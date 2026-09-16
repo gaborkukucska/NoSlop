@@ -1392,16 +1392,19 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
                             val isBackupExporting by viewModel.isBackupExporting.collectAsState()
 
+                            var selectedMediaOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.OWNED_ONLY) }
+
                             val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
                                 if (uri != null && mnemonicInput.isNotBlank()) {
                                     val mnemonicToUse = mnemonicInput
-                                    importStatus = "Exporting backup (this may take a moment for large media)..."
-                                    viewModel.exportBackupToUri(context, mnemonicToUse, uri) { success, errMsg ->
+                                    val mediaOpt = selectedMediaOption
+                                    importStatus = "Exporting backup...".tr
+                                    viewModel.exportBackupToUri(context, mnemonicToUse, uri, mediaOpt) { success, errMsg ->
                                         if (success) {
                                             showExportSuccessDialog = true
                                             importStatus = null
                                         } else {
-                                            importStatus = errMsg ?: "Export failed."
+                                            importStatus = errMsg ?: "Export failed.".tr
                                         }
                                     }
                                     mnemonicInput = ""
@@ -1456,14 +1459,87 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             HorizontalDivider(color = BorderSubtle)
                             Spacer(modifier = Modifier.height(24.dp))
 
+                            val scope = rememberCoroutineScope()
+
                             if (showMnemonicDialog) {
+                                LaunchedEffect(isExporting) {
+                                    if (isExporting && mnemonicInput.isBlank()) {
+                                        val activeMnemonic = viewModel.getActiveMnemonic()
+                                        if (!activeMnemonic.isNullOrBlank()) {
+                                            mnemonicInput = activeMnemonic
+                                        }
+                                    }
+                                }
+
                                 AlertDialog(
                                     onDismissRequest = { showMnemonicDialog = false },
-                                    title = { Text(if (isExporting) "Export Backup".tr else "Import Backup".tr) },
+                                    title = { Text(if (isExporting) "Export Identity Backup".tr else "Import Backup".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                                     text = {
                                         Column {
-                                            Text("Please enter your Word Cloud password to encrypt/decrypt the backup.".tr, color = TextMuted)
-                                            Spacer(modifier = Modifier.height(8.dp))
+                                            if (isExporting) {
+                                                Text(
+                                                    "Your sovereign identity and database will be encrypted with your 12-word Word Cloud. Choose a backup format:".tr,
+                                                    color = TextMuted,
+                                                    fontSize = 13.sp
+                                                )
+                                                Spacer(modifier = Modifier.height(12.dp))
+
+                                                // Option 1: IDs & Keys Only (Lightweight)
+                                                Card(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { selectedMediaOption = com.noslop.app.data.BackupMediaOption.NONE },
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = if (selectedMediaOption == com.noslop.app.data.BackupMediaOption.NONE) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack
+                                                    ),
+                                                    border = BorderStroke(1.dp, if (selectedMediaOption == com.noslop.app.data.BackupMediaOption.NONE) AccentGreen else BorderSubtle)
+                                                ) {
+                                                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                        RadioButton(
+                                                            selected = selectedMediaOption == com.noslop.app.data.BackupMediaOption.NONE,
+                                                            onClick = { selectedMediaOption = com.noslop.app.data.BackupMediaOption.NONE },
+                                                            colors = RadioButtonDefaults.colors(selectedColor = AccentGreen)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Column {
+                                                            Text("IDs & Keys Only (Lightweight)".tr, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 13.sp)
+                                                            Text("Keys, contacts, groups & database (~100 KB). Fast & media re-syncs from peers.".tr, color = TextMuted, fontSize = 11.sp)
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(8.dp))
+
+                                                // Option 2: Full Backup (Owned Media Included)
+                                                Card(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { selectedMediaOption = com.noslop.app.data.BackupMediaOption.OWNED_ONLY },
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = if (selectedMediaOption == com.noslop.app.data.BackupMediaOption.OWNED_ONLY) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack
+                                                    ),
+                                                    border = BorderStroke(1.dp, if (selectedMediaOption == com.noslop.app.data.BackupMediaOption.OWNED_ONLY) AccentGreen else BorderSubtle)
+                                                ) {
+                                                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                        RadioButton(
+                                                            selected = selectedMediaOption == com.noslop.app.data.BackupMediaOption.OWNED_ONLY,
+                                                            onClick = { selectedMediaOption = com.noslop.app.data.BackupMediaOption.OWNED_ONLY },
+                                                            colors = RadioButtonDefaults.colors(selectedColor = AccentGreen)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Column {
+                                                            Text("Full Backup (Owned Media Included)".tr, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 13.sp)
+                                                            Text("Keys, database, and all media created by your node.".tr, color = TextMuted, fontSize = 11.sp)
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                            } else {
+                                                Text("Please enter your Word Cloud password to decrypt the backup archive:".tr, color = TextMuted)
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                            }
+
                                             OutlinedTextField(
                                                 value = mnemonicInput,
                                                 onValueChange = { mnemonicInput = it },
@@ -1478,19 +1554,21 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         }
                                     },
                                     confirmButton = {
-                                        TextButton(
+                                        Button(
                                             onClick = {
                                                 showMnemonicDialog = false
                                                 if (isExporting) {
+                                                    val prefix = if (selectedMediaOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
                                                     val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                                                    exportLauncher.launch("noslop_backup_$exportTimestamp.zip")
+                                                    exportLauncher.launch("$prefix$exportTimestamp.zip")
                                                 } else {
                                                     importLauncher.launch(arrayOf("application/zip"))
                                                 }
                                             },
-                                            enabled = mnemonicInput.isNotBlank()
+                                            enabled = mnemonicInput.isNotBlank(),
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                                         ) {
-                                            Text(if (isExporting) "Save File".tr else "Select File".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                                            Text(if (isExporting) "Export File".tr else "Select File".tr, fontWeight = FontWeight.Bold)
                                         }
                                     },
                                     dismissButton = {
@@ -1805,6 +1883,125 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
             confirmButton = {
                 TextButton(onClick = { showAboutModal = false }) {
                     Text("Close".tr, color = TextMuted)
+                }
+            }
+        )
+    }
+
+    // ─── Proactive Sovereign Backup Advisory Modal ───
+    val backupPromptReason by viewModel.backupPromptReason.collectAsState()
+    if (backupPromptReason != null) {
+        val reason = backupPromptReason!!
+        val reasonExplanation = when (reason) {
+            NoSlopViewModel.BackupPromptReason.ONBOARDING_COMPLETED ->
+                "Node setup is complete! Because NoSlop is a completely serverless, peer-to-peer network, there are no central servers or email logins. Your cryptographic keys and contacts live only on this device.".tr
+            NoSlopViewModel.BackupPromptReason.DISCOVERABILITY_CHANGED ->
+                "Discoverability mode has been toggled. Your node has configured an ephemeral burnable onion address. Back up your identity now to retain your reachability settings.".tr
+            NoSlopViewModel.BackupPromptReason.CREATOR_MODE_ENABLED ->
+                "Creator Mode is now active! A secondary Creator ID keypair and onion address have been generated. Back up your keys now to preserve your creator broadcasts and followers.".tr
+            NoSlopViewModel.BackupPromptReason.CREATOR_IDENTITY_BURNED ->
+                "Creator ID burned and re-generated! You have minted a fresh cryptographic creator address. Back up now to preserve your new identity.".tr
+        }
+
+        var advisoryOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.NONE) }
+        val advisoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+            if (uri != null) {
+                val mediaOpt = advisoryOption
+                viewModel.viewModelScope.launch {
+                    val mnemonic = viewModel.getActiveMnemonic() ?: ""
+                    if (mnemonic.isNotBlank()) {
+                        viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
+                            if (success) {
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.SHORT).show()
+                            }
+                        }
+                    }
+                }
+                viewModel.dismissBackupPrompt()
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissBackupPrompt() },
+            containerColor = SurfaceDark,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(26.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Protect Your Sovereign Identity".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Column {
+                    Text(reasonExplanation, color = TextMuted, fontSize = 13.sp, lineHeight = 18.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Store your encrypted backup archive in multiple safe locations (e.g. USB flash drive, password manager, or offline storage):".tr, color = TextLight, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { advisoryOption = com.noslop.app.data.BackupMediaOption.NONE },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack
+                        ),
+                        border = BorderStroke(1.dp, if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) AccentGreen else BorderSubtle)
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = advisoryOption == com.noslop.app.data.BackupMediaOption.NONE,
+                                onClick = { advisoryOption = com.noslop.app.data.BackupMediaOption.NONE },
+                                colors = RadioButtonDefaults.colors(selectedColor = AccentGreen)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("IDs & Keys Only (Lightweight)".tr, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 13.sp)
+                                Text("All keys, contacts, groups & settings (~100 KB). Fast & reliable.".tr, color = TextMuted, fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { advisoryOption = com.noslop.app.data.BackupMediaOption.OWNED_ONLY },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (advisoryOption == com.noslop.app.data.BackupMediaOption.OWNED_ONLY) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack
+                        ),
+                        border = BorderStroke(1.dp, if (advisoryOption == com.noslop.app.data.BackupMediaOption.OWNED_ONLY) AccentGreen else BorderSubtle)
+                    ) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = advisoryOption == com.noslop.app.data.BackupMediaOption.OWNED_ONLY,
+                                onClick = { advisoryOption = com.noslop.app.data.BackupMediaOption.OWNED_ONLY },
+                                colors = RadioButtonDefaults.colors(selectedColor = AccentGreen)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("Full Backup (Owned Media Included)".tr, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 13.sp)
+                                Text("Database and all media created by you.".tr, color = TextMuted, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                        val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                        advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    Text("Export Backup Now".tr, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissBackupPrompt() }) {
+                    Text("Remind Me Later".tr, color = TextMuted)
                 }
             }
         )

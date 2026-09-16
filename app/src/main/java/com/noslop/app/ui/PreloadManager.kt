@@ -132,10 +132,6 @@ object PreloadManager {
         return "$rawUrl||$quality"
     }
 
-    suspend fun waitForPreload(rawUrl: String) {
-        pendingTasks[rawUrl]?.await()
-    }
-
     /**
      * Single entry point for pre-loading an upcoming feed item, regardless of
      * its media type.

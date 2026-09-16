@@ -1885,6 +1885,28 @@ fun toggleAggregator() {
         }
     }
 
+    enum class BackupPromptReason {
+        ONBOARDING_COMPLETED,
+        DISCOVERABILITY_CHANGED,
+        CREATOR_MODE_CHANGED,
+        CREATOR_IDENTITY_BURNED
+    }
+
+    private val _backupPromptReason = MutableStateFlow<BackupPromptReason?>(null)
+    val backupPromptReason: StateFlow<BackupPromptReason?> = _backupPromptReason.asStateFlow()
+
+    fun triggerBackupPrompt(reason: BackupPromptReason) {
+        _backupPromptReason.value = reason
+    }
+
+    fun dismissBackupPrompt() {
+        _backupPromptReason.value = null
+    }
+
+    suspend fun getActiveMnemonic(): String? {
+        return repository.getMnemonic()
+    }
+
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, mnemonic: String, creatorKeywords: String = "") {
         viewModelScope.launch {
             repository.clearBurnableIdentity()
@@ -1899,53 +1921,11 @@ fun toggleAggregator() {
             _dmTutorialStep.value = 0
             repository.putAppSetting("feed_tutorial_step", "0")
             repository.putAppSetting("dms_tutorial_step", "0")
+            _backupPromptReason.value = BackupPromptReason.ONBOARDING_COMPLETED
         }
     }
 
     suspend fun getIdentityVersion(): Int = repository.getIdentityVersion()
-
-    fun restoreIdentityFromWordCloud(
-        handle: String,
-        mnemonic: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        viewModelScope.launch {
-            try {
-                val cleanMnemonic = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
-                val words = cleanMnemonic.split(" ")
-                if (words.size != 12) {
-                    onError("A valid Word Cloud mnemonic must contain exactly 12 words.")
-                    return@launch
-                }
-                val localIdentity = repository.getLocalIdentity()
-                val currentVersion = repository.getIdentityVersion()
-                if (localIdentity != null && currentVersion < 2) {
-                    onError("Existing identity on this device is legacy (pre-v0.5.1) and predates deterministic Word Cloud derivation. Restoring from Word Cloud words cannot recover pre-v0.5.1 keys. Please restore using an encrypted backup archive instead.")
-                    return@launch
-                }
-
-                val seed = com.noslop.app.crypto.MnemonicGenerator.deriveSeed(cleanMnemonic)
-                val keys = CryptoService.deriveIdentityFromSeed(seed, handle.trim())
-                repository.saveLocalIdentity(handle.trim(), keys, cleanMnemonic)
-
-                val defaultSources = com.noslop.app.feeds.SourceLibrary.sources.filter {
-                    it.category in com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories
-                }
-                preloadFeedsDuringOnboarding(defaultSources, listOf("Technology", "World News"), emptyList(), emptyList(), "")
-
-                repository.setOnboardingComplete(true)
-                _isOnboardingComplete.value = true
-                _feedTutorialStep.value = 0
-                _dmTutorialStep.value = 0
-                repository.putAppSetting("feed_tutorial_step", "0")
-                repository.putAppSetting("dms_tutorial_step", "0")
-                onSuccess()
-            } catch (e: Exception) {
-                onError("Failed to restore identity: ${e.message}")
-            }
-        }
-    }
 
     fun updateUserProfile(profile: com.noslop.app.data.UserProfile) {
         viewModelScope.launch {
@@ -2053,6 +2033,7 @@ fun toggleAggregator() {
         context: Context,
         mnemonic: String,
         uri: android.net.Uri,
+        mediaOption: com.noslop.app.data.BackupMediaOption = com.noslop.app.data.BackupMediaOption.OWNED_ONLY,
         onResult: (Boolean, String?) -> Unit = { _, _ -> }
     ) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -2060,7 +2041,7 @@ fun toggleAggregator() {
             try {
                 val outputStream = context.contentResolver.openOutputStream(uri)
                 if (outputStream != null) {
-                    val success = com.noslop.app.data.BackupManager.exportData(context, mnemonic, outputStream)
+                    val success = com.noslop.app.data.BackupManager.exportData(context, mnemonic, outputStream, mediaOption)
                     withContext(Dispatchers.Main) {
                         onResult(success, if (success) null else "Export failed during archive creation")
                     }
@@ -2417,10 +2398,6 @@ fun toggleAggregator() {
         Logger.info("VM", "Playback started for mesh post: $postId")
     }
 
-    fun hasMeshMediaStartedPlaying(postId: String): Boolean {
-        return playedMeshPostIds.contains(postId)
-    }
-
     fun getPeerHandle(pubKey: String): String? {
         return peers.value.find { it.publicKeyB64 == pubKey }?.handle
             ?: allMeshes.find { it.authorPublicKeyB64 == pubKey }?.authorHandle
@@ -2648,6 +2625,7 @@ fun toggleAggregator() {
                     }
                 }
                 broadcastDiscoverable()
+                _backupPromptReason.value = BackupPromptReason.DISCOVERABILITY_CHANGED
             } else {
                 val burnable = repository.getBurnableIdentity()
                 if (burnable != null && !_isCreatorEnabled.value) {
@@ -2682,6 +2660,7 @@ fun toggleAggregator() {
                 if (_isDiscoverableEnabled.value) {
                     broadcastDiscoverable()
                 }
+                _backupPromptReason.value = BackupPromptReason.CREATOR_MODE_ENABLED
             } else {
                 repository.clearBurnableIdentity()
             }
@@ -2695,6 +2674,7 @@ fun toggleAggregator() {
             if (_isDiscoverableEnabled.value) {
                 broadcastDiscoverable()
             }
+            _backupPromptReason.value = BackupPromptReason.CREATOR_IDENTITY_BURNED
         }
     }
 

@@ -170,9 +170,6 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
-    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature WHERE id = :id")
-    suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String)
-
     @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy WHERE id = :id")
     suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String)
 }

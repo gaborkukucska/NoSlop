@@ -51,6 +51,12 @@ import javax.crypto.spec.SecretKeySpec
  */
 class LegacyBackupConfirmationRequiredException : Exception("Legacy unauthenticated backup archive detected")
 
+enum class BackupMediaOption {
+    NONE,        // IDs, keys, contacts, settings, and database only (Lightweight, ~100KB)
+    OWNED_ONLY,  // Database, keys, plus only media files authored by local identities
+    ALL          // Everything including all cached peer media
+}
+
 object BackupManager {
     private const val TAG = "BACKUP_MANAGER"
     private const val DB_NAME = "mesh.db"
@@ -83,8 +89,13 @@ object BackupManager {
         }
     }
 
-    fun exportData(context: Context, mnemonic: String, targetStream: OutputStream): Boolean {
-        Logger.info(TAG, "Starting data export...")
+    fun exportData(
+        context: Context,
+        mnemonic: String,
+        targetStream: OutputStream,
+        mediaOption: BackupMediaOption = BackupMediaOption.OWNED_ONLY
+    ): Boolean {
+        Logger.info(TAG, "Starting data export...", "mediaOption=$mediaOption")
         val tempDir = context.externalCacheDir ?: context.cacheDir
         val tempZip = File(tempDir, "noslop_backup_${System.currentTimeMillis()}.zip")
         return try {
@@ -188,24 +199,72 @@ object BackupManager {
                     }
                 }
 
-                // Add Media Directories
-                val possibleDirs = listOf(
-                    android.os.Environment.DIRECTORY_PICTURES,
-                    android.os.Environment.DIRECTORY_MOVIES,
-                    android.os.Environment.DIRECTORY_MUSIC,
-                    android.os.Environment.DIRECTORY_DOWNLOADS
-                )
-                for (dirType in possibleDirs) {
-                    val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
-                    val noSlopDir = File(baseDir, "NoSlop")
-                    if (noSlopDir.exists() && noSlopDir.isDirectory) {
-                        noSlopDir.listFiles()?.forEach { file ->
-                            // Only plain files; skip in-progress .part files and unsafe names
-                            if (file.isFile && isSafeEntryName(file.name) && !file.name.endsWith(".part")) {
-                                try {
-                                    addToZip(zos, file, "media/$dirType/${file.name}")
-                                } catch (e: Exception) {
-                                    Logger.warn(TAG, "Skipping unreadable media file ${file.name}: ${e.message}")
+                // Add Media Directories if requested
+                if (mediaOption != BackupMediaOption.NONE) {
+                    val ownedMediaIds = mutableSetOf<String>()
+                    if (mediaOption == BackupMediaOption.OWNED_ONLY) {
+                        try {
+                            val idRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
+                            val myPubKeys = kotlinx.coroutines.runBlocking {
+                                val main = idRepo.loadIdentity()?.publicKeyB64
+                                val burnable = idRepo.getBurnableIdentity()?.publicKeyB64
+                                setOfNotNull(main, burnable)
+                            }
+                            if (myPubKeys.isNotEmpty()) {
+                                val db = NoSlopDatabase.getDatabase(context)
+                                val inClause = myPubKeys.joinToString(",") { "'$it'" }
+                                db.openHelper.readableDatabase.query(
+                                    "SELECT mediaUrl FROM mesh_posts WHERE authorPublicKeyB64 IN ($inClause)"
+                                ).use { cursor ->
+                                    while (cursor.moveToNext()) {
+                                        val url = cursor.getString(0) ?: ""
+                                        val id = url.substringAfterLast("/").trim()
+                                        if (id.isNotBlank()) ownedMediaIds.add(id)
+                                    }
+                                }
+                                db.openHelper.readableDatabase.query(
+                                    "SELECT mediaId FROM chat_messages WHERE mediaId IS NOT NULL AND senderPub IN ($inClause)"
+                                ).use { cursor ->
+                                    while (cursor.moveToNext()) {
+                                        val id = cursor.getString(0) ?: ""
+                                        if (id.isNotBlank()) ownedMediaIds.add(id)
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Logger.warn(TAG, "Could not query owned media IDs: ${e.message}")
+                        }
+                    }
+
+                    val possibleDirs = listOf(
+                        android.os.Environment.DIRECTORY_PICTURES,
+                        android.os.Environment.DIRECTORY_MOVIES,
+                        android.os.Environment.DIRECTORY_MUSIC,
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    )
+                    for (dirType in possibleDirs) {
+                        val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                        val noSlopDir = File(baseDir, "NoSlop")
+                        if (noSlopDir.exists() && noSlopDir.isDirectory) {
+                            noSlopDir.listFiles()?.forEach { file ->
+                                // Only plain files; skip in-progress .part files and unsafe names
+                                if (file.isFile && isSafeEntryName(file.name) && !file.name.endsWith(".part")) {
+                                    val shouldInclude = when (mediaOption) {
+                                        BackupMediaOption.ALL -> true
+                                        BackupMediaOption.OWNED_ONLY -> {
+                                            file.name.endsWith(".mine") ||
+                                                file.name in ownedMediaIds ||
+                                                file.nameWithoutExtension in ownedMediaIds
+                                        }
+                                        BackupMediaOption.NONE -> false
+                                    }
+                                    if (shouldInclude) {
+                                        try {
+                                            addToZip(zos, file, "media/$dirType/${file.name}")
+                                        } catch (e: Exception) {
+                                            Logger.warn(TAG, "Skipping unreadable media file ${file.name}: ${e.message}")
+                                        }
+                                    }
                                 }
                             }
                         }
