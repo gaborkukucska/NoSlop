@@ -29,6 +29,7 @@ import com.noslop.app.util.tr // Added translation extension
 import com.noslop.app.util.UpdateManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
@@ -1398,13 +1399,13 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 if (uri != null && mnemonicInput.isNotBlank()) {
                                     val mnemonicToUse = mnemonicInput
                                     val mediaOpt = selectedMediaOption
-                                    importStatus = "Exporting backup...".tr
+                                    importStatus = com.noslop.app.util.LanguageManager.translate("Exporting backup...")
                                     viewModel.exportBackupToUri(context, mnemonicToUse, uri, mediaOpt) { success, errMsg ->
                                         if (success) {
                                             showExportSuccessDialog = true
                                             importStatus = null
                                         } else {
-                                            importStatus = errMsg ?: "Export failed.".tr
+                                            importStatus = errMsg ?: com.noslop.app.util.LanguageManager.translate("Export failed.")
                                         }
                                     }
                                     mnemonicInput = ""
@@ -1897,22 +1898,23 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 "Node setup is complete! Because NoSlop is a completely serverless, peer-to-peer network, there are no central servers or email logins. Your cryptographic keys and contacts live only on this device.".tr
             NoSlopViewModel.BackupPromptReason.DISCOVERABILITY_CHANGED ->
                 "Discoverability mode has been toggled. Your node has configured an ephemeral burnable onion address. Back up your identity now to retain your reachability settings.".tr
-            NoSlopViewModel.BackupPromptReason.CREATOR_MODE_ENABLED ->
+            NoSlopViewModel.BackupPromptReason.CREATOR_MODE_CHANGED ->
                 "Creator Mode is now active! A secondary Creator ID keypair and onion address have been generated. Back up your keys now to preserve your creator broadcasts and followers.".tr
             NoSlopViewModel.BackupPromptReason.CREATOR_IDENTITY_BURNED ->
                 "Creator ID burned and re-generated! You have minted a fresh cryptographic creator address. Back up now to preserve your new identity.".tr
         }
 
         var advisoryOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.NONE) }
+        val advisoryScope = rememberCoroutineScope()
         val advisoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
             if (uri != null) {
                 val mediaOpt = advisoryOption
-                viewModel.viewModelScope.launch {
+                advisoryScope.launch {
                     val mnemonic = viewModel.getActiveMnemonic() ?: ""
                     if (mnemonic.isNotBlank()) {
                         viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
                             if (success) {
-                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.SHORT).show()
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
