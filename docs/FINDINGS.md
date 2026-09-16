@@ -16,9 +16,11 @@ This document tracks active architectural enhancements and audit items for the N
 - **Current State**: Direct messaging uses static-static X25519 key agreement derived into a ChaCha20-Poly1305 key via SHA3-256.
 - **Roadmap**: Implement Double Ratchet protocol (Signal / Olm style) to provide per-message ephemeral key exchanges and forward secrecy.
 
-## 4. ProGuard Keep Surface Refactoring (P2-2)
-- **Current State**: `proguard-rules.pro` preserves model classes and necessary reflection packages to guarantee Gson serialization stability and Tor daemon interoperability.
-- **Roadmap**: Gradually replace package-level wildcard rules with granular `@Keep` annotations on model DTOs (`Packets.kt`, `UpdateChecker.kt`, `UserProfile.kt`).
+## 4. ProGuard Keep Surface Refactoring (P2-2) ✅
+- **Current State & Resolution**:
+  1. Broad package-level wildcards (`com.noslop.app.data.**`, `com.noslop.app.mesh.**`, `com.noslop.app.util.**`) were replaced with targeted model preservation and Room `@Entity` / `@Dao` keep rules.
+  2. Model DTOs in `Packets.kt`, `UpdateChecker.kt`, and `UserProfile.kt` are annotated with `@androidx.annotation.Keep` and protected via `@SerializedName` reflection preservation rules.
+  3. Enables R8 to safely optimize, minify, and eliminate dead code across all business repositories, mesh services, and utility classes without risking JSON deserialization failures.
 
 ## 5. Architectural Decomposition (P2-3 & P2-4)
 - **Current State**: `NoSlopRepository` and `NoSlopViewModel` coordinate cross-domain flows (mesh, feeds, engagement, settings, and Hubs).

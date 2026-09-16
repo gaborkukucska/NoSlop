@@ -1,6 +1,7 @@
 // FILE: app/src/main/java/com/noslop/app/util/UpdateChecker.kt
 package com.noslop.app.util
 
+import androidx.annotation.Keep
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.noslop.app.BuildConfig
@@ -23,6 +24,7 @@ import okhttp3.Request
  * handed to the package installer. It is null when the release publishes no
  * checksum, in which case [UpdateManager] refuses to install by default.
  */
+@Keep
 data class UpdateInfo(
     val latestVersion: String,
     val currentVersion: String,
@@ -31,7 +33,9 @@ data class UpdateInfo(
 )
 
 // Minimal shape of content.json — we only care about the hero block.
+@Keep
 private data class ContentJson(val hero: HeroBlock?)
+@Keep
 private data class HeroBlock(
     @SerializedName("apkUrl") val apkUrl: String?,
     @SerializedName("githubUrl") val githubUrl: String?,
@@ -39,12 +43,14 @@ private data class HeroBlock(
     @SerializedName("apkSha256") val apkSha256: String?
 )
 
+@Keep
 private data class GithubRelease(
     @SerializedName("tag_name") val tagName: String?,
     @SerializedName("body") val body: String?,
     @SerializedName("assets") val assets: List<GithubAsset>?
 )
 
+@Keep
 private data class GithubAsset(
     @SerializedName("name") val name: String?,
     @SerializedName("browser_download_url") val browserDownloadUrl: String?

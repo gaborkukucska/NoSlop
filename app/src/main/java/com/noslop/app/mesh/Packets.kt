@@ -1,6 +1,7 @@
 // FILE: app/src/main/java/com/noslop/app/mesh/Packets.kt
 package com.noslop.app.mesh
 
+import androidx.annotation.Keep
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
@@ -399,6 +400,7 @@ data class SyncResponsePayload(
     val reactions: List<ReactionSyncData>? = null
 )
 
+@Keep
 data class NetworkPacket(
     val id: String? = null,
     val hops: Int? = null,
