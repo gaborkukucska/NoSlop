@@ -48,10 +48,24 @@ class ApiKeyRepository(context: Context) {
         }
     }
 
+    init {
+        syncRuntimeOverrides()
+    }
+
+    private fun syncRuntimeOverrides() {
+        val customUrl = getKey("custom_proxy_url")
+        val customSecret = getKey("custom_proxy_secret")
+        com.noslop.app.feeds.api.ProxyAuth.setCustomProxy(customUrl, customSecret)
+        com.noslop.app.feeds.api.JamendoApiClient.userClientId = getKey("jamendo")
+    }
+
     fun getKey(service: String): String? = prefs.getString("api_key_$service", null)
 
     fun setKey(service: String, key: String) {
         prefs.edit().putString("api_key_$service", key).apply()
+        if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
+            syncRuntimeOverrides()
+        }
         Logger.info(TAG, "API key updated for service: $service")
     }
 
@@ -59,6 +73,9 @@ class ApiKeyRepository(context: Context) {
 
     fun removeKey(service: String) {
         prefs.edit().remove("api_key_$service").apply()
+        if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
+            syncRuntimeOverrides()
+        }
         Logger.info(TAG, "API key removed for service: $service")
     }
 
@@ -74,7 +91,10 @@ class ApiKeyRepository(context: Context) {
             ServiceInfo("podcastindex", "Podcast Index API Key", true, "api.podcastindex.org"),
             ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org"),
             ServiceInfo("instagram", "Instagram Graph API User Token", true, "developers.facebook.com"),
-            ServiceInfo("tiktok", "TikTok Display API Client Key", true, "developers.tiktok.com")
+            ServiceInfo("tiktok", "TikTok Display API Client Key", true, "developers.tiktok.com"),
+            ServiceInfo("jamendo", "Jamendo Client ID", false, "developer.jamendo.com (Optional, defaults to public client)"),
+            ServiceInfo("custom_proxy_url", "Custom API Proxy URL", false, "Self-hosted Cloudflare Worker or reverse proxy URL"),
+            ServiceInfo("custom_proxy_secret", "Custom API Proxy Secret", false, "HMAC secret for your self-hosted proxy (Optional)")
         )
     }
 

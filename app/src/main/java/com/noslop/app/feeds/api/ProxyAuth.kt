@@ -6,8 +6,21 @@ import okhttp3.Request
  * P4-1: Shared proxy authentication and header signing for external API requests.
  */
 object ProxyAuth {
-    val PROXY_URL: String = com.noslop.app.BuildConfig.PROXY_URL
-    val PROXY_SECRET: String = com.noslop.app.BuildConfig.PROXY_SECRET
+    @Volatile
+    private var customProxyUrl: String? = null
+    @Volatile
+    private var customProxySecret: String? = null
+
+    val PROXY_URL: String
+        get() = customProxyUrl?.takeIf { it.isNotBlank() } ?: com.noslop.app.BuildConfig.PROXY_URL
+
+    val PROXY_SECRET: String
+        get() = customProxySecret?.takeIf { it.isNotBlank() } ?: com.noslop.app.BuildConfig.PROXY_SECRET
+
+    fun setCustomProxy(url: String?, secret: String?) {
+        customProxyUrl = url?.trim()?.removeSuffix("/")
+        customProxySecret = secret?.trim()
+    }
 
     fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
         val timestamp = (System.currentTimeMillis() / 1000).toString()

@@ -16,17 +16,30 @@ object JamendoApiClient {
     private const val BASE_URL = "https://api.jamendo.com/v3.0"
     
     // Default test client ID for Jamendo API
-    private const val CLIENT_ID = "709fa152"
+    private const val DEFAULT_CLIENT_ID = "709fa152"
+    @Volatile
+    var userClientId: String? = null
+
+    val CLIENT_ID: String
+        get() = userClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_CLIENT_ID
+
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
-    suspend fun searchTracks(tags: String, sourceId: String = "api-jamendo-music"): List<FeedItem> {
+    suspend fun searchTracks(
+        tags: String,
+        sourceId: String = "api-jamendo-music",
+        apiKeyRepo: com.noslop.app.data.ApiKeyRepository? = null
+    ): List<FeedItem> {
+        val effectiveClientId = apiKeyRepo?.getKey("jamendo")?.takeIf { it.isNotBlank() }
+            ?: userClientId?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_CLIENT_ID
         return try {
             val encodedQuery = java.net.URLEncoder.encode(tags.lowercase(), "UTF-8")
             
             // Use namesearch for free-text queries (matches track name and artist name).
             // tags= only accepts known Jamendo genre/mood tokens and fails on arbitrary text.
-            val url = "$BASE_URL/tracks/?client_id=$CLIENT_ID&format=json&limit=20&namesearch=$encodedQuery&include=musicinfo"
+            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&namesearch=$encodedQuery&include=musicinfo"
             
             val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
             val reqBuilder = Request.Builder().url(proxiedUrl)

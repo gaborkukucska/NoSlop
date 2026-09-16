@@ -29,11 +29,11 @@ This document tracks active architectural enhancements and audit items for the N
 - **Roadmap**: Support direct LAN HTTP fast-path with Hub self-signed certificate generation and fingerprint pinning.
 
 
-## 7. Client-Side Proxy Secret and Shared API Keys (P1-9 / D-2)
-- **Current State**: `PROXY_SECRET` is embedded via `BuildConfig` (defaulting to `NoSlopRocks2026`) and used for HMAC-SHA256 request signing against the Cloudflare Worker API proxy (`ProxyAuth.kt`). `JamendoApiClient.kt` carries a shared client ID (`CLIENT_ID = "709fa152"`). Outbound Cloudflare Worker proxy usage is disclosed in `docs/PRIVACY_POLICY.md`.
-- **Roadmap / Architectural Decision**: Hardcoded secrets inside an open-source client provide abuse friction rather than cryptographic secrecy. Long-term resolution:
-  1. Migrate Cloudflare Worker endpoints to server-side rate limiting or Proof-of-Work headers, completely deprecating client-side HMAC secret signing.
-  2. Support user-configurable custom API keys in `ApiKeysScreen` for Jamendo and custom proxy endpoints, consistent with the existing Guardian/NewsAPI/Pexels/Vimeo pattern.
+## 7. Client-Side Proxy Secret and Shared API Keys (P1-9 / D-2) ✅
+- **Current State & Resolution**:
+  1. `ProxyAuth.kt` dynamically accepts user-configured `custom_proxy_url` and `custom_proxy_secret` from `ApiKeyRepository`, allowing users to route through their own self-hosted Cloudflare Worker or reverse proxy endpoints while falling back safely to `BuildConfig` defaults.
+  2. `JamendoApiClient.kt` accepts user-configured Jamendo Client IDs from `ApiKeyRepository`, falling back gracefully to the public CC client ID (`709fa152`).
+  3. `ApiKeyRepository.SERVICES` exposes `jamendo`, `custom_proxy_url`, and `custom_proxy_secret` directly in `ApiKeysScreen.kt` for secure user configuration.
 
 ## 8. Sovereign Identity Recovery & Tiered Backup Architecture (Finding #2 / D-1)
 - **Current State**: Restoring only from a 12-word mnemonic phrase cannot reconstruct a serverless node's peer connections, group chat states, secondary/burnable creator keys, or local preferences. Recovery is anchored on AES-256-GCM authenticated ZIP archives (`BackupManager.kt`).
