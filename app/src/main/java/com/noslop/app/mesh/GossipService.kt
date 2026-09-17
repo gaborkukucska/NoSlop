@@ -401,7 +401,19 @@ object GossipService {
             }
         }
         
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket) {
+        // Check if sender is a member/admin of any local group chat
+        val isSenderInGroup = if (packet.type == "MESSAGE") {
+            try {
+                val groupDao = transport?.repository?.context?.let { ctx ->
+                    com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()
+                }
+                groupDao?.getAllGroupChatsList()?.any { group ->
+                    group.adminPublicKeyB64 == senderId || group.membersJson.contains(senderId)
+                } == true
+            } catch (_: Exception) { false }
+        } else false
+
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)

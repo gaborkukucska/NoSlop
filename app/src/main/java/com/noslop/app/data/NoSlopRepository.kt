@@ -747,16 +747,27 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
 
-        // Send targeted GROUP_INVITE packet to every member so dispatchPacket spools retries if they are currently offline
+        // Send targeted GROUP_INVITE packet to every member with identity alignment
         for (memberPub in allMembers) {
             if (memberPub == myKeys.publicKeyB64) continue
-            val memberPacket = packet.copy(
-                id = "group_invite_${groupId}_${memberPub}",
-                targetUserId = memberPub
-            )
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
             val onion = peer?.onionAddress ?: ""
+            if (onion.isBlank()) continue
+
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
+            val effectiveSenderId = if (contactIdentity == "burnable") {
+                getBurnableIdentity()?.publicKeyB64 ?: myKeys.publicKeyB64
+            } else {
+                myKeys.publicKeyB64
+            }
+
+            val memberPacket = packet.copy(
+                id = "group_invite_${groupId}_${memberPub}",
+                senderId = effectiveSenderId,
+                targetUserId = memberPub
+            )
             meshSocialRepository.dispatchPacket(onion, memberPacket)
+            kotlinx.coroutines.delay(300L) // Stagger invites to prevent Tor circuit collision
         }
         Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members and dispatched targeted invites")
     }
@@ -863,6 +874,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 continue
             }
 
+            // Align identity keys: if peer knows us as burnable, encrypt and stamp with burnable keys
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
+            val senderKeys = if (contactIdentity == "burnable") {
+                getBurnableIdentity() ?: myKeys
+            } else {
+                myKeys
+            }
+
             val encPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
             if (encPub == null) {
                 // P0-1: Never fallback to Ed25519 key for X25519 encryption. Send connection request to learn key.
@@ -873,7 +892,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 continue
             }
 
-            val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.encPrivateKeyB64)
+            val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, senderKeys.encPrivateKeyB64)
             if (ciphertext.isBlank() || nonce.isBlank()) {
                 Logger.error("REPOSITORY", "sendGroupMessage: encryption FAILED for member ${memberPub.take(12)}... -- not sending")
                 continue
@@ -882,7 +901,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, groupId = groupId, timestamp = timestamp)
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = java.util.UUID.randomUUID().toString(),
-                senderId = myKeys.publicKeyB64,
+                senderId = senderKeys.publicKeyB64,
                 targetUserId = memberPub,
                 type = "MESSAGE",
                 payload = com.google.gson.Gson().toJsonTree(msgPayload)
@@ -1021,17 +1040,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             )
             for (addedPub in addedMembers) {
                 if (addedPub == myKeys.publicKeyB64) continue
+                val peer = db.peerDao().getPeerByPublicKey(addedPub)
+                val onion = peer?.onionAddress ?: ""
+                if (onion.isBlank()) continue
+
+                val contactIdentity = db.appSettingDao().getSetting("contact_identity_$addedPub")
+                val effectiveSenderId = if (contactIdentity == "burnable") {
+                    getBurnableIdentity()?.publicKeyB64 ?: myKeys.publicKeyB64
+                } else {
+                    myKeys.publicKeyB64
+                }
+
                 val invitePacket = com.noslop.app.mesh.NetworkPacket(
                     id = "group_invite_${groupId}_${addedPub}",
-                    senderId = myKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = addedPub,
                     type = "GROUP_INVITE",
                     payload = com.google.gson.Gson().toJsonTree(invitePayload)
                 )
-                val peer = db.peerDao().getPeerByPublicKey(addedPub)
-                val onion = peer?.onionAddress ?: ""
                 meshSocialRepository.dispatchPacket(onion, invitePacket)
-                Logger.info("REPOSITORY", "Sent GROUP_INVITE for $groupId to newly added member ${addedPub.take(8)}...")
+                Logger.info("REPOSITORY", "Sent GROUP_INVITE for $groupId to newly added member ${addedPub.take(8)}... (senderId=${effectiveSenderId.take(8)})")
             }
         }
 
@@ -1173,12 +1201,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         for (memberPub in members) {
             if (memberPub == myKeys.publicKeyB64) continue
-            val memberPacket = packet.copy(
-                id = "group_invite_${groupId}_${memberPub}",
-                targetUserId = memberPub
-            )
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
             val onion = peer?.onionAddress ?: ""
+            if (onion.isBlank()) continue
+
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
+            val effectiveSenderId = if (contactIdentity == "burnable") {
+                getBurnableIdentity()?.publicKeyB64 ?: myKeys.publicKeyB64
+            } else {
+                myKeys.publicKeyB64
+            }
+
+            val memberPacket = packet.copy(
+                id = "group_invite_${groupId}_${memberPub}",
+                senderId = effectiveSenderId,
+                targetUserId = memberPub
+            )
             meshSocialRepository.dispatchPacket(onion, memberPacket)
         }
         Logger.info("REPOSITORY", "Re-sent group invites for '${group.title}' ($groupId) to ${members.size} member(s)")
