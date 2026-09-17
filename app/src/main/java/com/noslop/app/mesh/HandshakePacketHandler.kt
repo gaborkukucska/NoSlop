@@ -750,9 +750,9 @@ class HandshakePacketHandler(
         }
 
         // If creator is us, insert directly
-        syncMemberPeers(invite.memberDetails)
         val isMyGroup = invite.adminPublicKeyB64 == myKeys?.publicKeyB64 || invite.adminPublicKeyB64 == burnable?.publicKeyB64
         if (isMyGroup) {
+            syncMemberPeers(invite.memberDetails)
             val membersJson = com.google.gson.Gson().toJson(invite.members)
             val memberHandlesJson = com.google.gson.Gson().toJson(invite.memberHandles ?: emptyMap<String, String>())
             val group = GroupChat(

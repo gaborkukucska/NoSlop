@@ -234,7 +234,19 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
             // Discoverable peers state hoisted to DMsTab root scope
             val groupChats by viewModel.groupChats.collectAsState()
-            val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable && it.onionAddress.isNotBlank() && it.onionAddress.endsWith(".onion") }
+            val groupMemberPubKeys = remember(groupChats) {
+                groupChats.flatMap { g ->
+                    try {
+                        com.google.gson.Gson().fromJson(g.membersJson, Array<String>::class.java).toList() + g.adminPublicKeyB64
+                    } catch (_: Exception) { emptyList() }
+                }.toSet()
+            }
+            val pendingRequests = peers.filter { 
+                !it.isTrusted && !it.isDiscoverable && 
+                it.onionAddress.isNotBlank() && it.onionAddress.endsWith(".onion") &&
+                it.publicKeyB64 !in groupMemberPubKeys &&
+                it.handle != "Member"
+            }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
 

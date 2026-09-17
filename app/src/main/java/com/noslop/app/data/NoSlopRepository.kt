@@ -1609,16 +1609,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // Clean up any duplicate temporary peers that were erroneously promoted to contacts
         repositoryScope.launch(Dispatchers.IO) {
             try {
-                val tempPeers = peerDao.getAllPeersList().filter { it.isTemporary }
+                val allPeersList = peerDao.getAllPeersList()
                 val groups = db.groupChatDao().getAllGroupChatsList()
-                for (tp in tempPeers) {
+                for (p in allPeersList) {
                     val inGroup = groups.any { g ->
-                        g.adminPublicKeyB64.trim() == tp.publicKeyB64.trim() || g.membersJson.contains(tp.publicKeyB64.trim())
+                        g.adminPublicKeyB64.trim() == p.publicKeyB64.trim() || g.membersJson.contains(p.publicKeyB64.trim())
                     }
-                    if (inGroup && tp.isTrusted) {
-                        peerDao.insertPeer(tp.copy(isTrusted = false, isTemporary = false))
-                        Logger.info("REPOSITORY", "Cleaned up duplicate group contact: ${tp.handle}")
+                    if (inGroup && (p.handle == "Member" || p.isTemporary)) {
+                        peerDao.insertPeer(p.copy(isTrusted = false, isTemporary = false))
                     }
+                }
+                if (appSettingDao.getSetting("deleted_official_creator") == "true") {
+                    postDao.deletePostsByAuthor(OFFICIAL_CREATOR_PUBKEY)
+                    val oldP = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
+                    if (oldP != null) peerDao.deletePeer(oldP)
                 }
             } catch (_: Exception) {}
         }
@@ -1735,6 +1739,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun ensureDefaultApiSourcesExist() = feedRepository.ensureDefaultApiSourcesExist()
 
     suspend fun ensureDefaultDiscoverableNode() = withContext(Dispatchers.IO) {
+        // If the user has explicitly deleted the official creator node, do not re-seed it!
+        if (appSettingDao.getSetting("deleted_official_creator") == "true") {
+            return@withContext
+        }
+
         // Clean up any placeholder peer from earlier development
         val oldPlaceholder = peerDao.getPeerByPublicKey("official_noslop_creator_node_key")
         if (oldPlaceholder != null) {

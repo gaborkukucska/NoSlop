@@ -926,6 +926,10 @@ class MeshSocialRepository(
             dispatchPacket(targetOnion, packet)
         }
 
+        if (targetPub == NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+            db.appSettingDao().insertSetting(AppSetting("deleted_official_creator", "true"))
+        }
+
         com.noslop.app.mesh.GossipService.recordDeletedPeer(targetPub)
         com.noslop.app.mesh.GossipService.removePeerFromRelays(targetPub)
 
@@ -1624,7 +1628,9 @@ class MeshSocialRepository(
             val validPubKeys = mutableSetOf<String>()
             myKeys?.publicKeyB64?.let { validPubKeys.add(it) }
             burnableKeys?.publicKeyB64?.let { validPubKeys.add(it) }
-            validPubKeys.add(NoSlopRepository.OFFICIAL_CREATOR_PUBKEY)
+            if (peerDao.getPeerByPublicKey(NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) != null) {
+                validPubKeys.add(NoSlopRepository.OFFICIAL_CREATOR_PUBKEY)
+            }
             connectedPeers.forEach { validPubKeys.add(it.publicKeyB64) }
 
             val validHandles = mutableSetOf<String>()
