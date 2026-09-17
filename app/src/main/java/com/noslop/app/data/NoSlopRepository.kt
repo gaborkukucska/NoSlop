@@ -1606,6 +1606,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private var hubSyncJob: kotlinx.coroutines.Job? = null
 
     fun startPresenceHeartbeat() {
+        // Clean up any duplicate temporary peers that were erroneously promoted to contacts
+        repositoryScope.launch(Dispatchers.IO) {
+            try {
+                val tempPeers = peerDao.getTemporaryPeersList()
+                val groups = db.groupChatDao().getAllGroupChatsList()
+                for (tp in tempPeers) {
+                    val inGroup = groups.any { g ->
+                        g.adminPublicKeyB64 == tp.publicKeyB64 || g.membersJson.contains(tp.publicKeyB64)
+                    }
+                    if (inGroup && tp.isTrusted) {
+                        peerDao.insertPeer(tp.copy(isTrusted = false, isTemporary = false))
+                        Logger.info("REPOSITORY", "Cleaned up duplicate group contact: ${tp.handle}")
+                    }
+                }
+            } catch (_: Exception) {}
+        }
         meshSocialRepository.startPresenceHeartbeat()
         
         if (hubSyncJob?.isActive == true) return

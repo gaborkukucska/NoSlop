@@ -215,18 +215,25 @@ class HandshakePacketHandler(
                 g.adminPublicKeyB64.trim() == handPay.fromUserId.trim() ||
                 parseMembers(g.membersJson).any { it.trim() == handPay.fromUserId.trim() }
             }
-            peer = Peer(
-                publicKeyB64 = handPay.fromUserId,
-                handle = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Peer",
-                tripcode = tripcode,
-                onionAddress = handPay.fromHomeNode,
-                encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
-                isTrusted = isInGroup,
-                isTemporary = !isInGroup,
-                lastSeenAt = System.currentTimeMillis()
-            )
-            peerDao.insertPeer(peer)
-            Logger.info(TAG, "Created peer from authentic USER_HANDSHAKE: ${handPay.fromUserId.take(8)}... (${peer.handle}, isTrusted=${peer.isTrusted})")
+            // If sender is a group member, store their keys for group messaging without making them a 1:1 contact
+            if (isInGroup) {
+                peer = Peer(
+                    publicKeyB64 = handPay.fromUserId,
+                    handle = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Member",
+                    tripcode = tripcode,
+                    onionAddress = handPay.fromHomeNode,
+                    encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
+                    isTrusted = false, // Group peers do not clutter the 1:1 DM contacts list
+                    isTemporary = false,
+                    lastSeenAt = System.currentTimeMillis()
+                )
+                peerDao.insertPeer(peer)
+                Logger.info(TAG, "Stored keys for group member: ${handPay.fromUserId.take(8)}... (${peer.handle})")
+                return true
+            } else {
+                Logger.debug(TAG, "Ignored un-solicited USER_HANDSHAKE from non-contact ${handPay.fromUserId.take(8)}...")
+                return false
+            }
         }
 
         val isOldPacket = (System.currentTimeMillis() - handPay.timestamp) > 5 * 60 * 1000L
@@ -454,9 +461,9 @@ class HandshakePacketHandler(
             ))
             if (cameBackOnline) {
                 refreshDeletionBudgetFor(peer.handle)
+                resendGroupInvitesForPeer(announcePay.authorId, announcePay.onionAddress)
             }
             GossipService.recordSendSuccess(announcePay.onionAddress)
-            resendGroupInvitesForPeer(announcePay.authorId, announcePay.onionAddress)
         }
         return true
     }
@@ -466,7 +473,15 @@ class HandshakePacketHandler(
      * groups and re-send the GROUP_INVITE packet to them in case their device was offline
      * when the group was initially created or updated.
      */
+    private val lastInviteResendTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     private suspend fun resendGroupInvitesForPeer(peerPubKey: String, peerOnion: String) {
+        val now = System.currentTimeMillis()
+        val lastTime = lastInviteResendTimes[peerPubKey] ?: 0L
+        if (now - lastTime < 30 * 60 * 1000L) {
+            return // Debounce: do not resend invites to the same peer more than once per 30 minutes
+        }
+        lastInviteResendTimes[peerPubKey] = now
         try {
             val myKeys = repo.getLocalIdentity() ?: return
             val burnableKeys = repo.getBurnableIdentity()
