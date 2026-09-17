@@ -168,7 +168,8 @@ data class ChatReactionPayload(
     @SerializedName("author_id") val authorId: String,
     val timestamp: Long,
     val signature: String,
-    val action: String = "add"
+    val action: String = "add",
+    @SerializedName("group_id") val groupId: String? = null
 )
 
 data class CommentReactionPayload(

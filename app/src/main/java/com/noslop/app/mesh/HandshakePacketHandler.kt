@@ -448,6 +448,8 @@ class HandshakePacketHandler(
             for (group in groups) {
                 val members = parseMembers(group.membersJson)
                 if (members.contains(peerPubKey)) {
+                    val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+                    if (!isAdmin) continue // Only the group admin can re-send group invites!
                     val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
                     val timestamp = group.createdAt
                     val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())

@@ -175,6 +175,7 @@ class ReactionPacketHandler(
             )
             reactionDao.insertReaction(localReaction)
         }
+        repo.triggerDmSync()
         return true
     }
 

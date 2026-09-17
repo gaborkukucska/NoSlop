@@ -1322,22 +1322,35 @@ class MeshSocialRepository(
 
     suspend fun reactToGroupChat(messageId: String, reactionType: String, groupId: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
+        val burnableKeys = getBurnableIdentity()
         val group = db.groupChatDao().getGroupChatById(groupId) ?: return@withContext false
-        val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
+
+        // Determine which identity we are known by in this group:
+        // If our burnable key is in the group members or admin, use burnable; if open group, use burnable; else main.
+        val senderKeys = if (burnableKeys != null && (group.membersJson.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) {
+            burnableKeys
+        } else if (group.allowMemberInvites && burnableKeys != null) {
+            burnableKeys
+        } else {
+            myKeys
+        }
+
+        val reactionId = "${messageId}_${senderKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
         val timestamp = System.currentTimeMillis()
         
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, reactionType, myKeys.publicKeyB64, timestamp.toString())
-        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, reactionType, senderKeys.publicKeyB64, timestamp.toString())
+        val signature = CryptoService.sign(payloadToSign, senderKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.ChatReactionPayload(
             messageId = messageId,
             reactionType = reactionType,
-            authorId = myKeys.publicKeyB64,
+            authorId = senderKeys.publicKeyB64,
             timestamp = timestamp,
             signature = signature,
-            action = action
+            action = action,
+            groupId = groupId
         )
 
         if (action == "remove") {
@@ -1346,7 +1359,7 @@ class MeshSocialRepository(
             val localReaction = ChatReaction(
                 id = reactionId,
                 messageId = messageId,
-                authorPublicKeyB64 = myKeys.publicKeyB64,
+                authorPublicKeyB64 = senderKeys.publicKeyB64,
                 reactionType = reactionType,
                 timestamp = timestamp,
                 signature = signature
@@ -1359,23 +1372,28 @@ class MeshSocialRepository(
         } catch (e: Exception) { emptyList() }
 
         for (memberPub in memberPubs) {
-            if (memberPub == myKeys.publicKeyB64) continue
-            val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
-            if (peer.onionAddress.isNotBlank()) {
-                val packet = com.noslop.app.mesh.NetworkPacket(
-                    id = UUID.randomUUID().toString(),
-                    hops = 3,
-                    senderId = myKeys.publicKeyB64,
-                    targetUserId = memberPub,
-                    type = "CHAT_REACTION",
-                    payload = com.google.gson.Gson().toJsonTree(reactionPayload),
-                    signature = signature
-                )
+            if (memberPub == senderKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+            val peer = peerDao.getPeerByPublicKey(memberPub)
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = senderKeys.publicKeyB64,
+                targetUserId = memberPub,
+                type = "CHAT_REACTION",
+                payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+                signature = signature
+            )
+            if (peer != null && peer.onionAddress.isNotBlank()) {
                 repositoryScope.launch {
                     meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
                 }
+            } else {
+                // If member is not a direct peer or has no known onion address, gossip relay across the mesh!
+                val gossipPacket = packet.copy(id = UUID.randomUUID().toString(), hops = 6)
+                com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
             }
         }
+        meshTransport.repository.triggerDmSync()
         true
     }
 
