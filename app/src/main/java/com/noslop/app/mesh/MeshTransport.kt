@@ -164,8 +164,9 @@ class MeshTransport(
         val isInteractive = packet.type == "CHAT_REACTION" || packet.type == "TYPING" || packet.type == "READ_RECEIPT"
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
 
-        // Critical user messaging bypasses peer cooldown entirely
-        if (!isDmHighPriority && GossipService.isPeerInCooldown(onionAddress)) {
+        // Critical user messaging and media chunking bypass peer cooldown entirely
+        val bypassCooldown = isDmHighPriority || isMediaPacket
+        if (!bypassCooldown && GossipService.isPeerInCooldown(onionAddress)) {
             Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub
         }
@@ -215,13 +216,14 @@ class MeshTransport(
             val maxAttempts = when {
                 isHandshake -> 2 // 2 attempts allows recovery from initial circuit establishment
                 isDmHighPriority -> 2
+                isMediaPacket -> 2 // 2 attempts allows Tor rendezvous circuit setup to complete for media chunks
                 else -> 1
             }
             val connectTimeout = when {
                 isHandshake -> 28000 // 28s allows Tor v3 rendezvous circuit setup to complete on mobile
                 isDmHighPriority -> 25000
                 isInteractive -> 8000
-                isMediaPacket -> 20000
+                isMediaPacket -> 28000 // 28s prevents premature chunk fast-fail over mobile Tor
                 else -> 12000
             }
             for (attempt in 1..maxAttempts) {
@@ -267,7 +269,7 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            if (!isHandshake) {
+            if (!isHandshake && !isMediaPacket) {
                 GossipService.recordSendFailure(onionAddress)
             }
             return@withContext pushedToHub

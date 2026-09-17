@@ -1244,7 +1244,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun requestGroupCatchup(groupId: String) {
         val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
         val group = db.groupChatDao().getGroupChatById(groupId)
+        val senderKeys = if (burnableKeys != null && (group?.membersJson?.contains(burnableKeys.publicKeyB64) == true || group?.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
         val members = if (group != null) {
             try {
                 com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
@@ -1254,13 +1256,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val timestamp = System.currentTimeMillis()
         val queryPayload = com.noslop.app.mesh.GroupQueryPayload(
             groupId = groupId,
-            requesterId = myKeys.publicKeyB64,
+            requesterId = senderKeys.publicKeyB64,
             timestamp = timestamp
         )
 
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = java.util.UUID.randomUUID().toString(),
-            senderId = myKeys.publicKeyB64,
+            senderId = senderKeys.publicKeyB64,
             type = "GROUP_QUERY",
             payload = com.google.gson.Gson().toJsonTree(queryPayload)
         )
@@ -1967,13 +1969,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
             // Broadcast to all group members
             for (memberPub in memberPubs) {
-                if (memberPub == myKeys.publicKeyB64) continue
+                if (memberPub == signingKey.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
                 val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
                 if (peer.onionAddress.isNotBlank()) {
                     val packet = com.noslop.app.mesh.NetworkPacket(
                         id = "del_${messageId}_${memberPub}",
                         hops = 3,
-                        senderId = myKeys.publicKeyB64,
+                        senderId = signingKey.publicKeyB64,
                         targetUserId = memberPub,
                         type = "DELETE_MESSAGE",
                         payload = com.google.gson.Gson().toJsonTree(deletePay),

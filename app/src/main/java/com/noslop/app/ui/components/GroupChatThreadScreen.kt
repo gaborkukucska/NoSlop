@@ -143,7 +143,7 @@ fun GroupChatThreadScreen(
         }
     }
 
-    suspend fun buildMediaMetadata(file: java.io.File): MediaMetadata {
+    suspend fun buildMediaMetadata(file: java.io.File, senderKeys: CryptoService.IdentityKeys? = null): MediaMetadata {
         val ext = file.extension.lowercase()
         val isGif = ext == "gif" || file.name.endsWith(".gif", ignoreCase = true)
         val mimeType = if (isGif) "image/gif" else (android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream")
@@ -191,14 +191,17 @@ fun GroupChatThreadScreen(
         val mediaId = "group_${type}_${System.currentTimeMillis()}_${finalFile.name}"
         com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, mediaId)
 
+        val activeOnion = senderKeys?.onionAddress ?: localKeys?.onionAddress
+        val activeOwner = senderKeys?.publicKeyB64 ?: localKeys?.publicKeyB64
+
         return MediaMetadata(
             id = mediaId,
             type = type,
             mimeType = mimeType,
             size = finalFile.length(),
             chunkCount = (finalFile.length() / (256 * 1024)).toInt() + 1,
-            originNode = localKeys?.onionAddress,
-            ownerId = localKeys?.publicKeyB64,
+            originNode = activeOnion,
+            ownerId = activeOwner,
             thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(finalFile, type),
             filename = file.name
         )
@@ -774,7 +777,8 @@ fun GroupChatThreadScreen(
                     isProcessingMedia = true
                     compressionProgress = null
                     coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        val mediaMetadata = buildMediaMetadata(fileToProcess)
+                        val activeSender = if (privacy == "friends") localKeys else (burnableKeys ?: localKeys)
+                        val mediaMetadata = buildMediaMetadata(fileToProcess, activeSender)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             isProcessingMedia = false
                             compressionProgress = null

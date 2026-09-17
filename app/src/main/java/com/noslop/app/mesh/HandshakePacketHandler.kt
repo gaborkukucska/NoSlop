@@ -858,17 +858,26 @@ class HandshakePacketHandler(
         val group = db.groupChatDao().getGroupChatById(query.groupId) ?: return false
 
         val members = parseMembers(group.membersJson)
-        val requesterInGroup = members.contains(query.requesterId) || members.contains(packet.senderId)
+        val requesterInGroup = members.contains(query.requesterId) || 
+            members.contains(packet.senderId) ||
+            group.adminPublicKeyB64 == query.requesterId ||
+            group.adminPublicKeyB64 == packet.senderId ||
+            peerDao.getPeerByPublicKey(packet.senderId)?.let { p ->
+                members.contains(p.publicKeyB64) || group.adminPublicKeyB64 == p.publicKeyB64
+            } == true
         if (!requesterInGroup) {
-            Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: requester ${query.requesterId} is not a group member")
+            Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: requester ${query.requesterId} is not a group member or admin")
             return false
         }
 
         val myKeys = repo.getLocalIdentity() ?: return false
+        val burnableKeys = repo.getBurnableIdentity()
+        val signingKey = if (burnableKeys != null && (group.membersJson.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
+
         val groupJson = com.google.gson.Gson().toJson(group)
         val timestamp = System.currentTimeMillis()
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, groupJson, timestamp.toString())
-        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
 
         val syncPayload = GroupSyncPayload(
             groupChatJson = groupJson,
@@ -879,7 +888,7 @@ class HandshakePacketHandler(
         val syncPacket = NetworkPacket(
             id = java.util.UUID.randomUUID().toString(),
             hops = 1,
-            senderId = myKeys.publicKeyB64,
+            senderId = signingKey.publicKeyB64,
             targetUserId = packet.senderId,
             type = "GROUP_SYNC",
             payload = com.google.gson.Gson().toJsonTree(syncPayload)
@@ -910,7 +919,7 @@ class HandshakePacketHandler(
         val members = parseMembers(group.membersJson)
         val meInGroup = members.any {
             it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
-        }
+        } || group.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && group.adminPublicKeyB64 == burnable.publicKeyB64)
         if (!meInGroup) {
             Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: our identity is not in the group members list")
             return false
