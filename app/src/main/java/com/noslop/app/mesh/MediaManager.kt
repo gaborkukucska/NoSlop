@@ -130,7 +130,7 @@ object MediaManager {
         val retryQueue = LinkedBlockingQueue<Pair<Long, Int>>() // <offset, length>
 
         // AIMD State for chunk size and concurrency
-        var currentChunkSize = 512 * 1024 // Start with 512KB for higher throughput over Tor circuits
+        var currentChunkSize = 256 * 1024 // Start with 256KB for fast initial streaming and reliable Tor transfers
         var currentConcurrency = 2.0 // Start with 2 inflight chunks to pipeline over circuit latency
         var ssthresh = 8.0 // Slow-start threshold for concurrency
         var consecutiveTimeouts = 0
@@ -808,8 +808,8 @@ object MediaManager {
     suspend fun handleMediaRequest(senderId: String, payload: MediaRequestPayload) {
         val repo = repository ?: return
         scope.launch {
-            val targetOnion = repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress
-                ?: payload.originOnion?.takeIf { it.endsWith(".onion") }
+            val targetOnion = payload.originOnion?.takeIf { it.endsWith(".onion") }
+                ?: repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress
             if (targetOnion.isNullOrBlank()) {
                 Logger.warn(TAG, "Cannot resolve targetOnion for sender $senderId to return MEDIA_CHUNK")
                 return@launch

@@ -734,6 +734,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, adminKeys.publicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
+        val memberDetailsMap = allMembers.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = peer.handle,
+                    encPublicKey = peer.encPublicKeyB64,
+                    onionAddress = peer.onionAddress
+                )
+            } else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = myHandle,
+                    encPublicKey = adminKeys.encPublicKeyB64,
+                    onionAddress = adminKeys.onionAddress
+                )
+            } else null
+        }.toMap()
+
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = groupId,
             title = title,
@@ -742,10 +759,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             avatarB64 = avatarB64,
             description = description,
             memberHandles = memberHandlesMap,
+            memberDetails = memberDetailsMap,
             allowMemberInvites = allowMemberInvites,
             allowMemberSelfRemove = allowMemberSelfRemove,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            adminOnion = adminKeys.onionAddress,
+            adminEncPublicKey = adminKeys.encPublicKeyB64
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = "group_invite_${groupId}",
@@ -1197,6 +1217,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val timestamp = group.createdAt
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val allMembersForResend = (members + group.adminPublicKeyB64).distinct()
+        val memberDetailsMap = allMembersForResend.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = peer.handle,
+                    encPublicKey = peer.encPublicKeyB64,
+                    onionAddress = peer.onionAddress
+                )
+            } else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = myHandle,
+                    encPublicKey = adminKeys.encPublicKeyB64,
+                    onionAddress = adminKeys.onionAddress
+                )
+            } else null
+        }.toMap()
+
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = group.groupId,
             title = group.title,
@@ -1205,10 +1243,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             avatarB64 = group.avatarB64,
             description = group.description,
             memberHandles = memberHandlesMap,
-            allowMemberInvites = group.allowMemberInvites,
-            allowMemberSelfRemove = group.allowMemberSelfRemove,
+            memberDetails = memberDetailsMap,
+            allowMemberInvites = allowMemberInvites,
+            allowMemberSelfRemove = allowMemberSelfRemove,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            adminOnion = adminKeys.onionAddress,
+            adminEncPublicKey = adminKeys.encPublicKeyB64
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = "group_invite_${groupId}",

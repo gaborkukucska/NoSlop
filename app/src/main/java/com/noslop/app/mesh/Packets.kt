@@ -273,6 +273,12 @@ data class FollowPayload(
     val action: String = "follow" // "follow" or "unfollow"
 )
 
+data class GroupMemberInfo(
+    val handle: String? = null,
+    @SerializedName("enc_public_key") val encPublicKey: String? = null,
+    @SerializedName("onion_address") val onionAddress: String? = null
+)
+
 data class GroupInvitePayload(
     @SerializedName("group_id") val groupId: String,
     val title: String,
@@ -281,10 +287,13 @@ data class GroupInvitePayload(
     @SerializedName("avatar_b64") val avatarB64: String? = null,
     @SerializedName("description") val description: String? = null,
     @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
+    @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
     @SerializedName("allow_member_invites") val allowMemberInvites: Boolean = true,
     @SerializedName("allow_member_self_remove") val allowMemberSelfRemove: Boolean = true,
     val timestamp: Long,
-    val signature: String
+    val signature: String,
+    @SerializedName("admin_onion") val adminOnion: String? = null,
+    @SerializedName("admin_enc_public_key") val adminEncPublicKey: String? = null
 )
 
 data class GroupUpdatePayload(
@@ -295,6 +304,7 @@ data class GroupUpdatePayload(
     @SerializedName("added_members") val addedMembers: List<String>? = null,
     @SerializedName("removed_members") val removedMembers: List<String>? = null,
     @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
+    @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
     @SerializedName("allow_member_invites") val allowMemberInvites: Boolean? = null,
     @SerializedName("allow_member_self_remove") val allowMemberSelfRemove: Boolean? = null,
     val timestamp: Long,
@@ -316,6 +326,7 @@ data class GroupQueryPayload(
 
 data class GroupSyncPayload(
     @SerializedName("group_chat_json") val groupChatJson: String,
+    @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
     val timestamp: Long,
     val signature: String
 )

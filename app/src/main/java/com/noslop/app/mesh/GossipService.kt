@@ -401,20 +401,32 @@ object GossipService {
             }
         }
         
-        // Check if sender is a member/admin of any local group chat (permits group messages, deletes, reactions, presence, and sync)
+        // Check if packet is associated with an existing local group chat
         val isSenderInGroup = if (packet.type == "MESSAGE" || packet.type == "DELETE_MESSAGE" || packet.type == "CHAT_REACTION" || packet.type == "ANNOUNCE_PEER" || isGroupControl) {
             try {
                 val groupDao = transport?.repository?.context?.let { ctx ->
                     com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()
                 }
                 val pDao = peerDao
-                groupDao?.getAllGroupChatsList()?.any { group ->
-                    group.adminPublicKeyB64 == senderId || 
-                    group.membersJson.contains(senderId) ||
-                    pDao?.getPeerByPublicKey(senderId)?.let { p ->
-                        group.membersJson.contains(p.publicKeyB64) || group.adminPublicKeyB64 == p.publicKeyB64
+
+                // Check direct group association from payload if available
+                val payloadGid = when (packet.type) {
+                    "MESSAGE" -> packet.getMessagePayload()?.groupId
+                    "DELETE_MESSAGE" -> packet.getDeleteMessagePayload()?.groupId
+                    "CHAT_REACTION" -> packet.getChatReactionPayload()?.groupId
+                    else -> null
+                }
+                if (!payloadGid.isNullOrBlank() && groupDao?.getGroupChatById(payloadGid) != null) {
+                    true
+                } else {
+                    groupDao?.getAllGroupChatsList()?.any { group ->
+                        group.adminPublicKeyB64 == senderId || 
+                        group.membersJson.contains(senderId) ||
+                        pDao?.getPeerByPublicKey(senderId)?.let { p ->
+                            group.membersJson.contains(p.publicKeyB64) || group.adminPublicKeyB64 == p.publicKeyB64
+                        } == true
                     } == true
-                } == true
+                }
             } catch (_: Exception) { false }
         } else false
 
