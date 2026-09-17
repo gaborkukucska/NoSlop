@@ -203,30 +203,30 @@ class HandshakePacketHandler(
             }
         }
         if (peer == null) {
+            val isRecentlyDeleted = GossipService.isPeerRecentlyDeleted(handPay.fromUserId, handPay.timestamp)
+            if (isRecentlyDeleted) {
+                Logger.warn(TAG, "Received USER_HANDSHAKE from recently deleted peer ${handPay.fromUserId}. Ignoring to prevent forced re-connection.")
+                return false
+            }
+            val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
+            val tripcode = CryptoService.deriveTripcode(pubBytes)
             val allGroups = db.groupChatDao().getAllGroupChatsList()
             val isInGroup = allGroups.any { g ->
                 g.adminPublicKeyB64.trim() == handPay.fromUserId.trim() ||
                 parseMembers(g.membersJson).any { it.trim() == handPay.fromUserId.trim() }
             }
-            if (isInGroup) {
-                val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
-                val tripcode = CryptoService.deriveTripcode(pubBytes)
-                peer = Peer(
-                    publicKeyB64 = handPay.fromUserId,
-                    handle = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Member",
-                    tripcode = tripcode,
-                    onionAddress = handPay.fromHomeNode,
-                    encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
-                    isTrusted = true,
-                    isTemporary = false,
-                    lastSeenAt = System.currentTimeMillis()
-                )
-                peerDao.insertPeer(peer)
-                Logger.info(TAG, "Accepted USER_HANDSHAKE from group chat member ${handPay.fromUserId.take(8)}... (${peer.handle})")
-            } else {
-                Logger.warn(TAG, "Received USER_HANDSHAKE from unknown/deleted peer ${handPay.fromUserId}. Ignoring to prevent forced re-connection.")
-                return false
-            }
+            peer = Peer(
+                publicKeyB64 = handPay.fromUserId,
+                handle = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Peer",
+                tripcode = tripcode,
+                onionAddress = handPay.fromHomeNode,
+                encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
+                isTrusted = isInGroup,
+                isTemporary = !isInGroup,
+                lastSeenAt = System.currentTimeMillis()
+            )
+            peerDao.insertPeer(peer)
+            Logger.info(TAG, "Created peer from authentic USER_HANDSHAKE: ${handPay.fromUserId.take(8)}... (${peer.handle}, isTrusted=${peer.isTrusted})")
         }
 
         val isOldPacket = (System.currentTimeMillis() - handPay.timestamp) > 5 * 60 * 1000L
@@ -909,10 +909,12 @@ class HandshakePacketHandler(
         val sendId = packet.senderId.trim()
         val adminId = group.adminPublicKeyB64.trim()
 
+        val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${query.groupId}") != null
         val requesterInGroup = members.any { it.trim() == reqId || it.trim() == sendId } ||
             adminId == reqId || adminId == sendId ||
             (senderPeer != null && (members.any { it.trim() == senderPeer.publicKeyB64.trim() } || adminId == senderPeer.publicKeyB64.trim())) ||
             (requesterPeer != null && (members.any { it.trim() == requesterPeer.publicKeyB64.trim() } || adminId == requesterPeer.publicKeyB64.trim())) ||
+            group.allowMemberInvites || hasPendingInvite ||
             pDao.getAllPeersList().any { p -> 
                 val pKey = p.publicKeyB64.trim()
                 (members.any { it.trim() == pKey } || adminId == pKey) && 
@@ -1008,10 +1010,35 @@ class HandshakePacketHandler(
             return true
         }
 
-        if (group.createdAt >= existing.createdAt) {
-            db.groupChatDao().insertGroupChat(group)
-            Logger.info(TAG, "Synced updated group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
+        val isAdmin = existing.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && existing.adminPublicKeyB64 == burnable.publicKeyB64)
+        val existingMembers = parseMembers(existing.membersJson)
+        val incomingMembers = parseMembers(group.membersJson)
+        val mergedMembers = (existingMembers + incomingMembers).distinct()
+
+        val mergedHandles = existing.getMemberHandles().toMutableMap()
+        group.getMemberHandles().forEach { (k, v) -> mergedHandles[k] = v }
+
+        val mergedGroup = if (isAdmin) {
+            // Admin keeps its own title, avatar, description and permissions; merges discovered members
+            existing.copy(
+                membersJson = com.google.gson.Gson().toJson(mergedMembers),
+                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles)
+            )
+        } else {
+            // Member updates metadata from admin/sync and merges member lists
+            existing.copy(
+                title = group.title,
+                description = group.description ?: existing.description,
+                avatarB64 = group.avatarB64 ?: existing.avatarB64,
+                allowMemberInvites = group.allowMemberInvites,
+                allowMemberSelfRemove = group.allowMemberSelfRemove,
+                membersJson = com.google.gson.Gson().toJson(mergedMembers),
+                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles)
+            )
         }
+
+        db.groupChatDao().insertGroupChat(mergedGroup)
+        Logger.info(TAG, "Synced and merged group chat '${mergedGroup.title}' (${group.groupId}) via GROUP_SYNC (members: ${mergedMembers.size})")
         return true
     }
 }
