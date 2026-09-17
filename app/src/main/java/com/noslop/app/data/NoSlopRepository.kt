@@ -800,6 +800,41 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members (admin=${adminKeys.publicKeyB64.take(8)}...)")
     }
 
+    suspend fun syncMemberPeers(memberDetails: Map<String, com.noslop.app.mesh.GroupMemberInfo>?) {
+        if (memberDetails == null) return
+        val myPub = getLocalIdentity()?.publicKeyB64
+        val myBurnable = getBurnableIdentity()?.publicKeyB64
+        for ((pubKey, info) in memberDetails) {
+            if (pubKey == myPub || pubKey == myBurnable) continue
+            val existing = peerDao.getPeerByPublicKey(pubKey)
+            if (existing == null) {
+                val pubBytes = try { android.util.Base64.decode(pubKey, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "group"
+                val handle = info.handle ?: "Member"
+                peerDao.insertPeer(
+                    Peer(
+                        publicKeyB64 = pubKey,
+                        handle = handle,
+                        tripcode = tripcode,
+                        onionAddress = info.onionAddress ?: "",
+                        encPublicKeyB64 = info.encPublicKey ?: "",
+                        isTrusted = false,
+                        isTemporary = false,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                )
+            } else if (existing.encPublicKeyB64.isBlank() || existing.onionAddress.isBlank()) {
+                peerDao.insertPeer(
+                    existing.copy(
+                        encPublicKeyB64 = existing.encPublicKeyB64.ifBlank { info.encPublicKey ?: "" },
+                        onionAddress = existing.onionAddress.ifBlank { info.onionAddress ?: "" },
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
+    }
+
     suspend fun acceptGroupInvite(groupId: String) {
         val setting = db.appSettingDao().getSetting("pending_group_invite_$groupId")
         if (!setting.isNullOrBlank()) {
@@ -821,7 +856,39 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
                 db.groupChatDao().insertGroupChat(group)
                 db.appSettingDao().removeSetting("pending_group_invite_$groupId")
-                Logger.info("REPOSITORY", "Accepted group invite for '${invite.title}' ($groupId)")
+
+                // Sync directory peers and admin details into peerDao
+                syncMemberPeers(invite.memberDetails)
+                if (!invite.adminPublicKeyB64.isNullOrBlank() && !invite.adminOnion.isNullOrBlank()) {
+                    val adminPeer = peerDao.getPeerByPublicKey(invite.adminPublicKeyB64)
+                    if (adminPeer == null) {
+                        val pubBytes = try { android.util.Base64.decode(invite.adminPublicKeyB64, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                        val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "admin"
+                        peerDao.insertPeer(
+                            Peer(
+                                publicKeyB64 = invite.adminPublicKeyB64,
+                                handle = invite.memberHandles?.get(invite.adminPublicKeyB64) ?: "Group Admin",
+                                tripcode = tripcode,
+                                onionAddress = invite.adminOnion ?: "",
+                                encPublicKeyB64 = invite.adminEncPublicKey ?: "",
+                                isTrusted = true,
+                                isTemporary = false,
+                                lastSeenAt = System.currentTimeMillis()
+                            )
+                        )
+                    } else if (adminPeer.encPublicKeyB64.isBlank() || adminPeer.onionAddress.isBlank()) {
+                        peerDao.insertPeer(
+                            adminPeer.copy(
+                                encPublicKeyB64 = adminPeer.encPublicKeyB64.ifBlank { invite.adminEncPublicKey ?: "" },
+                                onionAddress = adminPeer.onionAddress.ifBlank { invite.adminOnion ?: "" },
+                                isTrusted = true
+                            )
+                        )
+                    }
+                }
+                // Request group catchup to synchronize latest group directory and state
+                requestGroupCatchup(groupId)
+                Logger.info("REPOSITORY", "Accepted group invite for '${invite.title}' ($groupId) and synced members")
             } catch (e: Exception) {
                 Logger.error("REPOSITORY", "Failed to parse pending group invite for $groupId: ${e.message}")
             }
@@ -915,11 +982,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
             val encPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
             if (encPub == null) {
-                // P0-1: Never fallback to Ed25519 key for X25519 encryption. Send connection request to learn key.
-                Logger.warn("REPOSITORY", "Member ${memberPub.take(12)}... has no X25519 key. Requesting handshake.")
+                // Never fallback to Ed25519 key for X25519 encryption. Send connection request & group catchup to learn key.
+                Logger.warn("REPOSITORY", "Member ${memberPub.take(12)}... has no X25519 key. Requesting handshake and group catchup.")
                 if (peer != null && peer.onionAddress.isNotBlank()) {
                     sendConnectionRequest(peer.handle, memberPub, peer.onionAddress)
                 }
+                requestGroupCatchup(groupId)
                 continue
             }
 
@@ -1024,6 +1092,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val signingKey = if (isAdmin) adminKeys else myKeys
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, effectiveTitle, signingKey.publicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
+        val allMembersForDetails = (newMembers + existing.adminPublicKeyB64).distinct()
+        val memberDetailsMap = allMembersForDetails.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = peer.handle,
+                    encPublicKey = peer.encPublicKeyB64,
+                    onionAddress = peer.onionAddress
+                )
+            } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = myHandle,
+                    encPublicKey = adminKeys.encPublicKeyB64,
+                    onionAddress = adminKeys.onionAddress
+                )
+            } else null
+        }.toMap()
+
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
             title = if (isAdmin) effectiveTitle else null,
@@ -1032,6 +1118,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             addedMembers = addedMembers.takeIf { it.isNotEmpty() },
             removedMembers = removedMembers.takeIf { it.isNotEmpty() },
             memberHandles = memberHandlesMap,
+            memberDetails = memberDetailsMap,
             allowMemberInvites = if (isAdmin) effectiveAllowInvites else null,
             allowMemberSelfRemove = if (isAdmin) effectiveAllowSelfRemove else null,
             timestamp = timestamp,
@@ -1070,10 +1157,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 avatarB64 = effectiveAvatarB64,
                 description = effectiveDescription,
                 memberHandles = memberHandlesMap,
+                memberDetails = memberDetailsMap,
                 allowMemberInvites = existing.allowMemberInvites,
                 allowMemberSelfRemove = existing.allowMemberSelfRemove,
                 timestamp = timestamp,
-                signature = signature
+                signature = signature,
+                adminOnion = adminKeys.onionAddress,
+                adminEncPublicKey = adminKeys.encPublicKeyB64
             )
             for (addedPub in addedMembers) {
                 if (addedPub == myKeys.publicKeyB64) continue

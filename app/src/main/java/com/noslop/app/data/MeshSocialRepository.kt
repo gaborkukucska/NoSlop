@@ -1371,28 +1371,36 @@ class MeshSocialRepository(
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
-        for (memberPub in memberPubs) {
+        val allMembers = (memberPubs + group.adminPublicKeyB64).distinct()
+        for (memberPub in allMembers) {
             if (memberPub == senderKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
             val peer = peerDao.getPeerByPublicKey(memberPub)
-            val packet = com.noslop.app.mesh.NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 3,
-                senderId = senderKeys.publicKeyB64,
-                targetUserId = memberPub,
-                type = "CHAT_REACTION",
-                payload = com.google.gson.Gson().toJsonTree(reactionPayload),
-                signature = signature
-            )
             if (peer != null && peer.onionAddress.isNotBlank()) {
+                val directPacket = com.noslop.app.mesh.NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = senderKeys.publicKeyB64,
+                    targetUserId = null, // Group reactions belong to the group, not a single user
+                    type = "CHAT_REACTION",
+                    payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+                    signature = signature
+                )
                 repositoryScope.launch {
-                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, directPacket)
                 }
-            } else {
-                // If member is not a direct peer or has no known onion address, gossip relay across the mesh!
-                val gossipPacket = packet.copy(id = UUID.randomUUID().toString(), hops = 6)
-                com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
             }
         }
+        // Broadcast single mesh-wide gossip packet so indirect/relay members receive the reaction
+        val gossipPacket = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = senderKeys.publicKeyB64,
+            targetUserId = null,
+            type = "CHAT_REACTION",
+            payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+            signature = signature
+        )
+        com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
         meshTransport.repository.triggerDmSync()
         true
     }

@@ -539,10 +539,20 @@ fun GroupChatThreadScreen(
                                                         val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, mid, meta?.filename ?: mid)
                                                         if (saved) android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Saved to Downloads"), android.widget.Toast.LENGTH_SHORT).show()
                                                     } else {
-                                                        val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
                                                         val onionToUse = senderPeer?.onionAddress?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
-                                                            ?: meta?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
-                                                        if (meta != null) viewModel.startMediaDownload(meta, onionToUse)
+                                                            ?: parsedMediaMetadata?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                        val finalMeta = parsedMediaMetadata
+                                                            ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                            ?: MediaMetadata(
+                                                                id = mid,
+                                                                type = msg.mediaType ?: "file",
+                                                                mimeType = "application/octet-stream",
+                                                                size = 0L,
+                                                                chunkCount = 999,
+                                                                originNode = onionToUse,
+                                                                ownerId = msg.senderPub
+                                                            )
+                                                        viewModel.startMediaDownload(finalMeta, onionToUse)
                                                     }
                                                 }.padding(12.dp),
                                                 contentAlignment = Alignment.Center
@@ -601,10 +611,20 @@ fun GroupChatThreadScreen(
                                             val progress = downloadProgress[mid] ?: 0
                                             Box(
                                                 modifier = Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
-                                                    val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
                                                     val onionToUse = senderPeer?.onionAddress?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
-                                                        ?: meta?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
-                                                    if (meta != null) viewModel.startMediaDownload(meta, onionToUse)
+                                                        ?: parsedMediaMetadata?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                    val finalMeta = parsedMediaMetadata
+                                                        ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                        ?: MediaMetadata(
+                                                            id = mid,
+                                                            type = msg.mediaType ?: "image",
+                                                            mimeType = if (isGif) "image/gif" else if (isVideo) "video/mp4" else "application/octet-stream",
+                                                            size = 0L,
+                                                            chunkCount = 999,
+                                                            originNode = onionToUse,
+                                                            ownerId = msg.senderPub
+                                                        )
+                                                    viewModel.startMediaDownload(finalMeta, onionToUse)
                                                 },
                                                 contentAlignment = Alignment.Center
                                             ) {

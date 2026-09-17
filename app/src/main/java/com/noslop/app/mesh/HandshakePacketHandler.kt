@@ -19,38 +19,7 @@ class HandshakePacketHandler(
     private val autoAcceptRateLimits = java.util.concurrent.ConcurrentHashMap<String, MutableList<Long>>()
 
     private suspend fun syncMemberPeers(memberDetails: Map<String, GroupMemberInfo>?) {
-        if (memberDetails == null) return
-        val myPub = repo.getLocalIdentity()?.publicKeyB64
-        val myBurnable = repo.getBurnableIdentity()?.publicKeyB64
-        for ((pubKey, info) in memberDetails) {
-            if (pubKey == myPub || pubKey == myBurnable) continue
-            val existing = peerDao.getPeerByPublicKey(pubKey)
-            if (existing == null) {
-                val pubBytes = try { Base64.decode(pubKey, Base64.DEFAULT) } catch (_: Exception) { null }
-                val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "group"
-                val handle = info.handle ?: "Member"
-                peerDao.insertPeer(
-                    Peer(
-                        publicKeyB64 = pubKey,
-                        handle = handle,
-                        tripcode = tripcode,
-                        onionAddress = info.onionAddress ?: "",
-                        encPublicKeyB64 = info.encPublicKey ?: "",
-                        isTrusted = false,
-                        isTemporary = true,
-                        lastSeenAt = System.currentTimeMillis()
-                    )
-                )
-            } else if (existing.encPublicKeyB64.isBlank() || existing.onionAddress.isBlank()) {
-                peerDao.insertPeer(
-                    existing.copy(
-                        encPublicKeyB64 = existing.encPublicKeyB64.ifBlank { info.encPublicKey ?: "" },
-                        onionAddress = existing.onionAddress.ifBlank { info.onionAddress ?: "" },
-                        lastSeenAt = System.currentTimeMillis()
-                    )
-                )
-            }
-        }
+        repo.syncMemberPeers(memberDetails)
     }
 
     suspend fun handleConnectionRequest(packet: NetworkPacket, sendResponse: suspend (NetworkPacket) -> Unit = {}): Boolean {
@@ -234,8 +203,30 @@ class HandshakePacketHandler(
             }
         }
         if (peer == null) {
-            Logger.warn(TAG, "Received USER_HANDSHAKE from unknown/deleted peer ${handPay.fromUserId}. Ignoring to prevent forced re-connection.")
-            return false
+            val allGroups = db.groupChatDao().getAllGroupChatsList()
+            val isInGroup = allGroups.any { g ->
+                g.adminPublicKeyB64.trim() == handPay.fromUserId.trim() ||
+                parseMembers(g.membersJson).any { it.trim() == handPay.fromUserId.trim() }
+            }
+            if (isInGroup) {
+                val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
+                val tripcode = CryptoService.deriveTripcode(pubBytes)
+                peer = Peer(
+                    publicKeyB64 = handPay.fromUserId,
+                    handle = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Member",
+                    tripcode = tripcode,
+                    onionAddress = handPay.fromHomeNode,
+                    encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
+                    isTrusted = true,
+                    isTemporary = false,
+                    lastSeenAt = System.currentTimeMillis()
+                )
+                peerDao.insertPeer(peer)
+                Logger.info(TAG, "Accepted USER_HANDSHAKE from group chat member ${handPay.fromUserId.take(8)}... (${peer.handle})")
+            } else {
+                Logger.warn(TAG, "Received USER_HANDSHAKE from unknown/deleted peer ${handPay.fromUserId}. Ignoring to prevent forced re-connection.")
+                return false
+            }
         }
 
         val isOldPacket = (System.currentTimeMillis() - handPay.timestamp) > 5 * 60 * 1000L
@@ -489,6 +480,18 @@ class HandshakePacketHandler(
                     val timestamp = group.createdAt
                     val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
                     val signature = CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
+
+                    val allMembers = (members + group.adminPublicKeyB64).distinct()
+                    val myHandle = repo.getLocalHandle()
+                    val memberDetailsMap = allMembers.mapNotNull { pub ->
+                        val p = peerDao.getPeerByPublicKey(pub)
+                        if (p != null) {
+                            pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
+                        } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
+                            pub to GroupMemberInfo(myHandle, adminKeys.encPublicKeyB64, adminKeys.onionAddress)
+                        } else null
+                    }.toMap()
+
                     val invitePayload = GroupInvitePayload(
                         groupId = group.groupId,
                         title = group.title,
@@ -497,10 +500,13 @@ class HandshakePacketHandler(
                         avatarB64 = group.avatarB64,
                         description = group.description,
                         memberHandles = group.getMemberHandles(),
+                        memberDetails = memberDetailsMap,
                         allowMemberInvites = group.allowMemberInvites,
                         allowMemberSelfRemove = group.allowMemberSelfRemove,
                         timestamp = timestamp,
-                        signature = signature
+                        signature = signature,
+                        adminOnion = adminKeys.onionAddress,
+                        adminEncPublicKey = adminKeys.encPublicKeyB64
                     )
                     val packet = NetworkPacket(
                         id = java.util.UUID.randomUUID().toString(),
@@ -899,15 +905,18 @@ class HandshakePacketHandler(
         val senderPeer = pDao.getPeerByPublicKey(packet.senderId)
         val requesterPeer = pDao.getPeerByPublicKey(query.requesterId)
 
-        val requesterInGroup = members.contains(query.requesterId) || 
-            members.contains(packet.senderId) ||
-            group.adminPublicKeyB64 == query.requesterId ||
-            group.adminPublicKeyB64 == packet.senderId ||
-            (senderPeer != null && (members.contains(senderPeer.publicKeyB64) || group.adminPublicKeyB64 == senderPeer.publicKeyB64)) ||
-            (requesterPeer != null && (members.contains(requesterPeer.publicKeyB64) || group.adminPublicKeyB64 == requesterPeer.publicKeyB64)) ||
+        val reqId = query.requesterId.trim()
+        val sendId = packet.senderId.trim()
+        val adminId = group.adminPublicKeyB64.trim()
+
+        val requesterInGroup = members.any { it.trim() == reqId || it.trim() == sendId } ||
+            adminId == reqId || adminId == sendId ||
+            (senderPeer != null && (members.any { it.trim() == senderPeer.publicKeyB64.trim() } || adminId == senderPeer.publicKeyB64.trim())) ||
+            (requesterPeer != null && (members.any { it.trim() == requesterPeer.publicKeyB64.trim() } || adminId == requesterPeer.publicKeyB64.trim())) ||
             pDao.getAllPeersList().any { p -> 
-                (p.publicKeyB64 in members || p.publicKeyB64 == group.adminPublicKeyB64) && 
-                (p.publicKeyB64 == packet.senderId || p.publicKeyB64 == query.requesterId || (senderPeer != null && p.onionAddress.isNotBlank() && p.onionAddress == senderPeer.onionAddress))
+                val pKey = p.publicKeyB64.trim()
+                (members.any { it.trim() == pKey } || adminId == pKey) && 
+                (pKey == sendId || pKey == reqId || (senderPeer != null && p.onionAddress.isNotBlank() && p.onionAddress == senderPeer.onionAddress))
             }
         if (!requesterInGroup) {
             Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: requester ${query.requesterId} is not a group member or admin")
@@ -947,7 +956,13 @@ class HandshakePacketHandler(
             type = "GROUP_SYNC",
             payload = com.google.gson.Gson().toJsonTree(syncPayload)
         )
-        GossipService.broadcast(syncPacket)
+        val targetOnion = senderPeer?.onionAddress?.takeIf { it.isNotBlank() }
+            ?: requesterPeer?.onionAddress?.takeIf { it.isNotBlank() }
+        if (!targetOnion.isNullOrBlank()) {
+            repo.dispatchPacket(targetOnion, syncPacket)
+        } else {
+            GossipService.broadcast(syncPacket)
+        }
         Logger.info(TAG, "Responded to GROUP_QUERY for group ${group.title} (${query.groupId}) to ${packet.senderId}")
         return true
     }
@@ -963,12 +978,12 @@ class HandshakePacketHandler(
 
         val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, sync.groupChatJson, sync.timestamp.toString())
         val pipePayload = "${group.groupId}|${sync.groupChatJson}|${sync.timestamp}"
-        val senderKey = packet.senderId
-        val adminKey = group.adminPublicKeyB64
-        val isValid = CryptoService.verify(encPayload, sync.signature, senderKey) ||
-                      CryptoService.verify(encPayload, sync.signature, adminKey) ||
-                      CryptoService.verify(pipePayload, sync.signature, senderKey) ||
-                      CryptoService.verify(pipePayload, sync.signature, adminKey)
+        val groupMembers = parseMembers(group.membersJson)
+        val verifyCandidates = (listOfNotNull(packet.senderId, group.adminPublicKeyB64) + groupMembers).distinct()
+        val isValid = verifyCandidates.any { cand ->
+            CryptoService.verify(encPayload, sync.signature, cand) ||
+            CryptoService.verify(pipePayload, sync.signature, cand)
+        }
         if (!isValid) {
             Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: signature verification failed")
             return false

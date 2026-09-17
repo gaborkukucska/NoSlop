@@ -345,7 +345,7 @@ object MediaManager {
         }
 
         val peer = repo.peerDao.getPeerByPublicKey(authorId)
-        val isTrusted = peer?.isTrusted == true
+        val isTrusted = peer?.isTrusted == true || context == "group"
 
         if (isTrusted) {
             if (!settings.autoDownloadFriends) {

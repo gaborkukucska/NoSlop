@@ -204,7 +204,7 @@ class DmPacketHandler(
                 val onion = mediaMetadata.originNode ?: peer?.onionAddress
                 MediaManager.checkAndAutoDownload(
                     mediaMetadata,
-                    "private", // Explicitly use private context so the DM auto-download setting is respected
+                    if (groupId != null) "group" else "private",
                     packet.senderId,
                     onion
                 )

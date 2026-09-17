@@ -576,12 +576,28 @@ object GossipService {
         // 5. If it is a directed message (has targetUserId), check if it is for us
         if (packet.targetUserId != null) {
             val isForUs = checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64)
-            if (!isForUs) {
+            val isGroupPacketForUs = if (!isForUs && (packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE")) {
+                val gid = when (packet.type) {
+                    "CHAT_REACTION" -> packet.getChatReactionPayload()?.groupId
+                    "DELETE_MESSAGE" -> packet.getDeleteMessagePayload()?.groupId
+                    else -> null
+                }
+                !gid.isNullOrBlank() && transport?.repository?.context?.let { ctx ->
+                    com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao().getGroupChatById(gid) != null
+                } == true
+            } else false
+
+            if (!isForUs && !isGroupPacketForUs) {
                 // Directed at someone else, just forward it if hops > 1
                 Logger.info(TAG, "Directed ${packet.type} packet ${packetId} is not for us (target=${packet.targetUserId?.take(20)}...) — forwarding")
                 pushToHubIfLinked(packet)
                 forwardPacket(packet)
                 return false
+            } else if (!isForUs && isGroupPacketForUs) {
+                // Group reaction or delete targeting a local group: forward and also process locally!
+                Logger.info(TAG, "Group ${packet.type} packet $packetId for local group — forwarding and processing locally")
+                pushToHubIfLinked(packet)
+                forwardPacket(packet)
             }
         } else if (packet.type == "MEDIA_RELAY_REQUEST") {
             handleRelayRequest(senderId, packet)
