@@ -696,9 +696,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         allowMemberInvites: Boolean = true,
         allowMemberSelfRemove: Boolean = true
     ) {
-        val myKeys = getLocalIdentity() ?: return
+        val myMain = getLocalIdentity() ?: return
+        // Open groups (members can invite) always use the admin's secondary burnable identity for safety
+        val adminKeys = if (allowMemberInvites) {
+            meshTransport.repository.getBurnableIdentity() ?: generateBurnableIdentity().also { newBurnable ->
+                com.noslop.app.tor.TorService.updateKeyAndRegister(myMain.privateKeyB64, newBurnable.privateKeyB64)
+            }
+        } else {
+            myMain
+        }
         val groupId = java.util.UUID.randomUUID().toString()
-        val allMembers = (memberPubs + myKeys.publicKeyB64).distinct()
+        val allMembers = (memberPubs + adminKeys.publicKeyB64).distinct()
         val membersJson = com.google.gson.Gson().toJson(allMembers)
         val timestamp = System.currentTimeMillis()
         
@@ -706,14 +714,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val memberHandlesMap = allMembers.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
             if (peer != null) pub to peer.handle
-            else if (pub == myKeys.publicKeyB64) pub to myHandle
+            else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) pub to myHandle
             else null
         }.toMap()
 
         val group = GroupChat(
             groupId = groupId,
             title = title,
-            adminPublicKeyB64 = myKeys.publicKeyB64,
+            adminPublicKeyB64 = adminKeys.publicKeyB64,
             membersJson = membersJson,
             createdAt = timestamp,
             description = description,
@@ -724,12 +732,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(group)
 
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, myKeys.publicKeyB64, timestamp.toString())
-        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, adminKeys.publicKeyB64, timestamp.toString())
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = groupId,
             title = title,
-            adminPublicKeyB64 = myKeys.publicKeyB64,
+            adminPublicKeyB64 = adminKeys.publicKeyB64,
             members = allMembers,
             avatarB64 = avatarB64,
             description = description,
@@ -741,7 +749,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = "group_invite_${groupId}",
-            senderId = myKeys.publicKeyB64,
+            senderId = adminKeys.publicKeyB64,
             type = "GROUP_INVITE",
             payload = com.google.gson.Gson().toJsonTree(invitePayload)
         )
@@ -749,16 +757,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         // Send targeted GROUP_INVITE packet to every member with identity alignment
         for (memberPub in allMembers) {
-            if (memberPub == myKeys.publicKeyB64) continue
+            if (memberPub == adminKeys.publicKeyB64 || memberPub == myMain.publicKeyB64) continue
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
             val onion = peer?.onionAddress ?: ""
             if (onion.isBlank()) continue
 
             val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
-            val effectiveSenderId = if (contactIdentity == "burnable") {
-                getBurnableIdentity()?.publicKeyB64 ?: myKeys.publicKeyB64
+            val effectiveSenderId = if (allowMemberInvites || contactIdentity == "burnable") {
+                adminKeys.publicKeyB64
             } else {
-                myKeys.publicKeyB64
+                myMain.publicKeyB64
             }
 
             val memberPacket = packet.copy(
@@ -769,7 +777,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             meshSocialRepository.dispatchPacket(onion, memberPacket)
             kotlinx.coroutines.delay(300L) // Stagger invites to prevent Tor circuit collision
         }
-        Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members and dispatched targeted invites")
+        Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members (admin=${adminKeys.publicKeyB64.take(8)}...)")
     }
 
     suspend fun acceptGroupInvite(groupId: String) {
@@ -827,10 +835,25 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null, privacy: String = "public") {
         val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
         val group = db.groupChatDao().getGroupChatById(groupId) ?: return
         val msgId = java.util.UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
         val myHandle = getLocalHandle() ?: "Me"
+
+        val memberPubs: List<String> = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        // Determine sender keys based on audience privacy and group configuration:
+        // Use main ID when poster chooses friends only; use secondary burnable ID for open groups
+        val senderKeys = if (privacy == "friends") {
+            myKeys
+        } else if (group.allowMemberInvites || group.adminPublicKeyB64 == burnableKeys?.publicKeyB64) {
+            burnableKeys ?: myKeys
+        } else {
+            myKeys
+        }
 
         // P0-2: Store group message body encrypted at rest with AAD binding
         val (encryptedBody, bodyNonce) = try {
@@ -842,7 +865,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val localMsg = ChatMessage(
             id = msgId,
             chatWithPeerPub = groupId,
-            senderPub = myKeys.publicKeyB64,
+            senderPub = senderKeys.publicKeyB64,
             ciphertext = encryptedBody,
             nonce = bodyNonce,
             timestamp = timestamp,
@@ -852,11 +875,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         messageDao.insertMessage(localMsg)
 
-        val memberPubs: List<String> = try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
-        } catch (e: Exception) { emptyList() }
-
-        Logger.info("REPOSITORY", "sendGroupMessage: groupId=$groupId, members=${memberPubs.size}, privacy=$privacy, localEcho=$msgId")
+        Logger.info("REPOSITORY", "sendGroupMessage: groupId=$groupId, members=${memberPubs.size}, privacy=$privacy, localEcho=$msgId, sender=${senderKeys.publicKeyB64.take(8)}...")
 
         val jsonPayload = com.google.gson.JsonObject().apply {
             addProperty("content", text)
@@ -868,18 +887,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         var directSentCount = 0
 
         for (memberPub in memberPubs) {
-            if (memberPub == myKeys.publicKeyB64) continue
+            if (memberPub == senderKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
             val peer = peerDao.getPeerByPublicKey(memberPub)
-            if (privacy == "friends" && (peer == null || !peer.isTrusted)) {
+            if (privacy == "friends" && (peer == null || !peer.isTrusted || peer.isTemporary)) {
                 continue
-            }
-
-            // Align identity keys: if peer knows us as burnable, encrypt and stamp with burnable keys
-            val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
-            val senderKeys = if (contactIdentity == "burnable") {
-                getBurnableIdentity() ?: myKeys
-            } else {
-                myKeys
             }
 
             val encPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
@@ -907,11 +918,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 payload = com.google.gson.Gson().toJsonTree(msgPayload)
             )
 
-            if (peer.onionAddress.isNotBlank()) {
+            if (peer != null && peer.onionAddress.isNotBlank()) {
                 meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
                 directSentCount++
             } else {
-                // P0-1: Store-and-forward queue for members with unknown onion address
+                // Store-and-forward queue for members with unknown onion address or offline
                 db.pendingGroupMessageDao().insert(
                     PendingGroupMessage(
                         groupId = groupId,
@@ -922,10 +933,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         createdAt = timestamp
                     )
                 )
-                Logger.info("REPOSITORY", "Enqueued group message $msgId for offline member ${memberPub.take(12)}...")
+                // Also broadcast via gossip so intermediate peers can relay to the target
+                val gossipDm = packet.copy(id = java.util.UUID.randomUUID().toString(), hops = 6)
+                com.noslop.app.mesh.GossipService.broadcast(gossipDm)
+                Logger.info("REPOSITORY", "Enqueued and gossip-relayed group message $msgId for member ${memberPub.take(12)}...")
             }
         }
-        // P0-1: Cleartext GROUP_MESSAGE gossip broadcast deleted entirely.
         Logger.info("REPOSITORY", "sendGroupMessage: dispatched to $directSentCount direct member(s)")
     }
 
@@ -939,7 +952,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         membersList: List<String>
     ) {
         val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
         val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
+        // isAdmin already determined above with dual-identity support || (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        val adminKeys = if (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
 
         // --- NOSLOP_GROUP_DELTA_V1 ---
         // This used to send addedMembers = membersList, i.e. the COMPLETE new
@@ -985,8 +1001,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, effectiveTitle, myKeys.publicKeyB64, timestamp.toString())
-        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val signingKey = if (isAdmin) adminKeys else myKeys
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, effectiveTitle, signingKey.publicKeyB64, timestamp.toString())
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
             title = if (isAdmin) effectiveTitle else null,
@@ -1073,23 +1090,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun deleteGroupChat(groupId: String) {
         val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
         val existing = db.groupChatDao().getGroupChatById(groupId)
+        val isAdmin = existing != null && (existing.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64))
+        val adminKeys = if (burnableKeys != null && existing?.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
 
-        if (existing != null && existing.adminPublicKeyB64 == myKeys.publicKeyB64) {
+        if (existing != null && isAdmin) {
             // Admin: broadcast GROUP_DELETE so all members drop the group
             db.groupChatDao().deleteGroupChat(groupId)
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, "delete", myKeys.publicKeyB64, timestamp.toString())
-            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, "delete", adminKeys.publicKeyB64, timestamp.toString())
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
             val deletePayload = com.noslop.app.mesh.GroupDeletePayload(
                 groupId = groupId,
-                adminPublicKeyB64 = myKeys.publicKeyB64,
+                adminPublicKeyB64 = adminKeys.publicKeyB64,
                 timestamp = timestamp,
                 signature = signature
             )
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = java.util.UUID.randomUUID().toString(),
-                senderId = myKeys.publicKeyB64,
+                senderId = adminKeys.publicKeyB64,
                 type = "GROUP_DELETE",
                 payload = com.google.gson.Gson().toJsonTree(deletePayload)
             )
@@ -1356,13 +1376,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
-            val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, myKeys.displayName, address, timestamp.toString())
+            val userProfile = getUserProfile()
+            val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
+            val bio = userProfile.bio?.takeIf { it.isNotBlank() }
+            val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                myKeys.publicKeyB64, myKeys.displayName, address, timestamp.toString(), avatarB64, bio
+            )
             val signature = com.noslop.app.crypto.CryptoService.sign(payload, myKeys.privateKeyB64)
             val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
                 id = java.util.UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
                 fromUsername = myKeys.displayName,
                 fromDisplayName = myKeys.displayName,
+                authorAvatarB64 = avatarB64,
+                bio = bio,
                 fromHomeNode = address,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = timestamp,
@@ -1903,8 +1930,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun deleteGroupMessages(messageIds: List<String>, groupId: String) {
         val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
         val group = db.groupChatDao().getGroupChatById(groupId) ?: return
-        val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64
+        val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
 
         val memberPubs: List<String> = try {
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
@@ -1912,20 +1941,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         for (messageId in messageIds) {
             val msg = messageDao.getMessageById(messageId) ?: continue
-            val canDelete = msg.senderPub == myKeys.publicKeyB64 || isAdmin
+            val isMyMsg = msg.senderPub == myKeys.publicKeyB64 || (burnableKeys != null && msg.senderPub == burnableKeys.publicKeyB64)
+            val canDelete = isMyMsg || isAdmin
 
             if (!canDelete) {
                 Logger.info("REPOSITORY", "Skipping delete of message $messageId: not owner and not admin")
                 continue
             }
 
+            val signingKey = if (isAdmin && !isMyMsg) adminKeys else if (burnableKeys != null && msg.senderPub == burnableKeys.publicKeyB64) burnableKeys else myKeys
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, myKeys.publicKeyB64, timestamp.toString())
-            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, signingKey.publicKeyB64, timestamp.toString())
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
 
             val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
                 messageId = messageId,
-                authorId = myKeys.publicKeyB64,
+                authorId = signingKey.publicKeyB64,
                 timestamp = timestamp,
                 signature = signature,
                 groupId = groupId

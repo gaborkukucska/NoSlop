@@ -73,6 +73,7 @@ fun GroupChatThreadScreen(
     var messagePrivacy by remember { mutableStateOf("public") }
 
     val allPeers by viewModel.peers.collectAsState()
+    val burnableKeys by viewModel.burnableKeys.collectAsState()
 
     // ── Media attachment state ──
     var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
@@ -211,6 +212,7 @@ fun GroupChatThreadScreen(
             allPeers = allPeers,
             myPubKey = localKeys?.publicKeyB64,
             myHandle = localHandle,
+            myBurnablePubKey = burnableKeys?.publicKeyB64,
             onUpdateGroup = { title, desc, avatarB64, allowInviting, allowSelfRemove, members ->
                 viewModel.updateGroupChat(group.groupId, title, desc, avatarB64, allowInviting, allowSelfRemove, members)
             },
@@ -289,7 +291,8 @@ fun GroupChatThreadScreen(
         return
     }
 
-    val isAdmin = localKeys != null && group.adminPublicKeyB64 == localKeys.publicKeyB64
+    val isAdmin = (localKeys != null && group.adminPublicKeyB64 == localKeys.publicKeyB64) ||
+                  (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys?.publicKeyB64)
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
@@ -420,7 +423,7 @@ fun GroupChatThreadScreen(
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
             items(messages) { msg ->
-                val isMyMessage = msg.senderPub == localKeys?.publicKeyB64
+                val isMyMessage = msg.senderPub == localKeys?.publicKeyB64 || (burnableKeys != null && msg.senderPub == burnableKeys?.publicKeyB64)
                 val senderPeer = allPeers.find { it.publicKeyB64 == msg.senderPub }
                 val handleFromGroup = memberHandlesMap[msg.senderPub]
                 val senderName = when {

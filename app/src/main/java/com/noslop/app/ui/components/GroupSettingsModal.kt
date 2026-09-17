@@ -113,6 +113,7 @@ fun GroupSettingsModal(
     allPeers: List<Peer>,
     myPubKey: String?,
     myHandle: String? = null,
+    myBurnablePubKey: String? = null,
     onUpdateGroup: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, members: List<String>) -> Unit,
     onLeaveGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
@@ -145,7 +146,7 @@ fun GroupSettingsModal(
     var showLeaveConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
-    val isAdmin = myPubKey == group.adminPublicKeyB64
+    val isAdmin = myPubKey == group.adminPublicKeyB64 || (myBurnablePubKey != null && myBurnablePubKey == group.adminPublicKeyB64)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -308,7 +309,7 @@ fun GroupSettingsModal(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     membersList.forEach { memberPub ->
-                        val isMe = memberPub == myPubKey
+                        val isMe = memberPub == myPubKey || memberPub == myBurnablePubKey
                         val peer = allPeers.find { it.publicKeyB64 == memberPub }
                         val handleFromGroup = memberHandlesMap[memberPub]
                         val name = when {
@@ -469,10 +470,14 @@ fun GroupSettingsModal(
     }
 
     if (showAddMemberDialog) {
-        val availablePeers = allPeers.filter { 
-            (it.isTrusted || it.isTemporary || it.isCreator || it.isDiscoverable) && 
-            it.onionAddress.isNotBlank() && 
-            !membersList.contains(it.publicKeyB64) 
+        val canMembersInvite = if (isAdmin) allowInvites else group.allowMemberInvites
+        val availablePeers = allPeers.filter { p ->
+            val isEligible = if (canMembersInvite) {
+                (p.isTrusted || p.isTemporary || p.isCreator || p.isDiscoverable)
+            } else {
+                p.isTrusted && !p.isTemporary
+            }
+            isEligible && p.onionAddress.isNotBlank() && !membersList.contains(p.publicKeyB64)
         }
         AlertDialog(
             onDismissRequest = { showAddMemberDialog = false },

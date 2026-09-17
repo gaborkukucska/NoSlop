@@ -20,8 +20,8 @@
 -dontwarn okio.**
 -keep class okhttp3.** { *; }
 
-# Keep source file line numbers for crash debugging
--keepattributes SourceFile,LineNumberTable
+# Keep source file line numbers and generic signatures for Gson TypeToken reflection
+-keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod,*Annotation*
 
 # tor-android + jtorctl + netcipher — required for embedded Tor daemon
 -keep class net.freehaven.tor.control.** { *; }

@@ -176,7 +176,7 @@ object MeshPacketVerifier {
             Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.commentId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
-        // --- HandshakePacketHandler. These three sign the ENVELOPE, not the payload. ---
+        // --- HandshakePacketHandler. These sign the ENVELOPE or payload. ---
         "CONNECTION_REQUEST", "USER_HANDSHAKE" -> {
             val p = if (packet.type == "CONNECTION_REQUEST") {
                 packet.getConnectionRequestPayload()
@@ -188,14 +188,19 @@ object MeshPacketVerifier {
                     it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString(),
                     it.authorAvatarB64, it.bio.takeIf { b -> !b.isNullOrBlank() }
                 )
+                val encPayload4 = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString()
+                )
                 var pipePayload = "${it.fromUserId}|${it.fromUsername}|${it.fromHomeNode}|${it.timestamp}"
                 if (it.authorAvatarB64 != null) pipePayload += "|${it.authorAvatarB64}"
                 if (!it.bio.isNullOrBlank()) pipePayload += "|${it.bio}"
 
-                val sig = packet.signature
+                val sig = packet.signature ?: it.signature
                 val signer = it.fromUserId
                 if (sig != null && CryptoService.verify(pipePayload, sig, signer)) {
                     Signed(pipePayload, sig, signer)
+                } else if (sig != null && CryptoService.verify(encPayload4, sig, signer)) {
+                    Signed(encPayload4, sig, signer)
                 } else {
                     Signed(encPayload, sig, signer)
                 }

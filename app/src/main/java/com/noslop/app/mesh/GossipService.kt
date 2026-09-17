@@ -380,7 +380,7 @@ object GossipService {
         }
 
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
-        val isGroupControl = packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE"
+        val isGroupControl = packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" || packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC"
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || isGroupControl
         val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
@@ -401,8 +401,8 @@ object GossipService {
             }
         }
         
-        // Check if sender is a member/admin of any local group chat
-        val isSenderInGroup = if (packet.type == "MESSAGE") {
+        // Check if sender is a member/admin of any local group chat (permits group messages, deletes, reactions, and sync)
+        val isSenderInGroup = if (packet.type == "MESSAGE" || packet.type == "DELETE_MESSAGE" || packet.type == "CHAT_REACTION" || isGroupControl) {
             try {
                 val groupDao = transport?.repository?.context?.let { ctx ->
                     com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()

@@ -443,13 +443,15 @@ class HandshakePacketHandler(
     private suspend fun resendGroupInvitesForPeer(peerPubKey: String, peerOnion: String) {
         try {
             val myKeys = repo.getLocalIdentity() ?: return
+            val burnableKeys = repo.getBurnableIdentity()
             val groups = db.groupChatDao().getAllGroupChatsList()
             for (group in groups) {
                 val members = parseMembers(group.membersJson)
                 if (members.contains(peerPubKey)) {
+                    val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
                     val timestamp = group.createdAt
-                    val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, myKeys.publicKeyB64, timestamp.toString())
-                    val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                    val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
+                    val signature = CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
                     val invitePayload = GroupInvitePayload(
                         groupId = group.groupId,
                         title = group.title,
@@ -465,7 +467,7 @@ class HandshakePacketHandler(
                     )
                     val packet = NetworkPacket(
                         id = java.util.UUID.randomUUID().toString(),
-                        senderId = myKeys.publicKeyB64,
+                        senderId = if (group.allowMemberInvites) adminKeys.publicKeyB64 else myKeys.publicKeyB64,
                         targetUserId = peerPubKey,
                         type = "GROUP_INVITE",
                         payload = com.google.gson.Gson().toJsonTree(invitePayload)

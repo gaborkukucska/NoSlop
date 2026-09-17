@@ -120,8 +120,13 @@ class DmPacketHandler(
                 val members: List<String> = try {
                     com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
                 } catch (e: Exception) { emptyList() }
-                if (!members.contains(packet.senderId)) {
-                    Logger.warn(TAG, "Dropping group message for $groupId: sender is not a member")
+                val isMemberOrAdmin = members.contains(packet.senderId) || 
+                    group.adminPublicKeyB64 == packet.senderId ||
+                    db.peerDao().getPeerByPublicKey(packet.senderId)?.let { p ->
+                        members.contains(p.publicKeyB64) || group.adminPublicKeyB64 == p.publicKeyB64
+                    } == true
+                if (!isMemberOrAdmin) {
+                    Logger.warn(TAG, "Dropping group message for $groupId: sender ${packet.senderId.take(8)}... is not a member")
                     return false
                 }
             }

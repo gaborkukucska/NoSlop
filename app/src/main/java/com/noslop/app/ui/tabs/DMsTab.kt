@@ -1069,7 +1069,13 @@ fun CreateGroupDialog(
                     Text("Allow members to invite".tr, color = TextLight, fontSize = 12.sp)
                     Switch(
                         checked = allowInvites,
-                        onCheckedChange = { allowInvites = it },
+                        onCheckedChange = { checked ->
+                            allowInvites = checked
+                            if (!checked) {
+                                val permanentPubs = peers.filter { it.isTrusted && !it.isTemporary }.map { it.publicKeyB64 }.toSet()
+                                selectedPubs = selectedPubs.filter { it in permanentPubs }.toSet()
+                            }
+                        },
                         colors = SwitchDefaults.colors(checkedThumbColor = PrimaryBlack, checkedTrackColor = AccentGreen)
                     )
                 }
@@ -1091,8 +1097,21 @@ fun CreateGroupDialog(
                 Text("Select Members:".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(6.dp))
 
-                if (peers.isEmpty()) {
-                    Text("No contacts or discoverable nodes available to invite yet.".tr, color = TextMuted, fontSize = 12.sp)
+                val displayPeers = remember(peers, allowInvites) {
+                    if (allowInvites) {
+                        peers
+                    } else {
+                        peers.filter { it.isTrusted && !it.isTemporary }
+                    }
+                }
+
+                if (displayPeers.isEmpty()) {
+                    Text(
+                        if (!allowInvites) "No permanent trusted contacts available. Temporary connections filtered out.".tr
+                        else "No contacts or discoverable nodes available to invite yet.".tr,
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
                 } else {
                     Column(
                         modifier = Modifier
@@ -1100,7 +1119,7 @@ fun CreateGroupDialog(
                             .padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        peers.forEach { peer ->
+                        displayPeers.forEach { peer ->
                             val isChecked = selectedPubs.contains(peer.publicKeyB64)
                             Row(
                                 modifier = Modifier
