@@ -141,6 +141,9 @@ class MeshSocialRepository(
     }
 
     fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
+        if (onionAddress.isBlank() || com.noslop.app.mesh.GossipService.isPeerInCooldown(onionAddress)) {
+            return
+        }
         if (!inFlightFlushes.add(recipientPub)) return // Prevent racing flushes on the same peer
 
         // 1. Flush standard DM outbox
@@ -156,8 +159,10 @@ class MeshSocialRepository(
                             if (success) {
                                 list.remove(packet)
                                 savePersistedOutbox()
+                                com.noslop.app.mesh.GossipService.recordSendSuccess(onionAddress)
                                 Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
                             } else {
+                                com.noslop.app.mesh.GossipService.recordSendFailure(onionAddress)
                                 break
                             }
                         }
@@ -197,8 +202,10 @@ class MeshSocialRepository(
                         val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                         if (success) {
                             db.pendingGroupMessageDao().delete(pending.groupId, pending.memberPub, pending.msgId)
+                            com.noslop.app.mesh.GossipService.recordSendSuccess(onionAddress)
                             Logger.info(TAG, "Delivered pending group message ${pending.msgId} to $onionAddress")
                         } else {
+                            com.noslop.app.mesh.GossipService.recordSendFailure(onionAddress)
                             break
                         }
                     }
@@ -224,6 +231,7 @@ class MeshSocialRepository(
                 if (hasPending) {
                     val allPeers = peerDao.getAllPeersList().filter { it.onionAddress.isNotBlank() }
                     for (peer in allPeers) {
+                        if (com.noslop.app.mesh.GossipService.isPeerInCooldown(peer.onionAddress)) continue
                         if (peer.isTrusted || pendingOutboxMessages.containsKey(peer.publicKeyB64)) {
                             flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
                         }
