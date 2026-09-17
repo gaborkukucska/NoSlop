@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 
+@Keep
 data class EncryptedPayload(
     val id: String,
     val nonce: String,
@@ -14,6 +15,7 @@ data class EncryptedPayload(
     val timestamp: Long? = null
 )
 
+@Keep
 data class PostPayload(
     val id: String,
     @SerializedName("author_id") val authorId: String,
@@ -34,12 +36,14 @@ data class PostPayload(
     @SerializedName("clearnet_media_type") val clearnetMediaType: String? = null // "video", "audio", "image", or null for article
 )
 
+@Keep
 data class CommentPayload(
     @SerializedName("post_id") val postId: String,
     val comment: CommentData,
     @SerializedName("parent_comment_id") val parentCommentId: String? = null
 )
 
+@Keep
 data class CommentData(
     val id: String,
     @SerializedName("author_id") val authorId: String,
@@ -53,6 +57,7 @@ data class CommentData(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
+@Keep
 data class MediaMetadata(
     val id: String,
     val type: String, // "audio", "video", "file", "image"
@@ -66,6 +71,7 @@ data class MediaMetadata(
     @SerializedName("thumbnail_b64") val thumbnailB64: String? = null
 )
 
+@Keep
 data class MediaRequestPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int,
@@ -77,6 +83,7 @@ data class MediaRequestPayload(
     @SerializedName("origin_onion") val originOnion: String? = null
 )
 
+@Keep
 data class MediaChunkPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int,
@@ -86,6 +93,7 @@ data class MediaChunkPayload(
     val data: String // Base64 encoded
 )
 
+@Keep
 data class MediaRelayRequestPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("origin_node") val originNode: String? = null,
@@ -94,20 +102,24 @@ data class MediaRelayRequestPayload(
     val metadata: MediaMetadata? = null
 )
 
+@Keep
 data class MediaRecoveryFoundPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("onion_address") val onionAddress: String? = null
 )
 
+@Keep
 data class MediaPendingPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int
 )
 
+@Keep
 data class MediaTransferAckPayload(
     @SerializedName("media_id") val mediaId: String
 )
 
+@Keep
 data class PeerHandshakePayload(
     val id: String,
     @SerializedName("from_user_id") val fromUserId: String,
@@ -121,6 +133,7 @@ data class PeerHandshakePayload(
     val signature: String? = null
 )
 
+@Keep
 data class AnnouncePeerPayload(
     @SerializedName("author_id") val authorId: String,
     @SerializedName("onion_address") val onionAddress: String? = null,
@@ -128,6 +141,7 @@ data class AnnouncePeerPayload(
     val signature: String
 )
 
+@Keep
 data class AnnounceDiscoverablePayload(
     @SerializedName("author_id") val authorId: String,
     val handle: String,
@@ -141,11 +155,13 @@ data class AnnounceDiscoverablePayload(
     val signature: String
 )
 
+@Keep
 data class AnnounceInvidiousInstancePayload(
     @SerializedName("instance_url") val instanceUrl: String,
     val timestamp: Long
 )
 
+@Keep
 data class SubscribePayload(
     @SerializedName("creator_id") val creatorId: String,
     @SerializedName("subscriber_id") val subscriberId: String,
@@ -153,6 +169,7 @@ data class SubscribePayload(
     val signature: String
 )
 
+@Keep
 data class ReactionPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("reaction_type") val reactionType: String, // e.g., "like", "upvote", "downvote"
@@ -162,6 +179,7 @@ data class ReactionPayload(
     val action: String = "add" // "add" or "remove"
 )
 
+@Keep
 data class ChatReactionPayload(
     @SerializedName("message_id") val messageId: String,
     @SerializedName("reaction_type") val reactionType: String,
@@ -172,6 +190,7 @@ data class ChatReactionPayload(
     @SerializedName("group_id") val groupId: String? = null
 )
 
+@Keep
 data class CommentReactionPayload(
     @SerializedName("comment_id") val commentId: String,
     @SerializedName("reaction_type") val reactionType: String,
@@ -181,6 +200,7 @@ data class CommentReactionPayload(
     val action: String = "add"
 )
 
+@Keep
 data class VotePayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("vote_type") val voteType: String, // "upvote" or "downvote"
@@ -190,6 +210,7 @@ data class VotePayload(
     val action: String = "add"
 )
 
+@Keep
 data class CommentVotePayload(
     @SerializedName("comment_id") val commentId: String,
     @SerializedName("vote_type") val voteType: String, // "upvote" or "downvote"
@@ -199,6 +220,7 @@ data class CommentVotePayload(
     val action: String = "add"
 )
 
+@Keep
 data class IdentityUpdatePayload(
     @SerializedName("user_id") val userId: String,
     val handle: String,
@@ -208,24 +230,28 @@ data class IdentityUpdatePayload(
     val signature: String
 )
 
+@Keep
 data class UserExitPayload(
     @SerializedName("user_id") val userId: String,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
 data class PeerRemovedPayload(
     @SerializedName("user_id") val userId: String,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
 data class ConnectionRejectedPayload(
     @SerializedName("from_user_id") val fromUserId: String,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
 data class EditPostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
@@ -238,6 +264,7 @@ data class EditPostPayload(
     val privacy: String? = null
 )
 
+@Keep
 data class EditCommentPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("comment_id") val commentId: String,
@@ -248,6 +275,7 @@ data class EditCommentPayload(
     val signature: String
 )
 
+@Keep
 data class DeleteCommentPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("comment_id") val commentId: String,
@@ -257,6 +285,7 @@ data class DeleteCommentPayload(
 )
 
 
+@Keep
 data class DeleteMessagePayload(
     @SerializedName("message_id") val messageId: String,
     @SerializedName("author_id") val authorId: String,
@@ -265,6 +294,7 @@ data class DeleteMessagePayload(
     @SerializedName("group_id") val groupId: String? = null
 )
 
+@Keep
 data class FollowPayload(
     @SerializedName("followed_public_key") val followedPublicKeyB64: String,
     @SerializedName("follower_public_key") val followerPublicKeyB64: String,
@@ -273,12 +303,14 @@ data class FollowPayload(
     val action: String = "follow" // "follow" or "unfollow"
 )
 
+@Keep
 data class GroupMemberInfo(
     val handle: String? = null,
     @SerializedName("enc_public_key") val encPublicKey: String? = null,
     @SerializedName("onion_address") val onionAddress: String? = null
 )
 
+@Keep
 data class GroupInvitePayload(
     @SerializedName("group_id") val groupId: String,
     val title: String,
@@ -296,6 +328,7 @@ data class GroupInvitePayload(
     @SerializedName("admin_enc_public_key") val adminEncPublicKey: String? = null
 )
 
+@Keep
 data class GroupUpdatePayload(
     @SerializedName("group_id") val groupId: String,
     val title: String? = null,
@@ -311,6 +344,7 @@ data class GroupUpdatePayload(
     val signature: String
 )
 
+@Keep
 data class GroupDeletePayload(
     @SerializedName("group_id") val groupId: String,
     @SerializedName("admin_public_key") val adminPublicKeyB64: String,
@@ -318,12 +352,14 @@ data class GroupDeletePayload(
     val signature: String
 )
 
+@Keep
 data class GroupQueryPayload(
     @SerializedName("group_id") val groupId: String,
     @SerializedName("requester_id") val requesterId: String,
     val timestamp: Long
 )
 
+@Keep
 data class GroupSyncPayload(
     @SerializedName("group_chat_json") val groupChatJson: String,
     @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
@@ -331,6 +367,7 @@ data class GroupSyncPayload(
     val signature: String
 )
 
+@Keep
 data class GroupMessagePayload(
     val id: String,
     @SerializedName("group_id") val groupId: String,
@@ -346,18 +383,21 @@ data class GroupMessagePayload(
     @SerializedName("signature") val signature: String? = null
 )
 
+@Keep
 data class TypingPayload(
     @SerializedName("chat_with_peer_pub") val chatWithPeerPub: String,
     @SerializedName("is_typing") val isTyping: Boolean,
     val timestamp: Long
 )
 
+@Keep
 data class ReadReceiptPayload(
     @SerializedName("message_id") val messageId: String,
     @SerializedName("reader_public_key") val readerPublicKeyB64: String,
     val timestamp: Long
 )
 
+@Keep
 data class DeletePostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
@@ -365,23 +405,28 @@ data class DeletePostPayload(
     val signature: String
 )
 
+@Keep
 data class SyncRequestPayload(
     val since: Long
 )
 
+@Keep
 data class InventoryItem(
     val id: String,
     val hash: String
 )
 
+@Keep
 data class InventorySyncRequestPayload(
     val inventory: List<InventoryItem>
 )
 
+@Keep
 data class DmSyncRequestPayload(
     @SerializedName("since") val since: Long
 )
 
+@Keep
 data class CommentSyncData(
     val id: String,
     @SerializedName("post_id") val postId: String,
@@ -397,6 +442,7 @@ data class CommentSyncData(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
+@Keep
 data class ReactionSyncData(
     val id: String,
     @SerializedName("post_id") val postId: String,
@@ -406,6 +452,7 @@ data class ReactionSyncData(
     val signature: String
 )
 
+@Keep
 data class SyncResponsePayload(
     val posts: List<PostPayload>,
     val comments: List<CommentSyncData>? = null,

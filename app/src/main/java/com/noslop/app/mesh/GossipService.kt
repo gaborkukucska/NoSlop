@@ -576,10 +576,14 @@ object GossipService {
         // 5. If it is a directed message (has targetUserId), check if it is for us
         if (packet.targetUserId != null) {
             val isForUs = checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64)
-            val isGroupPacketForUs = if (!isForUs && (packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE")) {
+            val isGroupPacketForUs = if (!isForUs && (packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE" || packet.type == "MESSAGE" || packet.type == "GROUP_SYNC")) {
                 val gid = when (packet.type) {
                     "CHAT_REACTION" -> packet.getChatReactionPayload()?.groupId
                     "DELETE_MESSAGE" -> packet.getDeleteMessagePayload()?.groupId
+                    "MESSAGE" -> packet.getMessagePayload()?.groupId
+                    "GROUP_SYNC" -> packet.getGroupSyncPayload()?.let {
+                        try { com.google.gson.Gson().fromJson(it.groupChatJson, com.noslop.app.data.GroupChat::class.java)?.groupId } catch (_: Exception) { null }
+                    }
                     else -> null
                 }
                 !gid.isNullOrBlank() && transport?.repository?.context?.let { ctx ->
@@ -757,7 +761,7 @@ object GossipService {
         val forwardedPacket = NetworkPacket(
             id = packet.id,
             hops = currentHops - 1,
-            senderId = if (packet.type == "MESSAGE" || packet.type == "ANNOUNCE_DISCOVERABLE") packet.senderId else localPublicKeyB64, // Preserve senderId for DMs and Discoverability!
+            senderId = if (packet.type == "MESSAGE" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE" || packet.type.startsWith("GROUP_")) packet.senderId else localPublicKeyB64,
             targetUserId = packet.targetUserId,
             signature = packet.signature,
             type = packet.type,

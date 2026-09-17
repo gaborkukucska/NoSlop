@@ -75,3 +75,7 @@
 # 7. JSch SSH Deployment & Algorithms
 -keep class com.jcraft.jsch.** { *; }
 -dontwarn com.jcraft.jsch.**
+
+# Mesh protocol packets and payloads
+-keep class com.noslop.app.mesh.** { *; }
+-keep class com.noslop.app.data.GroupChat { *; }

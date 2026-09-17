@@ -734,6 +734,7 @@ object MediaManager {
             updateWakeLock()
             activeDownloads.remove(dl.metadata.id)
             persistDownloadQueue()
+            repo.triggerDmSync()
 
             // Send ACK
             val ack = MediaTransferAckPayload(mediaId = dl.metadata.id)

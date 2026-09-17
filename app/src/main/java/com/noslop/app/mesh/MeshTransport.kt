@@ -158,10 +158,11 @@ class MeshTransport(
             packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" ||
             packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
             packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
-            packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC"
+            packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC" ||
+            packet.type == "CHAT_REACTION"
 
         val isMediaPacket = packet.type.startsWith("MEDIA_")
-        val isInteractive = packet.type == "CHAT_REACTION" || packet.type == "TYPING" || packet.type == "READ_RECEIPT"
+        val isInteractive = packet.type == "TYPING" || packet.type == "READ_RECEIPT"
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
 
         // Critical user messaging and media chunking bypass peer cooldown entirely
@@ -269,7 +270,7 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            if (!isHandshake && !isMediaPacket) {
+            if (!isHandshake && !isMediaPacket && !isInteractive) {
                 GossipService.recordSendFailure(onionAddress)
             }
             return@withContext pushedToHub

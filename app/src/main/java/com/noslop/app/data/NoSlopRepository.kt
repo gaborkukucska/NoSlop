@@ -810,7 +810,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             if (existing == null) {
                 val pubBytes = try { android.util.Base64.decode(pubKey, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
                 val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "group"
-                val handle = info.handle ?: "Member"
+                val handle = info.handle?.takeIf { it.isNotBlank() && it != "Member" } ?: "Member_${pubKey.take(6)}"
                 peerDao.insertPeer(
                     Peer(
                         publicKeyB64 = pubKey,
@@ -823,14 +823,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         lastSeenAt = System.currentTimeMillis()
                     )
                 )
-            } else if (existing.encPublicKeyB64.isBlank() || existing.onionAddress.isBlank()) {
-                peerDao.insertPeer(
-                    existing.copy(
-                        encPublicKeyB64 = existing.encPublicKeyB64.ifBlank { info.encPublicKey ?: "" },
-                        onionAddress = existing.onionAddress.ifBlank { info.onionAddress ?: "" },
-                        lastSeenAt = System.currentTimeMillis()
-                    )
-                )
+            } else {
+                var updated = existing
+                if (existing.encPublicKeyB64.isBlank() && !info.encPublicKey.isNullOrBlank()) {
+                    updated = updated.copy(encPublicKeyB64 = info.encPublicKey)
+                }
+                if (existing.onionAddress.isBlank() && !info.onionAddress.isNullOrBlank()) {
+                    updated = updated.copy(onionAddress = info.onionAddress)
+                }
+                if ((existing.handle.startsWith("Member") || existing.handle == "Peer") && !info.handle.isNullOrBlank() && info.handle != "Member") {
+                    updated = updated.copy(handle = info.handle)
+                }
+                if (updated != existing) {
+                    peerDao.insertPeer(updated.copy(lastSeenAt = System.currentTimeMillis()))
+                }
             }
         }
     }
@@ -1414,9 +1420,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     meshTransport.sendPacket(peer.onionAddress, packet = memberPacket)
                 }
             }
-        } else {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
         }
+        // Always gossip GROUP_QUERY so relay members and admin can resolve missing keys
+        com.noslop.app.mesh.GossipService.broadcast(packet)
     }
 
     suspend fun requestAllGroupsCatchup() {
@@ -1611,9 +1617,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             try {
                 val allPeersList = peerDao.getAllPeersList()
                 for (p in allPeersList) {
-                    // Only purge ghost placeholder peers literally named 'Member'
+                    // Upgrade placeholder handle 'Member' to distinguished handle to prevent key loss
                     if (p.handle == "Member") {
-                        peerDao.deletePeer(p)
+                        peerDao.insertPeer(p.copy(handle = "Member_${p.publicKeyB64.take(6)}"))
                         continue
                     }
                     // Heal and restore connected creator peers that were erroneously demoted

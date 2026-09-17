@@ -213,13 +213,14 @@ class HandshakePacketHandler(
             }
             // If sender is a group member, store their keys for group messaging without making them a 1:1 contact
             if (isInGroup) {
+                val fallbackHandle = "Member_${handPay.fromUserId.take(6)}"
                 peer = Peer(
                     publicKeyB64 = handPay.fromUserId,
-                    handle = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Member",
+                    handle = if (handPay.fromUsername.isNotBlank() && handPay.fromUsername != "Member") handPay.fromUsername else fallbackHandle,
                     tripcode = tripcode,
                     onionAddress = handPay.fromHomeNode,
                     encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
-                    isTrusted = false, // Group peers do not clutter the 1:1 DM contacts list
+                    isTrusted = false,
                     isTemporary = false,
                     lastSeenAt = System.currentTimeMillis()
                 )
@@ -923,9 +924,9 @@ class HandshakePacketHandler(
         val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${query.groupId}") != null
         val requesterInGroup = members.any { it.trim() == reqId || it.trim() == sendId } ||
             adminId == reqId || adminId == sendId ||
+            group.allowMemberInvites || hasPendingInvite ||
             (senderPeer != null && (members.any { it.trim() == senderPeer.publicKeyB64.trim() } || adminId == senderPeer.publicKeyB64.trim())) ||
             (requesterPeer != null && (members.any { it.trim() == requesterPeer.publicKeyB64.trim() } || adminId == requesterPeer.publicKeyB64.trim())) ||
-            group.allowMemberInvites || hasPendingInvite ||
             pDao.getAllPeersList().any { p -> 
                 val pKey = p.publicKeyB64.trim()
                 (members.any { it.trim() == pKey } || adminId == pKey) && 

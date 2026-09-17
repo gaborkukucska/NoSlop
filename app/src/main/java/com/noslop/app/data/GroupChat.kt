@@ -1,9 +1,11 @@
 package com.noslop.app.data
 
 import androidx.room.ColumnInfo
+import androidx.annotation.Keep
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+@Keep
 @Entity(tableName = "group_chats")
 data class GroupChat(
     @PrimaryKey val groupId: String,
