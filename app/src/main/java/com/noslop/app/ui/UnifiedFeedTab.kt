@@ -280,7 +280,15 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 viewModel.selectChatPeer(null)
                 viewModel.selectGroupChat(routeClean.substringAfter("group_chat/"))
             } else if (routeClean.startsWith("group_invite/")) {
-                selectedTab = 4
+                val gid = routeClean.substringAfter("group_invite/").substringBefore("-")
+                if (gid.isNotBlank()) {
+                    viewModel.acceptGroupInviteFromNotification("group_invite_$gid", routeClean)
+                    selectedTab = 1
+                    viewModel.selectChatPeer(null)
+                    viewModel.selectGroupChat(gid)
+                } else {
+                    selectedTab = 4
+                }
             } else if (routeClean.startsWith("post/")) {
                 selectedTab = 0
                 val routeData = routeClean.removePrefix("post/")
@@ -512,7 +520,14 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                 viewModel.selectChatPeer(null)
                                 viewModel.selectGroupChat(route.substringAfter("group_chat/"))
                             } else if (route.startsWith("group_invite/")) {
-                                selectedTab = 4 // Notifications tab
+                                val gid = route.substringAfter("group_invite/").substringBefore("-")
+                                if (gid.isNotBlank()) {
+                                    selectedTab = 1
+                                    viewModel.selectChatPeer(null)
+                                    viewModel.selectGroupChat(gid)
+                                } else {
+                                    selectedTab = 4
+                                }
                             } else if (route.startsWith("post/")) {
                             selectedTab = 0
                             val routeData = route.removePrefix("post/")

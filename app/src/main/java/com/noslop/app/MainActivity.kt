@@ -231,6 +231,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("target_route")?.let { _routeFlow.value = it }
+        intent.getStringExtra("target_route")?.let { _routeFlow.value = it + "-" + System.currentTimeMillis() }
     }
 }
