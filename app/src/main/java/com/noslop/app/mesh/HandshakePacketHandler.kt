@@ -195,11 +195,7 @@ class HandshakePacketHandler(
         var peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
         if (peer == null) {
             peer = peerDao.getAllPeersList().find {
-                it.onionAddress.isNotBlank() && it.onionAddress == handPay.fromHomeNode
-            }
-            if (peer != null) {
-                peerDao.deletePeer(peer)
-                peer = peer.copy(publicKeyB64 = handPay.fromUserId)
+                it.onionAddress.isNotBlank() && it.onionAddress == handPay.fromHomeNode && it.publicKeyB64 == handPay.fromUserId
             }
         }
         if (peer == null) {

@@ -1610,13 +1610,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         repositoryScope.launch(Dispatchers.IO) {
             try {
                 val allPeersList = peerDao.getAllPeersList()
-                val groups = db.groupChatDao().getAllGroupChatsList()
                 for (p in allPeersList) {
-                    val inGroup = groups.any { g ->
-                        g.adminPublicKeyB64.trim() == p.publicKeyB64.trim() || g.membersJson.contains(p.publicKeyB64.trim())
+                    // Only purge ghost placeholder peers literally named 'Member'
+                    if (p.handle == "Member") {
+                        peerDao.deletePeer(p)
+                        continue
                     }
-                    if (inGroup && (p.handle == "Member" || p.isTemporary)) {
-                        peerDao.insertPeer(p.copy(isTrusted = false, isTemporary = false))
+                    // Heal and restore connected creator peers that were erroneously demoted
+                    val contactIdentity = appSettingDao.getSetting("contact_identity_${p.publicKeyB64}")
+                    if (contactIdentity == "burnable" && !p.isTrusted) {
+                        peerDao.insertPeer(p.copy(isTrusted = true, isTemporary = true))
+                        Logger.info("REPOSITORY", "Restored connected creator peer: ${p.handle}")
                     }
                 }
                 if (appSettingDao.getSetting("deleted_official_creator") == "true") {
