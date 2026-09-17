@@ -1201,7 +1201,15 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun resendGroupInvites(groupId: String) {
         val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
         val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        if (!isAdmin) {
+            Logger.warn("REPOSITORY", "Cannot resend invites for group $groupId: local user is not admin")
+            return
+        }
+        val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
+
         val members = try {
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
@@ -1210,13 +1218,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val memberHandlesMap = members.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
             if (peer != null) pub to peer.handle
-            else if (pub == myKeys.publicKeyB64) pub to myHandle
+            else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) pub to myHandle
             else null
         }.toMap()
 
-        val timestamp = group.createdAt
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
-        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val allMembersForResend = (members + group.adminPublicKeyB64).distinct()
         val memberDetailsMap = allMembersForResend.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
@@ -1226,7 +1231,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     encPublicKey = peer.encPublicKeyB64,
                     onionAddress = peer.onionAddress
                 )
-            } else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) {
+            } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
                 pub to com.noslop.app.mesh.GroupMemberInfo(
                     handle = myHandle,
                     encPublicKey = adminKeys.encPublicKeyB64,
@@ -1235,6 +1240,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             } else null
         }.toMap()
 
+        val timestamp = group.createdAt
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = group.groupId,
             title = group.title,
@@ -1244,8 +1252,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             description = group.description,
             memberHandles = memberHandlesMap,
             memberDetails = memberDetailsMap,
-            allowMemberInvites = allowMemberInvites,
-            allowMemberSelfRemove = allowMemberSelfRemove,
+            allowMemberInvites = group.allowMemberInvites,
+            allowMemberSelfRemove = group.allowMemberSelfRemove,
             timestamp = timestamp,
             signature = signature,
             adminOnion = adminKeys.onionAddress,
@@ -1253,7 +1261,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = "group_invite_${groupId}",
-            senderId = myKeys.publicKeyB64,
+            senderId = if (group.allowMemberInvites) adminKeys.publicKeyB64 else myKeys.publicKeyB64,
             type = "GROUP_INVITE",
             payload = com.google.gson.Gson().toJsonTree(invitePayload)
         )
@@ -1261,14 +1269,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         com.noslop.app.mesh.GossipService.broadcast(packet)
 
         for (memberPub in members) {
-            if (memberPub == myKeys.publicKeyB64) continue
+            if (memberPub == adminKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
             val onion = peer?.onionAddress ?: ""
             if (onion.isBlank()) continue
 
             val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
-            val effectiveSenderId = if (contactIdentity == "burnable") {
-                getBurnableIdentity()?.publicKeyB64 ?: myKeys.publicKeyB64
+            val effectiveSenderId = if (group.allowMemberInvites || contactIdentity == "burnable") {
+                adminKeys.publicKeyB64
             } else {
                 myKeys.publicKeyB64
             }
