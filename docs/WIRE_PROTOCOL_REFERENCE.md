@@ -125,6 +125,10 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
 | 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Replies with `GROUP_SYNC` containing full group schema and `memberDetails` |
 | 30 | `GROUP_SYNC` | `GroupSyncPayload` | `groupId|groupChatJson|timestamp` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
+| 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
+| 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
+| 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
+| 34 | `ANNOUNCE_INVIDIOUS_INSTANCE` | `AnnounceInvidiousInstancePayload` | n/a (validated URL & timestamp window) | `HandshakePacketHandler.handleAnnounceInvidiousInstance` | `InvidiousApiClient.addGossipedInstance` |
 
 Notes:
 
@@ -478,6 +482,41 @@ signer is recovered and what each role is permitted to change.
 | `timestamp` | Long | Epoch milliseconds |
 | `signature` | String | Signature over `groupId|groupChatJson|timestamp` |
 
+### EDIT_COMMENT
+**Type:** `EDIT_COMMENT` · class `EditCommentPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `post_id` | String | ID of the post containing the comment |
+| `comment_id` | String | ID of the comment being edited |
+| `author_id` | String | Author's public key (verifying key) |
+| `author_avatar_b64`? | String | Author avatar Base64, if set |
+| `content` | String | New comment content |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `postId|commentId|content|timestamp` (+`|authorAvatarB64`) |
+
+### DELETE_COMMENT
+**Type:** `DELETE_COMMENT` · class `DeleteCommentPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `post_id` | String | ID of the post containing the comment |
+| `comment_id` | String | ID of the comment being deleted |
+| `author_id` | String | Author's public key (verifying key) |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `postId|commentId|authorId|timestamp` |
+
+### FOLLOW / UNFOLLOW
+**Types:** `FOLLOW`, `UNFOLLOW` · class `FollowPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `followed_public_key` | String | Public key of the node being followed |
+| `follower_public_key` | String | Public key of the follower (verifying key) |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `followedPublicKeyB64|followerPublicKeyB64|timestamp` |
+| `action` | String | `"follow"` or `"unfollow"` |
+
 ### TYPING
 **Type:** `TYPING` · class `TypingPayload` · **unsigned**
 
@@ -734,6 +773,9 @@ and still accurate.
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
 | `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
+| `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) |
+| `DELETE_COMMENT` | `postId|commentId|authorId|timestamp` |
+| `FOLLOW` / `UNFOLLOW` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` |
 | `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64

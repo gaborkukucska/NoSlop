@@ -423,9 +423,6 @@ EOF
                     echo "Pulling latest changes from Git..."
                     git pull || (git fetch origin && git reset --hard origin/master) || true
                     
-                    # Apply Antigravity dynamic patches to the freshly cloned/updated repo!
-
-                    
                     export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                     
                     echo "Building React UI..."

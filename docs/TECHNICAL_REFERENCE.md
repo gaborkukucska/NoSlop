@@ -1106,6 +1106,11 @@ is traceable rather than silently disappearing:
     `GossipService.forwardRelayChunk`, which live-forwards each chunk to all
     registered relay listeners. See
     [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented).
+12. ~~`GossipService.broadcast` discards the return value of `pushPacketToHub`
+    and has no direct-Tor fallback.~~ **Fixed** — `GossipService.broadcast`
+    checks `pushed` from `pushPacketToHub` and explicitly logs a warning and
+    falls through to the direct Tor peer broadcast loop if the Hub is offline
+    or unreachable.
 
 ---
 

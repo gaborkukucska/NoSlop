@@ -27,11 +27,11 @@ class HubSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             return Result.success()
         }
 
-        val hubAddress = repo.getAppSetting("hub_address") // IP or .onion
-        if (hubAddress.isNullOrBlank()) {
-            Logger.debug(TAG, "Hub address not set. Skipping HubSyncWorker.")
-            return Result.success()
-        }
+        val isLegacy = hubStatus == "Active (Legacy Connection)"
+        val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
+        val isPrivateLan = lanIp != null && (lanIp == "127.0.0.1" || lanIp == "localhost" ||
+                lanIp.startsWith("192.168.") || lanIp.startsWith("10.") ||
+                (lanIp.startsWith("172.") && (lanIp.substringAfter("172.").substringBefore(".").toIntOrNull() ?: 0) in 16..31))
 
         val mnemonic = repo.getWordCloudMnemonic()
         if (mnemonic.isBlank()) {
@@ -57,27 +57,46 @@ class HubSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 )
                 .build()
 
-            val targetUrl = if (hubAddress.endsWith(".onion")) {
-                "http://$hubAddress:9999/api/backup/push"
-            } else {
-                "http://$hubAddress:9999/api/backup/push"
+            // 1. Try local private LAN over rawClearnetClient first (port 8080)
+            if (isPrivateLan && lanIp != null) {
+                try {
+                    val lanUrl = "http://$lanIp:8080/api/backup/push"
+                    val request = Request.Builder().url(lanUrl).post(requestBody).build()
+                    val client = HttpClientProvider.rawClearnetClient.newBuilder()
+                        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            Logger.info(TAG, "Encrypted backup successfully pushed to Hub over LAN!")
+                            return Result.success()
+                        } else {
+                            Logger.warn(TAG, "LAN Hub backup push returned HTTP ${response.code}: ${response.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "LAN Hub backup push failed: ${e.message}. Falling back to Tor...")
+                }
             }
 
-            val request = Request.Builder()
-                .url(targetUrl)
-                .post(requestBody)
-                .build()
-
-            Logger.info(TAG, "Pushing encrypted backup to Hub at $targetUrl...")
-            val client = HttpClientProvider.torClient
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    Logger.info(TAG, "Encrypted backup successfully pushed to Hub!")
-                    Result.success()
-                } else {
-                    Logger.warn(TAG, "Hub backup push returned HTTP ${response.code}: ${response.message}")
-                    Result.retry()
+            // 2. Fallback to Tor hidden service targeting the cloned onion address on port 8080
+            val identity = repo.getLocalIdentity()
+            val onionAddress = identity?.onionAddress
+            if (!onionAddress.isNullOrBlank()) {
+                val torUrl = "http://$onionAddress:8080/api/backup/push"
+                val request = Request.Builder().url(torUrl).post(requestBody).build()
+                val client = HttpClientProvider.torClient
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        Logger.info(TAG, "Encrypted backup successfully pushed to Hub over Tor!")
+                        return Result.success()
+                    } else {
+                        Logger.warn(TAG, "Tor Hub backup push returned HTTP ${response.code}: ${response.message}")
+                        return Result.retry()
+                    }
                 }
+            } else {
+                Logger.warn(TAG, "Local onion address not available for Tor Hub backup push.")
+                return Result.retry()
             }
         } catch (e: Exception) {
             Logger.error(TAG, "HubSyncWorker error: ${e.message}")
