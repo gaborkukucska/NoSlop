@@ -475,8 +475,8 @@ class HandshakePacketHandler(
     private suspend fun resendGroupInvitesForPeer(peerPubKey: String, peerOnion: String) {
         val now = System.currentTimeMillis()
         val lastTime = lastInviteResendTimes[peerPubKey] ?: 0L
-        if (now - lastTime < 30 * 60 * 1000L) {
-            return // Debounce: do not resend invites to the same peer more than once per 30 minutes
+        if (now - lastTime < 60 * 1000L) {
+            return // Debounce: do not resend invites to the same peer more than once per 60 seconds
         }
         lastInviteResendTimes[peerPubKey] = now
         try {
@@ -926,7 +926,26 @@ class HandshakePacketHandler(
         }
 
         db.groupChatDao().deleteGroupChat(del.groupId)
-        Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet")
+        val previousMembers = try {
+            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        val remainingGroups = db.groupChatDao().getAllGroupChatsList()
+        val remainingGroupMembers = remainingGroups.flatMap {
+            try {
+                com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+            } catch (_: Exception) { emptyList() }
+        }.toSet()
+        val myPub = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnable = repo.getBurnableIdentity()?.publicKeyB64
+        for (mPub in (previousMembers + existing.adminPublicKeyB64)) {
+            if (mPub !in remainingGroupMembers && mPub != myPub && mPub != myBurnable) {
+                val p = peerDao.getPeerByPublicKey(mPub)
+                if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                    peerDao.deletePeer(p)
+                }
+            }
+        }
+        Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet and cleaned up group peers")
         return true
     }
 

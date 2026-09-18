@@ -1077,7 +1077,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
         val memberHandlesMap = existingHandles.toMap()
 
-        val isAdmin = existing.adminPublicKeyB64 == myKeys.publicKeyB64
+        val isAdmin = existing.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64)
         val effectiveTitle = if (isAdmin) title else existing.title
         val effectiveDescription = if (isAdmin) description else existing.description
         val effectiveAvatarB64 = if (isAdmin) avatarB64 else existing.avatarB64
@@ -1178,8 +1178,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 if (onion.isBlank()) continue
 
                 val contactIdentity = db.appSettingDao().getSetting("contact_identity_$addedPub")
-                val effectiveSenderId = if (contactIdentity == "burnable") {
-                    getBurnableIdentity()?.publicKeyB64 ?: myKeys.publicKeyB64
+                val effectiveSenderId = if (isAdmin || allowInvites || contactIdentity == "burnable") {
+                    adminKeys.publicKeyB64
                 } else {
                     myKeys.publicKeyB64
                 }
@@ -1191,9 +1191,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     type = "GROUP_INVITE",
                     payload = com.google.gson.Gson().toJsonTree(invitePayload)
                 )
-                meshSocialRepository.dispatchPacket(onion, invitePacket)
+                if (onion.isNotBlank()) {
+                    meshSocialRepository.dispatchPacket(onion, invitePacket)
+                }
                 Logger.info("REPOSITORY", "Sent GROUP_INVITE for $groupId to newly added member ${addedPub.take(8)}... (senderId=${effectiveSenderId.take(8)})")
             }
+            // Also broadcast general GROUP_INVITE across the mesh so offline/indirect members receive it
+            val generalInvitePacket = com.noslop.app.mesh.NetworkPacket(
+                id = "group_invite_${groupId}_${System.currentTimeMillis()}",
+                senderId = adminKeys.publicKeyB64,
+                type = "GROUP_INVITE",
+                payload = com.google.gson.Gson().toJsonTree(invitePayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(generalInvitePacket)
         }
 
         // If we removed ourselves from the group, delete the group locally
@@ -1212,8 +1222,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val adminKeys = if (burnableKeys != null && existing?.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
 
         if (existing != null && isAdmin) {
-            // Admin: broadcast GROUP_DELETE so all members drop the group
-            db.groupChatDao().deleteGroupChat(groupId)
+            // Admin: broadcast GROUP_DELETE directly to all members' onion addresses and over gossip
             val timestamp = System.currentTimeMillis()
             val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, "delete", adminKeys.publicKeyB64, timestamp.toString())
             val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
@@ -1229,8 +1238,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 type = "GROUP_DELETE",
                 payload = com.google.gson.Gson().toJsonTree(deletePayload)
             )
+            val members = try {
+                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+            } catch (e: Exception) { emptyList() }
+            for (memberPub in members) {
+                if (memberPub == adminKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+                val peer = peerDao.getPeerByPublicKey(memberPub)
+                if (peer != null && peer.onionAddress.isNotBlank()) {
+                    meshSocialRepository.dispatchPacket(peer.onionAddress, packet.copy(targetUserId = memberPub))
+                }
+            }
             com.noslop.app.mesh.GossipService.broadcast(packet)
-            Logger.info("REPOSITORY", "Admin deleted group $groupId and broadcast GROUP_DELETE")
+            db.groupChatDao().deleteGroupChat(groupId)
+            Logger.info("REPOSITORY", "Admin deleted group $groupId and dispatched GROUP_DELETE to ${members.size} members")
         } else if (existing != null) {
             // Non-admin: remove self from member list via GROUP_UPDATE, then delete locally
             val members: MutableList<String> = try {

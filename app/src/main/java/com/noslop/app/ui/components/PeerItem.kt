@@ -547,9 +547,10 @@ fun ContactCardDialog(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // Action Buttons
-                Row(
+                // Action Buttons (Stacked vertically to prevent horizontal squashing)
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (!peer.isTrusted) {
                         Button(
@@ -557,62 +558,60 @@ fun ContactCardDialog(
                                 onConnect()
                                 onDismiss()
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                         ) {
                             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text("Connect".tr, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    // Close button
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, BorderSubtle),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Close".tr, fontWeight = FontWeight.Bold)
-                    }
+                        if (peer.isTrusted) {
+                            Button(
+                                onClick = { showDeleteConfirmation = true },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = DestructiveRed.copy(alpha = 0.15f),
+                                    contentColor = DestructiveRed
+                                )
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Remove".tr, fontWeight = FontWeight.Bold)
+                            }
+                        }
 
-                    // Ban button
-                    Button(
-                        onClick = {
-                            viewModel?.banNode(peer.publicKeyB64, peer.handle)
-                            onDismiss()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DestructiveRed.copy(alpha = 0.15f),
-                            contentColor = DestructiveRed
-                        )
-                    ) {
-                        Text("Ban 🚫".tr, fontWeight = FontWeight.Bold)
-                    }
-
-                    // Delete button
-                    if (peer.isTrusted) {
                         Button(
-                            onClick = { showDeleteConfirmation = true },
-                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                viewModel?.banNode(peer.publicKeyB64, peer.handle)
+                                onDismiss()
+                            },
+                            modifier = if (peer.isTrusted) Modifier.weight(1f).height(44.dp) else Modifier.fillMaxWidth().height(44.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = DestructiveRed.copy(alpha = 0.15f),
                                 contentColor = DestructiveRed
                             )
                         ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Remove".tr, fontWeight = FontWeight.Bold)
+                            Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
                         }
+                    }
+
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, BorderSubtle),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+                    ) {
+                        Text("Close".tr, fontWeight = FontWeight.Bold)
                     }
                 }
             }

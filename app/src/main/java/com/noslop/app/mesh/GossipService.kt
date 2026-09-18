@@ -754,9 +754,23 @@ object GossipService {
             return // Will expire on next hop
         }
 
+        val isGroupPacket = packet.type.startsWith("GROUP_") || packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE" || (packet.type == "MESSAGE" && packet.getMessagePayload()?.groupId != null)
+        val groupMemberPubs = if (isGroupPacket) {
+            try {
+                val groupDao = tx.repository.context.let { ctx ->
+                    com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()
+                }
+                groupDao.getAllGroupChatsList().flatMap {
+                    try { com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64 } catch (_: Exception) { emptyList() }
+                }.toSet()
+            } catch (_: Exception) { emptySet() }
+        } else emptySet()
+
         val activePeers = dao.getAllPeersList()
         val peersToForward = activePeers.filter { 
-            it.publicKeyB64 != packet.senderId && it.publicKeyB64 != localPublicKeyB64 && it.isTrusted && it.onionAddress.isNotBlank()
+            it.publicKeyB64 != packet.senderId && it.publicKeyB64 != localPublicKeyB64 && 
+            (it.isTrusted || it.publicKeyB64 in groupMemberPubs) && 
+            it.onionAddress.isNotBlank()
         }
 
         if (peersToForward.isEmpty()) return
@@ -809,8 +823,20 @@ object GossipService {
         }
         
         val dao = peerDao ?: return
+        val isGroupPacket = packet.type.startsWith("GROUP_") || packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE" || (packet.type == "MESSAGE" && packet.getMessagePayload()?.groupId != null)
+        val groupMemberPubs = if (isGroupPacket) {
+            try {
+                val groupDao = tx.repository.context.let { ctx ->
+                    com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()
+                }
+                groupDao.getAllGroupChatsList().flatMap {
+                    try { com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64 } catch (_: Exception) { emptyList() }
+                }.toSet()
+            } catch (_: Exception) { emptySet() }
+        } else emptySet()
+
         val activePeers = dao.getAllPeersList()
-        val trustedPeers = activePeers.filter { it.isTrusted && it.publicKeyB64 != localPublicKeyB64 && it.onionAddress.isNotBlank() }
+        val trustedPeers = activePeers.filter { (it.isTrusted || it.publicKeyB64 in groupMemberPubs) && it.publicKeyB64 != localPublicKeyB64 && it.onionAddress.isNotBlank() }
 
         if (trustedPeers.isEmpty()) {
             Logger.debug(TAG, "No trusted peers connected to broadcast packet ${packet.id}")
