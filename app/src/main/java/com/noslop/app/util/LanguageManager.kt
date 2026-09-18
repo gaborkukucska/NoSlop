@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 object LanguageManager {
+    val supportedLanguages = listOf(
+        "en" to "English",
+        "es" to "Español",
+        "hu" to "Magyar"
+    )
+
     private var translations: Map<String, String> = emptyMap()
     private val _currentLanguage = MutableStateFlow("en")
     val currentLanguage: StateFlow<String> = _currentLanguage

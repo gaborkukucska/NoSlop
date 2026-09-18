@@ -474,7 +474,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
                             // APP LANGUAGE SELECTOR
                             val appLanguage by viewModel.appLanguage.collectAsState()
-                            val availableLanguages = listOf("en" to "English", "hu" to "Magyar")
+                            val availableLanguages = com.noslop.app.util.LanguageManager.supportedLanguages
                             var expandedLang by remember { mutableStateOf(false) }
                             
                             Row(
