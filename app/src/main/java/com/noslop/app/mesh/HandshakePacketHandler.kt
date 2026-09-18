@@ -636,6 +636,10 @@ class HandshakePacketHandler(
         if (peer != null) {
             peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))
         }
+        if (repo.isNodeBanned(exitPay.userId)) {
+            Logger.info(TAG, "Banned node ${exitPay.userId.take(8)}... exited/shut down — removing from ban list")
+            repo.unbanNode(exitPay.userId)
+        }
         return true
     }
 
@@ -654,6 +658,9 @@ class HandshakePacketHandler(
         }
 
         Logger.info(TAG, "Peer ${removePay.userId.take(12)} removed us — deleting peer and all their content locally")
+        if (repo.isNodeBanned(removePay.userId)) {
+            repo.unbanNode(removePay.userId)
+        }
         repo.deletePeer(removePay.userId, notifyRemote = false)
         return true
     }

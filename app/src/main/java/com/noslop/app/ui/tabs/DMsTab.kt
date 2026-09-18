@@ -71,10 +71,13 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val discoverablePeers by viewModel.discoverablePeers.collectAsState()
     val burnableKeys by viewModel.burnableKeys.collectAsState()
-    val visibleDiscoverablePeers = remember(discoverablePeers, localKeys, burnableKeys) {
+    val bannedNodes by viewModel.bannedNodes.collectAsState()
+    val bannedKeys = remember(bannedNodes) { bannedNodes.map { it.publicKeyB64 }.toSet() }
+    val visibleDiscoverablePeers = remember(discoverablePeers, localKeys, burnableKeys, bannedKeys) {
         discoverablePeers.filter {
             it.publicKeyB64 != localKeys?.publicKeyB64 &&
-            it.publicKeyB64 != burnableKeys?.publicKeyB64
+            it.publicKeyB64 != burnableKeys?.publicKeyB64 &&
+            it.publicKeyB64 !in bannedKeys
         }
     }
     var selectedDiscoverableNode by remember { mutableStateOf<Peer?>(null) }
@@ -584,14 +587,28 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             val targetOnion = peer.onionAddress
                             if (!isTrusted && targetOnion.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(24.dp))
-                                Button(
-                                    onClick = { showConnectWarning = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                            ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Connect".tr, fontWeight = FontWeight.Bold)
-                            }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { showConnectWarning = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            viewModel.banNode(peer.publicKeyB64, peer.handle)
+                                            selectedDiscoverableNode = null
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed.copy(alpha = 0.2f), contentColor = DestructiveRed),
+                                        border = BorderStroke(1.dp, DestructiveRed),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     },

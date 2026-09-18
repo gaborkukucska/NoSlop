@@ -334,6 +334,12 @@ object GossipService {
             return false
         }
 
+        // Drop any traffic from blacklisted/banned nodes
+        if (transport?.repository?.isNodeBanned(senderId) == true) {
+            Logger.debug(TAG, "Dropping packet $packetId from banned node ${senderId.take(8)}...")
+            return false
+        }
+
         // 2. Dedup — drop if already processed.
         //
         // --- NOSLOP_VERIFY_BEFORE_FORWARD_V1 ---

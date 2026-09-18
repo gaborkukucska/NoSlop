@@ -203,6 +203,52 @@ class PreferencesRepository(
         saveBannedChannels(current)
     }
 
+    // --- Banned Mesh Nodes ---
+
+    @androidx.annotation.Keep
+    data class BannedNode(
+        val publicKeyB64: String,
+        val handle: String
+    )
+
+    suspend fun saveBannedNodes(nodes: List<BannedNode>) = withContext(Dispatchers.IO) {
+        val json = com.google.gson.Gson().toJson(nodes)
+        appSettingDao.insertSetting(AppSetting("banned_nodes", json))
+    }
+
+    suspend fun getBannedNodes(): List<BannedNode> = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("banned_nodes") ?: ""
+        if (json.isBlank()) return@withContext emptyList()
+        try {
+            val type = object : com.google.gson.reflect.TypeToken<List<BannedNode>>() {}.type
+            com.google.gson.Gson().fromJson(json, type) ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun banNode(publicKeyB64: String, handle: String) = withContext(Dispatchers.IO) {
+        if (publicKeyB64.isBlank()) return@withContext
+        val current = getBannedNodes().toMutableList()
+        val targetKey = publicKeyB64.trim()
+        if (current.none { it.publicKeyB64 == targetKey }) {
+            current.add(BannedNode(targetKey, handle.trim().ifBlank { "Node" }))
+            saveBannedNodes(current)
+        }
+    }
+
+    suspend fun unbanNode(publicKeyB64: String) = withContext(Dispatchers.IO) {
+        if (publicKeyB64.isBlank()) return@withContext
+        val targetKey = publicKeyB64.trim()
+        val current = getBannedNodes().filter { it.publicKeyB64 != targetKey }
+        saveBannedNodes(current)
+    }
+
+    suspend fun isNodeBanned(publicKeyB64: String): Boolean = withContext(Dispatchers.IO) {
+        if (publicKeyB64.isBlank()) return@withContext false
+        getBannedNodes().any { it.publicKeyB64 == publicKeyB64.trim() }
+    }
+
     // --- Channel Creation Cut-Off Date Settings ---
 
     suspend fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) = withContext(Dispatchers.IO) {

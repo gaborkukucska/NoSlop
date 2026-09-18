@@ -819,6 +819,126 @@ fun ContentPreferencesScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
+            // ────────────────── BANNED MESH NODES (COLLAPSIBLE) ──────────────────
+            item {
+                val bannedNodes by viewModel.bannedNodes.collectAsState()
+                var isBannedNodesExpanded by remember { mutableStateOf(false) }
+                var manualNodeBanInput by remember { mutableStateOf("") }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, if (isBannedNodesExpanded) DestructiveRed else BorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { isBannedNodesExpanded = !isBannedNodesExpanded },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Banned Mesh Nodes 🚫".tr, style = MaterialTheme.typography.titleMedium, color = DestructiveRed, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = DestructiveRed.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = "{count} banned".tr.replace("{count}", bannedNodes.size.toString()),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = DestructiveRed,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (isBannedNodesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Toggle Banned Nodes",
+                                tint = DestructiveRed
+                            )
+                        }
+
+                        if (isBannedNodesExpanded) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Banned mesh nodes are dropped at the firewall and hidden from discoverable lists until they permanently exit or are unbanned.".tr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (bannedNodes.isNotEmpty()) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    bannedNodes.forEach { node ->
+                                        FilterChip(
+                                            selected = true,
+                                            onClick = { viewModel.unbanNode(node.publicKeyB64) },
+                                            label = { Text("${node.handle} (${node.publicKeyB64.take(6)}...)", style = MaterialTheme.typography.labelSmall) },
+                                            trailingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Unban",
+                                                    tint = DestructiveRed,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = DestructiveRed.copy(alpha = 0.15f),
+                                                selectedLabelColor = DestructiveRed
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = true,
+                                                borderColor = DestructiveRed,
+                                                selectedBorderColor = DestructiveRed
+                                            )
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = manualNodeBanInput,
+                                    onValueChange = { manualNodeBanInput = it },
+                                    label = { Text("Ban by public key".tr) },
+                                    placeholder = { Text("MCowBQ...".tr) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = DestructiveRed, unfocusedBorderColor = BorderSubtle,
+                                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (manualNodeBanInput.isNotBlank()) {
+                                            viewModel.banNode(manualNodeBanInput.trim(), "Custom")
+                                            manualNodeBanInput = ""
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = TextLight),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(54.dp)
+                                ) {
+                                    Text("Ban".tr, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // ────────────────── CHANNEL CREATION CUT-OFF DATE ──────────────────
             item {
                 val cutoffSettings by viewModel.channelCutoffSettings.collectAsState()

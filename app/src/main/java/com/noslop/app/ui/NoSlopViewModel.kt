@@ -494,6 +494,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _bannedChannels = MutableStateFlow<List<String>>(emptyList())
     val bannedChannels: StateFlow<List<String>> = _bannedChannels.asStateFlow()
 
+    private val _bannedNodes = MutableStateFlow<List<com.noslop.app.data.PreferencesRepository.BannedNode>>(emptyList())
+    val bannedNodes: StateFlow<List<com.noslop.app.data.PreferencesRepository.BannedNode>> = _bannedNodes.asStateFlow()
+
     private val _channelCutoffSettings = MutableStateFlow<Triple<Boolean, Int, Int>>(Triple(true, 2022, 1))
     val channelCutoffSettings: StateFlow<Triple<Boolean, Int, Int>> = _channelCutoffSettings.asStateFlow()
 
@@ -623,6 +626,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _languagePreference.value = repository.getLanguagePreference()
             _creatorKeywords.value = repository.getCreatorKeywords().joinToString(", ")
             _bannedChannels.value = repository.getBannedChannels()
+            _bannedNodes.value = repository.getBannedNodes()
             _channelCutoffSettings.value = repository.getChannelCutoffSettings()
         }
 
@@ -2912,6 +2916,25 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.unbanChannel(channelName)
             _bannedChannels.value = repository.getBannedChannels()
+        }
+    }
+
+    fun banNode(publicKeyB64: String, handle: String) {
+        if (publicKeyB64.isBlank()) return
+        viewModelScope.launch {
+            repository.banNode(publicKeyB64, handle)
+            _bannedNodes.value = repository.getBannedNodes()
+            val currentFeed = _unifiedFeed.value.toMutableList()
+            currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == publicKeyB64 }
+            _unifiedFeed.value = currentFeed
+        }
+    }
+
+    fun unbanNode(publicKeyB64: String) {
+        if (publicKeyB64.isBlank()) return
+        viewModelScope.launch {
+            repository.unbanNode(publicKeyB64)
+            _bannedNodes.value = repository.getBannedNodes()
         }
     }
 

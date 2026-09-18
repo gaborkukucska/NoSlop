@@ -1629,7 +1629,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         Logger.info("REPOSITORY", "Restored connected creator peer: ${p.handle}")
                     }
                 }
-                if (appSettingDao.getSetting("deleted_official_creator") == "true") {
+                if (preferencesRepository.isNodeBanned(OFFICIAL_CREATOR_PUBKEY)) {
                     postDao.deletePostsByAuthor(OFFICIAL_CREATOR_PUBKEY)
                     val oldP = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
                     if (oldP != null) peerDao.deletePeer(oldP)
@@ -1749,8 +1749,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun ensureDefaultApiSourcesExist() = feedRepository.ensureDefaultApiSourcesExist()
 
     suspend fun ensureDefaultDiscoverableNode() = withContext(Dispatchers.IO) {
-        // If the user has explicitly deleted the official creator node, do not re-seed it!
-        if (appSettingDao.getSetting("deleted_official_creator") == "true") {
+        // If the official node is banned by the user, do not re-seed it
+        if (preferencesRepository.isNodeBanned(OFFICIAL_CREATOR_PUBKEY)) {
             return@withContext
         }
 
@@ -1881,6 +1881,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun unbanChannel(channelName: String) =
         preferencesRepository.unbanChannel(channelName)
+
+    suspend fun getBannedNodes(): List<PreferencesRepository.BannedNode> = preferencesRepository.getBannedNodes()
+    suspend fun banNode(publicKeyB64: String, handle: String) {
+        preferencesRepository.banNode(publicKeyB64, handle)
+        deletePeer(publicKeyB64, notifyRemote = false)
+    }
+    suspend fun unbanNode(publicKeyB64: String) {
+        preferencesRepository.unbanNode(publicKeyB64)
+        if (publicKeyB64 == OFFICIAL_CREATOR_PUBKEY) {
+            ensureDefaultDiscoverableNode()
+        }
+    }
+    suspend fun isNodeBanned(publicKeyB64: String): Boolean = preferencesRepository.isNodeBanned(publicKeyB64)
 
     suspend fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) =
         preferencesRepository.saveChannelCutoffSettings(enabled, year, month)

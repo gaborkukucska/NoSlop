@@ -981,13 +981,40 @@ fun FullScreenMeshCardV2(
 
                             if (!isSelf && !isTrusted && targetOnion != null) {
                                 Spacer(modifier = Modifier.height(24.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    Button(
+                                        onClick = { showConnectWarning = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            viewModel?.banNode(post.authorPublicKeyB64, displayHandle)
+                                            showUserInfoDialog = false
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed.copy(alpha = 0.2f), contentColor = DestructiveRed),
+                                        border = BorderStroke(1.dp, DestructiveRed),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            } else if (!isSelf) {
+                                Spacer(modifier = Modifier.height(16.dp))
                                 Button(
-                                    onClick = { showConnectWarning = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                    onClick = {
+                                        viewModel?.banNode(post.authorPublicKeyB64, displayHandle)
+                                        showUserInfoDialog = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed.copy(alpha = 0.2f), contentColor = DestructiveRed),
+                                    border = BorderStroke(1.dp, DestructiveRed),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                    Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
                                 }
                             }
 

@@ -578,6 +578,22 @@ fun ContactCardDialog(
                         Text("Close".tr, fontWeight = FontWeight.Bold)
                     }
 
+                    // Ban button
+                    Button(
+                        onClick = {
+                            viewModel?.banNode(peer.publicKeyB64, peer.handle)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DestructiveRed.copy(alpha = 0.15f),
+                            contentColor = DestructiveRed
+                        )
+                    ) {
+                        Text("Ban 🚫".tr, fontWeight = FontWeight.Bold)
+                    }
+
                     // Delete button
                     if (peer.isTrusted) {
                         Button(

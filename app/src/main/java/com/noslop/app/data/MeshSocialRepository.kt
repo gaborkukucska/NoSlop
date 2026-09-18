@@ -927,7 +927,7 @@ class MeshSocialRepository(
         }
 
         if (targetPub == NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
-            db.appSettingDao().insertSetting(AppSetting("deleted_official_creator", "true"))
+            db.appSettingDao().removeSetting("deleted_official_creator")
         }
 
         com.noslop.app.mesh.GossipService.recordDeletedPeer(targetPub)
@@ -962,7 +962,27 @@ class MeshSocialRepository(
             com.noslop.app.mesh.MediaManager.deleteMediaFiles(mediaIdsToDelete)
         }
 
-        if (peer != null) {
+        if (targetPub == NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+            // Always restore the default official creator node back to discoverable state
+            val pubBytes = try { android.util.Base64.decode(targetPub, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "noslop"
+            peerDao.insertPeer(
+                Peer(
+                    publicKeyB64 = targetPub,
+                    handle = "NoSlop",
+                    tripcode = tripcode,
+                    onionAddress = NoSlopRepository.OFFICIAL_CREATOR_ONION,
+                    encPublicKeyB64 = NoSlopRepository.OFFICIAL_CREATOR_ENC_PUBKEY,
+                    isTrusted = false,
+                    isTemporary = false,
+                    isDiscoverable = true,
+                    isCreator = true,
+                    fundMeLink = "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00",
+                    bio = "Official NoSlop Creator Node — The unfiltered pulse of the mesh.",
+                    lastSeenAt = System.currentTimeMillis()
+                )
+            )
+        } else if (peer != null) {
             peerDao.deletePeer(peer)
         }
         messageDao.deleteMessagesWithPeer(targetPub)
