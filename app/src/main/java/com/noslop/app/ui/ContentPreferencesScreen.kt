@@ -644,6 +644,7 @@ fun ContentPreferencesScreen(
                     "it" to "Italiano", "pt" to "Português", "ru" to "Русский", "zh" to "中文",
                     "ja" to "日本語", "ko" to "한국어", "ar" to "العربية", "hi" to "हिन्दी",
                     "nl" to "Nederlands", "tr" to "Türkçe", "pl" to "Polski", "sv" to "Svenska",
+                    "uk" to "Українська", "cs" to "Čeština", "ro" to "Română",
                     "id" to "Bahasa Indonesia", "vi" to "Tiếng Việt", "th" to "ไทย", "el" to "Ελληνικά",
                     "hu" to "Magyar"
                 )

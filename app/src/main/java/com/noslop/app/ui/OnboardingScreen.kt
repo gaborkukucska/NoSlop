@@ -427,7 +427,7 @@ fun Step2Language(
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
         )
 
-        val languages = listOf("en" to "English", "hu" to "Magyar")
+        val languages = com.noslop.app.util.LanguageManager.supportedLanguages
         
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
