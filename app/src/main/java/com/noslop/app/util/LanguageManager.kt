@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 object LanguageManager {
     val supportedLanguages = listOf(
+        "de" to "Deutsch",
         "en" to "English",
         "es" to "Español",
         "hu" to "Magyar"
