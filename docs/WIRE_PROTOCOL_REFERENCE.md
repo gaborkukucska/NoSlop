@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-06-19)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-09-18)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -123,6 +123,8 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
 | 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | `groupId|id|content|timestamp|senderId` | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage` (Keystore encrypted at rest); legacy receive-only wire support with strict signature and group membership verification |
 | 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
+| 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Replies with `GROUP_SYNC` containing full group schema and `memberDetails` |
+| 30 | `GROUP_SYNC` | `GroupSyncPayload` | `groupId|groupChatJson|timestamp` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
 
 Notes:
 
@@ -337,7 +339,8 @@ at render time.
 `CommentData.signature` covers `postId|commentId|content|timestamp`.
 
 ### REACTION / CHAT_REACTION / COMMENT_REACTION
-**Types:** `REACTION`, `CHAT_REACTION`, `COMMENT_REACTION` · classes `ReactionPayload`, `ChatReactionPayload`, `CommentReactionPayload` (identical shape, different target-ID field name)
+
+**Types:** `REACTION`, `CHAT_REACTION`, `COMMENT_REACTION` · classes `ReactionPayload`, `ChatReactionPayload`, `CommentReactionPayload`
 
 | Field | Type | Description |
 |---|---|---|
@@ -347,6 +350,7 @@ at render time.
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Ed25519 signature (see §2 for exact per-type string) |
 | `action` | String | `"add"` (default) or `"remove"` — toggles the reaction |
+| `group_id`? | String | Optional group identifier (present on `CHAT_REACTION` for group messages) |
 
 ### VOTE / COMMENT_VOTE
 **Types:** `VOTE`, `COMMENT_VOTE` · classes `VotePayload`, `CommentVotePayload`
@@ -392,6 +396,7 @@ distinguished only by whether `comments`/`reactions` are populated (older
 timestamp-based replies leave them `null`).
 
 ### GROUP_INVITE
+
 **Type:** `GROUP_INVITE` · class `GroupInvitePayload`
 
 | Field | Type | Description |
@@ -399,13 +404,17 @@ timestamp-based replies leave them `null`).
 | `group_id` | String | Group identifier (UUID, minted by the creator) |
 | `title` | String | Group name |
 | `admin_public_key` | String | Creator's Ed25519 key; also the verifying key for the signature |
-| `members` | Array\<String\> | Full member list as Ed25519 public keys |
+| `members` | Array<String> | Full member list as Ed25519 public keys |
 | `avatar_b64`? | String | Group picture |
 | `description`? | String | Group description |
+| `member_handles`? | Map<String, String> | Display handles of members |
+| `member_details`? | Map<String, GroupMemberInfo> | Directory of member onion addresses and X25519 encryption keys |
 | `allow_member_invites`? | Boolean | Whether non-admin members are permitted to invite peers (default: true) |
 | `allow_member_self_remove`? | Boolean | Whether members may voluntarily leave the group (default: true) |
 | `timestamp` | Long | Epoch milliseconds |
-| `signature` | String | Signature over `groupId\|title\|adminPublicKeyB64\|timestamp` |
+| `signature` | String | Signature over `groupId|title|adminPublicKeyB64|timestamp` |
+| `admin_onion`? | String | Onion address of group admin |
+| `admin_enc_public_key`? | String | X25519 encryption public key of group admin |
 
 Rejected unless the signature verifies against `admin_public_key`, our own
 (or burnable) identity appears in `members`, and — if we already hold a group
@@ -413,6 +422,7 @@ with this `group_id` — the admin key matches the stored one. An inbound
 packet can never reassign a group's admin.
 
 ### GROUP_UPDATE
+
 **Type:** `GROUP_UPDATE` · class `GroupUpdatePayload`
 
 | Field | Type | Description |
@@ -421,12 +431,14 @@ packet can never reassign a group's admin.
 | `title`? | String | New title, or the unchanged current title |
 | `avatar_b64`? | String | New group picture |
 | `description`? | String | New description |
-| `added_members`? | Array\<String\> | Members added by this update (a delta, not the full list) |
-| `removed_members`? | Array\<String\> | Members removed by this update |
+| `added_members`? | Array<String> | Members added by this update (a delta, not the full list) |
+| `removed_members`? | Array<String> | Members removed by this update |
+| `member_handles`? | Map<String, String> | Display handles of members |
+| `member_details`? | Map<String, GroupMemberInfo> | Directory of member onion addresses and X25519 encryption keys |
 | `allow_member_invites`? | Boolean | Updated invite permission flag (admin only) |
 | `allow_member_self_remove`? | Boolean | Updated self-remove permission flag (admin only) |
 | `timestamp` | Long | Epoch milliseconds |
-| `signature` | String | Signature over `groupId\|title\|signerPublicKeyB64\|timestamp` |
+| `signature` | String | Signature over `groupId|title|signerPublicKeyB64|timestamp` |
 
 `added_members` / `removed_members` are genuine deltas computed by
 `NoSlopRepository.updateGroupChat` against the stored member list. They were
@@ -446,6 +458,25 @@ signer is recovered and what each role is permitted to change.
 | `admin_public_key` | String | Claimed admin key; must equal the stored group's admin |
 | `timestamp` | Long | Epoch milliseconds |
 | `signature` | String | Signature over `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+
+### GROUP_QUERY
+**Type:** `GROUP_QUERY` · class `GroupQueryPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier |
+| `requester_id` | String | Public key of the member requesting group catch-up |
+| `timestamp` | Long | Epoch milliseconds |
+
+### GROUP_SYNC
+**Type:** `GROUP_SYNC` · class `GroupSyncPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_chat_json` | String | Serialized GroupChat JSON |
+| `member_details`? | Map<String, GroupMemberInfo> | Directory of member handles, onion addresses, and X25519 encryption keys |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `groupId|groupChatJson|timestamp` |
 
 ### TYPING
 **Type:** `TYPING` · class `TypingPayload` · **unsigned**

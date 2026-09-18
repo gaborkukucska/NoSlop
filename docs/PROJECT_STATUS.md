@@ -1,5 +1,33 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-18) — Decentralized Group Directory Sync, Mesh Node Blacklist & ProGuard Hardening (v0.5.8-alpha)
+
+* **Decentralized Group Member Directory Synchronization (`Packets.kt`, `NoSlopRepository.kt`, `HandshakePacketHandler.kt`, `GossipService.kt`)**:
+  * Added `GroupMemberInfo` (`handle`, `enc_public_key`, `onion_address`) exchanged via `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupSyncPayload`.
+  * Allows group members to exchange cryptographic onion routing and X25519 encryption parameters across peer boundaries without polluting or exposing personal 1:1 trusted DM contacts.
+  * Implemented `syncMemberPeers` in `NoSlopRepository.kt`: newly invited or joined group members discover peers as un-trusted group participants (`isTrusted = false`), eliminating "ghost" pending DM requests.
+  * Extended `GROUP_QUERY` and `GROUP_SYNC` protocols with direct onion reply fallback and signature verification across all group member candidates.
+  * Implemented `CHAT_REACTION` group support (`groupId` attached to payload) with unified mesh gossip broadcasting so group reactions propagate seamlessly to all members across multi-hop circuits.
+  * Bound open group creation (`allowMemberInvites = true`) to the admin's secondary burnable identity for operator anonymity.
+* **Mesh Node Blacklisting & Trust Firewall Dropping (`PreferencesRepository.kt`, `GossipService.kt`, `NoSlopRepository.kt`, `NoSlopViewModel.kt`, `ContentPreferencesScreen.kt`, `PeerItem.kt`, `FeedCard.kt`)**:
+  * Implemented `BannedNode(publicKeyB64, handle)` entity stored in `app_settings["banned_nodes"]`.
+  * `GossipService.processIncoming` inspects incoming sender public keys and unconditionally drops all packets from blacklisted nodes at step 1.
+  * Added "Ban Node 🚫" action button across Contact Card dialogs (`PeerItem.kt`) and mesh feed cards (`FeedCard.kt`).
+  * Added collapsible "Banned Mesh Nodes 🚫" section to Settings -> Content preferences, providing 1-tap unban chips and manual public key ban inputs.
+  * Automatically removes nodes from the ban list if they broadcast an authentic `USER_EXIT` or `PEER_REMOVED` tombstone.
+  * Restores the default official NoSlop creator node upon peer disconnect unless explicitly added to the banned node list.
+* **Group Invite Notification & Navigation Parity (`NotificationsScreen.kt`, `NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Accepting a `GROUP_INVITE` notification immediately purges pending notifications for that group and transitions the card into an active `"Joined • Open Chat"` state.
+  * Tapping the notification accepts the invite and navigates directly to `group_chat/$groupId` in 1 tap.
+  * Fixed group route parsing in `MainActivity.kt` and `UnifiedFeedTab.kt` to preserve UUID hyphens by stripping trailing millisecond timestamps via regex instead of naive `.substringBefore("-")`.
+  * Added a resilient loading fallback in `DMsTab.kt` to prevent blank screen freezes while group threads load.
+* **Group Member Cleanup on Self-Removal & Group Deletion (`HandshakePacketHandler.kt`, `NoSlopRepository.kt`)**:
+  * When an admin removes a member or deletes a group, non-contact group peers are automatically reaped from `peerDao`, preventing orphaned entries.
+  * Leaving a group broadcasts self-removal with the matching identity keypair (main or burnable), notifies all members via direct dispatch, and cleans up group peers locally.
+* **ProGuard R8 Hardening & `@Keep` Model Annotations (`proguard-rules.pro`, `Packets.kt`, `GroupChat.kt`, `UserProfile.kt`, `UpdateChecker.kt`)**:
+  * Annotated all wire protocol payload classes in `Packets.kt`, `GroupChat`, and `UserProfile` with `@Keep`.
+  * Added `-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*` in `proguard-rules.pro` to ensure Gson `TypeToken` generic signatures are preserved during minification.
+
 ## Completed Changes (2026-09-16) — Tiered Sovereign Backups, Identity Lifecycle Advisory Prompts & Dead Code Pruning (v0.5.7-alpha)
 
 * **Tiered Encrypted Sovereign Backups (`BackupManager.kt`, `NoSlopViewModel.kt`, `SettingsTab.kt`)**:

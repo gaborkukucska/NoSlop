@@ -768,5 +768,14 @@
   "Export Backup Now": "Export Backup Now",
   "Remind Me Later": "Remind Me Later",
   "Backup exported successfully!": "Backup exported successfully!",
-  "Exporting backup...": "Exporting backup..."
+  "Exporting backup...": "Exporting backup...",
+  "Ban Node 🚫": "Ban Node 🚫",
+  "Banned Mesh Nodes 🚫": "Banned Mesh Nodes 🚫",
+  "Banned mesh nodes are dropped at the firewall and hidden from discoverable lists until they permanently exit or are unbanned.": "Banned mesh nodes are dropped at the firewall and hidden from discoverable lists until they permanently exit or are unbanned.",
+  "Ban by public key": "Ban by public key",
+  "MCowBQ...": "MCowBQ...",
+  "Joined • Open Chat": "Joined • Open Chat",
+  "Loading group chat...": "Loading group chat...",
+  "Back to DMs": "Back to DMs",
+  "No permanent trusted contacts available. Temporary connections filtered out.": "No permanent trusted contacts available. Temporary connections filtered out."
 }

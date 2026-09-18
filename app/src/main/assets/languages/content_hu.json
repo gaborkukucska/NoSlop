@@ -768,5 +768,14 @@
   "Export Backup Now": "Mentés exportálása most",
   "Remind Me Later": "Emlékeztess később",
   "Backup exported successfully!": "A mentés sikeresen exportálva!",
-  "Exporting backup...": "Mentés exportálása..."
+  "Exporting backup...": "Mentés exportálása...",
+  "Ban Node 🚫": "Csomópont tiltása 🚫",
+  "Banned Mesh Nodes 🚫": "Tiltott mesh csomópontok 🚫",
+  "Banned mesh nodes are dropped at the firewall and hidden from discoverable lists until they permanently exit or are unbanned.": "A tiltott mesh csomópontok eldobásra kerülnek a tűzfalon, és rejtve maradnak a felfedezhető listákból, amíg végleg ki nem lépnek vagy a tiltásuk feloldásra nem kerül.",
+  "Ban by public key": "Tiltás nyilvános kulcs alapján",
+  "MCowBQ...": "MCowBQ...",
+  "Joined • Open Chat": "Csatlakozva • Csevegés megnyitása",
+  "Loading group chat...": "Csoportos csevegés betöltése...",
+  "Back to DMs": "Vissza az Üzenetekhez",
+  "No permanent trusted contacts available. Temporary connections filtered out.": "Nincsenek állandó megbízható kapcsolatok. Az ideiglenes kapcsolatok kiszűrve."
 }

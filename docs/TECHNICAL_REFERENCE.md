@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.5.3-alpha`, Room schema version 14 — see §10, compileSdk/targetSdk
+versionName `0.5.8-alpha`, Room schema version 14 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -2016,6 +2016,12 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
+
+### 23.13 Decentralized Group Directory Sync, Node Blacklisting & ProGuard Hardening (v0.5.8-alpha)
+* **Decentralized Group Member Directory Synchronization**: `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupSyncPayload` carry `memberDetails: Map<String, GroupMemberInfo>` containing members' handles, onion addresses, and X25519 public keys (`encPublicKey`). Nodes store these as un-trusted group peers (`isTrusted = false`), enabling pairwise X25519 DM encryption for group messages without exposing peers as 1:1 DM contacts.
+* **Group Catchup & Multi-Candidate Verification**: Nodes issue `GROUP_QUERY` packets to resolve missing keys. Responding nodes generate `GROUP_SYNC` packets signed by the admin or sender. `HandshakePacketHandler` verifies signatures against all current group members and admin candidates.
+* **Mesh Node Firewall Blacklisting**: `PreferencesRepository.BannedNode` stores blacklisted node keys. `GossipService.processIncoming` evaluates `repo.isNodeBanned(senderId)` and discards all incoming packets before deduplication or routing.
+* **ProGuard Reflection Safety**: Added `@Keep` across all `Packets.kt` payload models and configured `proguard-rules.pro` with `-keepattributes Signature,InnerClasses,EnclosingMethod` to safeguard Gson `TypeToken` generic types under R8 full minification.
 
 ### 23.12 Tiered Sovereign Backups, Media Exclusion & Identity Lifecycle Advisory Prompts (v0.5.7-alpha)
 * **Tiered Backup Architecture**: `BackupManager.exportData` accepts `BackupMediaOption`:

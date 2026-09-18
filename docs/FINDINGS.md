@@ -18,9 +18,9 @@ This document tracks active architectural enhancements and audit items for the N
 
 ## 4. ProGuard Keep Surface Refactoring (P2-2) ✅
 - **Current State & Resolution**:
-  1. Broad package-level wildcards (`com.noslop.app.data.**`, `com.noslop.app.mesh.**`, `com.noslop.app.util.**`) were replaced with targeted model preservation and Room `@Entity` / `@Dao` keep rules.
-  2. Model DTOs in `Packets.kt`, `UpdateChecker.kt`, and `UserProfile.kt` are annotated with `@androidx.annotation.Keep` and protected via `@SerializedName` reflection preservation rules.
-  3. Enables R8 to safely optimize, minify, and eliminate dead code across all business repositories, mesh services, and utility classes without risking JSON deserialization failures.
+  1. Replaced broad package wildcards with explicit `@Keep` annotations on all DTOs and models in `Packets.kt`, `GroupChat.kt`, `UserProfile.kt`, and `UpdateChecker.kt`.
+  2. Added `-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*` to `proguard-rules.pro` to prevent R8 from stripping Gson `TypeToken` generic type metadata in release builds.
+  3. Enables R8 to safely optimize, minify, and eliminate dead code without risking runtime JSON serialization or deserialization failures.
 
 ## 5. Architectural Decomposition (P2-3 & P2-4)
 - **Current State**: `NoSlopRepository` and `NoSlopViewModel` coordinate cross-domain flows (mesh, feeds, engagement, settings, and Hubs).
