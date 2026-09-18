@@ -415,6 +415,9 @@ interface NotificationDao {
 
     @Query("DELETE FROM notifications WHERE id = :id")
     suspend fun deleteNotification(id: String)
+
+    @Query("DELETE FROM notifications WHERE id = :id OR targetRoute = :route OR targetRoute LIKE '%' || :groupId || '%'")
+    suspend fun deleteGroupInviteNotifications(groupId: String, id: String = "", route: String = "")
     
     @Query("DELETE FROM notifications")
     suspend fun clearAllNotifications()

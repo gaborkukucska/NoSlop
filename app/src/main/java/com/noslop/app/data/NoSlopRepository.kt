@@ -2044,6 +2044,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.notificationDao().deleteNotification(id)
     }
 
+    suspend fun deleteGroupInviteNotifications(groupId: String) = withContext(Dispatchers.IO) {
+        db.notificationDao().deleteGroupInviteNotifications(groupId)
+    }
+
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
