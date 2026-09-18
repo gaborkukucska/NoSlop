@@ -101,9 +101,9 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
                         onClick = {
                             viewModel.markNotificationAsRead(notif.id)
                             if (notif.type == "GROUP_INVITE") {
-                                viewModel.acceptGroupInviteFromNotification(notif.id, notif.targetRoute)
-                                val gid = notif.targetRoute?.substringAfter("group_invite/")?.substringBefore("-")
+                                val gid = notif.targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
                                 if (!gid.isNullOrBlank()) {
+                                    viewModel.acceptGroupInviteFromNotification(notif.id, gid)
                                     onNavigateToRoute("group_chat/$gid")
                                 }
                             } else if (notif.targetRoute != null) {
@@ -113,9 +113,9 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
                         onAccept = { notifId, senderPub -> viewModel.acceptConnectionFromNotification(notifId, senderPub) },
                         onDecline = { notifId, senderPub -> viewModel.rejectConnectionFromNotification(notifId, senderPub) },
                         onAcceptGroup = { notifId, targetRoute -> 
-                            viewModel.acceptGroupInviteFromNotification(notifId, targetRoute)
-                            val gid = targetRoute?.substringAfter("group_invite/")?.substringBefore("-")
+                            val gid = targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
                             if (!gid.isNullOrBlank()) {
+                                viewModel.acceptGroupInviteFromNotification(notifId, gid)
                                 onNavigateToRoute("group_chat/$gid")
                             }
                         },

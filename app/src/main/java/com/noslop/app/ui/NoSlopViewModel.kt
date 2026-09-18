@@ -2997,9 +2997,9 @@ fun toggleAggregator() {
 
     fun acceptGroupInviteFromNotification(notifId: String, targetRoute: String?) {
         viewModelScope.launch {
-            val groupId = targetRoute?.substringAfter("group_invite/")
-            if (!groupId.isNullOrBlank()) {
-                repository.acceptGroupInvite(groupId)
+            val cleanRoute = targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
+            if (!cleanRoute.isNullOrBlank()) {
+                repository.acceptGroupInvite(cleanRoute)
             }
             repository.deleteNotification(notifId)
         }

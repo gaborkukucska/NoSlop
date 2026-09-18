@@ -280,9 +280,9 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 viewModel.selectChatPeer(null)
                 viewModel.selectGroupChat(routeClean.substringAfter("group_chat/"))
             } else if (routeClean.startsWith("group_invite/")) {
-                val gid = routeClean.substringAfter("group_invite/").substringBefore("-")
+                val gid = routeClean.substringAfter("group_invite/").replace(Regex("""-\d{10,}$"""), "").trim()
                 if (gid.isNotBlank()) {
-                    viewModel.acceptGroupInviteFromNotification("group_invite_$gid", routeClean)
+                    viewModel.acceptGroupInviteFromNotification("group_invite_$gid", gid)
                     selectedTab = 1
                     viewModel.selectChatPeer(null)
                     viewModel.selectGroupChat(gid)
@@ -516,12 +516,14 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                 viewModel.selectGroupChat(null)
                                 viewModel.selectChatPeer(route.substringAfter("chat/"))
                             } else if (route.startsWith("group_chat/")) {
+                                val gid = route.substringAfter("group_chat/").replace(Regex("""-\d{10,}$"""), "").trim()
                                 selectedTab = 1
                                 viewModel.selectChatPeer(null)
-                                viewModel.selectGroupChat(route.substringAfter("group_chat/"))
+                                viewModel.selectGroupChat(gid)
                             } else if (route.startsWith("group_invite/")) {
-                                val gid = route.substringAfter("group_invite/").substringBefore("-")
+                                val gid = route.substringAfter("group_invite/").replace(Regex("""-\d{10,}$"""), "").trim()
                                 if (gid.isNotBlank()) {
+                                    viewModel.acceptGroupInviteFromNotification("group_invite_$gid", gid)
                                     selectedTab = 1
                                     viewModel.selectChatPeer(null)
                                     viewModel.selectGroupChat(gid)

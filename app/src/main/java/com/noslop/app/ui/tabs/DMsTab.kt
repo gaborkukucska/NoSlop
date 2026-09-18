@@ -154,6 +154,26 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 onSendMessage = { txt, media, replyTo, privacy -> viewModel.sendGroupMessage(activeGroup.groupId, txt, media, replyTo, privacy) },
                 onBack = { viewModel.selectGroupChat(null) }
             )
+        } else {
+            // Group loading or invalid ID fallback: prevents blank screen lock-out
+            Box(
+                modifier = Modifier.fillMaxSize().background(PrimaryBlack),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = AccentGreen)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Loading group chat...".tr, color = TextLight, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { viewModel.selectGroupChat(null) },
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = TextLight),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Text("Back to DMs".tr, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     } else {
         // Conversation/Contacts List view
