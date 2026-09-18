@@ -882,9 +882,43 @@ class HandshakePacketHandler(
         val myBurnable = repo.getBurnableIdentity()?.publicKeyB64
         val stillAMember = currentMembers.any { it == myPub || (myBurnable != null && it == myBurnable) }
         if (!stillAMember) {
+            val previousMembers = parseMembers(existing.membersJson)
+            val otherGroups = db.groupChatDao().getAllGroupChatsList().filter { it.groupId != update.groupId }
+            val otherGroupMembers = otherGroups.flatMap {
+                try {
+                    com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+                } catch (_: Exception) { emptyList() }
+            }.toSet()
+            for (mPub in (previousMembers + existing.adminPublicKeyB64)) {
+                if (mPub !in otherGroupMembers && mPub != myPub && mPub != myBurnable) {
+                    val p = peerDao.getPeerByPublicKey(mPub)
+                    if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                        peerDao.deletePeer(p)
+                        Logger.info(TAG, "Cleaned up non-contact group peer: ${p.handle}")
+                    }
+                }
+            }
             db.groupChatDao().deleteGroupChat(update.groupId)
-            Logger.info(TAG, "Left group chat ${update.groupId}: we were removed by ${if (isAdmin) "the admin" else "a member"}")
+            Logger.info(TAG, "Left group chat ${update.groupId}: we were removed by ${if (isAdmin) "the admin" else "a member"} and cleaned up group peers")
             return true
+        }
+
+        if (removed.isNotEmpty()) {
+            val otherGroups = db.groupChatDao().getAllGroupChatsList().filter { it.groupId != update.groupId }
+            val otherGroupMembers = otherGroups.flatMap {
+                try {
+                    com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+                } catch (_: Exception) { emptyList() }
+            }.toSet() + currentMembers
+            for (removedPub in removed) {
+                if (removedPub !in otherGroupMembers && removedPub != myPub && removedPub != myBurnable) {
+                    val p = peerDao.getPeerByPublicKey(removedPub)
+                    if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                        peerDao.deletePeer(p)
+                        Logger.info(TAG, "Cleaned up removed group member peer: ${p.handle}")
+                    }
+                }
+            }
         }
 
         db.groupChatDao().insertGroupChat(updatedGroup)

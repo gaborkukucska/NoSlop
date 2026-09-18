@@ -264,11 +264,15 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     } catch (_: Exception) { emptyList() }
                 }.toSet()
             }
+            val notifications by viewModel.allNotifications.collectAsState()
+            val pendingConnectionSenderPubs = remember(notifications) {
+                notifications.filter { it.type == "CONNECTION_REQUEST" }.mapNotNull { it.senderPub }.toSet()
+            }
             val pendingRequests = peers.filter { 
                 !it.isTrusted && !it.isDiscoverable && 
                 it.onionAddress.isNotBlank() && it.onionAddress.endsWith(".onion") &&
                 it.publicKeyB64 !in groupMemberPubKeys &&
-                it.handle != "Member"
+                it.publicKeyB64 in pendingConnectionSenderPubs
             }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
