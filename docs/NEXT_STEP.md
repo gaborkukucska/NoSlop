@@ -47,12 +47,9 @@ Public Invidious instances are frequently blocked by YouTube or rotate. We can r
 
 ---
 
-### Recommended Next Step
+### Status of Recommended Next Steps
 
-Would you like to proceed with:
-
-* **Option A (Feed & Invidious Health)**: Fix the dead RSS feeds in `SourceLibrary.kt` (updating Pitchfork/Flickr and replacing dead 403 feeds) and refresh the fallback instance list in `InvidiousApiClient.kt`.
-* **Option B (Comment Deletion & Management)**: Implement the missing client-side comment deletion in `CommentsBottomSheet.kt` and `NoSlopRepository.kt` so users can delete their own comments over the mesh.
-* **Option C (Peer Follows)**: Wire up the outgoing `FOLLOW` / `UNFOLLOW` action in `NoSlopRepository.kt` and add the button to user profiles / contact dialogs.
-
-Which option would you like to tackle next?
+* **Option A (Feed & Invidious Health)**: ✅ Completed (Pitchfork/Flickr/NPR updated, Cloudflare-over-Tor gating implemented, Invidious & Piped pool refreshed).
+* **Option B (Comment Deletion & Management)**: ✅ Completed (`editComment` & `deleteComment` implemented across repository, ViewModel, and `CommentsBottomSheet.kt` with edit/delete modals).
+* **Option C (Peer Follows)**: ✅ Completed (Follow / Unfollow button wired in `ContactCardDialog` with live status updates).
+* **Dead Packet Cleanup**: ✅ Completed (`SUBSCRIBE` payload and handler removed).

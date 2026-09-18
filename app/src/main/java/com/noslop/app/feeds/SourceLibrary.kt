@@ -83,7 +83,7 @@ object SourceLibrary {
         // still well covered by Al Jazeera, BBC, Reuters, and the API sources below.
         BuiltInSource("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "rss", "World News"),
         BuiltInSource("bbc-world", "BBC World News", "https://feeds.bbci.co.uk/news/world/rss.xml", "rss", "World News"),
-        BuiltInSource("reuters-world", "Reuters World", "https://www.reutersagency.com/feed/?best-topics=world-news&post_type=best", "rss", "World News"),
+        BuiltInSource("npr-world", "NPR World News", "https://feeds.npr.org/1004/rss.xml", "rss", "World News"),
 
         // Open Source
         BuiltInSource("linux-foundation", "Linux Foundation", "https://www.linuxfoundation.org/blog/rss.xml", "rss", "Open Source"),
@@ -132,11 +132,11 @@ object SourceLibrary {
 
         // Photography
         BuiltInSource("500px-popular", "500px Popular", "https://500px.com/popular.rss", "rss", "Photography"),
-        BuiltInSource("flickr-explore", "Flickr Explore", "https://www.flickr.com/services/feeds/explore/", "rss", "Photography"),
+        BuiltInSource("flickr-explore", "Flickr Explore", "https://www.flickr.com/services/feeds/photos_public.gne?format=rss_200", "rss", "Photography"),
         BuiltInSource("petapixel", "PetaPixel", "https://petapixel.com/feed/", "rss", "Photography"),
 
         // Music
-        BuiltInSource("pitchfork", "Pitchfork", "https://pitchfork.com/rss/all/", "rss", "Music"),
+        BuiltInSource("pitchfork", "Pitchfork", "https://pitchfork.com/feed/feed-news/rss", "rss", "Music"),
         BuiltInSource("rolling-stone", "Rolling Stone", "https://www.rollingstone.com/feed/", "rss", "Music"),
         BuiltInSource("nme", "NME", "https://www.nme.com/feed", "rss", "Music"),
 

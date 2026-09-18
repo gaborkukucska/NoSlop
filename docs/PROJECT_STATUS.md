@@ -1,5 +1,21 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-18) — Feed Health, Invidious Resiliency, Comment Management & Peer Follows (v0.5.8-alpha)
+
+* **RSS & Feed Health Restoration (`SourceLibrary.kt`, `FeedRepository.kt`)**:
+  * Fixed dead/404 RSS URLs: updated Pitchfork to `feed-news/rss`, Flickr Explore to `photos_public.gne`, and replaced defunct Reuters World URL with live NPR World News feed.
+  * Implemented Tor-aware Cloudflare WAF gating: sources known to block Tor exit nodes (`500px.com`, `nme.com`, `juxtapoz.com`, `hifructose.com`) are automatically skipped during background sync while "Route Clearnet via Tor" is enabled, completely eliminating HTTP 403 logs and shortening background sync cycles by 15–20 seconds, while remaining active when Clearnet over Tor is turned off.
+* **Invidious & Piped Instance Pool Refresh (`InvidiousApiClient.kt`)**:
+  * Replaced failing/exhausted endpoints with active public Invidious and Piped instances (`yewtu.be`, `invidious.flokinet.to`, `invidious.privacydev.net`, `iv.datura.network`, `invidious.projectsegfau.lt`, `invidious.einfachzocken.eu`, `api.piped.privacydev.net`).
+* **Client-Side Comment Editing & Deletion UX (`MeshSocialRepository.kt`, `NoSlopRepository.kt`, `NoSlopViewModel.kt`, `CommentsBottomSheet.kt`)**:
+  * Implemented `editComment(commentId, newContent)` and `deleteComment(commentId)` with Ed25519 signing and mesh broadcast (`EDIT_COMMENT`, `DELETE_COMMENT`).
+  * Added Edit and Delete UI action buttons to `CommentsBottomSheet.kt` for authors on their own comments.
+  * Rendered deleted comments as italicized `[Deleted]` placeholders with reactions/replies suppressed.
+* **Mesh Peer Following UI Integration (`PeerItem.kt`)**:
+  * Added reactive "Follow Creator" / "Unfollow Creator" toggle buttons in `ContactCardDialog` (`PeerItem.kt`), wired directly to `toggleFollowPeer`.
+* **Dead Code Pruning (`Packets.kt`, `HandshakePacketHandler.kt`)**:
+  * Removed obsolete unpersisted `SUBSCRIBE` / `SubscribePayload` stub superseded by `FOLLOW`.
+
 ## Completed Changes (2026-09-18) — Global Multi-Language Localization & Zero-Code Dynamic Discovery (v0.5.8-alpha)
 
 * **21+ Languages Fully Supported (`app/src/main/assets/languages/`)**:

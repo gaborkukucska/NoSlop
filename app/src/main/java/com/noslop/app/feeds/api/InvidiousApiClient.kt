@@ -50,18 +50,21 @@ object InvidiousApiClient {
 
     // Hardcoded Invidious instances (including .onion services and active public servers)
     private val INVIDIOUS_INSTANCES = listOf(
+        "https://yewtu.be",
+        "https://invidious.flokinet.to",
+        "https://invidious.privacydev.net",
+        "https://iv.datura.network",
+        "https://invidious.projectsegfau.lt",
+        "https://invidious.einfachzocken.eu",
         "http://inv.nadekonw7plitnjuawu6ytjsl7jlglk2t6pyq6eftptmiv3dvqndwvyd.onion",
-        "http://nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion",
-        "https://inv.nadeko.net",
-        "https://invidious.nerdvpn.de",
-        "https://invidious.tiekoetter.com",
-        "https://yewtu.be"
+        "http://nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion"
     )
 
     // Robust Piped API instances that deliver clean MP4 streams over Tor
     private val PIPED_INSTANCES = listOf(
         "https://pipedapi.adminforge.de",
         "https://piped-api.privacy.com.de",
+        "https://api.piped.privacydev.net",
         "https://pipedapi.drgns.space"
     )
 

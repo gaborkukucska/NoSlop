@@ -2614,6 +2614,15 @@ fun toggleAggregator() {
         viewModelScope.launch { repository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata) }
     }
 
+    fun editComment(commentId: String, newContent: String) {
+        if (newContent.isBlank()) return
+        viewModelScope.launch { repository.editComment(commentId, newContent) }
+    }
+
+    fun deleteComment(commentId: String) {
+        viewModelScope.launch { repository.deleteComment(commentId) }
+    }
+
     fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "", useBurnableIdentity: Boolean = false) {
         viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity) }
     }

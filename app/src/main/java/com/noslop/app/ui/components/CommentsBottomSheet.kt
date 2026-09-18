@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.AddReaction
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
@@ -214,7 +215,15 @@ fun CommentItem(
     val reactions by viewModel.getReactionsForComment(comment.id).collectAsState(initial = emptyList())
     val votes by viewModel.getVotesForComment(comment.id).collectAsState(initial = emptyList())
     val peers by viewModel.peers.collectAsState()
+    val burnableKeys by viewModel.burnableKeys.collectAsState()
+    val isOwnComment = comment.authorPublicKeyB64 == localKeys?.publicKeyB64 || 
+                       (burnableKeys != null && comment.authorPublicKeyB64 == burnableKeys?.publicKeyB64)
+    val isDeleted = comment.content == "[Deleted]"
+
     var showReactionPicker by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var editingText by remember(comment.content) { mutableStateOf(comment.content) }
 
     // Resolve author onion for media rendering
     val authorOnion = remember(comment.authorPublicKeyB64, peers) {
@@ -408,7 +417,15 @@ fun CommentItem(
         }
         
         // ─── Content Rendering ───
-        if (comment.content.isNotBlank()) {
+        if (isDeleted) {
+            Text(
+                text = "[Deleted]".tr,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                ),
+                color = TextMuted
+            )
+        } else if (comment.content.isNotBlank()) {
             Text(
                 comment.content,
                 style = MaterialTheme.typography.bodyMedium,
@@ -417,7 +434,7 @@ fun CommentItem(
         }
 
         // ─── Structured Media Rendering (GIFs / Images) ───
-        if (comment.mediaId != null && authorOnion != null) {
+        if (!isDeleted && comment.mediaId != null && authorOnion != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
 
             val mediaType = comment.mediaType ?: "image"
@@ -510,28 +527,113 @@ fun CommentItem(
             }
         }
 
-        // Explicit Actions (Always visible)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.AddReaction,
-                contentDescription = "React".tr,
-                tint = TextMuted,
-                modifier = Modifier.size(16.dp).clickable { showReactionPicker = true }
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Icon(
-                Icons.AutoMirrored.Filled.Reply,
-                contentDescription = "Reply".tr,
-                tint = TextMuted,
-                modifier = Modifier.size(16.dp).clickable { onReply(comment.id) }
+        // Explicit Actions
+        if (!isDeleted) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isOwnComment) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit".tr,
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp).clickable { 
+                            editingText = comment.content
+                            showEditDialog = true 
+                        }
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete".tr,
+                        tint = DestructiveRed.copy(alpha = 0.8f),
+                        modifier = Modifier.size(16.dp).clickable { showDeleteDialog = true }
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Icon(
+                    Icons.Default.AddReaction,
+                    contentDescription = "React".tr,
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp).clickable { showReactionPicker = true }
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Icon(
+                    Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = "Reply".tr,
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp).clickable { onReply(comment.id) }
+                )
+            }
+        }
+
+        if (showEditDialog) {
+            AlertDialog(
+                onDismissRequest = { showEditDialog = false },
+                title = { Text("Edit".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    OutlinedTextField(
+                        value = editingText,
+                        onValueChange = { editingText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextLight,
+                            unfocusedTextColor = TextLight,
+                            focusedBorderColor = AccentGreen,
+                            unfocusedBorderColor = BorderSubtle
+                        )
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (editingText.isNotBlank() && editingText != comment.content) {
+                                viewModel.editComment(comment.id, editingText.trim())
+                            }
+                            showEditDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Text("Save".tr, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showEditDialog = false }) {
+                        Text("Cancel".tr, color = TextMuted)
+                    }
+                },
+                containerColor = SurfaceDark
             )
         }
 
-        if (reactions.isNotEmpty() || votes.isNotEmpty()) {
+        if (showDeleteDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                title = { Text("Delete".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("Are you sure?".tr, color = TextMuted) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteComment(comment.id)
+                            showDeleteDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = TextLight)
+                    ) {
+                        Text("Delete".tr, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = false }) {
+                        Text("Cancel".tr, color = TextMuted)
+                    }
+                },
+                containerColor = SurfaceDark
+            )
+        }
+
+        if (!isDeleted && (reactions.isNotEmpty() || votes.isNotEmpty())) {
             val allReactions = reactions.map { it.reactionType to it.authorPublicKeyB64 } + 
                                votes.map { it.voteType to it.authorPublicKeyB64 }
             val grouped = allReactions.groupBy { it.first }

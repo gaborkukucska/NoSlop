@@ -568,6 +568,41 @@ fun ContactCardDialog(
                         }
                     }
 
+                    val allPeersList by (viewModel?.peers?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+                    val livePeer = remember(allPeersList, peer.publicKeyB64) {
+                        allPeersList.find { it.publicKeyB64 == peer.publicKeyB64 } ?: peer
+                    }
+                    val isOwnNode = peer.publicKeyB64 == viewModel?.localKeys?.value?.publicKeyB64 || 
+                                    peer.publicKeyB64 == viewModel?.burnableKeys?.value?.publicKeyB64
+
+                    if (!isOwnNode) {
+                        val isFollowing = livePeer.isFollowing
+                        Button(
+                            onClick = {
+                                viewModel?.toggleFollowPeer(peer.publicKeyB64, !isFollowing)
+                            },
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = if (isFollowing) {
+                                ButtonDefaults.buttonColors(
+                                    containerColor = SurfaceDark,
+                                    contentColor = TextMuted
+                                )
+                            } else {
+                                ButtonDefaults.buttonColors(
+                                    containerColor = AccentGreen.copy(alpha = 0.2f),
+                                    contentColor = AccentGreen
+                                )
+                            },
+                            border = BorderStroke(1.dp, if (isFollowing) BorderSubtle else AccentGreen)
+                        ) {
+                            Text(
+                                if (isFollowing) "Unfollow Creator".tr else "Follow Creator".tr,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)

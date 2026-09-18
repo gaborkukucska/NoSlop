@@ -162,14 +162,6 @@ data class AnnounceInvidiousInstancePayload(
 )
 
 @Keep
-data class SubscribePayload(
-    @SerializedName("creator_id") val creatorId: String,
-    @SerializedName("subscriber_id") val subscriberId: String,
-    val timestamp: Long,
-    val signature: String
-)
-
-@Keep
 data class ReactionPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("reaction_type") val reactionType: String, // e.g., "like", "upvote", "downvote"
@@ -550,10 +542,6 @@ data class NetworkPacket(
 
     fun getAnnounceInvidiousInstancePayload(): AnnounceInvidiousInstancePayload? = if (type == "ANNOUNCE_INVIDIOUS_INSTANCE" && payload != null) {
         Gson().fromJson(payload, AnnounceInvidiousInstancePayload::class.java)
-    } else null
-
-    fun getSubscribePayload(): SubscribePayload? = if (type == "SUBSCRIBE" && payload != null) {
-        Gson().fromJson(payload, SubscribePayload::class.java)
     } else null
 
     fun getFollowPayload(): FollowPayload? = if ((type == "FOLLOW" || type == "UNFOLLOW") && payload != null) {

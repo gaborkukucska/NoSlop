@@ -553,12 +553,6 @@ class HandshakePacketHandler(
         }
     }
 
-    suspend fun handleSubscribe(packet: NetworkPacket): Boolean {
-        val subscribePay = packet.getSubscribePayload() ?: return false
-        val payloadToVerify = "${subscribePay.creatorId}|${subscribePay.subscriberId}|${subscribePay.timestamp}"
-        return CryptoService.verify(payloadToVerify, subscribePay.signature, subscribePay.subscriberId)
-    }
-
     suspend fun handleAnnounceInvidiousInstance(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnounceInvidiousInstancePayload() ?: return false
         val url = announcePay.instanceUrl

@@ -352,8 +352,22 @@ class FeedRepository(
         }
     }
 
+    companion object {
+        // Feeds protected by Cloudflare WAF / bot-protection that block Tor exit nodes (HTTP 403 / challenge HTML)
+        private val TOR_BLOCKED_DOMAINS = setOf(
+            "500px.com",
+            "nme.com",
+            "juxtapoz.com",
+            "hifructose.com"
+        )
+    }
+
     private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {
         try {
+            if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && TOR_BLOCKED_DOMAINS.any { source.url.contains(it) }) {
+                Logger.debug(TAG, "Skipping Tor-blocked RSS source ${source.title} while Route Clearnet via Tor is active")
+                return
+            }
             Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
             val items = FeedParser.fetchAndParse(source.url, source.id)
             if (items.isNotEmpty()) {

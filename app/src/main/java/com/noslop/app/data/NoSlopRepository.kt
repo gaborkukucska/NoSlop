@@ -2130,6 +2130,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = meshSocialRepository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata)
 
+    suspend fun editComment(commentId: String, newContent: String): Boolean =
+        meshSocialRepository.editComment(commentId, newContent)
+
+    suspend fun deleteComment(commentId: String): Boolean =
+        meshSocialRepository.deleteComment(commentId)
+
     suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean =
         meshSocialRepository.reactToMeshPost(postId, reactionType)
 
