@@ -9,6 +9,16 @@
   * Implemented runtime discovery of language assets: any `content_<code >.json` placed in `app/src/main/assets/languages/` is automatically enumerated and registered on application startup.
   * Resolved native language names via `WELL_KNOWN_LANGUAGES` map with dynamic `java.util.Locale` fallback, sorting alphabetically with English pinned first.
   * Community contributors can now add or test translations by simply dropping a JSON file into the assets folder without touching any Kotlin or Compose code.
+* **Onboarding & Content Preferences Dynamic Integration (`OnboardingScreen.kt`, `ContentPreferencesScreen.kt`)**:
+  * Wired `LanguageManager.supportedLanguages` into `OnboardingScreen.kt`, eliminating the legacy 2-language hardcoded list and presenting all 21+ languages dynamically to new users on first launch.
+  * Added Ukrainian (`uk`), Czech (`cs`), and Romanian (`ro`) to the Content Language selection dropdown in `ContentPreferencesScreen.kt`.
+* **Automated Home Hub Backup Sync Repair (`HubSyncWorker.kt`)**:
+  * Aligned address resolution with `hub_deployment_status` (resolving LAN IP or cloned onion address) rather than querying an unpopulated setting key.
+  * Corrected endpoint port from gossip TCP port 9999 to REST API port 8080 (`/api/backup/push`).
+  * Implemented private LAN fast-path over `rawClearnetClient` with seamless Tor SOCKS5 fallback.
+* **Wire Protocol & Codebase Documentation Alignment (`WIRE_PROTOCOL_REFERENCE.md`, `TECHNICAL_REFERENCE.md`)**:
+  * Synchronized `WIRE_PROTOCOL_REFERENCE.md` catalog, schemas, and signed-string tables with all active packet types (`EDIT_COMMENT`, `DELETE_COMMENT`, `FOLLOW`/`UNFOLLOW`, `ANNOUNCE_INVIDIOUS_INSTANCE`).
+  * Updated `TECHNICAL_REFERENCE.md` §14 marking the `GossipService.broadcast` Hub fallback discrepancy as resolved in code.
 
 ## Completed Changes (2026-09-18) — Decentralized Group Directory Sync, Mesh Node Blacklist & ProGuard Hardening (v0.5.8-alpha)
 
