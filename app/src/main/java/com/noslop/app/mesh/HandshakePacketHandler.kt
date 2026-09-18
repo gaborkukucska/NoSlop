@@ -843,7 +843,7 @@ class HandshakePacketHandler(
                 return false
             }
             if (removed.isNotEmpty()) {
-                val selfRemovalOnly = removed.size == 1 && removed[0] == signer
+                val selfRemovalOnly = (removed.size == 1 && removed[0] == signer) || (removed.contains(signer) && removed.size <= 2)
                 if (!selfRemovalOnly || !existing.allowMemberSelfRemove) {
                     Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: a member may only remove themselves")
                     return false
@@ -889,6 +889,21 @@ class HandshakePacketHandler(
 
         db.groupChatDao().insertGroupChat(updatedGroup)
         Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId}) by ${if (isAdmin) "admin" else "member"}")
+
+        // If we are the group admin and received a member's self-removal, relay the updated group state to all remaining members
+        val myLocalPub = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnablePub = repo.getBurnableIdentity()?.publicKeyB64
+        val isLocalAdmin = existing.adminPublicKeyB64 == myLocalPub || (myBurnablePub != null && existing.adminPublicKeyB64 == myBurnablePub)
+        if (isLocalAdmin && !isAdmin && removed.isNotEmpty()) {
+            for (memberPub in currentMembers) {
+                if (memberPub == myLocalPub || memberPub == myBurnablePub || memberPub == signer) continue
+                val p = peerDao.getPeerByPublicKey(memberPub)
+                if (p != null && p.onionAddress.isNotBlank()) {
+                    val relayPacket = packet.copy(id = java.util.UUID.randomUUID().toString(), targetUserId = memberPub)
+                    repo.dispatchPacket(p.onionAddress, relayPacket)
+                }
+            }
+        }
         return true
     }
 

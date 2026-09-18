@@ -1245,54 +1245,100 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             // Group not found locally — just ensure cleanup
             db.groupChatDao().deleteGroupChat(groupId)
         }
+
+        // Clean up any remaining ghost peers stored only for this deleted group
+        if (existing != null) {
+            val remainingGroups = db.groupChatDao().getAllGroupChatsList()
+            val remainingGroupMembers = remainingGroups.flatMap {
+                try {
+                    com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+                } catch (_: Exception) { emptyList() }
+            }.toSet()
+            val deletedGroupMembers = try {
+                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList() + existing.adminPublicKeyB64
+            } catch (_: Exception) { emptyList() }
+            for (memberPub in deletedGroupMembers) {
+                if (memberPub !in remainingGroupMembers && memberPub != myKeys.publicKeyB64 && memberPub != burnableKeys?.publicKeyB64) {
+                    val p = peerDao.getPeerByPublicKey(memberPub)
+                    if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                        peerDao.deletePeer(p)
+                    }
+                }
+            }
+        }
     }
 
     suspend fun leaveGroupChat(groupId: String) {
-        val myKeys = getLocalIdentity()
+        val myKeys = getLocalIdentity() ?: return
         val burnable = getBurnableIdentity()
-        val existing = db.groupChatDao().getGroupChatById(groupId)
+        val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
 
-        // Always delete locally first so the user is immediately free of the group
+        val previousMembers: List<String> = try {
+            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        // Determine which identity we are known by in this group
+        val signingKey = when {
+            burnable != null && previousMembers.contains(burnable.publicKeyB64) -> burnable
+            previousMembers.contains(myKeys.publicKeyB64) -> myKeys
+            burnable != null && existing.allowMemberInvites -> burnable
+            else -> myKeys
+        }
+
+        val finalRemoved = listOf(signingKey.publicKeyB64)
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, existing.title, signingKey.publicKeyB64, timestamp.toString())
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
+        val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
+            groupId = groupId,
+            title = existing.title,
+            avatarB64 = existing.avatarB64,
+            description = existing.description,
+            addedMembers = null,
+            removedMembers = finalRemoved,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = signingKey.publicKeyB64,
+            type = "GROUP_UPDATE",
+            payload = com.google.gson.Gson().toJsonTree(updatePayload)
+        )
+
+        // 1. Direct targeted dispatch to all group members (including admin) so it reliably reaches them
+        val allGroupPeers = (previousMembers + existing.adminPublicKeyB64).distinct()
+        for (memberPub in allGroupPeers) {
+            if (memberPub == signingKey.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+            val p = peerDao.getPeerByPublicKey(memberPub)
+            if (p != null && p.onionAddress.isNotBlank()) {
+                meshSocialRepository.dispatchPacket(p.onionAddress, packet.copy(targetUserId = memberPub))
+            }
+        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        // 2. Delete group locally
         db.groupChatDao().deleteGroupChat(groupId)
 
-        if (existing != null && myKeys != null) {
-            val previousMembers: List<String> = try {
-                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
-            } catch (e: Exception) { emptyList() }
+        // 3. Clean up ghost peers stored only for this group to prevent them appearing as Pending Requests
+        val otherGroups = db.groupChatDao().getAllGroupChatsList()
+        val otherGroupMembers = otherGroups.flatMap {
+            try {
+                com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+            } catch (_: Exception) { emptyList() }
+        }.toSet()
 
-            val localKeySet = setOfNotNull(
-                myKeys.publicKeyB64,
-                myKeys.onionAddress,
-                burnable?.publicKeyB64,
-                burnable?.onionAddress
-            )
-
-            val newMembers = previousMembers.filter { it !in localKeySet }
-            val removedMembers = previousMembers.filter { it in localKeySet }
-            val finalRemoved = if (removedMembers.isNotEmpty()) removedMembers else listOf(myKeys.publicKeyB64)
-
-            val timestamp = System.currentTimeMillis()
-            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, existing.title, myKeys.publicKeyB64, timestamp.toString())
-            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-            val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
-                groupId = groupId,
-                title = existing.title,
-                avatarB64 = existing.avatarB64,
-                description = existing.description,
-                addedMembers = null,
-                removedMembers = finalRemoved,
-                timestamp = timestamp,
-                signature = signature
-            )
-            val packet = com.noslop.app.mesh.NetworkPacket(
-                id = java.util.UUID.randomUUID().toString(),
-                senderId = myKeys.publicKeyB64,
-                type = "GROUP_UPDATE",
-                payload = com.google.gson.Gson().toJsonTree(updatePayload)
-            )
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-            Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${finalRemoved.size} key(s) and deleted locally")
+        for (memberPub in allGroupPeers) {
+            if (memberPub !in otherGroupMembers && memberPub != myKeys.publicKeyB64 && memberPub != burnable?.publicKeyB64) {
+                val p = peerDao.getPeerByPublicKey(memberPub)
+                if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                    peerDao.deletePeer(p)
+                    Logger.info("REPOSITORY", "Cleaned up non-contact group peer: ${p.handle}")
+                }
+            }
         }
+
+        Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${signingKey.publicKeyB64.take(8)}... and cleaned up group peers")
     }
 
     suspend fun resendGroupInvites(groupId: String) {
