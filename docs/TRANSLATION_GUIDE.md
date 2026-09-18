@@ -54,3 +54,5 @@ val languages = listOf("en" to "English", "hu" to "Magyar", "es" to "Español")
 3. Submit a Pull Request (PR) to the main NoSlop repository with your new `.json` file and updated Kotlin files.
 
 *Thank you for helping make the mesh accessible to everyone!*
+
+> 💡 **Zero-Code Dynamic Language Discovery:** Any new `content_<code >.json` added to `app/src/main/assets/languages/` is automatically discovered by `LanguageManager` at runtime and appears immediately in the app's language picker with its native language name.
