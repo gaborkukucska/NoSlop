@@ -1,5 +1,15 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-18) — Global Multi-Language Localization & Zero-Code Dynamic Discovery (v0.5.8-alpha)
+
+* **21+ Languages Fully Supported (`app/src/main/assets/languages/`)**:
+  * Added 18 comprehensive community translations alongside English, Hungarian, and Spanish: Romanian (`ro`), Swedish (`sv`), Czech (`cs`), Vietnamese (`vi`), Hindi (`hi`), Arabic (`ar`), Dutch (`nl`), Turkish (`tr`), French (`fr`), Russian (`ru`), Chinese (`zh`), Polish (`pl`), Korean (`ko`), Ukrainian (`uk`), Japanese (`ja`), Portuguese (`pt`), Italian (`it`), and German (`de`).
+  * 100% parity across all 792 localized UI strings, system dialogs, error messages, and onboarding steps.
+* **Zero-Code Dynamic Language Discovery (`LanguageManager.kt`, `TRANSLATION_GUIDE.md`)**:
+  * Implemented runtime discovery of language assets: any `content_<code >.json` placed in `app/src/main/assets/languages/` is automatically enumerated and registered on application startup.
+  * Resolved native language names via `WELL_KNOWN_LANGUAGES` map with dynamic `java.util.Locale` fallback, sorting alphabetically with English pinned first.
+  * Community contributors can now add or test translations by simply dropping a JSON file into the assets folder without touching any Kotlin or Compose code.
+
 ## Completed Changes (2026-09-18) — Decentralized Group Directory Sync, Mesh Node Blacklist & ProGuard Hardening (v0.5.8-alpha)
 
 * **Decentralized Group Member Directory Synchronization (`Packets.kt`, `NoSlopRepository.kt`, `HandshakePacketHandler.kt`, `GossipService.kt`)**:
@@ -1897,6 +1907,49 @@ is [AUDIT_2026_09_03.md](AUDIT_2026_09_03.md).
     ahead, none behind, 8s head start. Clearnet behaviour unchanged.
 
 
+
+## Open Architectural & Technical Register (Consolidated from FINDINGS.md)
+
+This section tracks the active architectural enhancements and audit items for the NoSlop Android application (`app/`), serving as the unified single source of truth:
+
+### 1. Cryptographic Payload Canonicalization (Finding #4 / P1-7)
+- **Current State**: Handlers and `MeshPacketVerifier` utilize length-prefixed encoding (`CryptoService.encodeForSigning`) across high-volume types (`POST`, `EDIT_POST`, `DELETE_POST`, `USER_HANDSHAKE`, `CONNECTION_REQUEST`, `CHAT_REACTION`, `GROUP_INVITE`, `GROUP_DELETE`). Legacy pipe-delimited strings (`|`) remain supported as fallback for `COMMENT`, `EDIT_COMMENT`, `IDENTITY_UPDATE`, and `FOLLOW`.
+- **Roadmap**: Transition all packet types to a unified, versioned canonical encoder (e.g. sorted-key JSON with explicit null representations) emitting a protocol version header (`sigVersion = 2`) with a backward-compatible transition window.
+
+### 2. Complete Database Encryption at Rest (Finding #11 / P0-2)
+- **Current State**: Group message bodies are encrypted at rest using an app-scoped AES-256-GCM master key held in the Android Keystore (`GroupMessageCrypto`, Room migration 12→13). 1:1 Direct Messages store encrypted ciphertext and nonces from X25519/ChaCha20-Poly1305 key agreement.
+- **Roadmap**: The underlying Room SQLite database (`mesh.db`) stores non-message entities (feed sources, viewed history, peers, and settings) in standard SQLite. Full-database encryption via SQLCipher is planned for post-v0.5 releases.
+
+### 3. Direct Message Forward Secrecy & Ratchet
+- **Current State**: Direct messaging uses static-static X25519 key agreement derived into a ChaCha20-Poly1305 key via SHA3-256.
+- **Roadmap**: Implement Double Ratchet protocol (Signal / Olm style) to provide per-message ephemeral key exchanges and forward secrecy.
+
+### 4. ProGuard Keep Surface Refactoring (P2-2) ✅
+- **Current State & Resolution**:
+  1. Replaced broad package wildcards with explicit `@Keep` annotations on all DTOs and models in `Packets.kt`, `GroupChat.kt`, `UserProfile.kt`, and `UpdateChecker.kt`.
+  2. Added `-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*` to `proguard-rules.pro` to prevent R8 from stripping Gson `TypeToken` generic type metadata in release builds.
+  3. Enables R8 to safely optimize, minify, and eliminate dead code without risking runtime JSON serialization or deserialization failures.
+
+### 5. Architectural Decomposition (P2-3 & P2-4)
+- **Current State**: `NoSlopRepository` and `NoSlopViewModel` coordinate cross-domain flows (mesh, feeds, engagement, settings, and Hubs).
+- **Roadmap**: Decompose large repository and ViewModel classes along existing domain boundaries (`HubRepository`, `ChatRepository`, `FeedViewModel`, `DMsViewModel`).
+
+### 6. LAN Hub TLS Pinning (Finding #14)
+- **Current State**: Because Android's Network Security Config enforces system-anchor TLS and restricts cleartext to loopback and `.onion`, Hub API interactions route reliably over the authenticated Tor hidden service (`.onion`) endpoint.
+- **Roadmap**: Support direct LAN HTTP fast-path with Hub self-signed certificate generation and fingerprint pinning.
+
+### 7. Client-Side Proxy Secret and Shared API Keys (P1-9 / D-2) ✅
+- **Current State & Resolution**:
+  1. `ProxyAuth.kt` dynamically accepts user-configured `custom_proxy_url` and `custom_proxy_secret` from `ApiKeyRepository`, allowing users to route through their own self-hosted Cloudflare Worker or reverse proxy endpoints while falling back safely to `BuildConfig` defaults.
+  2. `JamendoApiClient.kt` accepts user-configured Jamendo Client IDs from `ApiKeyRepository`, falling back gracefully to the public CC client ID (`709fa152`).
+  3. `ApiKeyRepository.SERVICES` exposes `jamendo`, `custom_proxy_url`, and `custom_proxy_secret` directly in `ApiKeysScreen.kt` for secure user configuration.
+
+### 8. Sovereign Identity Recovery & Tiered Backup Architecture (Finding #2 / D-1) ✅
+- **Current State**: Restoring only from a 12-word mnemonic phrase cannot reconstruct a serverless node's peer connections, group chat states, secondary/burnable creator keys, or local preferences. Recovery is anchored on AES-256-GCM authenticated ZIP archives (`BackupManager.kt`).
+- **Resolution**:
+  1. Implemented tiered backup export (`BackupMediaOption.NONE` for lightweight ~100 KB IDs/keys/database archive vs. `BackupMediaOption.OWNED_ONLY` for owned media).
+  2. Proactive advisory modals prompt users to back up their node upon onboarding completion and whenever secondary/creator hidden services or keys change (`NoSlopViewModel.BackupPromptReason`).
+  3. Pruned dead derivation pathways and aligned test fakes.
 
 ## Consolidated Master Backlog
 

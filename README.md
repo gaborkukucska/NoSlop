@@ -33,6 +33,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 🔒 **Mathematical Privacy** — E2EE Direct Messages (X25519 + ChaCha20-Poly1305) and multi-member mesh group chats.
 * 🧅 **Strict Tor-Routed Anonymity** — All network traffic routes through an embedded Tor SOCKS5 daemon with dedicated per-stream circuit isolation.
 * 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
+* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery.
 
 ---
 
@@ -86,6 +87,35 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 ---
 
+## 🌍 Community Localization (21+ Languages Supported)
+
+NoSlop is designed to be accessible to anyone, anywhere in the world. As of **v0.5.8-alpha**, the app includes **21 native language translations** covering every UI string, modal, and system message:
+
+| Language | Code | Native Name | Language | Code | Native Name |
+|---|---|---|---|---|---|
+| English | `en` | English | العربية | `ar` | Arabic |
+| Magyar | `hu` | Hungarian | Nederlands | `nl` | Dutch |
+| Español | `es` | Spanish | Polski | `pl` | Polish |
+| Deutsch | `de` | German | Türkçe | `tr` | Turkish |
+| Italiano | `it` | Italian | Українська | `uk` | Ukrainian |
+| Português | `pt` | Portuguese | Čeština | `cs` | Czech |
+| Français | `fr` | French | Svenska | `sv` | Swedish |
+| Русский | `ru` | Russian | Română | `ro` | Romanian |
+| 中文 | `zh` | Chinese (Simplified) | Tiếng Việt | `vi` | Vietnamese |
+| 日本語 | `ja` | Japanese | हिन्दी | `hi` | Hindi |
+| 한국어 | `ko` | Korean | | | |
+
+### 🗣️ Help Review & Submit Translations!
+Are you a native speaker of one of the languages above? **We warmly invite you to review existing strings, report typos, or improve natural phrasing!**
+
+NoSlop features **Zero-Code Dynamic Language Discovery**:
+- Anyone can contribute a translation without knowing Kotlin or writing code.
+- Simply inspect or duplicate `app/src/main/assets/languages/content_en.json` and translate the text on the right side of each key.
+- Dropping a new `content_<code >.json` file into the assets folder immediately registers it in the app's language selector at runtime!
+- Read our step-by-step [docs/TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md) to get started or submit a Pull Request.
+
+---
+
 ## 🛠️ Tech Stack
 
 | Layer | Technologies |
@@ -113,11 +143,11 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🏗️ **[docs/BUILD.md](docs/BUILD.md)** — Compilation instructions and signing configuration.
 * 📡 **[docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)** — Complete 24-packet HAI-Net wire protocol catalog and payload schemas.
 * 🔬 **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — Deep technical specification (crypto derivations, Tor internals, SOCKS5 isolation, media pipelines).
-* 📈 **[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — Detailed technical milestone changelog and completed audit resolutions.
 * 🌍 **[docs/TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — Guide for community localization and language JSON files.
 * 🛡️ **[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — User privacy expectations, data sovereignty, and security posture.
 * 🏠 **[docs/archived/HUB_INTEGRATION_PLAN.md](docs/archived/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.
-* 📋 **[docs/FINDINGS.md](docs/FINDINGS.md)** — Architectural findings, security enhancements, and technical roadmap.
+* 📈 **[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — Detailed technical milestone changelog, open technical findings, and completed audit resolutions (single source of truth).
+* 🗄️ **[docs/archived/](docs/archived/)** — Historical architectural proposals, milestone verification reports, and legacy roadmaps.
 * 🛠️ **[docs/SUPPORT.md](docs/SUPPORT.md)** — Backup/restore guides, troubleshooting, and operations.
 * 🐞 **[docs/DEBUG.md](docs/DEBUG.md)** — Extracting structured diagnostic logs.
 
