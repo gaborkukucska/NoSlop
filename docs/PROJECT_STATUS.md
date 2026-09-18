@@ -11,8 +11,16 @@
   * Implemented `editComment(commentId, newContent)` and `deleteComment(commentId)` with Ed25519 signing and mesh broadcast (`EDIT_COMMENT`, `DELETE_COMMENT`).
   * Added Edit and Delete UI action buttons to `CommentsBottomSheet.kt` for authors on their own comments.
   * Rendered deleted comments as italicized `[Deleted]` placeholders with reactions/replies suppressed.
-* **Mesh Peer Following UI Integration (`PeerItem.kt`)**:
-  * Added reactive "Follow Creator" / "Unfollow Creator" toggle buttons in `ContactCardDialog` (`PeerItem.kt`), wired directly to `toggleFollowPeer`.
+* **Mesh Peer Following UI Integration & Feed Prioritization (`PeerItem.kt`, `FeedCard.kt`, `NoSlopViewModel.kt`)**:
+  * Added reactive "Follow Creator" / "Unfollow Creator" toggle buttons in `ContactCardDialog` (`PeerItem.kt`) and `FeedCard.kt` profile sheet, wired directly to `toggleFollowPeer`.
+  * Added visual `Following` badge next to author handles on mesh posts from followed peers.
+  * Prioritized posts from followed peers in the Live Feed round-robin interleaver and Mesh feed.
+* **Decentralized Group Moderation & Member Banning (`GroupChat.kt`, `NoSlopDatabase.kt`, `Packets.kt`, `HandshakePacketHandler.kt`, `DmPacketHandler.kt`, `GroupSettingsModal.kt`)**:
+  * Added `bannedMembersJson` column to `GroupChat` entity and Room schema version 15 (`MIGRATION_14_15`).
+  * Group admins can ban members with 1-tap in `GroupSettingsModal.kt`, preventing bad actors from rejoining open groups and dropping incoming messages from banned keys.
+  * Added "Banned Members ({count}) 🚫" section in group settings with 1-tap unban functionality.
+* **Wire Protocol Conformance Test Suite Expansion (`WireProtocolTest.kt`)**:
+  * Added unit test coverage validating serialization, deserialization, and snake_case wire key contracts for `EDIT_COMMENT`, `DELETE_COMMENT`, and `FOLLOW`.
 * **Dead Code Pruning (`Packets.kt`, `HandshakePacketHandler.kt`)**:
   * Removed obsolete unpersisted `SUBSCRIBE` / `SubscribePayload` stub superseded by `FOLLOW`.
 

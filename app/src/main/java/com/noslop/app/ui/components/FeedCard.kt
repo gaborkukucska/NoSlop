@@ -798,6 +798,18 @@ fun FullScreenMeshCardV2(
                         }
                     }
                     Text(displayHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                    val authorPeer = allPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
+                    if (authorPeer?.isFollowing == true) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(AccentGreen.copy(alpha = 0.2f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("Following".tr, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
 
                 if (showUserInfoDialog) {
@@ -977,6 +989,26 @@ fun FullScreenMeshCardV2(
                                         viewModel?.viewAuthorPosts(post.authorPublicKeyB64, clickedPost.id)
                                     }
                                 )
+                            }
+
+                            if (!isSelf) {
+                                val isFollowing = peer?.isFollowing == true
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        viewModel?.toggleFollowPeer(post.authorPublicKeyB64, !isFollowing)
+                                    },
+                                    colors = if (isFollowing) {
+                                        ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = TextMuted)
+                                    } else {
+                                        ButtonDefaults.buttonColors(containerColor = AccentGreen.copy(alpha = 0.2f), contentColor = AccentGreen)
+                                    },
+                                    border = BorderStroke(1.dp, if (isFollowing) BorderSubtle else AccentGreen),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                                ) {
+                                    Text(if (isFollowing) "Unfollow Creator".tr else "Follow Creator".tr, fontWeight = FontWeight.Bold)
+                                }
                             }
 
                             if (!isSelf && !isTrusted && targetOnion != null) {

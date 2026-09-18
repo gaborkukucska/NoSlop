@@ -216,8 +216,8 @@ fun GroupChatThreadScreen(
             myPubKey = localKeys?.publicKeyB64,
             myHandle = localHandle,
             myBurnablePubKey = burnableKeys?.publicKeyB64,
-            onUpdateGroup = { title, desc, avatarB64, allowInviting, allowSelfRemove, members ->
-                viewModel.updateGroupChat(group.groupId, title, desc, avatarB64, allowInviting, allowSelfRemove, members)
+            onUpdateGroup = { title, desc, avatarB64, allowInviting, allowSelfRemove, members, bannedMembers ->
+                viewModel.updateGroupChat(group.groupId, title, desc, avatarB64, allowInviting, allowSelfRemove, members, bannedMembers)
             },
             onLeaveGroup = {
                 viewModel.leaveGroupChat(group.groupId)

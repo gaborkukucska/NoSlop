@@ -129,6 +129,10 @@ class DmPacketHandler(
                     Logger.warn(TAG, "Dropping group message for $groupId: sender ${packet.senderId.take(8)}... is not a member")
                     return false
                 }
+                if (group.getBannedMembers().contains(packet.senderId)) {
+                    Logger.warn(TAG, "Dropping group message for $groupId: sender ${packet.senderId.take(8)}... is banned")
+                    return false
+                }
             }
 
             // Peer just delivered an authenticated DM, immediately clear any network failure cooldown
@@ -429,6 +433,9 @@ object GroupMessageGate {
         } catch (e: Exception) { emptyList() }
         if (!members.contains(senderId)) {
             return Verdict.Reject("sender $senderId is not a member of group ${group.groupId}")
+        }
+        if (group.getBannedMembers().contains(senderId)) {
+            return Verdict.Reject("sender $senderId is banned from group ${group.groupId}")
         }
         if (payload.signature.isNullOrBlank()) {
             return Verdict.Reject("missing cryptographic signature from sender $senderId")

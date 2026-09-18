@@ -1043,7 +1043,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         avatarB64: String?,
         allowInvites: Boolean,
         allowSelfRemove: Boolean,
-        membersList: List<String>
+        membersList: List<String>,
+        bannedMembersList: List<String> = emptyList()
     ) {
         val myKeys = getLocalIdentity() ?: return
         val burnableKeys = getBurnableIdentity()
@@ -1083,6 +1084,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val effectiveAvatarB64 = if (isAdmin) avatarB64 else existing.avatarB64
         val effectiveAllowInvites = if (isAdmin) allowInvites else existing.allowMemberInvites
         val effectiveAllowSelfRemove = if (isAdmin) allowSelfRemove else existing.allowMemberSelfRemove
+        val effectiveBannedList = if (isAdmin) bannedMembersList else existing.getBannedMembers()
 
         val updatedGroup = existing.copy(
             title = effectiveTitle,
@@ -1091,7 +1093,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             allowMemberInvites = effectiveAllowInvites,
             allowMemberSelfRemove = effectiveAllowSelfRemove,
             membersJson = membersJson,
-            memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap)
+            memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap),
+            bannedMembersJson = com.google.gson.Gson().toJson(effectiveBannedList)
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
@@ -1123,6 +1126,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             description = if (isAdmin) effectiveDescription else null,
             addedMembers = addedMembers.takeIf { it.isNotEmpty() },
             removedMembers = removedMembers.takeIf { it.isNotEmpty() },
+            bannedMembers = if (isAdmin && effectiveBannedList.isNotEmpty()) effectiveBannedList else null,
             memberHandles = memberHandlesMap,
             memberDetails = memberDetailsMap,
             allowMemberInvites = if (isAdmin) effectiveAllowInvites else null,

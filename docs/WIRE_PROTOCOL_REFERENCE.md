@@ -437,6 +437,7 @@ packet can never reassign a group's admin.
 | `description`? | String | New description |
 | `added_members`? | Array<String> | Members added by this update (a delta, not the full list) |
 | `removed_members`? | Array<String> | Members removed by this update |
+| `banned_members`? | Array<String> | Members blacklisted/banned by this update (admin only) |
 | `member_handles`? | Map<String, String> | Display handles of members |
 | `member_details`? | Map<String, GroupMemberInfo> | Directory of member onion addresses and X25519 encryption keys |
 | `allow_member_invites`? | Boolean | Updated invite permission flag (admin only) |

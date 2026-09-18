@@ -328,6 +328,7 @@ data class GroupUpdatePayload(
     @SerializedName("description") val description: String? = null,
     @SerializedName("added_members") val addedMembers: List<String>? = null,
     @SerializedName("removed_members") val removedMembers: List<String>? = null,
+    @SerializedName("banned_members") val bannedMembers: List<String>? = null,
     @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
     @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
     @SerializedName("allow_member_invites") val allowMemberInvites: Boolean? = null,

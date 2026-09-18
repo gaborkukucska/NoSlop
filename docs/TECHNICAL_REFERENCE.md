@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.5.8-alpha`, Room schema version 14 — see §10, compileSdk/targetSdk
+versionName `0.5.8-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -930,7 +930,7 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 14)
+## 10. Data Model (Room, version 15)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
@@ -956,7 +956,7 @@ keyword lists (`keywords_<Category>`), `selected_categories`,
 `channel_cutoff_enabled`, `channel_cutoff_year`, `channel_cutoff_month`,
 `enable_aggregator`, `user_profile` (JSON), `dm_all_tab_hidden` (`"true"`/`"false"`).
 
-Database migrations (`MIGRATION_1_2` through `MIGRATION_13_14`) safely preserve data across schema updates. `MIGRATION_12_13` introduced `pending_group_messages` and Keystore message encryption, and `MIGRATION_13_14` re-encrypts legacy group messages with mandatory AAD binding (`$groupId|$msgId`).
+Database migrations (`MIGRATION_1_2` through `MIGRATION_14_15`) safely preserve data across schema updates. `MIGRATION_12_13` introduced `pending_group_messages` and Keystore message encryption, `MIGRATION_13_14` re-encrypted legacy group messages with mandatory AAD binding (`$groupId|$msgId`), and `MIGRATION_14_15` added `bannedMembersJson` to `group_chats` for decentralized group moderation.
 
 ---
 

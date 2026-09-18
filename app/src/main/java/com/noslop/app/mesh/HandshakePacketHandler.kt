@@ -850,8 +850,11 @@ class HandshakePacketHandler(
         }
 
         syncMemberPeers(update.memberDetails)
-        currentMembers.addAll(added)
+        val bannedSet = (existing.getBannedMembers() + (if (isAdmin) update.bannedMembers.orEmpty() else emptyList())).toSet()
+        val filteredAdded = added.filter { it !in bannedSet }
+        currentMembers.addAll(filteredAdded)
         currentMembers.removeAll(removed.toSet())
+        currentMembers.removeAll(bannedSet)
         val updatedTitle = update.title ?: existing.title
 
         val handlesMap = existing.getMemberHandles().toMutableMap()
@@ -867,7 +870,8 @@ class HandshakePacketHandler(
             allowMemberInvites = allowInvites,
             allowMemberSelfRemove = allowSelfRemove,
             membersJson = com.google.gson.Gson().toJson(currentMembers.distinct()),
-            memberHandlesJson = com.google.gson.Gson().toJson(handlesMap)
+            memberHandlesJson = com.google.gson.Gson().toJson(handlesMap),
+            bannedMembersJson = if (isAdmin && update.bannedMembers != null) com.google.gson.Gson().toJson(bannedSet.toList()) else existing.bannedMembersJson
         )
         // --- NOSLOP_GROUP_DELTA_V1 ---
         // If this update removed us, drop the group locally rather than leaving

@@ -1490,8 +1490,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 } else {
                     val sortedSpecificFeeds = specificFeeds.sortedByDescending { it.publishedAt }
 
+                    val followedPubs = peers.value.filter { it.isFollowing }.map { it.publicKeyB64 }.toSet()
+                    val sortedMeshes = specificMeshes.sortedWith(
+                        compareByDescending<MeshPost> { it.authorPublicKeyB64 in followedPubs }
+                            .thenByDescending { it.timestamp }
+                    )
                     batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
-                    batch.addAll(specificMeshes.sortedByDescending { it.timestamp }.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
+                    batch.addAll(sortedMeshes.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
                 }
             }
             
@@ -1675,11 +1680,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     "total candidates=${recentFeeds.size}"
             )
         }
+        val followedPubKeys = peers.value.filter { it.isFollowing }.map { it.publicKeyB64 }.toSet()
         val v = rawVideos.takeRoundRobin(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
         val a = rawAudios.takeRoundRobin(targetA, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
         val i = rawImages.takeRoundRobin(targetI, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
         val t = rawArticles.takeRoundRobin(targetT, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
-        val m = rawMeshes.take(targetM).map { UnifiedItem.Mesh(it) }.toMutableList()
+        val m = rawMeshes.takeRoundRobin(targetM, { it.authorPublicKeyB64 }, { it.authorPublicKeyB64 in followedPubKeys }).map { UnifiedItem.Mesh(it) }.toMutableList()
 
         val batch = mutableListOf<UnifiedItem>()
         val buckets = listOf(v, m, a, i, t) // Order of round-robin attempts
@@ -2499,10 +2505,11 @@ fun toggleAggregator() {
         avatarB64: String?,
         allowInvites: Boolean,
         allowSelfRemove: Boolean,
-        membersList: List<String>
+        membersList: List<String>,
+        bannedMembersList: List<String> = emptyList()
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.updateGroupChat(groupId, title, description, avatarB64, allowInvites, allowSelfRemove, membersList)
+            repository.updateGroupChat(groupId, title, description, avatarB64, allowInvites, allowSelfRemove, membersList, bannedMembersList)
         }
     }
 

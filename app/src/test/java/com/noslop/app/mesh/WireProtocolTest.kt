@@ -193,6 +193,93 @@ class WireProtocolTest {
         assertEquals("sig-abc", extracted?.signature)
     }
 
+    @Test
+    fun editCommentPayload_roundTrips() {
+        val edit = EditCommentPayload(
+            postId = "post-1",
+            commentId = "comm-1",
+            authorId = "author-xyz",
+            authorAvatarB64 = "b64avatar",
+            content = "Updated comment content",
+            timestamp = 1700000000000L,
+            signature = "sig-123"
+        )
+        val packet = NetworkPacket(
+            senderId = "author-xyz",
+            type = "EDIT_COMMENT",
+            payload = gson.toJsonTree(edit)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getEditCommentPayload()
+        assertNotNull(extracted)
+        assertEquals("post-1", extracted?.postId)
+        assertEquals("comm-1", extracted?.commentId)
+        assertEquals("author-xyz", extracted?.authorId)
+        assertEquals("b64avatar", extracted?.authorAvatarB64)
+        assertEquals("Updated comment content", extracted?.content)
+        assertEquals("sig-123", extracted?.signature)
+
+        val json = gson.toJson(edit)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("post_id"))
+        assertTrue(obj.has("comment_id"))
+        assertTrue(obj.has("author_id"))
+        assertTrue(obj.has("author_avatar_b64"))
+    }
+
+    @Test
+    fun deleteCommentPayload_roundTrips() {
+        val del = DeleteCommentPayload(
+            postId = "post-1",
+            commentId = "comm-1",
+            authorId = "author-xyz",
+            timestamp = 1700000000000L,
+            signature = "sig-del"
+        )
+        val packet = NetworkPacket(
+            senderId = "author-xyz",
+            type = "DELETE_COMMENT",
+            payload = gson.toJsonTree(del)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getDeleteCommentPayload()
+        assertNotNull(extracted)
+        assertEquals("post-1", extracted?.postId)
+        assertEquals("comm-1", extracted?.commentId)
+        assertEquals("author-xyz", extracted?.authorId)
+        assertEquals("sig-del", extracted?.signature)
+
+        val json = gson.toJson(del)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("post_id"))
+        assertTrue(obj.has("comment_id"))
+        assertTrue(obj.has("author_id"))
+    }
+
+    @Test
+    fun followPayload_roundTrips() {
+        val follow = FollowPayload(
+            followedPublicKeyB64 = "node-target",
+            followerPublicKeyB64 = "node-follower",
+            timestamp = 1700000000000L,
+            signature = "sig-follow",
+            action = "follow"
+        )
+        val packet = NetworkPacket(
+            senderId = "node-follower",
+            type = "FOLLOW",
+            payload = gson.toJsonTree(follow)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getFollowPayload()
+        assertNotNull(extracted)
+        assertEquals("node-target", extracted?.followedPublicKeyB64)
+        assertEquals("node-follower", extracted?.followerPublicKeyB64)
+        assertEquals("follow", extracted?.action)
+
+        val json = gson.toJson(follow)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("followed_public_key"))
+        assertTrue(obj.has("follower_public_key"))
+    }
+
     private fun samplePost() = PostPayload(
         id = "post-1",
         authorId = "author-1",

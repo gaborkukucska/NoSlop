@@ -114,7 +114,7 @@ fun GroupSettingsModal(
     myPubKey: String?,
     myHandle: String? = null,
     myBurnablePubKey: String? = null,
-    onUpdateGroup: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, members: List<String>) -> Unit,
+    onUpdateGroup: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, members: List<String>, bannedMembers: List<String>) -> Unit,
     onLeaveGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
     onResendInvites: (() -> Unit)? = null,
@@ -142,6 +142,7 @@ fun GroupSettingsModal(
         } catch (e: Exception) { emptyList() }
     }
     var membersList by remember { mutableStateOf(currentMembers) }
+    var bannedMembersList by remember { mutableStateOf(group.getBannedMembers()) }
     var showAddMemberDialog by remember { mutableStateOf(false) }
     var showLeaveConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
@@ -333,8 +334,40 @@ fun GroupSettingsModal(
                                 }
                             }
                             if (isAdmin && !isMemberAdmin) {
-                                IconButton(onClick = { membersList = membersList - memberPub }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = DestructiveRed, modifier = Modifier.size(18.dp))
+                                Row {
+                                    IconButton(onClick = {
+                                        bannedMembersList = (bannedMembersList + memberPub).distinct()
+                                        membersList = membersList - memberPub
+                                    }) {
+                                        Text("🚫", fontSize = 14.sp)
+                                    }
+                                    IconButton(onClick = { membersList = membersList - memberPub }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = DestructiveRed, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (bannedMembersList.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Banned Members ({count}) 🚫".tr.replace("{count}", bannedMembersList.size.toString()), color = DestructiveRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        bannedMembersList.forEach { bannedPub ->
+                            val peer = allPeers.find { it.publicKeyB64 == bannedPub }
+                            val name = peer?.handle ?: memberHandlesMap[bannedPub] ?: (bannedPub.take(8) + "...")
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(name, color = TextMuted, fontSize = 12.sp)
+                                if (isAdmin) {
+                                    TextButton(onClick = { bannedMembersList = bannedMembersList - bannedPub }) {
+                                        Text("Unban".tr, color = AccentGreen, fontSize = 12.sp)
+                                    }
                                 }
                             }
                         }
@@ -388,7 +421,7 @@ fun GroupSettingsModal(
                         Button(
                             onClick = {
                                 showOpenGroupWarning = false
-                                onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
+                                onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList, bannedMembersList)
                                 onDismiss()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
@@ -409,7 +442,7 @@ fun GroupSettingsModal(
                     if (isAdmin && allowInvites && !group.allowMemberInvites) {
                         showOpenGroupWarning = true
                     } else {
-                        onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
+                        onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList, bannedMembersList)
                         onDismiss()
                     }
                 },
