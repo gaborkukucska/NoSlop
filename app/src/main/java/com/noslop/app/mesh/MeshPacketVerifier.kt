@@ -234,10 +234,6 @@ object MeshPacketVerifier {
             Signed(matched, sig, signer)
         }
 
-        "SUBSCRIBE" -> packet.getSubscribePayload()?.let { p ->
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.creatorId, p.subscriberId, p.timestamp.toString()), p.signature, p.subscriberId)
-        }
-
         "IDENTITY_UPDATE" -> packet.getIdentityUpdatePayload()?.let { p ->
             var s = "${p.userId}|${p.handle}|${p.timestamp}"
             if (p.authorAvatarB64 != null) s += "|${p.authorAvatarB64}"
