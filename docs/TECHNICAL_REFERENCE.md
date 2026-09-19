@@ -1652,7 +1652,16 @@ The general rule for this codebase: **before spending a retry, establish that
 some input to the operation is different from last time.** Same URL, same
 exit, same client identity means the same result.
 
-### 16.21 Diagnosing from logs
+### 16.21 Long-Stream Playback Stabilization & Continuous Mid-Stream Stall Recovery (`NOSLOP_LONG_STREAM_STALL_V1`)
+
+Longer videos (exceeding 3–5 minutes) experienced stream breakdown over Tor, entering an endless cycle where the video would buffer for 40–50s, play for 2s, and buffer again, eventually failing with `code=2004 (Source error)`:
+
+1. **Rebuffer Threshold Undersizing**: `DefaultLoadControl` configured `bufferForPlaybackAfterRebufferMs = 2000` (2s). Once buffer ran dry, ExoPlayer resumed playback as soon as only 2s of media was buffered. Over high-latency Tor circuits, playing 2s consumed the buffer faster than the incoming connection could supply it, re-triggering `STATE_BUFFERING` immediately. Raised to `8000` (8s) in both `VideoPlayer.kt` and `PreloadManager.kt`.
+2. **Diagnostic Monitor Early Exit**: The buffer progress sampler in `VideoPlayer.kt` included `if (p.playbackState == STATE_READY && p.isPlaying) return@LaunchedEffect`. As a result, the monitor terminated as soon as playback commenced at minute 0 and never ran during mid-playback stalls, leaving the player hung until OkHttp's 60s read timeout timed out. Removing the early return keeps the monitor active for the full duration of playback.
+3. **Recovery Authorization (`canRetry`)**: `canRetry` was limited strictly to `retryTrigger < 2`. For a long video, any third reconnect was refused, showing "Video unavailable". `canRetry` now permits recovery if the video was already playing (`isVideoReady || resumePosition >= 8000L`), and resets `retryTrigger` to 0 after 15s of stable playback.
+4. **Socket Keep-Alive**: `HttpClientProvider.getOrCreateIsolatedMediaClient` reduced `ConnectionPool` keepalive from 300s to 60s and `readTimeout` from 60s to 35s, preventing ExoPlayer from hanging on stale Tor sockets.
+
+### 16.22 Diagnosing from logs
 
 Capture unfiltered — `adb logcat -c && adb logcat -v time > noslop.log` — and
 uninstall whichever build variant is not under test (§16.10). Filtering by

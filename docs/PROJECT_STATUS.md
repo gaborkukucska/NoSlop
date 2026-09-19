@@ -1,5 +1,21 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-19) — Long-Stream Playback Stabilization, Stall Recovery & Log Clipboard Hardening (v0.5.9-alpha)
+
+* **Long-Stream Playback Stabilization & Stutter Loop Elimination (`VideoPlayer.kt`, `PreloadManager.kt`)**:
+  * Resolved the 2-second buffer/play loop on videos longer than 3–5 minutes by raising `bufferForPlaybackAfterRebufferMs` from 2,000ms to 8,000ms (8s) in both `VideoPlayer.kt` and `PreloadManager.kt`. When network throughput dips over Tor, ExoPlayer now buffers a healthy 8-second cushion before resuming rather than playing out 2 seconds immediately and stalling repeatedly.
+  * Restored continuous mid-stream stall monitoring: removed the premature `return@LaunchedEffect` that was killing the `VideoPlayer` diagnostic loop as soon as the first frame rendered at minute 0. The monitor now continues sampling throughout the entire video and proactively triggers stream recovery if the buffer fails to advance for 28s on Tor.
+  * Enabled stream recovery for active videos: updated `canRetry` to allow reconnection if the video was already playing (`isVideoReady || resumePosition >= 8000L`). When a video plays stably for 15 seconds, `retryTrigger` is automatically reset to 0, allowing 10–30+ minute videos to recover across multiple transient Tor circuit stalls without hitting permanent failure lockouts.
+* **SOCKS5 Media Connection Pool & Timeout Hardening (`HttpClientProvider.kt`)**:
+  * Reduced `ConnectionPool` keepalive duration from 300s (5m) to 60s for isolated media clients, preventing ExoPlayer range requests from reusing half-dead or idle-throttled Tor sockets.
+  * Reduced `readTimeout` from 60s to 35s so dead sockets fail and recover fast instead of freezing the player for a full minute.
+* **Preload Headroom Tuning (`PreloadManager.kt`)**:
+  * Raised `MAX_PRELOAD` from 2 to 3, ensuring that while the visible video plays, upcoming slides remain warm in memory for instant ~100–170ms first-frame rendering on swipe.
+* **Log Clipboard Binder Protection & Ring Buffer Expansion (`Logger.kt`, `NoSlopViewModel.kt`)**:
+  * Fixed a fatal `android.os.TransactionTooLargeException` crash when copying logs by bounding clipboard copy to the latest ~500 KB (approx. 3,000 lines), staying safely within Android's 1MB IPC Binder transaction limit.
+  * Expanded `Logger.MAX_ENTRIES` in-memory ring buffer from 500 to 2,000 entries so the in-app scrollable viewer retains more history during high-frequency mesh gossip periods.
+  * Added `Logger.getAllLogsText()` to read the complete log from disk (including rotated `.log.1` generations) on export.
+
 ## Completed Changes (2026-09-18) — Feed Health, Invidious Resiliency, Comment Management & Peer Follows (v0.5.8-alpha)
 
 * **RSS & Feed Health Restoration (`SourceLibrary.kt`, `FeedRepository.kt`)**:
