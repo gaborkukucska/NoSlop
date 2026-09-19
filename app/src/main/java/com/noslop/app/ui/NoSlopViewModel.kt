@@ -3075,12 +3075,8 @@ fun toggleAggregator() {
     fun copyLogToClipboard(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
             val rawText = Logger.getAllLogsText()
-            // Android Binder transaction limit is 1MB system-wide.
-            // Cap clipboard text to the latest ~600KB (approx 3000-4000 lines) to prevent TransactionTooLargeException.
-            val safeText = if (rawText.length > 600_000) {
-                val truncated = rawText.takeLast(600_000)
-                truncated.substringAfter("
-") // Start cleanly on a newline
+            val safeText = if (rawText.length > 500_000) {
+                rawText.takeLast(500_000).substringAfter('\n', "")
             } else {
                 rawText
             }

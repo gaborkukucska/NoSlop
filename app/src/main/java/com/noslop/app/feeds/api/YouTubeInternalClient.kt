@@ -513,16 +513,7 @@ object YouTubeInternalClient {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
 
-        // 1. HLS Manifest. Muxed and adaptive-bitrate, split into small chunks.
-        //    Crucially, segmented HLS avoids YouTube's progressive file throttling (>10MB)
-        //    and handles Tor circuit latency variations automatically.
-        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
-        if (!hlsUrl.isNullOrBlank()) {
-            Logger.info(TAG, "Using HLS manifest — muxed and adaptive bitrate")
-            return hlsUrl
-        }
-
-        // 2. Progressive formats (single muxed stream, e.g. itag 18 / 22).
+        // 1. Progressive formats (single muxed stream, e.g. itag 18 / 22).
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
             val valid = formats.mapNotNull { element ->
@@ -540,6 +531,13 @@ object YouTubeInternalClient {
                 }
                 return chosen.first
             }
+        }
+
+        // 2. HLS. Muxed and adaptive-bitrate fallback.
+        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
+        if (!hlsUrl.isNullOrBlank()) {
+            Logger.info(TAG, "Using HLS manifest — muxed and adaptive bitrate")
+            return hlsUrl
         }
 
         // 3. --- NOSLOP_MUXED_ONLY_V1 ---
