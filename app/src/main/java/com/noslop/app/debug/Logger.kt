@@ -68,7 +68,7 @@ object Logger {
             "[$timestamp] [${level.name}] [$module] $message${details?.let { " | $it" } ?: ""}"
     }
 
-    private const val MAX_ENTRIES = 500
+    private const val MAX_ENTRIES = 2000
 
     /** Rotate at 4MB; one previous generation is kept, so worst case on disk is ~8MB. */
     private const val MAX_FILE_BYTES = 4L * 1024 * 1024
@@ -202,6 +202,24 @@ object Logger {
     fun error(module: String, message: String, details: String? = null) = log(Level.ERROR, module, message, details)
 
     fun getLogs(): List<LogEntry> = ringBuffer.toList()
+
+    fun getAllLogsText(): String {
+        val file = logFile
+        if (file != null && file.exists()) {
+            return try {
+                val sb = StringBuilder()
+                val prev = File(file.parentFile, file.name + ".1")
+                if (prev.exists()) {
+                    sb.append(prev.readText())
+                }
+                sb.append(file.readText())
+                sb.toString().ifBlank { ringBuffer.joinToString("\n") { it.toString() } }
+            } catch (e: Exception) {
+                ringBuffer.joinToString("\n") { it.toString() }
+            }
+        }
+        return ringBuffer.joinToString("\n") { it.toString() }
+    }
 
     fun clearLog() {
         ringBuffer.clear()
