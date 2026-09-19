@@ -628,9 +628,10 @@ fun VideoPlayer(
     var source by remember(url) { mutableStateOf<VideoSource?>(initialSource) }
     var isVideoReady by remember(url) { mutableStateOf(false) }
 
-    LaunchedEffect(isVideoReady, isVisible, retryTrigger) {
-        if (isVideoReady && isVisible && retryTrigger > 0) {
-            kotlinx.coroutines.delay(15_000L)
+    // Stable playback recovery callback: only reset retry count if video is actively playing
+    val onStablePlayback = {
+        if (retryTrigger > 0 && isVideoReady) {
+            Logger.info("VIDEO", "Video has played stably for 16s — resetting retry trigger to 0")
             retryTrigger = 0
         }
     }
@@ -657,8 +658,13 @@ fun VideoPlayer(
     LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible, activeVisible) {
         // Offscreen next slide is warmed by PreloadManager; VideoPlayer only resolves for the visible slide
         if (!isVisible && !activeVisible) return@LaunchedEffect
+        // If retryTrigger was reset to 0 after stable playback, do NOT re-resolve or kill the player
+        if (retryTrigger == 0 && isVideoReady && source != null) return@LaunchedEffect
         val forceRefresh = retryTrigger > 0
-        if (forceRefresh) source = null
+        if (forceRefresh) {
+            source = null
+            isVideoReady = false
+        }
         // If this slide is merely next but not visible, only check existing cache without triggering network resolves
         if (!isVisible && activeVisible) {
             val cached = sourceCache["$url||${mediaSettings.videoQuality.ifBlank { "medium" }}"]?.takeIf { it.stalenessReason() == null }?.source
@@ -719,6 +725,7 @@ fun VideoPlayer(
                             canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES || isVideoReady || PlaybackPositionStore.resumePositionFor(stableKey ?: url) >= 8000L,
                             onRetry = {
                                 directPlaybackFailed = false
+                                isVideoReady = false
                                 retryTrigger++
                             },
                             onReady = {
@@ -727,6 +734,7 @@ fun VideoPlayer(
                                 directPlaybackFailed = false
                                 onPlaybackStarted?.invoke()
                             },
+                            onStablePlayback = onStablePlayback,
                             onFailed = { directPlaybackFailed = true }
                         )
                     }
@@ -949,6 +957,7 @@ private fun ExoVideoPlayer(
     canRetry: Boolean = true,
     onRetry: () -> Unit,
     onReady: () -> Unit,
+    onStablePlayback: () -> Unit = {},
     // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
     // Raised when the player gives up for good, so the parent can uncover
     // the error card it draws underneath the poster.
@@ -1016,13 +1025,8 @@ private fun ExoVideoPlayer(
         if (!isVisible) return@LaunchedEffect
         var lastBufPos = -1L
         var stalledSamples = 0
-        // --- NOSLOP_STALL_DETECT_V2 ---
-        // The recovery below used to require `bufPos == 0L`, which is only
-        // true for a video starting from the very beginning. Anything that
-        // resumed at a saved offset reports bufPos = that offset forever while
-        // stalled, so the check never fired on exactly the slides that needed
-        // it (205swuI0JlY sat at bufPos=891343, xvjQwQaIYu8 at 2815).
-        // Baseline whatever we started at and measure movement from there.
+        var continuousBufferingSamples = 0
+        var stablePlaySamples = 0
         var baselineBufPos = -1L
         while (true) {
             kotlinx.coroutines.delay(2000L)
@@ -1031,16 +1035,32 @@ private fun ExoVideoPlayer(
                 // Do not count stalled samples if player is paused by user or in IDLE state
                 if (!p.playWhenReady || p.playbackState == androidx.media3.common.Player.STATE_IDLE) {
                     stalledSamples = 0
+                    continuousBufferingSamples = 0
+                    stablePlaySamples = 0
                     lastBufPos = -1L
                     continue
                 }
                 if (p.playbackState == androidx.media3.common.Player.STATE_READY && p.isPlaying) {
-                    // Reset stall count while playing normally, but KEEP SAMPLING for mid-stream stalls
                     stalledSamples = 0
+                    continuousBufferingSamples = 0
                     baselineBufPos = -1L
                     lastBufPos = p.bufferedPosition
+                    stablePlaySamples++
+                    if (stablePlaySamples >= 8) { // 16s of continuous stable playback
+                        onStablePlayback()
+                    }
                     continue
+                } else {
+                    stablePlaySamples = 0
                 }
+
+                val isBuffering = p.playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                if (isBuffering) {
+                    continuousBufferingSamples++
+                } else {
+                    continuousBufferingSamples = 0
+                }
+
                 val bufPos = p.bufferedPosition
                 if (baselineBufPos < 0L) baselineBufPos = bufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
@@ -1051,9 +1071,9 @@ private fun ExoVideoPlayer(
                     "sample +${System.currentTimeMillis() - diagStartMs}ms " +
                         "state=${playbackStateName(p.playbackState)} bufPos=$bufPos " +
                         "delta=${delta}ms pct=${p.bufferedPercentage} " +
-                        "playWhenReady=${p.playWhenReady} stalledFor=${stalledSamples * 2}s | $rawUrl"
+                        "playWhenReady=${p.playWhenReady} stalledFor=${stalledSamples * 2}s (bufTime=${continuousBufferingSamples * 2}s) | $rawUrl"
                 )
-                if (stalledSamples == 5) {
+                if (stalledSamples == 5 || continuousBufferingSamples == 5) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "NO PROGRESS for 10s — buffer has not advanced. | $rawUrl"
@@ -1061,18 +1081,20 @@ private fun ExoVideoPlayer(
                 }
 
                 // Mid-stream or initial stall recovery over Tor.
-                // 14 samples * 2s = 28s on Tor (allows initial 15-20s Tor SOCKS/TLS handshake without false alarms).
-                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 14 else 6
-                if (stalledSamples >= stallThresholdSamples && url.contains("googlevideo") && canRetry) {
+                // Recovers if zero bytes arrive for 24s OR if stuck buffering for 30s despite trickling bytes.
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 12 else 6
+                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 15)
+                if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Stream stalled in BUFFERING for ${stalledSamples * 2}s with no progress — recovering at pos=${p.currentPosition}ms: $rawUrl"
+                        "Stream stalled in BUFFERING (stalledFor=${stalledSamples * 2}s, bufTime=${continuousBufferingSamples * 2}s) — recovering at pos=${p.currentPosition}ms: $rawUrl"
                     )
                     val curPos = p.currentPosition
                     if (curPos > 0L) {
                         PlaybackPositionStore.save(rawUrl, curPos, p.duration)
                     }
                     stalledSamples = 0
+                    continuousBufferingSamples = 0
                     onRetry()
                     return@LaunchedEffect
                 }
@@ -1199,10 +1221,10 @@ private fun ExoVideoPlayer(
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    35000, // min buffer (35s) so rebuffer starts long before buffer runs dry
-                    120000, // max buffer (120s = 2 min) to hold a deep buffer over Tor
+                    60000, // min buffer (60s) keeps buffer continuously topped up without idle gaps
+                    75000, // max buffer (75s)
                     500,   // buffer for playback (0.5s)
-                    8000   // buffer for playback after rebuffer (8s) to prevent 2-second stutter cycles
+                    3500   // buffer for playback after rebuffer (3.5s)
                 )
                 .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
                 .setPrioritizeTimeOverSizeThresholds(true)

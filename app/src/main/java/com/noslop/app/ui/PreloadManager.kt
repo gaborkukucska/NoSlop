@@ -307,13 +307,13 @@ object PreloadManager {
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // Generous rebuffer threshold so claimed player never loops on 1.8s stalls
+        // Drip-feed continuous buffer with Tor-optimized parameters
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                35000, // min buffer (35s)
-                120000, // max buffer (120s)
+                60000, // min buffer (60s) keeps buffer continuously topped up without idle gaps
+                75000, // max buffer (75s)
                 500,   // buffer for playback (0.5s)
-                8000   // buffer for playback after rebuffer (8s)
+                3500   // buffer for playback after rebuffer (3.5s)
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
