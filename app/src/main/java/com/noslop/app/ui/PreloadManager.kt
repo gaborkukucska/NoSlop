@@ -313,7 +313,7 @@ object PreloadManager {
                 35000, // min buffer (35s)
                 120000, // max buffer (120s)
                 500,   // buffer for playback (0.5s)
-                2000   // buffer for playback after rebuffer (2s)
+                8000   // buffer for playback after rebuffer (8s)
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
@@ -340,8 +340,8 @@ object PreloadManager {
             }
 
         val mimeType = when {
-            resolvedUrl.endsWith(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
-            resolvedUrl.endsWith(".mpd", ignoreCase = true) -> MimeTypes.APPLICATION_MPD
+            resolvedUrl.contains(".m3u8", ignoreCase = true) || resolvedUrl.contains("hls", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+            resolvedUrl.contains(".mpd", ignoreCase = true) -> MimeTypes.APPLICATION_MPD
             resolvedUrl.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
             resolvedUrl.endsWith(".wav", ignoreCase = true) -> MimeTypes.AUDIO_WAV
             resolvedUrl.endsWith(".m4a", ignoreCase = true) -> MimeTypes.AUDIO_MP4

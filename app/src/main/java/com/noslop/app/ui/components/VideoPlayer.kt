@@ -628,6 +628,13 @@ fun VideoPlayer(
     var source by remember(url) { mutableStateOf<VideoSource?>(initialSource) }
     var isVideoReady by remember(url) { mutableStateOf(false) }
 
+    LaunchedEffect(isVideoReady, isVisible, retryTrigger) {
+        if (isVideoReady && isVisible && retryTrigger > 0) {
+            kotlinx.coroutines.delay(15_000L)
+            retryTrigger = 0
+        }
+    }
+
     // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
     // Hoisted out of ExoVideoPlayer. The parent owns the poster overlay, so
     // the parent is the only place that can decide to stop covering the
@@ -709,7 +716,7 @@ fun VideoPlayer(
                             thumbnailUrl = thumbnailUrl,
                             thumbnailB64 = thumbnailB64,
                             retryKey = retryTrigger,
-                            canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES,
+                            canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES || isVideoReady || PlaybackPositionStore.resumePositionFor(stableKey ?: url) >= 8000L,
                             onRetry = {
                                 directPlaybackFailed = false
                                 retryTrigger++
@@ -1024,22 +1031,19 @@ private fun ExoVideoPlayer(
                 // Do not count stalled samples if player is paused by user or in IDLE state
                 if (!p.playWhenReady || p.playbackState == androidx.media3.common.Player.STATE_IDLE) {
                     stalledSamples = 0
+                    lastBufPos = -1L
                     continue
                 }
                 if (p.playbackState == androidx.media3.common.Player.STATE_READY && p.isPlaying) {
-                    return@LaunchedEffect  // healthy; stop sampling
+                    // Reset stall count while playing normally, but KEEP SAMPLING for mid-stream stalls
+                    stalledSamples = 0
+                    baselineBufPos = -1L
+                    lastBufPos = p.bufferedPosition
+                    continue
                 }
                 val bufPos = p.bufferedPosition
                 if (baselineBufPos < 0L) baselineBufPos = bufPos
-                // --- NOSLOP_STALL_DETECT_V2 ---
-                // True when not one byte has landed since we started, whatever
-                // position we started from.
-                val noBytesEver = bufPos <= baselineBufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
-                // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
-                // Bytes are arriving, so a Tor circuit rotation right now would
-                // destroy this stream. TorService uses this to decide between
-                // its 60s protective interval and its 15s idle one.
                 if (delta > 0L) com.noslop.app.tor.TorService.noteMediaProgress()
                 stalledSamples = if (delta <= 0L) stalledSamples + 1 else 0
                 Logger.info(
@@ -1056,25 +1060,26 @@ private fun ExoVideoPlayer(
                     )
                 }
 
-                // --- NOSLOP_TOR_CIRCUIT_V1 ---
-                // Over Tor on mobile, SOCKS connection + TLS + initial chunk fetch can take 15-20s.
-                // A 12s timeout prematurely kills legitimate Tor streams. Give it 30s (15 samples).
-                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 15 else 6
-                if (stalledSamples >= stallThresholdSamples && noBytesEver && url.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
+                // Mid-stream or initial stall recovery over Tor (12s threshold)
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 6 else 5
+                if (stalledSamples >= stallThresholdSamples && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Zero bytes over Tor after ${stallThresholdSamples * 2}s — clearing resume pos and retrying resolve on fresh circuit: $rawUrl"
+                        "Stream stalled in BUFFERING for ${stalledSamples * 2}s with no progress — recovering at pos=${p.currentPosition}ms: $rawUrl"
                     )
-                    PlaybackPositionStore.clear(rawUrl)
+                    val curPos = p.currentPosition
+                    if (curPos > 0L) {
+                        PlaybackPositionStore.save(rawUrl, curPos, p.duration)
+                    }
                     stalledSamples = 0
                     onRetry()
                     return@LaunchedEffect
                 }
 
-                if (stalledSamples >= stallThresholdSamples && noBytesEver && retryKey >= MAX_AUTO_RESOLVE_RETRIES) {
+                if (stalledSamples >= stallThresholdSamples && !canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Still zero bytes after $retryKey retries — giving up on this " +
+                        "Still zero bytes after retries — giving up on this " +
                             "video rather than fetching it outside Tor. | $rawUrl"
                     )
                     com.noslop.app.tor.TorService.setTorStatusMessage(
@@ -1196,7 +1201,7 @@ private fun ExoVideoPlayer(
                     35000, // min buffer (35s) so rebuffer starts long before buffer runs dry
                     120000, // max buffer (120s = 2 min) to hold a deep buffer over Tor
                     500,   // buffer for playback (0.5s)
-                    2000   // buffer for playback after rebuffer (2s) for snappy recovery
+                    8000   // buffer for playback after rebuffer (8s) to prevent 2-second stutter cycles
                 )
                 .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
                 .setPrioritizeTimeOverSizeThresholds(true)
@@ -1224,8 +1229,8 @@ private fun ExoVideoPlayer(
                     }.build()
 
                     val mimeType = when {
-                        url.endsWith(".m3u8", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
-                        url.endsWith(".mpd", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_MPD
+                        url.contains(".m3u8", ignoreCase = true) || url.contains("hls", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                        url.contains(".mpd", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_MPD
                         else -> androidx.media3.common.MimeTypes.VIDEO_MP4
                     }
                     val mediaItem = androidx.media3.common.MediaItem.Builder()
