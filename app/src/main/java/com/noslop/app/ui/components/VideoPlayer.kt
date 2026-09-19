@@ -1060,8 +1060,9 @@ private fun ExoVideoPlayer(
                     )
                 }
 
-                // Mid-stream or initial stall recovery over Tor (12s threshold)
-                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 6 else 5
+                // Mid-stream or initial stall recovery over Tor.
+                // 14 samples * 2s = 28s on Tor (allows initial 15-20s Tor SOCKS/TLS handshake without false alarms).
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 14 else 6
                 if (stalledSamples >= stallThresholdSamples && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,

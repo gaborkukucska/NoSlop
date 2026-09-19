@@ -3074,17 +3074,30 @@ fun toggleAggregator() {
 
     fun copyLogToClipboard(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            val logsText = Logger.getAllLogsText()
+            val rawText = Logger.getAllLogsText()
+            // Android Binder transaction limit is 1MB system-wide.
+            // Cap clipboard text to the latest ~600KB (approx 3000-4000 lines) to prevent TransactionTooLargeException.
+            val safeText = if (rawText.length > 600_000) {
+                val truncated = rawText.takeLast(600_000)
+                truncated.substringAfter("
+") // Start cleanly on a newline
+            } else {
+                rawText
+            }
             withContext(Dispatchers.Main) {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText(com.noslop.app.util.LanguageManager.translate("NoSlop Logs"), logsText)
-                clipboard.setPrimaryClip(clip)
-                val lineCount = logsText.lines().size
-                android.widget.Toast.makeText(
-                    context,
-                    com.noslop.app.util.LanguageManager.translate("Logs copied to clipboard ({count} lines)").replace("{count}", lineCount.toString()),
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                try {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText(com.noslop.app.util.LanguageManager.translate("NoSlop Logs"), safeText)
+                    clipboard.setPrimaryClip(clip)
+                    val lineCount = safeText.lines().size
+                    android.widget.Toast.makeText(
+                        context,
+                        com.noslop.app.util.LanguageManager.translate("Logs copied to clipboard ({count} lines)").replace("{count}", lineCount.toString()),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } catch (e: Exception) {
+                    Logger.error("VM", "Clipboard copy failed: ${e.message}")
+                }
             }
         }
     }
