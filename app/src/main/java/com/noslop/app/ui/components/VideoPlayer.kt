@@ -631,7 +631,7 @@ fun VideoPlayer(
     // Stable playback recovery callback: only reset retry count if video is actively playing
     val onStablePlayback = {
         if (retryTrigger > 0 && isVideoReady) {
-            Logger.info("VIDEO", "Video has played stably for 16s — resetting retry trigger to 0")
+            Logger.info("VIDEO", "Video has played stably for 16s — resetting retry trigger to 0 without recreating player")
             retryTrigger = 0
         }
     }
@@ -714,6 +714,8 @@ fun VideoPlayer(
                             .fillMaxSize()
                             .zIndex(if (directPlaybackFailed) 3f else 0f)
                     ) {
+                        // Use playerMountKey so resetting retryTrigger to 0 after stable playback does NOT kill the player
+                        var playerMountKey by remember(url) { mutableStateOf(0) }
                         ExoVideoPlayer(
                             url = resolved.url,
                             rawUrl = stableKey ?: url,
@@ -721,12 +723,13 @@ fun VideoPlayer(
                             isVisible = isVisible,
                             thumbnailUrl = thumbnailUrl,
                             thumbnailB64 = thumbnailB64,
-                            retryKey = retryTrigger,
+                            retryKey = playerMountKey,
                             canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES || isVideoReady || PlaybackPositionStore.resumePositionFor(stableKey ?: url) >= 8000L,
                             onRetry = {
                                 directPlaybackFailed = false
                                 isVideoReady = false
                                 retryTrigger++
+                                playerMountKey++
                             },
                             onReady = {
                                 com.noslop.app.tor.TorService.setTorStatusMessage(null)
@@ -1087,7 +1090,7 @@ private fun ExoVideoPlayer(
                 if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Stream stalled in BUFFERING (stalledFor=${stalledSamples * 2}s, bufTime=${continuousBufferingSamples * 2}s) — recovering at pos=${p.currentPosition}ms: $rawUrl"
+                        "Stream stalled in BUFFERING (stalledFor=${stalledSamples * 2}s, bufTime=${continuousBufferingSamples * 2}s) — escaping to fresh Tor circuit at pos=${p.currentPosition}ms: $rawUrl"
                     )
                     val curPos = p.currentPosition
                     if (curPos > 0L) {
@@ -1095,6 +1098,12 @@ private fun ExoVideoPlayer(
                     }
                     stalledSamples = 0
                     continuousBufferingSamples = 0
+                    // Invalidate source and advance stream nonce to guarantee a fresh circuit
+                    val videoId = extractYouTubeId(rawUrl)
+                    if (videoId != null) {
+                        com.noslop.app.feeds.api.YouTubeInternalClient.advanceStreamNonce(videoId)
+                    }
+                    com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                     onRetry()
                     return@LaunchedEffect
                 }
@@ -1221,10 +1230,10 @@ private fun ExoVideoPlayer(
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    60000, // min buffer (60s) keeps buffer continuously topped up without idle gaps
-                    75000, // max buffer (75s)
+                    45000, // min buffer (45s) gives a deep cushion before requiring more data
+                    90000, // max buffer (90s) holds a healthy window without overflowing RAM
                     500,   // buffer for playback (0.5s)
-                    3500   // buffer for playback after rebuffer (3.5s)
+                    4000   // buffer for playback after rebuffer (4s) prevents 1-second stutter cycles
                 )
                 .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
                 .setPrioritizeTimeOverSizeThresholds(true)

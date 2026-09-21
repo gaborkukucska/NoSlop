@@ -310,10 +310,10 @@ object PreloadManager {
         // Drip-feed continuous buffer with Tor-optimized parameters
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                60000, // min buffer (60s) keeps buffer continuously topped up without idle gaps
-                75000, // max buffer (75s)
+                45000, // min buffer (45s) gives a deep cushion before requiring more data
+                90000, // max buffer (90s) holds a healthy window without overflowing RAM
                 500,   // buffer for playback (0.5s)
-                3500   // buffer for playback after rebuffer (3.5s)
+                4000   // buffer for playback after rebuffer (4s) prevents 1-second stutter cycles
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
