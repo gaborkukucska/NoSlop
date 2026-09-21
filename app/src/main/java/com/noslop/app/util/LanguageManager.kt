@@ -16,6 +16,8 @@ object LanguageManager {
     private var translations: Map<String, String> = emptyMap()
     private val _currentLanguage = MutableStateFlow("en")
     val currentLanguage: StateFlow<String> = _currentLanguage
+    private val _languageUpdateTrigger = MutableStateFlow(1L)
+    val languageUpdateTrigger: StateFlow<Long> = _languageUpdateTrigger
     private lateinit var appContext: Context
 
     private val _availableLanguages = MutableStateFlow<List<Pair<String, String>>>(emptyList())
@@ -46,12 +48,17 @@ object LanguageManager {
         "hi" to "हिन्दी"
     )
 
+    val fallbackLanguages: List<Pair<String, String>> by lazy {
+        WELL_KNOWN_LANGUAGES.map { it.key to it.value }
+            .sortedWith(compareBy({ it.first != "en" }, { it.second }))
+    }
+
     val supportedLanguages: List<Pair<String, String>>
         get() {
-            if (_availableLanguages.value.isEmpty() && ::appContext.isInitialized) {
+            if (_availableLanguages.value.size <= 1 && ::appContext.isInitialized) {
                 refreshAvailableLanguages()
             }
-            return _availableLanguages.value.ifEmpty { listOf("en" to "English") }
+            return _availableLanguages.value.ifEmpty { fallbackLanguages }
         }
 
     fun init(context: Context, defaultLang: String) {
@@ -74,11 +81,11 @@ object LanguageManager {
                 // English first, then alphabetical by display name
                 .sortedWith(compareBy({ it.first != "en" }, { it.second }))
 
-            _availableLanguages.value = if (langs.isNotEmpty()) langs else listOf("en" to "English")
+            _availableLanguages.value = if (langs.isNotEmpty()) langs else fallbackLanguages
             Logger.info("LANG", "Dynamically discovered ${langs.size} language files: ${langs.map { it.first }}")
         } catch (e: Exception) {
             Logger.error("LANG", "Failed to list available languages from assets: ${e.message}")
-            _availableLanguages.value = listOf("en" to "English")
+            _availableLanguages.value = fallbackLanguages
         }
     }
 
@@ -99,12 +106,20 @@ object LanguageManager {
     }
 
     fun loadLanguage(langCode: String) {
+        if (!::appContext.isInitialized) return
         try {
             val fileName = "languages/content_$langCode.json"
             val jsonString = appContext.assets.open(fileName).bufferedReader().use { it.readText() }
-            val type = object : TypeToken<Map<String, String>>() {}.type
-            translations = Gson().fromJson(jsonString, type) ?: emptyMap()
+            val jsonObject = com.google.gson.JsonParser.parseString(jsonString).asJsonObject
+            val map = HashMap<String, String>(jsonObject.size())
+            for ((key, value) in jsonObject.entrySet()) {
+                if (!value.isJsonNull) {
+                    map[key] = value.asString
+                }
+            }
+            translations = map
             _currentLanguage.value = langCode
+            _languageUpdateTrigger.value = System.currentTimeMillis()
             Logger.info("LANG", "Loaded language: $langCode with ${translations.size} keys")
         } catch (e: Exception) {
             Logger.error("LANG", "Failed to load language $langCode: ${e.message}")
@@ -122,6 +137,6 @@ object LanguageManager {
 val String.tr: String
     @Composable
     get() {
-        val lang by LanguageManager.currentLanguage.collectAsState()
-        return remember(lang, this) { LanguageManager.translate(this) }
+        val trigger by LanguageManager.languageUpdateTrigger.collectAsState()
+        return remember(trigger, this) { LanguageManager.translate(this) }
     }

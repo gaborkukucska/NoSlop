@@ -104,9 +104,13 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // the user left off, even after a cold start.
         com.noslop.app.ui.components.PlaybackPositionStore.init(this)
 
+        // Initialize LanguageManager immediately on the main thread so appContext and languages are ready before any UI composes
+        com.noslop.app.util.LanguageManager.init(this, "en")
         repositoryScope.launch {
             val appLang = repository.getAppLanguage()
-            com.noslop.app.util.LanguageManager.init(this@NoSlopApp, appLang)
+            if (appLang != "en") {
+                com.noslop.app.util.LanguageManager.loadLanguage(appLang)
+            }
         }
 
         // Start media HTTP-to-Tor proxy service

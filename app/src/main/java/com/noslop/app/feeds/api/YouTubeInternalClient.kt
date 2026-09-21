@@ -104,7 +104,7 @@ object YouTubeInternalClient {
     }
 
     fun advanceStreamNonce(videoId: String): Int {
-        val next = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
+        val next = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 } ?: 1
         Logger.info(TAG, "Advanced stream nonce for $videoId to $next to force fresh Tor circuit")
         return next
     }

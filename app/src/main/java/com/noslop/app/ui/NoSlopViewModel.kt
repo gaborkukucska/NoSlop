@@ -617,7 +617,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
-            _appLanguage.value = repository.getAppLanguage()
+            val appLang = repository.getAppLanguage()
+            _appLanguage.value = appLang
+            com.noslop.app.util.LanguageManager.loadLanguage(appLang)
             _userProfile.value = repository.getUserProfile()
             _selectedInterests.value = repository.getUserSelectedCategories()
             _selectedMusicGenres.value = repository.getSelectedMusicGenres()
