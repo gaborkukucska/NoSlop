@@ -452,7 +452,7 @@ object YouTubeInternalClient {
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
     // Evaluate up to 2 configs before advancing circuit nonce
-    private const val EXIT_BLOCKED_THRESHOLD = 2
+    private const val EXIT_BLOCKED_THRESHOLD = 3
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -684,12 +684,12 @@ object YouTubeInternalClient {
         val configs = listOf(
             InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
             InnerTubeClientConfig(
-                "ANDROID_VR", "28", "1.62.27",
-                "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12; GB) gzip"
-            ),
-            InnerTubeClientConfig(
                 "TVHTML5", "7", "7.20250312.16.00",
                 "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.master.0 (unlike Gecko) Starboard/17"
+            ),
+            InnerTubeClientConfig(
+                "ANDROID_VR", "28", "1.62.27",
+                "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12; GB) gzip"
             ),
             InnerTubeClientConfig(
                 "IOS", "5", "20.10.4",

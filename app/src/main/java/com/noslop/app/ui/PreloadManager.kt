@@ -152,6 +152,7 @@ object PreloadManager {
         if (rawUrl.isBlank()) return
         val cleanUrl = rawUrl.trim()
         if (cleanUrl.isEmpty()) return
+        cancelledTasks.remove(rawUrl) // Clear stale eviction cancellation for fresh prewarm
         if (rawUrl == currentlyPlayingUrl) {
             Logger.info("PRELOAD", "Skipping preWarm for actively playing video: $rawUrl")
             return
@@ -312,8 +313,8 @@ object PreloadManager {
             .setBufferDurationsMs(
                 45000, // min buffer (45s) gives a deep cushion before requiring more data
                 90000, // max buffer (90s) holds a healthy window without overflowing RAM
-                500,   // buffer for playback (0.5s)
-                4000   // buffer for playback after rebuffer (4s) prevents 1-second stutter cycles
+                2500,  // buffer for playback (2.5s) ensures smooth startup without stalling on chunk 2
+                8000   // buffer for playback after rebuffer (8s) gives a solid Tor cushion
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()

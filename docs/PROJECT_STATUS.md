@@ -1,5 +1,20 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-22) — Audio Sourcing Repair, Internet Archive Resilience, Tor Buffer Stabilization & Wikimedia Search Parity (v0.6.1-alpha)
+
+* **Audio Sourcing & Jamendo API Fix (`JamendoApiClient.kt`)**:
+  * Corrected Jamendo tracks endpoint query from invalid `namesearch` parameter to standard `search` (and `tags=pop+rock+electronic&order=popularity_total` for generic music queries), restoring music streams that previously failed with `Jamendo API returned status: failed`.
+* **Internet Archive Performance & Headless Resolution (`InternetArchiveClient.kt`)**:
+  * Replaced `NoSlop-Android/1.0` User-Agent with a standard browser User-Agent to avoid Archive.org's WAF filters.
+  * Scoped search query to curated music collections (`collection:(etree OR netlabels OR 78rpm OR oldtimeradio) AND mediatype:audio`) and capped metadata resolutions to 10.
+  * Eliminated 20 redundant blocking HTTP `HEAD` checks that were stalling the category pipeline and hitting the 35s timeout.
+* **Wikimedia Preference Querying (`PublicApiService.kt`)**:
+  * Replaced blind calls to `WikimediaApiClient.fetchFeaturedPictures()` with `WikimediaApiClient.searchImages(query)`, enabling Wikimedia to respect user keywords and categories instead of defaulting to bird taxonomy photos from the featured category.
+* **Video Preloading Cache Unblocking & Tor Playback Buffer Hardening (`PreloadManager.kt`, `VideoPlayer.kt`, `YouTubeInternalClient.kt`)**:
+  * Cleared `cancelledTasks.remove(rawUrl)` on new `preWarm()` requests, preventing evicted items from permanently blocking upcoming slide preloads.
+  * Reordered InnerTube configs to test `TVHTML5` immediately after `ANDROID` and raised `EXIT_BLOCKED_THRESHOLD` to 3, allowing token-free TVHTML5 resolution to succeed on the active circuit without wasting 20–40s hopping Tor exits.
+  * Raised `bufferForPlaybackMs` to 2,500ms (2.5s) and `bufferForPlaybackAfterRebufferMs` to 8,000ms (8s) in `VideoPlayer.kt` and `PreloadManager.kt`, eliminating the 4-second stutter and rebuffering loop.
+
 ## Completed Changes (2026-09-22) — Follow System Rollback & DMs Node Info Swipe-Down Modal Parity (v0.6.0-alpha)
 
 * **Follow System Rollback (`PeerItem.kt`, `FeedCard.kt`, `ChannelPreferenceModal.kt`, `NoSlopViewModel.kt`)**:

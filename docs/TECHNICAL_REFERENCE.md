@@ -1661,7 +1661,17 @@ Longer videos (exceeding 3–5 minutes) experienced stream breakdown over Tor, e
 3. **Recovery Authorization (`canRetry`)**: `canRetry` was limited strictly to `retryTrigger < 2`. For a long video, any third reconnect was refused, showing "Video unavailable". `canRetry` now permits recovery if the video was already playing (`isVideoReady || resumePosition >= 8000L`), and resets `retryTrigger` to 0 after 15s of stable playback.
 4. **Socket Keep-Alive**: `HttpClientProvider.getOrCreateIsolatedMediaClient` reduced `ConnectionPool` keepalive from 300s to 60s and `readTimeout` from 60s to 35s, preventing ExoPlayer from hanging on stale Tor sockets.
 
-### 16.22 Player Mount Lifecycle Decoupling & Tor Circuit Stall Escalation (`NOSLOP_PLAYER_MOUNT_KEY_V1`)
+### 16.23 Audio Sourcing Repair, Internet Archive Resilience, Tor Buffer Stabilization & Wikimedia Search Parity (v0.6.1-alpha)
+
+1. **Jamendo Search Parameter Fix**: Replaced invalid `namesearch` on `/v3.0/tracks/` with `search=` (or curated tag fallback `tags=pop+rock+electronic`), restoring live music tracks to the feed.
+2. **Internet Archive Headless Verification**: Replaced flagged User-Agent with a standard browser User-Agent, capped query results to 10, and dropped redundant HTTP `HEAD` checks that exhausted Tor connection pools.
+3. **Wikimedia Category Search Routing**: Swapped `fetchFeaturedPictures()` for `searchImages(query)` in `PublicApiService.kt` so user preferences and keywords determine image results instead of the bird-heavy Commons featured pictures category.
+4. **Preload Eviction Unblocking & Rebuffer Cushion Tuning**:
+   - `preWarm` explicitly clears `cancelledTasks.remove(rawUrl)`, preventing stale evictions from killing preloads for subsequent slides.
+   - `TVHTML5` promoted to second config in `YouTubeInternalClient` and `EXIT_BLOCKED_THRESHOLD` raised to 3, resolving streams in 1–2s without excessive circuit hops.
+   - Tuned `DefaultLoadControl` to `bufferForPlaybackMs = 2500` (2.5s) and `bufferForPlaybackAfterRebufferMs = 8000` (8s), completely stopping the 4s stutter rebuffer cycle over Tor.
+
+### 16.24 Player Mount Lifecycle Decoupling & Tor Circuit Stall Escalation (`NOSLOP_PLAYER_MOUNT_KEY_V1`)
 
 During long video streaming, a subtle recomposition bug caused playing videos to be torn down mid-stream:
 1. **Player Mount Teardown on Stable Reset**: `onStablePlayback` resets `retryTrigger` to 0 after 16 seconds of continuous stable playback. Previously, `ExoVideoPlayer`'s `DisposableEffect(url, retryKey)` was keyed on `retryKey = retryTrigger`. When `retryTrigger` reset from 1 to 0, `DisposableEffect` invoked `onDispose()`, tearing down the actively playing `ExoPlayer` instance (`attempt 1`) and creating a brand new one. The new player sought to the active offset, attempted an unbuffered range request over Tor, and stalled. Solved by introducing `playerMountKey` which only increments on genuine `onRetry()` invocations, ensuring that resetting `retryTrigger` to 0 does not kill the player.

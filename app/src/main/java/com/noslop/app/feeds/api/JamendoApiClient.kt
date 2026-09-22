@@ -39,7 +39,13 @@ object JamendoApiClient {
             
             // Use namesearch for free-text queries (matches track name and artist name).
             // tags= only accepts known Jamendo genre/mood tokens and fails on arbitrary text.
-            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&namesearch=$encodedQuery&include=musicinfo"
+            val cleanQuery = tags.trim().lowercase()
+            val queryParam = if (cleanQuery.isBlank() || cleanQuery == "music") {
+                "tags=pop+rock+electronic"
+            } else {
+                "search=" + java.net.URLEncoder.encode(cleanQuery, "UTF-8")
+            }
+            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&$queryParam&include=musicinfo&order=popularity_total" 
             
             val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
             val reqBuilder = Request.Builder().url(proxiedUrl)

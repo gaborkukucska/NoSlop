@@ -32,7 +32,7 @@ object InternetArchiveClient {
     // Cap the number we resolve. Items past the cap are DROPPED rather than
     // emitted with the bare /download/<id> directory URL, which is a file
     // listing and will not play.
-    private const val MAX_METADATA_RESOLUTIONS = 25
+    private const val MAX_METADATA_RESOLUTIONS = 10
 
     private val metadataResolutions = java.util.concurrent.atomic.AtomicInteger(0)
     private val gson = Gson()
@@ -80,9 +80,9 @@ object InternetArchiveClient {
         rows: Int = 20
     ): List<FeedItem> {
         val qTerm = query.trim()
-        val queryPart = if (qTerm.isBlank()) "mediatype:audio AND downloads:[100 TO 999999]" else "($qTerm) AND mediatype:audio"
+        val queryPart = if (qTerm.isBlank()) "collection:(etree OR netlabels OR 78rpm) AND mediatype:audio" else "($qTerm) AND mediatype:audio"
         val encodedQuery = java.net.URLEncoder.encode(
-            "$queryPart AND -subject:youtube AND -collection:opensource_audio",
+            "$queryPart AND -subject:youtube",
             "UTF-8"
         )
         return search(encodedQuery, "audio", sourceId, rows)
@@ -96,7 +96,7 @@ object InternetArchiveClient {
         rows: Int = 20
     ): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(
-            "(collection:78rpm OR collection:netlabels OR collection:etree OR collection:oldtimeradio OR mediatype:audio) AND -subject:youtube", "UTF-8"
+            "collection:(etree OR netlabels OR 78rpm OR oldtimeradio) AND mediatype:audio", "UTF-8"
         )
         val url = "https://archive.org/advancedsearch.php?" +
                 "q=$encodedQuery&" +
@@ -148,7 +148,7 @@ object InternetArchiveClient {
         return try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
                 .build()
 
             val response = client.newCall(request).execute()
@@ -283,38 +283,8 @@ object InternetArchiveClient {
                                 }
                             }
                             
-                            // Validate the resolved URL
-                            var finalMediaUrl: String? = archiveMediaUrl
+                            var finalMediaUrl: String? = archiveMediaUrl.takeIf { it.isNotBlank() }
                             var finalMediaType = resolvedMediaType
-                            
-                            if (archiveMediaUrl.isEmpty()) {
-                                finalMediaUrl = null // Drop
-                            } else {
-                                try {
-                                    if (!isActive) return@async null
-                                    val headReq = Request.Builder().url(archiveMediaUrl).head().build()
-                                    val headRes = client.newCall(headReq).execute()
-                                    val code = headRes.code
-                                    val contentType = headRes.header("Content-Type") ?: ""
-                                    headRes.close()
-                                    
-                                    if (code == 401 || code == 403 || contentType.contains("text/html")) {
-                                        if (finalMediaType == "audio") {
-                                            Logger.warn(TAG, "Audio URL is HTML or restricted ($identifier), dropping item")
-                                            finalMediaUrl = null
-                                        } else {
-                                            Logger.warn(TAG, "Download URL is HTML/restricted ($identifier), using embed fallback")
-                                            finalMediaUrl = "https://archive.org/embed/$identifier"
-                                            finalMediaType = "video" // Embeds are handled via WebView
-                                        }
-                                    } else if (code == 404) {
-                                        Logger.warn(TAG, "Download URL not found ($identifier), skipping")
-                                        finalMediaUrl = null
-                                    }
-                                } catch (e: Exception) {
-                                    Logger.warn(TAG, "Failed to validate URL for $identifier: ${e.message}")
-                                }
-                            }
 
                             if (finalMediaUrl == null) {
                                 return@async null // Skip this item as it has no valid playable URL

@@ -136,7 +136,11 @@ object PublicApiService {
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
                     fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
-                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
+                    fetchAsync("api-wikimedia-featured") { 
+                        val isGeneric = query.isBlank() || query.equals("Art", ignoreCase = true) || query.equals("Photography", ignoreCase = true)
+                        val targetQuery = if (isGeneric) "photography" else query
+                        WikimediaApiClient.searchImages(targetQuery)
+                    }
                     fetchAsync("api-artic-artworks") { ArtInstituteClient.fetchArtworks(query) }
                 }
                 "Health" -> {
