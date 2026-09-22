@@ -1,5 +1,17 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-22) — Follow System Rollback & DMs Node Info Swipe-Down Modal Parity (v0.6.0-alpha)
+
+* **Follow System Rollback (`PeerItem.kt`, `FeedCard.kt`, `ChannelPreferenceModal.kt`, `NoSlopViewModel.kt`)**:
+  * Rolled back the redundant "Follow Creator" / "Unfollow Creator" buttons across all node info dialogs and preference modals. The established secondary burnable identity (`.onion`) and temporary contact system already provides private, sovereign peer connectivity to creator nodes without leaking personal identity.
+  * Removed the visual `Following` author badge in `FeedCard.kt`.
+  * Reverted `followedPubKeys` and `followedPubs` sorting in `NoSlopViewModel.kt`'s Live Feed round-robin interleaver, restoring pure chronological ordering and fair creator rotation.
+* **DMs Node Info Bottom Sheet & Swipe-Down Dismissal Parity (`PeerItem.kt`, `DMsTab.kt`)**:
+  * Migrated `ContactCardDialog` in `PeerItem.kt` from a fixed `Dialog { Card { Column } }` to a Material 3 `ModalBottomSheet` with `rememberModalBottomSheetState(skipPartiallyExpanded = true)` and `BottomSheetDefaults.DragHandle`.
+  * Unified discoverable node profiles in `DMsTab.kt` to use `ContactCardDialog`, eliminating the rigid, non-scrollable 180-line `AlertDialog`.
+  * Enclosed modal contents in a vertically scrollable container (`verticalScroll(rememberScrollState())`) with safe bottom padding (`32.dp`), ensuring Avatar, Handle, Tripcode, Bio, Donation badges, Onion address, `PeerMeshContentList`, and all action buttons ("Connect", "Remove", "Ban Node 🚫", "Close") are fully accessible and never cut off on smaller screens.
+  * Swiping down anywhere outside the nested content list dismisses the sheet immediately, achieving full gesture parity with feed and source modals.
+
 ## Completed Changes (2026-09-22) — Player Session Mount Stability, Tor Circuit Stall Escapes & R8-Safe Instant Localization (v0.6.0-alpha)
 
 * **Player Mount Stability & Mid-Stream Teardown Elimination (`VideoPlayer.kt`)**:
