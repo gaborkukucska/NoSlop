@@ -3031,7 +3031,7 @@ fun toggleAggregator() {
     }
 
     fun startTor(forceRestart: Boolean = false) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val identity = repository.getLocalIdentity()
             val burnableIdentity = repository.getBurnableIdentity()
             val hubStatus = repository.getAppSetting("hub_deployment_status")

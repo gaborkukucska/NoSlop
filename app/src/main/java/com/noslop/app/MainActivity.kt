@@ -55,12 +55,12 @@ class MainActivity : ComponentActivity() {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
                             
-                            // 1. Wait for Tor readiness if clearnet over Tor is enabled (up to 35s on cold start)
+                            // 1. Quick wait for Tor readiness (up to 4s) so splash screen remains fast and responsive
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
-                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(35000L)
+                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(4000L)
                             } catch (e: Exception) {
-                                Logger.debug("MAIN", "Tor awaitNetworkReady in splash failed or timed out: ${e.message}")
+                                Logger.debug("MAIN", "Tor awaitNetworkReady in splash: ${e.message}")
                             }
 
                             var firstPreloadUrl: String? = null
@@ -128,8 +128,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 try {
-                                    // Wait up to 8s for the player to reach READY state (buffering first frame)
-                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 12000L)
+                                    // Quick buffer check for Slide 1 (up to 3s)
+                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 3000L)
                                     Logger.info("MAIN", "Slide 1 preload buffer readiness result: $isReady")
                                 } catch (e: Exception) {
                                     Logger.debug("MAIN", "Slide 1 awaitPlayerReady ended: ${e.message}")

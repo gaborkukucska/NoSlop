@@ -353,13 +353,13 @@ object PreloadManager {
         }
         val mediaItem = MediaItem.Builder().setUri(resolvedUrl).setMimeType(mimeType).build()
 
-        player.setMediaItem(mediaItem)
+        setMediaItem(mediaItem)
         val resumeMs = com.noslop.app.ui.components.PlaybackPositionStore.resumePositionFor(rawUrl)
         if (resumeMs >= 8000L) {
             Logger.info("PRELOAD", "Preloading at saved resume position ${resumeMs}ms: $rawUrl")
-            player.seekTo(resumeMs)
+            seekTo(resumeMs)
         }
-        player.prepare()
+        prepare()
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
 
@@ -473,9 +473,14 @@ object PreloadManager {
     }
 
     fun evictAll() {
-        for (entry in preloadedPlayers.values) {
-            entry.player.release()
-        }
+        val playersToRelease = preloadedPlayers.values.map { it.player }.toList()
         preloadedPlayers.clear()
+        if (playersToRelease.isNotEmpty()) {
+            CoroutineScope(Dispatchers.Main).launch {
+                for (p in playersToRelease) {
+                    try { p.release() } catch (_: Exception) {}
+                }
+            }
+        }
     }
 }

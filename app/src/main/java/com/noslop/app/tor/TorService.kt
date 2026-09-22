@@ -177,6 +177,7 @@ object TorService {
         burnablePrivateKeyB64: String? = null,
         forceRestart: Boolean = false
     ) {
+        scope.launch {
         if (forceRestart) {
             Logger.info(TAG, "Force restart requested. Terminating Tor daemon and purging stale cache...")
             stopTor(context)
@@ -282,6 +283,12 @@ object TorService {
 
             // Unified self-healing bootstrap loop: wait for proxy port, then wait for circuit bootstrap
             bootstrapJob = scope.launch {
+            }
+        }
+    }
+
+    private fun startTorBootstrapLoop(context: Context) {
+        bootstrapJob = scope.launch {
                 val proxyReady = waitForProxy(timeoutSeconds = 30)
                 if (proxyReady) {
                     _torState.value = TorState.PROXY_READY

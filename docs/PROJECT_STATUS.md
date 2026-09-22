@@ -1,5 +1,16 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-23) — Main Thread Tor Crash Elimination, Splash Latency Decoupling & Slide 1 Preload Self-Reference Fix (v0.6.1-alpha)
+
+* **Tor Reconnect Crash & Socket Threading (`NoSlopViewModel.kt`, `TorService.kt`)**:
+  * Moved `viewModel.startTor()` to `Dispatchers.IO`, preventing `NetworkOnMainThreadException` and `Thread.sleep` from crashing the Android UI thread when tapping "Reconnect Tor".
+  * Wrapped `TorService.startTor` internally in `scope.launch(Dispatchers.IO)` to guarantee thread safety.
+* **Slide 1 Preload Initialization Fix (`PreloadManager.kt`)**:
+  * Corrected self-referencing `player.seekTo()` inside `apply` block to `seekTo(resumeMs)`, eliminating the `NullPointerException` that was preventing the first video from preloading on cold start.
+  * Ensured `PreloadManager.evictAll()` releases ExoPlayer instances on `Dispatchers.Main`, preventing off-thread media player release crashes.
+* **Splash Screen Startup Acceleration (`MainActivity.kt`)**:
+  * Reduced `awaitNetworkReady` wait ceiling in the splash screen from 35s to 4s and `awaitPlayerReady` from 12s to 3s, eliminating the 47-second splash freeze and loading the app UI in 1.5–3s while Tor circuits finish connecting asynchronously in the background.
+
 ## Completed Changes (2026-09-23) — Filtered Log Clipboard Export, Initial Slide Buffer Sync, Offscreen Spinner Timeout Fix & Geo-Lock Recovery (v0.6.1-alpha)
 
 * **Tab-Aware Log Clipboard Export (`LogsViewerScreen.kt`, `Logger.kt`, `NoSlopViewModel.kt`)**:
