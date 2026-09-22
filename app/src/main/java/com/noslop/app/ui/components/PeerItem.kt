@@ -573,7 +573,7 @@ fun ContactCardDialog(
             ) {
                 if (!peer.isTrusted && onConnect != null) {
                     Button(
-                        onClick = onConnect,
+                        onClick = { onConnect?.invoke() },
                         modifier = Modifier.fillMaxWidth().height(44.dp),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
@@ -683,8 +683,8 @@ fun ContactCardDialog(
                 Button(
                     onClick = {
                         showDeleteConfirmation = false
-                        onDelete()
-                        // onDismiss for the contact card is implicit since the peer gets removed
+                        onDelete?.invoke()
+                        onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = DestructiveRed,
