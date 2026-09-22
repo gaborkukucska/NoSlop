@@ -32,14 +32,12 @@ fun ChannelPreferenceModal(
     channelName: String,
     isAlreadyInPreferences: Boolean,
     isBanned: Boolean = false,
-    isFollowing: Boolean = false,
     creatorItems: List<com.noslop.app.data.FeedItem> = emptyList(),
     onItemClick: ((com.noslop.app.data.FeedItem) -> Unit)? = null,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
     onBan: (() -> Unit)? = null,
     onUnban: (() -> Unit)? = null,
-    onToggleFollow: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -225,23 +223,6 @@ fun ChannelPreferenceModal(
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Add to Preferences".tr, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    if (onToggleFollow != null) {
-                        Button(
-                            onClick = {
-                                onToggleFollow()
-                                onDismiss()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = SurfaceDark,
-                                contentColor = AccentGreen
-                            ),
-                            border = BorderStroke(1.dp, AccentGreen),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (isFollowing) "Unfollow Creator".tr else "Follow Creator".tr, fontWeight = FontWeight.Bold)
                         }
                     }
                     if (onBan != null) {

@@ -31,7 +31,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.noslop.app.data.ChatMessage
 import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
@@ -137,7 +138,7 @@ fun PeerItem(
             peer = peer,
             onDismiss = { showContactCard = false },
             onDelete = { viewModel.removePeer(peer.publicKeyB64) },
-            onConnect = { viewModel.acceptHandshake(peer) },
+            onConnect = if (!peer.isTrusted) { { viewModel.acceptHandshake(peer); showContactCard = false } } else null,
             viewModel = viewModel,
             onNavigateToAuthorFeed = onNavigateToAuthorFeed
         )
@@ -287,340 +288,319 @@ fun PeerMeshContentList(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContactCardDialog(
     peer: Peer,
     onDismiss: () -> Unit,
-    onDelete: () -> Unit,
-    onConnect: () -> Unit = {},
+    onDelete: (() -> Unit)? = null,
+    onConnect: (() -> Unit)? = null,
     viewModel: NoSlopViewModel? = null,
     onNavigateToAuthorFeed: ((String, String) -> Unit)? = null
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceDark,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, BorderSubtle)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                var activeDonationUrl by remember { mutableStateOf<String?>(null) }
-                val effectiveDonationUrl = if (peer.publicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
-                    peer.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
-                } else {
-                    peer.fundMeLink?.takeIf { it.isNotBlank() }
+            Text(
+                text = "User Profile".tr,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+            val effectiveDonationUrl = if (peer.publicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+                peer.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+            } else {
+                peer.fundMeLink?.takeIf { it.isNotBlank() }
+            }
+
+            // Large Avatar with Donation & Online Badges
+            Box(modifier = Modifier.size(96.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            2.dp,
+                            when {
+                                peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
+                                peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
+                                else -> BorderSubtle
+                            },
+                            RoundedCornerShape(16.dp)
+                        )
+                ) {
+                    PeerAvatar(
+                        peer = peer,
+                        size = 96,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
-                // Large Avatar with Donation & Online Badges
-                Box(modifier = Modifier.size(96.dp)) {
+                // Online indicator
+                if (peer.isTrusted && peer.isOnline) {
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(
-                                2.dp,
-                                when {
-                                    peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
-                                    peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
-                                    else -> BorderSubtle
-                                },
-                                RoundedCornerShape(16.dp)
-                            )
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 4.dp, y = 4.dp)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(AccentGreen)
+                            .border(3.dp, SurfaceDark, CircleShape)
+                    )
+                }
+
+                // Donation icon on top right corner of avatar
+                if (peer.isCreator && effectiveDonationUrl != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = AccentGreen,
+                        border = BorderStroke(2.dp, SurfaceDark),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 6.dp, y = (-6).dp)
+                            .size(28.dp)
+                            .clickable { activeDonationUrl = effectiveDonationUrl }
                     ) {
-                        PeerAvatar(
-                            peer = peer,
-                            size = 96,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
                     }
+                }
+            }
 
-                    // Online indicator
-                    if (peer.isTrusted && peer.isOnline) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = 4.dp, y = 4.dp)
-                                .size(18.dp)
-                                .clip(CircleShape)
-                                .background(AccentGreen)
-                                .border(3.dp, SurfaceDark, CircleShape)
-                        )
-                    }
+            Spacer(modifier = Modifier.height(16.dp))
 
-                    // Donation icon on top right corner of avatar
-                    if (peer.isCreator && effectiveDonationUrl != null) {
+            var cleanHandle = peer.handle
+            if (cleanHandle.endsWith(".${peer.tripcode}")) cleanHandle = cleanHandle.removeSuffix(".${peer.tripcode}")
+            val fullName = if (peer.tripcode.isNotBlank()) "${cleanHandle}.${peer.tripcode}" else cleanHandle
+
+            Text(
+                text = if (peer.isTrusted) fullName else cleanHandle,
+                fontWeight = FontWeight.Bold,
+                color = TextLight,
+                fontSize = 20.sp,
+                fontFamily = FontFamily.Monospace
+            )
+
+            if (!peer.bio.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = peer.bio,
+                    color = TextMuted,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+
+            if (peer.isCreator) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    if (effectiveDonationUrl != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = CircleShape,
-                            color = AccentGreen,
-                            border = BorderStroke(2.dp, SurfaceDark),
+                            color = AccentGreen.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, AccentGreen),
                             modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 6.dp, y = (-6).dp)
-                                .size(28.dp)
+                                .size(20.dp)
                                 .clickable { activeDonationUrl = effectiveDonationUrl }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Handle + Tripcode
-                Text(
-                    text = peer.handle,
-                    fontWeight = FontWeight.Bold,
-                    color = TextLight,
-                    fontSize = 22.sp
+            if (activeDonationUrl != null) {
+                com.noslop.app.ui.ArticleWebViewDialog(
+                    url = activeDonationUrl!!,
+                    title = "${"Support".tr} ${peer.handle}",
+                    onDismiss = { activeDonationUrl = null }
                 )
+            }
 
-                Text(
-                    text = ".${peer.tripcode}",
-                    fontFamily = FontFamily.Monospace,
-                    color = TextMuted,
-                    fontSize = 13.sp
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                if (peer.isCreator) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        if (effectiveDonationUrl != null) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = CircleShape,
-                                color = AccentGreen.copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, AccentGreen),
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clickable { activeDonationUrl = effectiveDonationUrl }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (activeDonationUrl != null) {
-                    com.noslop.app.ui.ArticleWebViewDialog(
-                        url = activeDonationUrl!!,
-                        title = "${"Support".tr} ${peer.handle}",
-                        onDismiss = { activeDonationUrl = null }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                // Trust badge
-                if (peer.isTrusted && peer.isTemporary) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(TemporaryAmber.copy(alpha = 0.1f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.AccessTime,
-                            contentDescription = null,
-                            tint = TemporaryAmber,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Temporary Contact".tr,
-                            color = TemporaryAmber,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else if (peer.isTrusted) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(AccentGreen.copy(alpha = 0.1f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = AccentGreen,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Trusted Contact".tr,
-                            color = AccentGreen,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DestructiveRed.copy(alpha = 0.1f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = DestructiveRed,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Pending Trust".tr,
-                            color = DestructiveRed,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Onion address (truncated, shown only when not connected)
-                if (!peer.isTrusted) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(PrimaryBlack)
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            text = "ONION ADDRESS".tr,
-                            color = TextMuted,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
-                            color = TextLight.copy(alpha = 0.7f),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
-                val userPosts = remember(authorPosts, peer.publicKeyB64) {
-                    authorPosts.filter { it.authorPublicKeyB64 == peer.publicKeyB64 && !it.isOrphaned }
-                }
-
-                if (userPosts.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    PeerMeshContentList(
-                        posts = userPosts,
-                        onPostClick = { clickedPost ->
-                            onDismiss()
-                            if (onNavigateToAuthorFeed != null) {
-                                onNavigateToAuthorFeed(peer.publicKeyB64, clickedPost.id)
-                            } else {
-                                viewModel?.viewAuthorPosts(peer.publicKeyB64, clickedPost.id)
-                            }
-                        }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Action Buttons
-                // Action Buttons (Stacked vertically to prevent horizontal squashing)
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+            // Trust badge
+            if (peer.isTrusted && peer.isTemporary) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TemporaryAmber.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
                 ) {
-                    if (!peer.isTrusted) {
-                        Button(
-                            onClick = {
-                                onConnect()
-                                onDismiss()
-                            },
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                        ) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                    Icon(
+                        Icons.Default.AccessTime,
+                        contentDescription = null,
+                        tint = TemporaryAmber,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Temporary Contact".tr,
+                        color = TemporaryAmber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (peer.isTrusted) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AccentGreen.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = AccentGreen,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Trusted Contact".tr,
+                        color = AccentGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DestructiveRed.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = DestructiveRed,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Pending Trust".tr,
+                        color = DestructiveRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Onion address (truncated, shown only when not connected)
+            if (!peer.isTrusted && peer.onionAddress.isNotBlank()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(PrimaryBlack)
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "ONION ADDRESS".tr,
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
+                        color = TextLight.copy(alpha = 0.7f),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+            val userPosts = remember(authorPosts, peer.publicKeyB64, peer.handle) {
+                authorPosts.filter { post ->
+                    !post.isOrphaned && (
+                        post.authorPublicKeyB64 == peer.publicKeyB64 ||
+                        (post.authorHandle.isNotBlank() && post.authorHandle.equals(peer.handle, ignoreCase = true))
+                    )
+                }
+            }
+
+            if (userPosts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                PeerMeshContentList(
+                    posts = userPosts,
+                    onPostClick = { clickedPost ->
+                        onDismiss()
+                        if (onNavigateToAuthorFeed != null) {
+                            onNavigateToAuthorFeed(peer.publicKeyB64, clickedPost.id)
+                        } else {
+                            viewModel?.viewAuthorPosts(peer.publicKeyB64, clickedPost.id)
                         }
                     }
+                )
+            }
 
-                    val allPeersList by (viewModel?.peers?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
-                    val livePeer = remember(allPeersList, peer.publicKeyB64) {
-                        allPeersList.find { it.publicKeyB64 == peer.publicKeyB64 } ?: peer
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Action Buttons
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!peer.isTrusted && onConnect != null) {
+                    Button(
+                        onClick = onConnect,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Connect".tr, fontWeight = FontWeight.Bold)
                     }
-                    val isOwnNode = peer.publicKeyB64 == viewModel?.localKeys?.value?.publicKeyB64 || 
-                                    peer.publicKeyB64 == viewModel?.burnableKeys?.value?.publicKeyB64
+                }
 
-                    if (!isOwnNode) {
-                        val isFollowing = livePeer.isFollowing
-                        Button(
-                            onClick = {
-                                viewModel?.toggleFollowPeer(peer.publicKeyB64, !isFollowing)
-                            },
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = if (isFollowing) {
-                                ButtonDefaults.buttonColors(
-                                    containerColor = SurfaceDark,
-                                    contentColor = TextMuted
-                                )
-                            } else {
-                                ButtonDefaults.buttonColors(
-                                    containerColor = AccentGreen.copy(alpha = 0.2f),
-                                    contentColor = AccentGreen
-                                )
-                            },
-                            border = BorderStroke(1.dp, if (isFollowing) BorderSubtle else AccentGreen)
-                        ) {
-                            Text(
-                                if (isFollowing) "Unfollow Creator".tr else "Follow Creator".tr,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
+                if (peer.isTrusted && onDelete != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (peer.isTrusted) {
-                            Button(
-                                onClick = { showDeleteConfirmation = true },
-                                modifier = Modifier.weight(1f).height(44.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = DestructiveRed.copy(alpha = 0.15f),
-                                    contentColor = DestructiveRed
-                                )
-                            ) {
-                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Remove".tr, fontWeight = FontWeight.Bold)
-                            }
+                        Button(
+                            onClick = { showDeleteConfirmation = true },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DestructiveRed.copy(alpha = 0.15f),
+                                contentColor = DestructiveRed
+                            )
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Remove".tr, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -628,7 +608,7 @@ fun ContactCardDialog(
                                 viewModel?.banNode(peer.publicKeyB64, peer.handle)
                                 onDismiss()
                             },
-                            modifier = if (peer.isTrusted) Modifier.weight(1f).height(44.dp) else Modifier.fillMaxWidth().height(44.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = DestructiveRed.copy(alpha = 0.15f),
@@ -638,16 +618,31 @@ fun ContactCardDialog(
                             Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
                         }
                     }
-
-                    OutlinedButton(
-                        onClick = onDismiss,
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel?.banNode(peer.publicKeyB64, peer.handle)
+                            onDismiss()
+                        },
                         modifier = Modifier.fillMaxWidth().height(44.dp),
                         shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, BorderSubtle),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DestructiveRed.copy(alpha = 0.15f),
+                            contentColor = DestructiveRed
+                        )
                     ) {
-                        Text("Close".tr, fontWeight = FontWeight.Bold)
+                        Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
                     }
+                }
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+                ) {
+                    Text("Close".tr, fontWeight = FontWeight.Bold)
                 }
             }
         }
