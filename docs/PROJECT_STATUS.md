@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-22) — Player Session Mount Stability, Tor Circuit Stall Escapes & R8-Safe Instant Localization (v0.6.0-alpha)
+
+* **Player Mount Stability & Mid-Stream Teardown Elimination (`VideoPlayer.kt`)**:
+  * Decoupled player mount lifecycle from `retryTrigger` by introducing `playerMountKey` (`NOSLOP_PLAYER_MOUNT_KEY_V1`). Previously, when a video played stably for 16 seconds, `onStablePlayback` reset `retryTrigger` from 1 to 0. Because `ExoVideoPlayer`'s `DisposableEffect` was directly keyed on `retryTrigger`, this reset inadvertently triggered `onDispose()` and tore down the playing player mid-stream, forcing an expensive seek and rebuffering cycle from cold Tor sockets.
+* **Tor Circuit Stall Escalation & Stream Nonce Bumping (`VideoPlayer.kt`, `YouTubeInternalClient.kt`)**:
+  * Implemented `YouTubeInternalClient.advanceStreamNonce(videoId)`: when mid-stream stall detection triggers (0 bytes for 24s or continuous buffering for 30s), the recovery pipeline automatically increments the stream nonce and invalidates preloaded caches, ensuring reconnection establishes a fresh, un-throttled 3-hop Tor circuit rather than reconnecting to the stalled circuit.
+* **LoadControl Buffer Window Tuning for Tor (`VideoPlayer.kt`, `PreloadManager.kt`)**:
+  * Tuned `DefaultLoadControl` parameters: set `minBufferMs = 45000` (45s), `maxBufferMs = 90000` (90s), and `bufferForPlaybackAfterRebufferMs = 4000` (4s) across both `VideoPlayer.kt` and `PreloadManager.kt`. Provides a deep buffer cushion that keeps sockets actively streaming without triggering 15-second idle starvation gaps or RAM exhaustion.
+* **R8-Safe Zero-Reflection Localization & Instant Switching (`LanguageManager.kt`, `NoSlopApp.kt`, `NoSlopViewModel.kt`)**:
+  * Eliminated anonymous Gson `TypeToken` usage in `LanguageManager.loadLanguage()`, resolving runtime `RuntimeException: Missing type parameter` crashes under R8 full minification (`assembleRelease`). Replaced with direct `JsonParser.parseString(jsonString).asJsonObject` iteration.
+  * Added `_languageUpdateTrigger` StateFlow in `LanguageManager.kt` observed by `String.tr`, ensuring instant, guaranteed UI recomposition across every screen upon selecting a language in Settings.
+  * Added `fallbackLanguages` mapping all 22 bundled languages, safeguarding against `AssetManager.list("languages")` platform quirks on Android.
+  * Initialized `LanguageManager.init(this, "en")` synchronously on the main thread in `NoSlopApp.onCreate()`, eliminating cold-start initialization races.
+
 ## Completed Changes (2026-09-19) — Long-Stream Playback Stabilization, Stall Recovery & Log Clipboard Hardening (v0.5.9-alpha)
 
 * **Long-Stream Playback Stabilization & Stutter Loop Elimination (`VideoPlayer.kt`, `PreloadManager.kt`)**:

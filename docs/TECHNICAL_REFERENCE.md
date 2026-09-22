@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.5.8-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
+versionName `0.6.0-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1661,7 +1661,14 @@ Longer videos (exceeding 3–5 minutes) experienced stream breakdown over Tor, e
 3. **Recovery Authorization (`canRetry`)**: `canRetry` was limited strictly to `retryTrigger < 2`. For a long video, any third reconnect was refused, showing "Video unavailable". `canRetry` now permits recovery if the video was already playing (`isVideoReady || resumePosition >= 8000L`), and resets `retryTrigger` to 0 after 15s of stable playback.
 4. **Socket Keep-Alive**: `HttpClientProvider.getOrCreateIsolatedMediaClient` reduced `ConnectionPool` keepalive from 300s to 60s and `readTimeout` from 60s to 35s, preventing ExoPlayer from hanging on stale Tor sockets.
 
-### 16.22 Diagnosing from logs
+### 16.22 Player Mount Lifecycle Decoupling & Tor Circuit Stall Escalation (`NOSLOP_PLAYER_MOUNT_KEY_V1`)
+
+During long video streaming, a subtle recomposition bug caused playing videos to be torn down mid-stream:
+1. **Player Mount Teardown on Stable Reset**: `onStablePlayback` resets `retryTrigger` to 0 after 16 seconds of continuous stable playback. Previously, `ExoVideoPlayer`'s `DisposableEffect(url, retryKey)` was keyed on `retryKey = retryTrigger`. When `retryTrigger` reset from 1 to 0, `DisposableEffect` invoked `onDispose()`, tearing down the actively playing `ExoPlayer` instance (`attempt 1`) and creating a brand new one. The new player sought to the active offset, attempted an unbuffered range request over Tor, and stalled. Solved by introducing `playerMountKey` which only increments on genuine `onRetry()` invocations, ensuring that resetting `retryTrigger` to 0 does not kill the player.
+2. **Tor Circuit Escalation on Stalls**: When the 30s buffering stall detector triggers, calling `onRetry()` without modifying the SOCKS username reconnected to the exact same congested or throttled Tor circuit. `YouTubeInternalClient.advanceStreamNonce(videoId)` is now invoked on mid-stream stalls, guaranteeing the re-resolved URL and subsequent ExoPlayer media connection bind to a fresh Tor circuit and exit node.
+3. **Continuous Buffer Window Tuning**: Tuned `DefaultLoadControl` to `minBufferMs = 45000` (45s), `maxBufferMs = 90000` (90s), and `bufferForPlaybackAfterRebufferMs = 4000` (4s) in both `VideoPlayer.kt` and `PreloadManager.kt`. This maintains an active download stream without creating large idle gaps that allow Tor SOCKS sockets to time out.
+
+### 16.23 Diagnosing from logs
 
 Capture unfiltered — `adb logcat -c && adb logcat -v time > noslop.log` — and
 uninstall whichever build variant is not under test (§16.10). Filtering by
@@ -1871,6 +1878,13 @@ closing the file per line with no ordering guarantee. Scrubbing covers long
 Base64 blobs and 64-hex digests in addition to onion addresses.
 
 Note the log export surfaces only the active file, not the rotated `.log.1`.
+
+### 17.16 R8-Safe Zero-Reflection Dynamic Localization (`NOSLOP_I18N_R8_SAFE_V1`)
+
+In release builds (`assembleRelease`), R8 minification strips generic signatures from anonymous subclasses. `LanguageManager.loadLanguage()` constructed an anonymous `TypeToken<Map<String, String>>() {}`, causing a fatal `RuntimeException: Missing type parameter` on every non-English language load. The exception handler silently caught the error and fell back to reloading English, completely disabling language switching in production builds:
+1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
+2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
+3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
 
 ## 18. SOCKS5 Stream Isolation & Egress IP Affinity (2026-09-06)
 
