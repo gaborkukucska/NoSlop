@@ -80,7 +80,7 @@ object InternetArchiveClient {
         rows: Int = 20
     ): List<FeedItem> {
         val qTerm = query.trim()
-        val queryPart = if (qTerm.isBlank()) "collection:(etree OR netlabels OR 78rpm) AND mediatype:audio" else "($qTerm) AND mediatype:audio"
+        val queryPart = if (qTerm.isBlank()) "collection:(etree OR netlabels OR 78rpm) AND mediatype:audio" else "($qTerm) AND (collection:etree OR collection:netlabels OR collection:78rpm OR mediatype:audio)"
         val encodedQuery = java.net.URLEncoder.encode(
             "$queryPart AND -subject:youtube",
             "UTF-8"

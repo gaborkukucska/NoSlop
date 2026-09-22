@@ -1,5 +1,22 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-23) — Filtered Log Clipboard Export, Initial Slide Buffer Sync, Offscreen Spinner Timeout Fix & Geo-Lock Recovery (v0.6.1-alpha)
+
+* **Tab-Aware Log Clipboard Export (`LogsViewerScreen.kt`, `Logger.kt`, `NoSlopViewModel.kt`)**:
+  * Added `getFilteredLogsText(levelFilter: Level?)` in `Logger.kt` and wired `selectedLevelFilter` directly into the copy action in `LogsViewerScreen.kt`.
+  * Tapping the copy icon now copies all logs matching the currently active tab (ALL, DEBUG, INFO, WARN, or ERROR), respecting the safe 850KB Android IPC Binder ceiling.
+* **Initial Slide Position Buffer Sync on Cold Launch (`PreloadManager.kt`, `MainActivity.kt`)**:
+  * In `PreloadManager.doWarmUp`, checked `PlaybackPositionStore.resumePositionFor(rawUrl) >= 8000L` and sought to `resumeMs` before `prepare()`, ensuring the initial buffer is downloaded at the exact resume target instead of 0ms.
+  * Increased `MainActivity`'s `awaitPlayerReady` timeout from 8s to 12s, allowing cold Tor connections to reach `STATE_READY` before splash dismissal.
+* **Offscreen Spinner Pre-Expiration Elimination & Fast Zero-Byte Recovery (`VideoPlayer.kt`)**:
+  * Bound `loadingTimedOut` to `isVisible`: when a slide is offscreen, `loadingTimedOut` resets to `false`, preventing slides that were pre-warmed while watching earlier videos from prematurely timing out and rendering static thumbnails with no spinner.
+  * Reduced `stallThresholdSamples` from 12 (24s) to 4 (8s) when `bufPos <= 0L`, fast-failing stalled connections to fresh circuits in 8s.
+* **Restricted Geo-Lock Filter (`YouTubeInternalClient.kt`)**:
+  * Discarded streams tagged with sanctioned/restricted regions (`gcr=ir`, `gcr=sy`, `gcr=cu`, `gcr=kp`) over Tor to prevent players from locking onto throttled exit IPs.
+* **Archive.org Clearnet Tor Routing & Jamendo Diagnostics (`InternetArchiveClient.kt`, `JamendoApiClient.kt`)**:
+  * Switched Archive.org search endpoints from `.onion` to `https://archive.org` over Tor, eliminating 30s connection timeouts.
+  * Enhanced Jamendo logging with explicit `code` and `error_message` fields and added `boost=popularity_month` query parameters.
+
 ## Completed Changes (2026-09-22) — Audio Sourcing Repair, Internet Archive Resilience, Tor Buffer Stabilization & Wikimedia Search Parity (v0.6.1-alpha)
 
 * **Audio Sourcing & Jamendo API Fix (`JamendoApiClient.kt`)**:

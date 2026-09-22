@@ -41,11 +41,11 @@ object JamendoApiClient {
             // tags= only accepts known Jamendo genre/mood tokens and fails on arbitrary text.
             val cleanQuery = tags.trim().lowercase()
             val queryParam = if (cleanQuery.isBlank() || cleanQuery == "music") {
-                "tags=pop+rock+electronic"
+                "tags=pop+rock+electronic&boost=popularity_month"
             } else {
                 "search=" + java.net.URLEncoder.encode(cleanQuery, "UTF-8")
             }
-            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&$queryParam&include=musicinfo&order=popularity_total" 
+            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&$queryParam&include=musicinfo" 
             
             val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
             val reqBuilder = Request.Builder().url(proxiedUrl)
@@ -80,7 +80,9 @@ object JamendoApiClient {
             val headers = root.getAsJsonObject("headers")
             val status = headers?.get("status")?.asString
             if (status != "success") {
-                Logger.warn(TAG, "Jamendo API returned status: $status for query: $tags")
+                val code = headers?.get("code")?.asInt ?: -1
+                val errorMsg = headers?.get("error_message")?.asString ?: ""
+                Logger.warn(TAG, "Jamendo API returned status: $status (code=$code, msg=$errorMsg) for query: $tags")
                 return emptyList()
             }
             

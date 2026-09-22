@@ -50,7 +50,7 @@ fun LogsViewerScreen(
             }
 
             Row {
-                IconButton(onClick = { viewModel.copyLogToClipboard(context) }) {
+                IconButton(onClick = { viewModel.copyLogToClipboard(context, selectedLevelFilter) }) {
                     Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs".tr, tint = AccentGreen)
                 }
                 IconButton(onClick = { viewModel.clearLogFile() }) {

@@ -203,6 +203,37 @@ object Logger {
 
     fun getLogs(): List<LogEntry> = ringBuffer.toList()
 
+    fun getFilteredLogsText(levelFilter: Level? = null): String {
+        val file = logFile
+        val allLines = mutableListOf<String>()
+        if (file != null && file.exists()) {
+            try {
+                val prev = File(file.parentFile, file.name + ".1")
+                if (prev.exists()) {
+                    allLines.addAll(prev.readLines())
+                }
+                allLines.addAll(file.readLines())
+            } catch (_: Exception) {}
+        }
+        if (allLines.isEmpty()) {
+            allLines.addAll(ringBuffer.map { it.toString() })
+        }
+
+        val filtered = if (levelFilter == null) {
+            allLines
+        } else {
+            val tag = "[${levelFilter.name}]"
+            allLines.filter { it.contains(tag) }
+        }
+
+        val text = filtered.joinToString("\n")
+        return if (text.length > 850_000) {
+            text.takeLast(850_000).substringAfter('\n', "")
+        } else {
+            text
+        }
+    }
+
     fun getAllLogsText(): String {
         val file = logFile
         if (file != null && file.exists()) {

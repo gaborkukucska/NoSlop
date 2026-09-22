@@ -3069,18 +3069,14 @@ fun toggleAggregator() {
         }
     }
 
-    fun copyLogToClipboard(context: Context) {
+    fun copyLogToClipboard(context: Context, levelFilter: Logger.Level? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            val rawText = Logger.getAllLogsText()
-            val safeText = if (rawText.length > 500_000) {
-                rawText.takeLast(500_000).substringAfter('\n', "")
-            } else {
-                rawText
-            }
+            val safeText = Logger.getFilteredLogsText(levelFilter)
             withContext(Dispatchers.Main) {
                 try {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val clip = android.content.ClipData.newPlainText(com.noslop.app.util.LanguageManager.translate("NoSlop Logs"), safeText)
+                    val label = if (levelFilter != null) "NoSlop Logs (${levelFilter.name})" else "NoSlop Logs"
+                    val clip = android.content.ClipData.newPlainText(label, safeText)
                     clipboard.setPrimaryClip(clip)
                     val lineCount = safeText.lines().size
                     android.widget.Toast.makeText(

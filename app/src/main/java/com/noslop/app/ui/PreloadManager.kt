@@ -354,7 +354,11 @@ object PreloadManager {
         val mediaItem = MediaItem.Builder().setUri(resolvedUrl).setMimeType(mimeType).build()
 
         player.setMediaItem(mediaItem)
-        // Resume from start on preload to ensure fast initial buffering
+        val resumeMs = com.noslop.app.ui.components.PlaybackPositionStore.resumePositionFor(rawUrl)
+        if (resumeMs >= 8000L) {
+            Logger.info("PRELOAD", "Preloading at saved resume position ${resumeMs}ms: $rawUrl")
+            player.seekTo(resumeMs)
+        }
         player.prepare()
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE

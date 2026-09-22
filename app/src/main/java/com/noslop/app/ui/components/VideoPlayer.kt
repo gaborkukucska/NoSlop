@@ -865,8 +865,8 @@ fun VideoPlayer(
         // Never spin forever: if nothing has become ready by now, something is
         // wrong and the error / thumbnail state is the more honest thing to show.
         var loadingTimedOut by remember(url, retryTrigger) { mutableStateOf(false) }
-        LaunchedEffect(url, retryTrigger, isVideoReady) {
-            if (isVideoReady) {
+        LaunchedEffect(url, retryTrigger, isVideoReady, isVisible) {
+            if (isVideoReady || !isVisible) {
                 loadingTimedOut = false
             } else {
                 kotlinx.coroutines.delay(45_000L)
@@ -1084,8 +1084,8 @@ private fun ExoVideoPlayer(
                 }
 
                 // Mid-stream or initial stall recovery over Tor.
-                // Recovers if zero bytes arrive for 24s OR if stuck buffering for 30s despite trickling bytes.
-                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 12 else 6
+                // If zero bytes arrive on a cold start (bufPos <= 0), fail-fast after 8s (4 samples).
+                val stallThresholdSamples = if (bufPos <= 0L) 4 else (if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 10 else 5)
                 val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 15)
                 if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(

@@ -129,7 +129,7 @@ class MainActivity : ComponentActivity() {
                                 }
                                 try {
                                     // Wait up to 8s for the player to reach READY state (buffering first frame)
-                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 8000L)
+                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 12000L)
                                     Logger.info("MAIN", "Slide 1 preload buffer readiness result: $isReady")
                                 } catch (e: Exception) {
                                     Logger.debug("MAIN", "Slide 1 awaitPlayerReady ended: ${e.message}")

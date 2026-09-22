@@ -524,7 +524,13 @@ object YouTubeInternalClient {
         if (formats != null && formats.size() > 0) {
             val valid = formats.mapNotNull { element ->
                 val obj = element.asJsonObject ?: return@mapNotNull null
-                extractFormatStreamUrl(obj)
+                val pair = extractFormatStreamUrl(obj) ?: return@mapNotNull null
+                if (isTor && (pair.first.contains("gcr=ir", ignoreCase = true) || pair.first.contains("gcr=sy", ignoreCase = true) || pair.first.contains("gcr=cu", ignoreCase = true))) {
+                    Logger.warn(TAG, "Skipping restricted geo-locked stream format (itag=${pair.second}) over Tor")
+                    null
+                } else {
+                    pair
+                }
             }
             if (valid.isNotEmpty()) {
                 val chosen = when (quality) {
