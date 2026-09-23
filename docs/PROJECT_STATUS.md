@@ -1,5 +1,24 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-23) — Image Media Loading, Audio Pipeline Restoration, Preloader Bandwidth De-Contention & Tor Socket Congestion Relief (v0.6.1-alpha)
+
+* **Image Loading & Policy Headers (`MediaComponents.kt`, `NoSlopApp.kt`, `FeedCard.kt`)**:
+  * Fixed image URL corruption: `sanitizeImageUrl()` previously called `Html.fromHtml()` without trailing `.trim()`, which appended newline characters (`\n\n`) to all image URLs and caused OkHttp/Coil to reject them with `IllegalArgumentException`.
+  * Wikimedia Commons Tor 403 bypass: Wikimedia strictly blocks generic `Mozilla/5.0...` User-Agents over Tor exit nodes per Wikimedia Foundation User-Agent Policy. Injected policy-compliant `User-Agent: NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)` in `BlurredImageBackground`, `ZoomableImageDialog`, and via an app-wide Coil interceptor in `NoSlopApp.kt`. Added required `AIC-User-Agent` headers for Art Institute of Chicago (`artic.edu`).
+  * Image slide resolution: Updated `FeedCard.kt` to resolve image media from `thumbnailUrl` if `mediaUrl` is missing so items correctly render in `BlurredImageBackground` instead of falling through to the article reader.
+* **Audio Sourcing & Undated Feed Interleaving (`JamendoApiClient.kt`, `InternetArchiveClient.kt`, `NoSlopViewModel.kt`)**:
+  * Jamendo Client ID Candidate Pool: Replaced suspended single client ID (`709fa152`) with a rotating candidate pool (`56d30c95`, `3dce8b55`, `9d9f42e3`, `c0602f10`). On error code 11 (suspended application), the client automatically rotates candidates and logs the transition.
+  * Undated (`publishedAt = 0L`) Feed Sorting: Fixed `NoSlopViewModel.loadMoreFeedItems()` for specific category filters (`Audio` and `Images`). Previously, sorting strictly by `publishedAt` descending banished all 0L items (Openverse tracks/images, Wikimedia, Art Institute) to the bottom of the feed below thousands of dated items. Sorted using `effectiveDate` (`now - 20 days` assumed age) so undated items interleave seamlessly.
+  * Internet Archive Music Variety: Updated `InternetArchiveClient.getPopularAudio()` from all-time `downloads+desc` to `week+desc` across curated music collections (`netlabels`, `etree`, `78rpm`, `audio_music`), filtering out repetitive Quran recitations from general music queries to surface actual trending indie/rock/electronic tracks.
+* **Preloader Bandwidth De-Contention & Startup Buffer Tuning (`PreloadManager.kt`, `VideoPlayer.kt`, `YouTubeInternalClient.kt`)**:
+  * Preloader Bandwidth De-Contention: Reduced `PreloadManager` load control buffers from 45s min / 90s max down to 8s min / 15s max (`minBufferMs = 8000`, `maxBufferMs = 15000`, `bufferForPlaybackMs = 1000`). Preloaded background players now buffer only the head (8–15s) and immediately go idle, yielding 100% of Tor bandwidth to the active on-screen video.
+  * Active Playback Startup Acceleration: Reduced `VideoPlayer.kt` active player `bufferForPlaybackMs` from 2500ms (2.5s) to 1200ms (1.2s), halving the time to first frame playback. Tuned `minBufferMs` to 35s and `maxBufferMs` to 70s for continuous streaming without memory bloat.
+  * Blocked Tor Circuit Fast-Exit: Reduced `EXIT_BLOCKED_THRESHOLD` in `YouTubeInternalClient.kt` from 3 to 2, escaping flagged exits to fresh circuits in 2 attempts instead of 3.
+* **Tor Socket Congestion & Dead Peer Backoff (`GossipService.kt`)**:
+  * Extended exponential backoff for persistently unreachable onion peers (`isPeerInCooldown`) from 2 minutes up to 30 minutes (`exponent.coerceAtMost(6)`, `1800_000L`). Prevents repeated 12-second timeout socket storms (e.g. 238 failed attempts to dead peers) from freezing Tor's SOCKS5 daemon (`Tor proxy not responding on 9050`), while preserving instant unblocking the second an offline peer sends any authentic packet.
+* **R8/ProGuard Persisted Outbox Deserialization Fix (`MeshSocialRepository.kt`)**:
+  * Eliminated anonymous Gson `TypeToken` in `loadPersistedOutbox()`, which caused runtime crashes under R8 full minification (`TypeToken must be created with a type argument`). Replaced with direct zero-reflection `JsonParser.parseString(json).asJsonObject` iteration.
+
 ## Completed Changes (2026-09-23) — Main Thread Tor Crash Elimination, Splash Latency Decoupling & Slide 1 Preload Self-Reference Fix (v0.6.1-alpha)
 
 * **Tor Reconnect Crash & Socket Threading (`NoSlopViewModel.kt`, `TorService.kt`)**:

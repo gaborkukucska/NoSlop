@@ -1678,6 +1678,14 @@ During long video streaming, a subtle recomposition bug caused playing videos to
 2. **Tor Circuit Escalation on Stalls**: When the 30s buffering stall detector triggers, calling `onRetry()` without modifying the SOCKS username reconnected to the exact same congested or throttled Tor circuit. `YouTubeInternalClient.advanceStreamNonce(videoId)` is now invoked on mid-stream stalls, guaranteeing the re-resolved URL and subsequent ExoPlayer media connection bind to a fresh Tor circuit and exit node.
 3. **Continuous Buffer Window Tuning**: Tuned `DefaultLoadControl` to `minBufferMs = 45000` (45s), `maxBufferMs = 90000` (90s), and `bufferForPlaybackAfterRebufferMs = 4000` (4s) in both `VideoPlayer.kt` and `PreloadManager.kt`. This maintains an active download stream without creating large idle gaps that allow Tor SOCKS sockets to time out.
 
+### 16.25 Preloader Bandwidth De-Contention, Snappy Startup Buffering & Dead Peer Tor De-Congestion (v0.6.1-alpha)
+
+Videos previously struggled to preload and took a long time to buffer over Tor due to socket contention and oversized preload windows:
+1. **Preloader Bandwidth Monopolization (`PreloadManager.kt`)**: `PreloadManager` previously used `minBufferMs = 45000` (45s) and `maxBufferMs = 90000` (90s). With `MAX_PRELOAD = 3`, up to three background ExoPlayer instances were downloading 45–90 seconds (20–40 MB each) simultaneously over Tor, choking the connection and starving the active on-screen video down to ~25% bandwidth. Sized down to `minBufferMs = 8000` (8s), `maxBufferMs = 15000` (15s), and `bufferForPlaybackMs = 1000` (1.0s). Background players now buffer only an 8–15s head cushion and immediately go idle, yielding 100% of Tor bandwidth to the active playing video.
+2. **Startup Playback Cushion Halving (`VideoPlayer.kt`)**: Reduced active player `bufferForPlaybackMs` from 2500ms (2.5s) to 1200ms (1.2s), halving initial buffering delay, while maintaining `minBufferMs = 35000` and `maxBufferMs = 70000` to prevent memory pressure.
+3. **Dead Peer Tor Socket Congestion Relief (`GossipService.kt`)**: Outbound connection attempts to dead hidden services (e.g. 238 consecutive failures to an offline peer) previously capped at a 2-minute backoff. Every 120s, multiple 12-second hanging sockets saturated Tor's SOCKS daemon (`Tor proxy not responding on 9050`). Extended exponential backoff cap to 30 minutes (`exponent.coerceAtMost(6)`, `1800_000L`), while preserving instant auto-unblock the second any packet arrives from that peer.
+4. **Fast Circuit Escape on Blocked Exits (`YouTubeInternalClient.kt`)**: Lowered `EXIT_BLOCKED_THRESHOLD` from 3 to 2, escaping flagged exits after 2 client refusals (`ANDROID`, `TVHTML5`) rather than waiting through 3.
+
 ### 16.23 Diagnosing from logs
 
 Capture unfiltered — `adb logcat -c && adb logcat -v time > noslop.log` — and
@@ -1895,6 +1903,14 @@ In release builds (`assembleRelease`), R8 minification strips generic signatures
 1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
 2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
 3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
+
+### 17.17 R8-Safe Outbox Deserialization & Media Image Policy Routing (v0.6.1-alpha)
+
+1. **R8-Safe Outbox Deserialization (`MeshSocialRepository.kt`)**: In release builds, `loadPersistedOutbox()` threw `RuntimeException: TypeToken must be created with a type argument: new TypeToken<...>() {}` due to R8 minification stripping anonymous generic type tokens. Replaced `TypeToken` with direct `JsonParser.parseString(json).asJsonObject` iteration into `NetworkPacket` instances, eliminating outbox restore crashes on startup.
+2. **Image URL Clean Formatting (`MediaComponents.kt`)**: `sanitizeImageUrl()` previously called `Html.fromHtml(cleanUrl, ...).toString()`, which automatically appends `\n\n`. The trailing newlines were never stripped, causing OkHttp and Coil to reject all sanitized image URLs with `IllegalArgumentException`. Added `.trim()` and safe entity decoding.
+3. **Wikimedia & Art Institute Image Headers (`MediaComponents.kt`, `NoSlopApp.kt`)**: Wikimedia Commons blocks generic browser User-Agents from Tor exit nodes with HTTP 403 Forbidden under its robot policy. Injected `NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)` for `wikimedia.org` / `wikipedia.org`, and `AIC-User-Agent` for `artic.edu` across `BlurredImageBackground`, `ZoomableImageDialog`, and the app-wide Coil interceptor.
+4. **Undated Feed Interleaving (`NoSlopViewModel.kt`)**: Filter modes for `Audio` and `Images` previously sorted feeds strictly by `publishedAt DESC`. Because Openverse, Wikimedia, and Art Institute use the undated sentinel `publishedAt = 0L`, they were pushed to the bottom beneath thousands of dated items. Sorted using `effectiveDate` (`now - 20 days` assumed age) so undated media items interleave with dated items.
+5. **Jamendo Client ID Candidate Pool (`JamendoApiClient.kt`)**: Replaced suspended client ID `709fa152` with a rotating pool of candidate client IDs. On error code 11 or 4, the client advances `candidateIndex` and retries with the next candidate.
 
 ## 18. SOCKS5 Stream Isolation & Egress IP Affinity (2026-09-06)
 
