@@ -128,7 +128,7 @@ object PreloadManager {
     }
 
     private fun cacheKeyFor(rawUrl: String): String {
-        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality.ifBlank { "medium" }
         return "$rawUrl||$quality"
     }
 
@@ -470,6 +470,7 @@ object PreloadManager {
         }
         cancelledTasks.add(rawUrl)
         pendingTasks.remove(rawUrl)
+        readyTasks.remove(rawUrl)
     }
 
     fun evictAll() {

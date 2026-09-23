@@ -55,10 +55,10 @@ class MainActivity : ComponentActivity() {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
                             
-                            // 1. Quick wait for Tor readiness (up to 4s) so splash screen remains fast and responsive
+                            // 1. Wait for Tor readiness (up to 12s; returns immediately once Tor reaches READY)
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
-                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(4000L)
+                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(12000L)
                             } catch (e: Exception) {
                                 Logger.debug("MAIN", "Tor awaitNetworkReady in splash: ${e.message}")
                             }
@@ -128,8 +128,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 try {
-                                    // Quick buffer check for Slide 1 (up to 3s)
-                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 3000L)
+                                    // Wait for Slide 1 to buffer to READY state before dismissing splash
+                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 16000L)
                                     Logger.info("MAIN", "Slide 1 preload buffer readiness result: $isReady")
                                 } catch (e: Exception) {
                                     Logger.debug("MAIN", "Slide 1 awaitPlayerReady ended: ${e.message}")

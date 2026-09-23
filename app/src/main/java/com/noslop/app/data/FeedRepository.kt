@@ -232,7 +232,8 @@ class FeedRepository(
             return@withContext
         }
 
-        if (feedDao.getItemCount() > 0) {
+        val hasExistingItems = feedDao.getItemCount() > 0
+        if (hasExistingItems) {
             _feedBuildStatus.value = ""
         } else {
             _feedBuildStatus.value = "Preparing your feed..."
@@ -255,41 +256,42 @@ class FeedRepository(
         val parallelism = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 1 else 2
         val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(parallelism)
 
-        // --- Phase 1: Ramp-Up (Fast initial fetch) ---
-        val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
-
-        val firstRss = rssSources.firstOrNull()
-        if (firstRss != null) {
-            rssSources.remove(firstRss)
-            rampUpJobs.add(async(dispatcher) {
-                _feedBuildStatus.value = "Preparing your feed..."
-                fetchRssSource(firstRss, allNegative)
-            })
-        }
-
-        // Fast ramp-up: prioritize creators so initial feed has creator content
         val shuffledCreators = creatorKeywordList.shuffled()
-        val rampUpCreators = shuffledCreators.take(4)
-        val remainingCreators = shuffledCreators.drop(4)
-        for (creator in rampUpCreators) {
-            rampUpJobs.add(async(dispatcher) {
-                _feedBuildStatus.value = "Preparing your feed..."
-                fetchCreatorVideos(creator)
-            })
-        }
+        val rampUpCreators = if (!hasExistingItems) shuffledCreators.take(4) else emptyList()
+        val remainingCreators = if (!hasExistingItems) shuffledCreators.drop(4) else shuffledCreators
 
-        val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
-        for (cat in priorityCats) {
-            activeCategories.remove(cat)
-            rampUpJobs.add(async(dispatcher) {
-                _feedBuildStatus.value = "Preparing your feed..."
-                fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
-            })
-        }
+        // --- Phase 1: Ramp-Up (Fast initial fetch only needed if database is empty) ---
+        if (!hasExistingItems) {
+            val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
 
-        // Wait for Ramp-Up to finish so initial UI content is populated
-        kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
-        _feedBuildStatus.value = ""
+            val firstRss = rssSources.firstOrNull()
+            if (firstRss != null) {
+                rssSources.remove(firstRss)
+                rampUpJobs.add(async(dispatcher) {
+                    _feedBuildStatus.value = "Preparing your feed..."
+                    fetchRssSource(firstRss, allNegative)
+                })
+            }
+
+            for (creator in rampUpCreators) {
+                rampUpJobs.add(async(dispatcher) {
+                    _feedBuildStatus.value = "Preparing your feed..."
+                    fetchCreatorVideos(creator)
+                })
+            }
+
+            val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
+            for (cat in priorityCats) {
+                activeCategories.remove(cat)
+                rampUpJobs.add(async(dispatcher) {
+                    _feedBuildStatus.value = "Preparing your feed..."
+                    fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                })
+            }
+
+            kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
+            _feedBuildStatus.value = ""
+        }
 
         // --- Phase 2: Background Sync (low concurrency to keep Tor circuit responsive for UI) ---
         val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Any>>()

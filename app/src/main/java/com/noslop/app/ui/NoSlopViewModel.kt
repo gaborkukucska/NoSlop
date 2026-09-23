@@ -566,7 +566,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 _isAggregatorEnabled.value = repository.isAggregatorEnabled()
                 refreshFeeds()
             } else if (_isOnboardingComplete.value && _isAggregatorEnabled.value) {
-                refreshFeeds()
+                // Defer startup background feed refresh so Tor circuits and bandwidth
+                // are 100% dedicated to Slide 1 preloading and buffering
+                viewModelScope.launch(Dispatchers.IO) {
+                    kotlinx.coroutines.delay(12_000L)
+                    refreshFeeds()
+                }
             }
             
             // One-time migration: purge YouTube items with stale dates

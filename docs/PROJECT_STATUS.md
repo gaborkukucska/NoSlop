@@ -1,5 +1,21 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-23) — Startup Video Instant Handoff, CachedSource Staleness Fix & Tor Sync De-Contention (v0.6.2-alpha)
+
+* **Startup Video Instant Handoff & Splash Buffer Masking (`MainActivity.kt`, `PreloadManager.kt`)**:
+  * Resolved the premature splash screen drop: raised `awaitNetworkReady` ceiling to 12s and `awaitPlayerReady` to 16s in `MainActivity.kt`, ensuring Tor's ~5.5s cold bootstrap, initial YouTube stream resolution, and first-frame buffer complete seamlessly behind the splash curtain before reveal.
+  * Fixed `PreloadManager.cacheKeyFor`: added `.ifBlank { "medium" }` to prevent cache-misses against `doWarmUp` when video quality setting is uninitialized.
+  * Ensured `readyTasks.remove(rawUrl)` is cleaned on player invalidation.
+* **CachedSource Stream Nonce Invalidation Repair (`VideoPlayer.kt`)**:
+  * Fixed a critical cache poisoning bug in `CachedSource.stalenessReason()`: previously called `extractYouTubeId(source.url)` on the `googlevideo.com` CDN stream URL rather than the item ID. This extracted query string noise (e.g. `"m"`), causing `YouTubeInternalClient.getStreamNonce()` to return 0 and falsely fail against `streamNonce = 1` with `"circuit stream nonce advanced (1 -> 0)"`.
+  * Stored the authentic `videoId` directly on `CachedSource` and gated staleness strictly on `streamNonce < currentNonce`, eliminating false cache rejections that were forcing `VideoPlayer` to discard warm preloaded players, re-resolve streams, and display "Finding stream" / "Buffering" spinners on active slides.
+* **Tor Cold-Start Stall Watchdog Tuning (`VideoPlayer.kt`)**:
+  * Removed the aggressive 8-second cold-kill watchdog (`if (bufPos <= 0L) 4`) that was prematurely aborting fresh Tor connections before initial Range request byte delivery.
+  * Set Tor stall threshold to 22s (11 samples) and continuous buffering threshold to 30s (15 samples), and ensured any byte progress (`delta > 0L`) resets `stalledSamples` to 0, completely stopping false-alarm circuit escapes and retry restarts on initial video playback.
+* **Cold-Start Feed Synchronization De-Contention (`NoSlopViewModel.kt`, `FeedRepository.kt`)**:
+  * Defer startup feed synchronization in `NoSlopViewModel.init` by 12 seconds when cached feed items already exist in the Room database (`_isOnboardingComplete && _isAggregatorEnabled`), allocating 100% of Tor circuit bandwidth to Slide 1 media resolution and buffering.
+  * Gated Phase 1 Ramp-Up in `FeedRepository.refreshFeeds()` to run only when the database is completely empty (`!hasExistingItems`), preventing a storm of 10+ concurrent creator queries, trending requests, and RSS fetches from congesting Tor during startup.
+
 ## Completed Changes (2026-09-23) — Image Media Loading, Audio Pipeline Restoration, Preloader Bandwidth De-Contention & Tor Socket Congestion Relief (v0.6.1-alpha)
 
 * **Image Loading & Policy Headers (`MediaComponents.kt`, `NoSlopApp.kt`, `FeedCard.kt`)**:

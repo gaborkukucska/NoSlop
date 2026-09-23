@@ -77,7 +77,8 @@ private class CachedSource(
     val source: VideoSource,
     val expiresAtMs: Long,
     val overTor: Boolean,
-    val streamNonce: Int
+    val streamNonce: Int,
+    val videoId: String = ""
 )
 
 /**
@@ -104,10 +105,10 @@ private fun CachedSource.stalenessReason(): String? {
         }
     }
 
-    if (overTorNow && source is VideoSource.Direct) {
-        val videoId = extractYouTubeId(source.url)
-        if (videoId != null && streamNonce != YouTubeInternalClient.getStreamNonce(videoId)) {
-            return "circuit stream nonce advanced ($streamNonce -> ${YouTubeInternalClient.getStreamNonce(videoId)})"
+    if (overTorNow && source is VideoSource.Direct && videoId.isNotBlank()) {
+        val currentNonce = YouTubeInternalClient.getStreamNonce(videoId)
+        if (streamNonce < currentNonce) {
+            return "circuit stream nonce advanced ($streamNonce -> $currentNonce)"
         }
     }
 
@@ -225,7 +226,8 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
                 source = result,
                 expiresAtMs = expiryMs,
                 overTor = HttpClientProvider.useTorForClearnet,
-                streamNonce = nonce
+                streamNonce = nonce,
+                videoId = videoId
             )
         }
         result
@@ -1075,8 +1077,8 @@ private fun ExoVideoPlayer(
                 if (baselineBufPos < 0L) baselineBufPos = bufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
                 if (delta > 0L) com.noslop.app.tor.TorService.noteMediaProgress()
-                // A tiny trickle (<500ms over 2s) is not real buffering progress; count it as stalled
-                val isAdvancing = delta >= 500L
+                // Any byte progress means the buffer is advancing over Tor
+                val isAdvancing = delta > 0L
                 stalledSamples = if (isAdvancing) 0 else (stalledSamples + 1)
                 Logger.info(
                     PLAYBACK_DIAG_TAG,
@@ -1093,9 +1095,9 @@ private fun ExoVideoPlayer(
                 }
 
                 // Mid-stream or initial stall recovery over Tor.
-                // If zero bytes arrive on a cold start (bufPos <= 0), fail-fast after 8s (4 samples).
-                val stallThresholdSamples = if (bufPos <= 0L) 4 else (if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 6 else 4)
-                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 8)
+                // Allow 22s (11 samples) on Tor to accommodate SOCKS setup, TLS, Range seek, and initial chunk transfer
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 11 else 5
+                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 15)
                 if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
