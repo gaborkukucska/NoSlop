@@ -26,11 +26,14 @@ object JamendoApiClient {
     @Volatile
     private var candidateIndex = 0
 
+    val DEFAULT_CLIENT_ID: String
+        get() = CLIENT_ID_CANDIDATES[candidateIndex % CLIENT_ID_CANDIDATES.size]
+
     @Volatile
     var userClientId: String? = null
 
     val CLIENT_ID: String
-        get() = userClientId?.takeIf { it.isNotBlank() } ?: CLIENT_ID_CANDIDATES[candidateIndex % CLIENT_ID_CANDIDATES.size]
+        get() = userClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_CLIENT_ID
 
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
