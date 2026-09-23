@@ -51,12 +51,14 @@ object GossipService {
         val now = System.currentTimeMillis()
         val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: (0 to 0L)
         
-        // Reset count if outside the failure window
-        val effectiveCount = if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS) 1 else count + 1
+        // Retain consecutive failure count until a send succeeds, resetting only after 2h inactivity
+        val effectiveCount = if (now - lastFailureTime > 2 * 3600_000L) 1 else count + 1
         peerSendFailures[peerOnionAddress] = effectiveCount to now
         
         if (effectiveCount >= PEER_FAILURE_THRESHOLD) {
-            Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times in ${PEER_FAILURE_WINDOW_MS/1000}s. Cooldown for ${PEER_COOLDOWN_MS/1000}s")
+            val exponent = (effectiveCount - PEER_FAILURE_THRESHOLD).coerceAtMost(6)
+            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(1800_000L)
+            Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times. Cooldown for ${cooldownMs/1000}s")
         }
     }
 

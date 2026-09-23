@@ -232,6 +232,10 @@ class MeshSocialRepository(
         outboxWorkerJob = repositoryScope.launch(Dispatchers.IO) {
             while (isActive) {
                 kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
+                // Defer background outbox flushes during active video playback to prevent Tor socket congestion
+                if (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                    continue
+                }
                 // P0-1: Prune pending group messages older than 7 days
                 try {
                     val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000L

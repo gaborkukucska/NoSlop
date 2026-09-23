@@ -104,6 +104,13 @@ private fun CachedSource.stalenessReason(): String? {
         }
     }
 
+    if (overTorNow && source is VideoSource.Direct) {
+        val videoId = extractYouTubeId(source.url)
+        if (videoId != null && streamNonce != YouTubeInternalClient.getStreamNonce(videoId)) {
+            return "circuit stream nonce advanced ($streamNonce -> ${YouTubeInternalClient.getStreamNonce(videoId)})"
+        }
+    }
+
     return null
 }
 
@@ -728,8 +735,8 @@ fun VideoPlayer(
                             onRetry = {
                                 directPlaybackFailed = false
                                 isVideoReady = false
+                                source = null // Immediately clear old source so player is not recreated with stale URL
                                 retryTrigger++
-                                playerMountKey++
                             },
                             onReady = {
                                 com.noslop.app.tor.TorService.setTorStatusMessage(null)
@@ -1068,7 +1075,9 @@ private fun ExoVideoPlayer(
                 if (baselineBufPos < 0L) baselineBufPos = bufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
                 if (delta > 0L) com.noslop.app.tor.TorService.noteMediaProgress()
-                stalledSamples = if (delta <= 0L) stalledSamples + 1 else 0
+                // A tiny trickle (<500ms over 2s) is not real buffering progress; count it as stalled
+                val isAdvancing = delta >= 500L
+                stalledSamples = if (isAdvancing) 0 else (stalledSamples + 1)
                 Logger.info(
                     PLAYBACK_DIAG_TAG,
                     "sample +${System.currentTimeMillis() - diagStartMs}ms " +
@@ -1085,8 +1094,8 @@ private fun ExoVideoPlayer(
 
                 // Mid-stream or initial stall recovery over Tor.
                 // If zero bytes arrive on a cold start (bufPos <= 0), fail-fast after 8s (4 samples).
-                val stallThresholdSamples = if (bufPos <= 0L) 4 else (if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 10 else 5)
-                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 15)
+                val stallThresholdSamples = if (bufPos <= 0L) 4 else (if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 6 else 4)
+                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 8)
                 if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
@@ -1098,12 +1107,12 @@ private fun ExoVideoPlayer(
                     }
                     stalledSamples = 0
                     continuousBufferingSamples = 0
-                    // Invalidate source and advance stream nonce to guarantee a fresh circuit
                     val videoId = extractYouTubeId(rawUrl)
                     if (videoId != null) {
                         com.noslop.app.feeds.api.YouTubeInternalClient.advanceStreamNonce(videoId)
                     }
                     com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
+                    sourceCache.remove("$rawUrl||${mediaSettings.videoQuality.ifBlank { "medium" }}")
                     onRetry()
                     return@LaunchedEffect
                 }
@@ -1230,10 +1239,10 @@ private fun ExoVideoPlayer(
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    35000, // min buffer (35s) keeps buffer continuously topped up without idle gaps
-                    70000, // max buffer (70s) holds a healthy window without overflowing RAM
+                    50000, // min buffer (50s) maintains continuous buffer without 35s socket-killing idle gaps
+                    75000, // max buffer (75s) keeps a healthy 25s top-up window over Tor
                     1200,  // buffer for playback (1.2s) ensures snappy startup
-                    6000   // buffer for playback after rebuffer (6s) gives a solid Tor cushion
+                    4000   // buffer for playback after rebuffer (4s)
                 )
                 .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
                 .setPrioritizeTimeOverSizeThresholds(true)
