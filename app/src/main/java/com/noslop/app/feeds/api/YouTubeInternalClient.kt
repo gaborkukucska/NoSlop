@@ -452,7 +452,7 @@ object YouTubeInternalClient {
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
     // Evaluate up to 2 configs before advancing circuit nonce
-    private const val EXIT_BLOCKED_THRESHOLD = 3
+    private const val EXIT_BLOCKED_THRESHOLD = 2
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18

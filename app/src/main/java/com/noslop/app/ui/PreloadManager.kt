@@ -308,13 +308,13 @@ object PreloadManager {
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // Drip-feed continuous buffer with Tor-optimized parameters
+        // Compact preloader buffer: buffers 8-15s of head data and yields 100% of Tor bandwidth to active playback
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                45000, // min buffer (45s) gives a deep cushion before requiring more data
-                90000, // max buffer (90s) holds a healthy window without overflowing RAM
-                2500,  // buffer for playback (2.5s) ensures smooth startup without stalling on chunk 2
-                8000   // buffer for playback after rebuffer (8s) gives a solid Tor cushion
+                8000,  // min buffer (8s) - buffers enough for instant swipe playback
+                15000, // max buffer (15s) - stops downloading in background so active video gets full bandwidth
+                1000,  // buffer for playback (1.0s) - ready to play fast
+                4000   // buffer for playback after rebuffer (4s)
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()

@@ -70,9 +70,9 @@ object GossipService {
         val now = System.currentTimeMillis()
         
         if (count >= PEER_FAILURE_THRESHOLD) {
-            // Exponential backoff: 30s * 2^(count - 3), capped at 2 minutes (120s) so transient network hitches don't lock peers out
-            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(3)
-            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(120_000L)
+            // Exponential backoff: 30s * 2^(count - 3), capped up to 30 minutes (1800s) to prevent Tor circuit congestion from persistently dead peers
+            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(6)
+            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(1800_000L)
             
             if (now - lastFailureTime < cooldownMs) {
                 return true

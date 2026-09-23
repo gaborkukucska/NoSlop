@@ -87,10 +87,21 @@ class MeshSocialRepository(
             try {
                 val json = db.appSettingDao().getSetting("pending_dm_outbox")
                 if (!json.isNullOrBlank()) {
-                    val typeToken = object : com.google.gson.reflect.TypeToken<Map<String, List<com.noslop.app.mesh.NetworkPacket>>>() {}.type
-                    val map: Map<String, List<com.noslop.app.mesh.NetworkPacket>>? = com.google.gson.Gson().fromJson(json, typeToken)
-                    map?.forEach { (peerPub, packets) ->
-                        pendingOutboxMessages[peerPub] = java.util.Collections.synchronizedList(packets.toMutableList())
+                    val jsonObj = com.google.gson.JsonParser.parseString(json).asJsonObject
+                    val gson = com.google.gson.Gson()
+                    jsonObj.entrySet().forEach { (peerPub, element) ->
+                        if (element.isJsonArray) {
+                            val list = mutableListOf<com.noslop.app.mesh.NetworkPacket>()
+                            for (item in element.asJsonArray) {
+                                try {
+                                    val pkt = gson.fromJson(item, com.noslop.app.mesh.NetworkPacket::class.java)
+                                    if (pkt != null) list.add(pkt)
+                                } catch (_: Exception) {}
+                            }
+                            if (list.isNotEmpty()) {
+                                pendingOutboxMessages[peerPub] = java.util.Collections.synchronizedList(list)
+                            }
+                        }
                     }
                     val total = pendingOutboxMessages.values.sumOf { it.size }
                     Logger.info(TAG, "Restored $total pending DM(s) from persistent outbox")

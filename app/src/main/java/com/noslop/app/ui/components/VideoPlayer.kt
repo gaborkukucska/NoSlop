@@ -1230,10 +1230,10 @@ private fun ExoVideoPlayer(
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    45000, // min buffer (45s) gives a deep cushion before requiring more data
-                    90000, // max buffer (90s) holds a healthy window without overflowing RAM
-                    2500,  // buffer for playback (2.5s) ensures smooth startup without stalling on chunk 2
-                    8000   // buffer for playback after rebuffer (8s) gives a solid Tor cushion
+                    35000, // min buffer (35s) keeps buffer continuously topped up without idle gaps
+                    70000, // max buffer (70s) holds a healthy window without overflowing RAM
+                    1200,  // buffer for playback (1.2s) ensures snappy startup
+                    6000   // buffer for playback after rebuffer (6s) gives a solid Tor cushion
                 )
                 .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
                 .setPrioritizeTimeOverSizeThresholds(true)
