@@ -1112,7 +1112,7 @@ private fun ExoVideoPlayer(
                         com.noslop.app.feeds.api.YouTubeInternalClient.advanceStreamNonce(videoId)
                     }
                     com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
-                    sourceCache.remove("$rawUrl||${mediaSettings.videoQuality.ifBlank { "medium" }}")
+                    sourceCache.keys.removeAll { it.startsWith("$rawUrl||") }
                     onRetry()
                     return@LaunchedEffect
                 }
