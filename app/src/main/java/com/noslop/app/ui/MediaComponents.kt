@@ -60,8 +60,13 @@ import androidx.compose.animation.core.animateFloat
 private fun sanitizeImageUrl(url: String?): String? {
     if (url.isNullOrBlank()) return null
     var cleanUrl = url.trim()
-    // Decode HTML entities (e.g. &amp; -> &) which are common in RSS image URLs
-    cleanUrl = android.text.Html.fromHtml(cleanUrl, android.text.Html.FROM_HTML_MODE_COMPACT).toString()
+    // Decode HTML entities (e.g. &amp; -> &) which are common in RSS image URLs.
+    // Html.fromHtml appends trailing newlines (\n\n) which will corrupt the URL for OkHttp unless trimmed!
+    cleanUrl = try {
+        android.text.Html.fromHtml(cleanUrl, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+    } catch (_: Exception) {
+        cleanUrl.replace("&amp;", "&")
+    }
     
     if (cleanUrl.startsWith("http://")) {
         cleanUrl = "https://" + cleanUrl.substring(7)
@@ -72,7 +77,7 @@ private fun sanitizeImageUrl(url: String?): String? {
     if (cleanUrl.contains(" ")) {
         cleanUrl = cleanUrl.replace(" ", "%20")
     }
-    return cleanUrl
+    return cleanUrl.trim()
 }
 
 @Composable
@@ -105,17 +110,26 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         // If url is a File object, pass it directly. If proxy, pass null to force the placeholder.
         val actualModel = if (isProxy) null else if (activeUrl != null && activeUrl.startsWith("file://")) java.io.File(activeUrl.removePrefix("file://")) else activeUrl
         
+        val targetUserAgent = when {
+            activeUrl?.contains("wikimedia.org") == true || activeUrl?.contains("wikipedia.org") == true ->
+                "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+            activeUrl?.contains("artic.edu") == true ->
+                "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+            else ->
+                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+        }
+
         val request = coil.request.ImageRequest.Builder(context)
             .data(actualModel)
-            .setHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+            .setHeader("User-Agent", targetUserAgent)
+            .apply {
+                if (activeUrl?.contains("artic.edu") == true) {
+                    setHeader("AIC-User-Agent", "NoSlop-Android/1.0")
+                }
+            }
             .crossfade(true)
             .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
             .apply {
-                // --- NOSLOP_IMAGE_SOURCES_V1 ---
-                // "high" (the DEFAULT) previously fell through with no size at
-                // all, so a 6000px original was decoded full-res and then run
-                // through .blur(20.dp). Slow enough to look like a hang, and an
-                // OOM risk on modest devices. Every tier now has a ceiling.
                 when (mediaSettings.imageQuality) {
                     "low" -> size(640)
                     "medium" -> size(960)
@@ -140,11 +154,12 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                     loadFailed = false
                 },
                 onCancel = { isLoading = false },
-                onError = { _, _ ->
+                onError = { _, result ->
                     isLoading = false
-                    // First failure with a fallback available: swap and retry.
+                    com.noslop.app.debug.Logger.warn("MEDIA_IMG", "Failed to load image $activeUrl: ${result.throwable.message}")
+                    // First failure with a distinct fallback available: swap and retry.
                     // Otherwise we've genuinely run out of options.
-                    if (!isError && safeFallback != null) {
+                    if (!isError && safeFallback != null && safeFallback != safeUrl) {
                         isError = true
                     } else {
                         loadFailed = true
@@ -295,9 +310,22 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
             var zoomLoading by remember(actualModel) { mutableStateOf(true) }
             var zoomFailed by remember(actualModel) { mutableStateOf(false) }
 
+            val zoomUserAgent = when {
+                url.contains("wikimedia.org") || url.contains("wikipedia.org") ->
+                    "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+                url.contains("artic.edu") ->
+                    "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+                else ->
+                    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+            }
+
             val request = coil.request.ImageRequest.Builder(LocalContext.current)
                 .data(actualModel)
+                .setHeader("User-Agent", zoomUserAgent)
                 .apply {
+                    if (url.contains("artic.edu")) {
+                        setHeader("AIC-User-Agent", "NoSlop-Android/1.0")
+                    }
                     when (mediaSettings.imageQuality) {
                         "low" -> size(1280)
                         "medium" -> size(1920)

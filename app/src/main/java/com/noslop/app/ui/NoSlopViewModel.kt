@@ -1490,7 +1490,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val sortedAuthorMeshes = specificMeshes.sortedByDescending { it.timestamp }
                     batch.addAll(sortedAuthorMeshes.map { UnifiedItem.Mesh(it) })
                 } else {
-                    val sortedSpecificFeeds = specificFeeds.sortedByDescending { it.publishedAt }
+                    val sortedSpecificFeeds = specificFeeds.sortedByDescending(effectiveDate)
 
                     val sortedMeshes = specificMeshes.sortedByDescending { it.timestamp }
                     batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })

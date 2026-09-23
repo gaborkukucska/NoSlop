@@ -103,7 +103,7 @@ fun FullScreenFeedCard(
                   else ""
     val content = remember(rawText) { com.noslop.app.feeds.FeedParser.stripHtml(rawText) }
     val context = LocalContext.current
-    val resolvedUrl = resolveMediaUrl(item.mediaUrl, context)
+    val resolvedUrl = resolveMediaUrl(item.mediaUrl ?: (if (item.mediaType == "image") item.thumbnailUrl else null), context)
 
     val displayImageUrl = resolvedUrl ?: item.thumbnailUrl
     val isVisualCategory = item.apiSource in listOf("pexels", "nasa", "wikimedia", "artic", "openverse") || item.sourceId in listOf("hi-fructose", "juxtapoz", "colossal", "500px-popular", "flickr-explore", "petapixel")
@@ -190,7 +190,8 @@ fun FullScreenFeedCard(
                     AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
                 }
                 isVisualCategory && hasVisualMedia -> {
-                    BlurredImageBackground(url = displayImageUrl ?: resolvedUrl ?: "", fallbackUrl = item.thumbnailUrl)
+                    val fallback = if (!item.thumbnailUrl.isNullOrBlank() && item.thumbnailUrl != displayImageUrl) item.thumbnailUrl else null
+                    BlurredImageBackground(url = displayImageUrl ?: resolvedUrl ?: "", fallbackUrl = fallback)
                 }
                 item.mediaType == "image" || 
                 (displayImageUrl != null && (displayImageUrl.contains(".jpg") || 

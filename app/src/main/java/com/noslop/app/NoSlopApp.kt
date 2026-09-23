@@ -48,7 +48,23 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             // 'low' the app now asks the SOURCE for small images instead of
             // downloading full-size ones and shrinking them after the bytes
             // have already crossed the wire.
-            .okHttpClient { HttpClientProvider.activeClearnetClient }
+            .okHttpClient {
+                val baseClient = HttpClientProvider.activeClearnetClient
+                baseClient.newBuilder()
+                    .addInterceptor { chain ->
+                        val req = chain.request()
+                        val host = req.url.host
+                        val builder = req.newBuilder()
+                        if (host.contains("wikimedia.org") || host.contains("wikipedia.org")) {
+                            builder.header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                        } else if (host.contains("artic.edu")) {
+                            builder.header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                            builder.header("AIC-User-Agent", "NoSlop-Android/1.0")
+                        }
+                        chain.proceed(builder.build())
+                    }
+                    .build()
+            }
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     add(coil.decode.ImageDecoderDecoder.Factory())

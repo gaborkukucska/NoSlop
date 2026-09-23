@@ -96,12 +96,12 @@ object InternetArchiveClient {
         rows: Int = 20
     ): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(
-            "collection:(etree OR netlabels OR 78rpm OR oldtimeradio) AND mediatype:audio", "UTF-8"
+            "collection:(netlabels OR etree OR 78rpm OR audio_music) AND mediatype:audio AND -subject:quran AND -title:quran", "UTF-8"
         )
         val url = "https://archive.org/advancedsearch.php?" +
                 "q=$encodedQuery&" +
                 "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
-                "sort[]=downloads+desc&" +
+                "sort[]=week+desc&" +
                 "rows=$rows&output=json"
         return fetchAndParse(url, "audio", sourceId)
     }

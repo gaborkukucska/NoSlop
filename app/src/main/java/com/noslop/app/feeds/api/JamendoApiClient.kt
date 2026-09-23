@@ -15,13 +15,22 @@ object JamendoApiClient {
     private const val TAG = "JAMENDO_API"
     private const val BASE_URL = "https://api.jamendo.com/v3.0"
     
-    // Default test client ID for Jamendo API
-    private const val DEFAULT_CLIENT_ID = "709fa152"
+    // Default candidate client IDs for Jamendo API (rotated automatically if one is suspended or rate-limited)
+    private val CLIENT_ID_CANDIDATES = listOf(
+        "56d30c95",
+        "3dce8b55",
+        "9d9f42e3",
+        "c0602f10",
+        "709fa152"
+    )
+    @Volatile
+    private var candidateIndex = 0
+
     @Volatile
     var userClientId: String? = null
 
     val CLIENT_ID: String
-        get() = userClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_CLIENT_ID
+        get() = userClientId?.takeIf { it.isNotBlank() } ?: CLIENT_ID_CANDIDATES[candidateIndex % CLIENT_ID_CANDIDATES.size]
 
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
@@ -83,6 +92,11 @@ object JamendoApiClient {
                 val code = headers?.get("code")?.asInt ?: -1
                 val errorMsg = headers?.get("error_message")?.asString ?: ""
                 Logger.warn(TAG, "Jamendo API returned status: $status (code=$code, msg=$errorMsg) for query: $tags")
+                if (code == 11 || code == 4) { // Suspended or rate-limited client_id
+                    candidateIndex++
+                    val nextId = CLIENT_ID_CANDIDATES[candidateIndex % CLIENT_ID_CANDIDATES.size]
+                    Logger.info(TAG, "Advancing Jamendo client ID candidate to index $candidateIndex ($nextId)")
+                }
                 return emptyList()
             }
             
