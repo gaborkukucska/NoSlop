@@ -17,8 +17,8 @@ android {
         applicationId = "com.noslop.me.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 64
-        versionName = "0.6.4-alpha"
+        versionCode = 65
+        versionName = "0.6.5-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -93,6 +93,9 @@ android {
             }
             isMinifyEnabled = true
             isShrinkResources = true
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
