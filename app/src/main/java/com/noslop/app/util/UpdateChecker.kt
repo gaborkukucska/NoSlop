@@ -98,6 +98,11 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
      * a stale banner). Safe to call repeatedly; network/parse errors are swallowed and logged.
      */
     suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ENABLE_IN_APP_UPDATER) {
+            Logger.info(TAG, "In-app updates disabled for this build variant (managed by Google Play).")
+            return@withContext null
+        }
+
         if (!HttpClientProvider.isAutoUpdateEnabled) {
             Logger.info(TAG, "Automatic update checks are disabled in settings.")
             return@withContext null

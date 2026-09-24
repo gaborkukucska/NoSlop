@@ -14,7 +14,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.noslop.app"
+        applicationId = "com.noslop.me.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 63
@@ -49,6 +49,18 @@ android {
             "PROXY_SEND_LEGACY_SECRET",
             (project.findProperty("NOSLOP_PROXY_LEGACY_SECRET") ?: "true").toString()
         )
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ENABLE_IN_APP_UPDATER", "false")
+        }
+        create("github") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ENABLE_IN_APP_UPDATER", "true")
+        }
     }
     
     // NOSLOP_CONDITIONAL_SIGNING_V1
