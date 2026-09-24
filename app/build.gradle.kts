@@ -11,14 +11,14 @@ ksp {
 
 android {
     namespace = "com.noslop.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.noslop.me.app"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 63
-        versionName = "0.6.3-alpha"
+        targetSdk = 36
+        versionCode = 64
+        versionName = "0.6.4-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
