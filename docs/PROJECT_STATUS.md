@@ -1,5 +1,16 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-25) — 110-File Codebase Audit & Deprecated Compose API Remediation (v0.6.5-alpha)
+
+* **Full 110-File Codebase Audit & Documentation Parity Verification**:
+  * Inspected all 110 Kotlin source files across 10 packages against `README.md`, `TECHNICAL_REFERENCE.md`, `WIRE_PROTOCOL_REFERENCE.md`, and `PROJECT_STATUS.md`.
+  * Verified 100% code parity for all 34 mesh wire protocol packet types (`Packets.kt`), Ed25519/X25519/ChaCha20-Poly1305 identity derivations (`CryptoService.kt`), Tor v3 hidden services (`TorService.kt`), SOCKS5 per-stream circuit isolation (`HttpClientProvider.kt`), and dynamic zero-code 21+ language localizations (`LanguageManager.kt`).
+* **Compose & Android Deprecated API Remediation**:
+  * Updated deprecated `Icons.Filled.*` to `Icons.AutoMirrored.Filled.*` across `ProfileScreen.kt`, `ChatThreadScreen.kt`, `GroupChatThreadScreen.kt`, `LogsViewerScreen.kt`, `ApiKeysScreen.kt`, `UnifiedFeedTab.kt`, `SettingsTab.kt`, `AvatarCropper.kt`, and `FeedCard.kt`.
+  * Updated deprecated `LocalLifecycleOwner` import in `QRScanScreen.kt` to `androidx.lifecycle.compose.LocalLifecycleOwner`.
+  * Updated `Modifier.menuAnchor()` in `DMsTab.kt` and `ReportIssueScreen.kt` to `Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)`.
+  * Cleaned up deprecated `useArtwork` and `databaseEnabled` settings in `VideoPlayer.kt`.
+
 ## Completed Changes (2026-09-23) — Startup Video Instant Handoff, CachedSource Staleness Fix & Tor Sync De-Contention (v0.6.2-alpha)
 
 * **Startup Video Instant Handoff & Splash Buffer Masking (`MainActivity.kt`, `PreloadManager.kt`)**:
