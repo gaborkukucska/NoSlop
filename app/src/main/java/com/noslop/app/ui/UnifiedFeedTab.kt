@@ -31,6 +31,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -1475,7 +1478,7 @@ fun UnifiedFeedTab(
                         }
                     }
                     Text("Content Type".tr , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
-                    val contentTypes = listOf("Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
+                    val contentTypes = listOf("Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.AutoMirrored.Filled.Article)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         contentTypes.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2177,7 +2180,7 @@ fun BreakReminderSlide(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(0.85f).height(48.dp)
             ) {
-                Icon(Icons.Default.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Exit App".tr, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
@@ -2382,7 +2385,7 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                                     Text("Use the buttons on the right.".tr, color = TextMuted, textAlign = TextAlign.End)
                                 }
                                 Spacer(modifier = Modifier.width(16.dp))
-                                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                             }
                         }
                     }

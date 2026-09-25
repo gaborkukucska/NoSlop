@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -689,7 +690,7 @@ fun FullScreenMeshCardV2(
                                 .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
                                 .padding(32.dp)
                         ) {
-                            Icon(Icons.Default.InsertDriveFile, contentDescription = "File".tr, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = "File".tr, tint = AccentGreen, modifier = Modifier.size(64.dp))
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(post.clearnetTitle ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(modifier = Modifier.height(16.dp))

@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -218,7 +220,7 @@ fun OnboardingScreen(
                             .height(50.dp)
                             .testTag("onboarding_back_button")
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back".tr)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Back".tr, fontWeight = FontWeight.Bold)
                     }
@@ -276,7 +278,7 @@ fun OnboardingScreen(
                             color = if (canProceed) PrimaryBlack else TextMuted
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(if (currentStep == 8) Icons.Default.Check else Icons.Default.ArrowForward, contentDescription = "Next".tr)
+                        Icon(if (currentStep == 8) Icons.Default.Check else Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next".tr)
                     }
                 }
             }

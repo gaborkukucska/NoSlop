@@ -10,7 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Search
@@ -78,7 +78,7 @@ fun ContentPreferencesScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
             }
             Text(
                 text = "Settings".tr,
@@ -665,7 +665,7 @@ fun ContentPreferencesScreen(
                             focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                             focusedTextColor = TextLight, unfocusedTextColor = TextLight
                         ),
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                     )
                     ExposedDropdownMenu(
                         expanded = expanded,
@@ -1015,7 +1015,7 @@ fun ContentPreferencesScreen(
                                     focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                                     focusedTextColor = TextLight, unfocusedTextColor = TextLight
                                 ),
-                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                             )
                             ExposedDropdownMenu(
                                 expanded = yearExpanded,
@@ -1052,7 +1052,7 @@ fun ContentPreferencesScreen(
                                     focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                                     focusedTextColor = TextLight, unfocusedTextColor = TextLight
                                 ),
-                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                             )
                             ExposedDropdownMenu(
                                 expanded = monthExpanded,

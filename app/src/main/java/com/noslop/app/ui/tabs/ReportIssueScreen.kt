@@ -138,7 +138,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                     readOnly = true,
                     label = { Text("Issue Type".tr) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTypeDropdown) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGreen,
                         unfocusedBorderColor = BorderSubtle,

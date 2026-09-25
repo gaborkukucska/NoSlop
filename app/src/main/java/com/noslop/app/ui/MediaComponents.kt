@@ -20,6 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -503,7 +506,7 @@ fun SegmentedArticleReader(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Default.Article,
+                                Icons.AutoMirrored.Filled.Article,
                                 contentDescription = null,
                                 tint = AccentGreen.copy(alpha = 0.08f),
                                 modifier = Modifier.size(160.dp)
@@ -649,7 +652,7 @@ fun SegmentedArticleReader(
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.align(Alignment.CenterHorizontally)
                             ) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Read Full Article".tr, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
@@ -904,7 +907,7 @@ fun OverlayInteractions(
 
                 if (showComment && onComment != null) {
                     InteractionButton(
-                        icon = Icons.Default.Chat,
+                        icon = Icons.AutoMirrored.Filled.Chat,
                         label = if (commentCount > 0) commentCount.toString() else "Chat".tr,
                         onClick = onComment
                     )

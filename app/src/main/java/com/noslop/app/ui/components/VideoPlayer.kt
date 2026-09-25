@@ -1495,7 +1495,6 @@ private fun ExoVideoPlayer(
                         )
                         player = exoPlayer
                         useController = false
-                        useArtwork = false
                         keepScreenOn = isActivelyPlaying
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
@@ -1755,7 +1754,6 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                             javaScriptEnabled = true
                             mediaPlaybackRequiresUserGesture = false
                             domStorageEnabled = true
-                            databaseEnabled = true
                             allowFileAccess = false
                             allowContentAccess = false
                             useWideViewPort = true

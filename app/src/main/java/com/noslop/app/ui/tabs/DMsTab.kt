@@ -378,7 +378,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                             focusedTextColor = TextLight,
                                             unfocusedTextColor = TextLight
                                         ),
-                                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
                                     )
                                     ExposedDropdownMenu(
                                         expanded = dropdownExpanded,

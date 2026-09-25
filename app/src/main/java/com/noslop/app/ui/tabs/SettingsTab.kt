@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults
@@ -467,7 +468,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text("Edit Profile".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
 
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
@@ -1091,7 +1092,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text("Filtering & Content Mix".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
                             
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
@@ -1106,7 +1107,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text("API Keys".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
                         }
                     }
@@ -1276,7 +1277,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         Text("Unlink this device from your active Hub".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted)
                                     }
                                 }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
 
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
@@ -1300,7 +1301,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         Text("Reset pinned fingerprint to allow connecting to a reinstalled Hub".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted)
                                     }
                                 }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
                         }
                     }
