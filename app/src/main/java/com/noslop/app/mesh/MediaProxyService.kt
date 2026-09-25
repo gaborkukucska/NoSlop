@@ -53,7 +53,10 @@ object MediaProxyService {
         isRunning = true
         scope.launch {
             try {
-                serverSocket = ServerSocket(LOCAL_PORT, 100, java.net.InetAddress.getByName("127.0.0.1"))
+                serverSocket = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(java.net.InetSocketAddress(java.net.InetAddress.getByName("127.0.0.1"), LOCAL_PORT), 100)
+                }
                 Logger.info(TAG, "MediaProxyService successfully bound to http://127.0.0.1:$LOCAL_PORT")
                 while (isActive && isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break

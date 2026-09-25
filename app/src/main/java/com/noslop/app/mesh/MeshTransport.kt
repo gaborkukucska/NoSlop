@@ -43,7 +43,10 @@ class MeshTransport(
         scope.launch {
             try {
                 Logger.info(TAG, "Starting TCP ServerSocket on port $listenPort")
-                serverSocket = ServerSocket(listenPort, 50, java.net.InetAddress.getByName("127.0.0.1"))
+                serverSocket = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(java.net.InetAddress.getByName("127.0.0.1"), listenPort), 50)
+                }
                 listening = true
                 Logger.info(TAG, "TCP listener bound — 127.0.0.1:$listenPort (hidden service only)")
                 while (isActive && isRunning) {

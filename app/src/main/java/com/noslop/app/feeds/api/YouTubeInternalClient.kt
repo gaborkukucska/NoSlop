@@ -95,8 +95,23 @@ object YouTubeInternalClient {
     private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val videoStreamNonces = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    fun extractVideoId(url: String): String? {
+        if (url.isBlank()) return null
+        if (url.length == 11 && !url.contains("/") && !url.contains(".")) return url
+        val reg = Regex("(?:v=|/v/|/embed/|youtu\\.be/|/shorts/)([a-zA-Z0-9_-]{11})")
+        val match = reg.find(url)
+        return match?.groupValues?.get(1)
+    }
+
     fun getStreamIdForUrl(url: String): String? {
-        return urlToStreamId[url]
+        val directMatch = urlToStreamId[url]
+        if (directMatch != null) return directMatch
+        val extractedId = extractVideoId(url)
+        if (extractedId != null) {
+            val idMatch = urlToStreamId[extractedId]
+            if (idMatch != null) return idMatch
+        }
+        return null
     }
 
     fun getStreamNonce(videoId: String): Int {
@@ -112,6 +127,8 @@ object YouTubeInternalClient {
     private fun registerStreamId(url: String, videoId: String, streamId: String) {
         urlToStreamId[url] = streamId
         urlToStreamId[videoId] = streamId
+        urlToStreamId["https://www.youtube.com/watch?v=$videoId"] = streamId
+        urlToStreamId["https://youtu.be/$videoId"] = streamId
         if (urlToStreamId.size > 300) {
             val iterator = urlToStreamId.keys.iterator()
             var removed = 0
