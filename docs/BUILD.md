@@ -10,8 +10,8 @@ To build and run NoSlop locally, ensure your development environment has the fol
 
 *   **Java Development Kit (JDK 17)**: Recommended version is JDK 17 (Eclipse Temurin or OpenJDK), as modern Android Gradle Plugin (AGP) and Kotlin versions are strictly optimized for Java 17.
 *   **Android Studio (Koala or newer)**: Standard IDE for Android developers. It supplies the required compilation Android SDK, tools, and virtual emulators.
-*   **Android SDK (API Level 35)**:
-    *   `compileSdk = 35`
+*   **Android SDK (API Level 36)**:
+    *   `compileSdk = 36`
     *   `minSdk = 24` (Android 7.0 Nougat — see [`app/build.gradle.kts`](../app/build.gradle.kts) for the authoritative value; cryptographic APIs and `EncryptedSharedPreferences` are available from API 23+, with the Ed25519 KeyPairGenerator path using Lazysodium with a Bouncy Castle fallback on all API levels, see [TECHNICAL_REFERENCE.md §3.2](TECHNICAL_REFERENCE.md#32-key-generation-cryptoservicegenerateidentity))
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
 *   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.

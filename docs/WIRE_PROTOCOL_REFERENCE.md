@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-09-18)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-09-25)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
