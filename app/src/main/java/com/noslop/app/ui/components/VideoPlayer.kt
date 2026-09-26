@@ -1153,7 +1153,8 @@ private fun ExoVideoPlayer(
         val preloaded = PreloadManager.claim(rawUrl, url)
         val player = if (preloaded != null) {
             preloaded.apply {
-                playWhenReady = isVisible
+                // Do not start audio immediately on claim: wait for SurfaceView attachment and first frame
+                playWhenReady = false
                 
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                 // Only seek preloaded video if user watched deeply (>= 8s); micro-seeks destroy the pre-warmed buffer
@@ -1172,7 +1173,11 @@ private fun ExoVideoPlayer(
                         // --- NOSLOP_PLAYBACK_DIAG_V1 ---
                         logPlaybackState(this@apply, playbackState, rawUrl, diagStartMs)
                         if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                            onReady()
+                            val hasVideo = currentTracks.isTypeSelected(androidx.media3.common.C.TRACK_TYPE_VIDEO)
+                            if (!hasVideo) {
+                                onReady()
+                                if (isVisible) play()
+                            }
                         }
                     }
                     override fun onRenderedFirstFrame() {
@@ -1182,6 +1187,9 @@ private fun ExoVideoPlayer(
                             "FIRST FRAME rendered +${System.currentTimeMillis() - diagStartMs}ms | $rawUrl"
                         )
                         onReady()
+                        if (isVisible) {
+                            play()
+                        }
                     }
                     override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
                         videoSizeState = videoSize
@@ -1239,6 +1247,12 @@ private fun ExoVideoPlayer(
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
+            val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context).apply {
+                setAllowedVideoJoiningTimeMs(0L)
+                forceEnableMediaCodecAsynchronousQueueing()
+                setEnableDecoderFallback(true)
+            }
+
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
                     50000, // min buffer (50s) maintains continuous buffer without 35s socket-killing idle gaps
@@ -1250,7 +1264,7 @@ private fun ExoVideoPlayer(
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
-            androidx.media3.exoplayer.ExoPlayer.Builder(context)
+            androidx.media3.exoplayer.ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setLoadControl(loadControl)
                 .setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)

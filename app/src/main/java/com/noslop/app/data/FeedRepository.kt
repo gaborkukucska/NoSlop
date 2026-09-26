@@ -299,8 +299,13 @@ class FeedRepository(
         for (source in rssSources) {
             backgroundJobs.add(async(dispatcher) {
                 try {
+                    if (com.noslop.app.ui.PreloadManager.isVideoActive) {
+                        kotlinx.coroutines.delay(800L)
+                    }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                         kotlinx.coroutines.delay(1000L) // Stagger requests across Tor
+                    } else {
+                        kotlinx.coroutines.delay(250L)  // Stagger requests across clearnet
                     }
                     fetchRssSource(source, allNegative)
                 } catch (e: Exception) {
@@ -327,8 +332,13 @@ class FeedRepository(
         for (creator in remainingCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
+                    if (com.noslop.app.ui.PreloadManager.isVideoActive) {
+                        kotlinx.coroutines.delay(800L)
+                    }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                         kotlinx.coroutines.delay(1200L) // Stagger requests across Tor
+                    } else {
+                        kotlinx.coroutines.delay(300L)  // Stagger requests across clearnet
                     }
                     fetchCreatorVideos(creator)
                 } catch (e: Exception) {

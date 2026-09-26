@@ -326,7 +326,13 @@ object PreloadManager {
 
         val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality.ifBlank { "medium" }
 
-        val player = ExoPlayer.Builder(context)
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context).apply {
+            setAllowedVideoJoiningTimeMs(0L)
+            forceEnableMediaCodecAsynchronousQueueing()
+            setEnableDecoderFallback(true)
+        }
+
+        val player = ExoPlayer.Builder(context, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
