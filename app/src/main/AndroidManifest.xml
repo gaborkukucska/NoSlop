@@ -25,6 +25,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Queries for cross-variant install detection (GitHub com.noslop.app vs Play com.noslop.me.app) -->
+    <queries>
+        <package android:name="com.noslop.app" />
+        <package android:name="com.noslop.me.app" />
+    </queries>
+
     <application
         android:name=".NoSlopApp"
         android:allowBackup="false"

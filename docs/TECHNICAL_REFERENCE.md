@@ -979,7 +979,7 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_14_15`) safely preserve 
 
 | Setting | Value |
 |---|---|
-| `applicationId` | `com.noslop.app` |
+| `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
 | `compileSdk` / `targetSdk` | 35 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
 | `versionCode` / `versionName` | 1 / `0.1.0` |

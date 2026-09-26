@@ -1,5 +1,16 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-26) — Flavor ApplicationId Decoupling, PlayerView Artwork & YouTube Tests (v0.6.5-alpha)
+
+* **Distribution Flavor ApplicationId Decoupling (`app/build.gradle.kts`, `RedditApiClient.kt`)**:
+  * Configured `github` flavor with `applicationId = "com.noslop.app"` (preserving seamless in-place updates for existing users without secondary install) and `play` flavor with `applicationId = "com.noslop.me.app"`.
+  * Dynamically bound Reddit API client User-Agent to `BuildConfig.APPLICATION_ID` and `BuildConfig.VERSION_NAME`.
+* **PlayerView Artwork Display Mode Migration (`VideoPlayer.kt`)**:
+  * Migrated deprecated `useArtwork = false` to official Media3 `artworkDisplayMode = PlayerView.ARTWORK_DISPLAY_MODE_OFF`, preventing ExoPlayer default artwork from flashing over Coil thumbnails.
+* **YouTube Internal Client Enhancement & Unit Test Suite (`YouTubeInternalClient.kt`, `YouTubeInternalClientTest.kt`)**:
+  * Updated `extractVideoId` to recognize `yt_` prefix IDs used by `FeedItem.id`.
+  * Added unit test suite `YouTubeInternalClientTest.kt` verifying watch URLs, shorts, embeds, youtu.be, raw IDs, stream ID registrations, and nonce advancement.
+
 ## Completed Changes (2026-09-25) — 110-File Codebase Audit, Socket Bind Remediation & Tor Circuit Affinity (v0.6.5-alpha)
 
 * **Full 110-File Codebase Audit & Documentation Parity Verification**:
