@@ -22,11 +22,14 @@ class ReactionPacketHandler(
     suspend fun handleReaction(packet: NetworkPacket): Boolean {
         val payload = packet.getReactionPayload() ?: return false
         
-        // Verify signature
-        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+        // Verify signature (dual-mode: length-prefixed and pipe)
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
             payload.postId, payload.reactionType, payload.authorId, payload.timestamp.toString()
         )
-        if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
+        val pipePayload = "${payload.postId}|${payload.reactionType}|${payload.authorId}|${payload.timestamp}"
+        val isValid = CryptoService.verify(encPayload, payload.signature, payload.authorId) ||
+            CryptoService.verify(pipePayload, payload.signature, payload.authorId)
+        if (!isValid) {
             Logger.warn(TAG, "Reaction signature verification failed for post ${payload.postId} from ${payload.authorId}")
             return false
         }

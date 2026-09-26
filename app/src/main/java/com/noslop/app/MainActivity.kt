@@ -223,6 +223,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (this::viewModel.isInitialized) {
+            val state = com.noslop.app.tor.TorService.torState.value
+            if (state == com.noslop.app.tor.TorState.IDLE || state == com.noslop.app.tor.TorState.FAILED) {
+                viewModel.startTor(forceRestart = false)
+            }
             viewModel.refreshTorStatus()
             viewModel.checkForUpdateNow()
         }

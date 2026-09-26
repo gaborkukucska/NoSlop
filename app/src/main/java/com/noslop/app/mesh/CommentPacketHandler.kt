@@ -24,11 +24,19 @@ class CommentPacketHandler(
 
     suspend fun handleComment(packet: NetworkPacket): Boolean {
         val commPay = packet.getCommentPayload() ?: return false
-        var payloadToVerify = "${commPay.postId}|${commPay.comment.id}|${commPay.comment.content}|${commPay.comment.timestamp}"
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            commPay.postId, commPay.comment.id, commPay.comment.content, commPay.comment.timestamp.toString(), commPay.comment.authorAvatarB64
+        )
+        val encPayloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            commPay.postId, commPay.comment.id, commPay.comment.content, commPay.comment.timestamp.toString()
+        )
+        var pipePayload = "${commPay.postId}|${commPay.comment.id}|${commPay.comment.content}|${commPay.comment.timestamp}"
         if (commPay.comment.authorAvatarB64 != null) {
-            payloadToVerify += "|${commPay.comment.authorAvatarB64}"
+            pipePayload += "|${commPay.comment.authorAvatarB64}"
         }
-        val isValid = CryptoService.verify(payloadToVerify, commPay.comment.signature, commPay.comment.authorId)
+        val isValid = CryptoService.verify(encPayload, commPay.comment.signature, commPay.comment.authorId) ||
+            CryptoService.verify(encPayloadNoAvatar, commPay.comment.signature, commPay.comment.authorId) ||
+            CryptoService.verify(pipePayload, commPay.comment.signature, commPay.comment.authorId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip comment: Signature verification failed")
             return false

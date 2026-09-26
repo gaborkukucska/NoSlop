@@ -162,7 +162,11 @@ class MeshTransport(
             packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
             packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
             packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC" ||
-            packet.type == "CHAT_REACTION"
+            packet.type == "CHAT_REACTION" ||
+            packet.type == "POST" || packet.type == "EDIT_POST" || packet.type == "DELETE_POST" ||
+            packet.type == "COMMENT" || packet.type == "EDIT_COMMENT" || packet.type == "DELETE_COMMENT" ||
+            packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE" ||
+            packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "SYNC_REQUEST" || packet.type == "SYNC_RESPONSE"
 
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isInteractive = packet.type == "TYPING" || packet.type == "READ_RECEIPT"
@@ -218,16 +222,16 @@ class MeshTransport(
         try {
             val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
             val maxAttempts = when {
-                isHandshake -> 2 // 2 attempts allows recovery from initial circuit establishment
+                isHandshake -> 3 // 3 attempts ensures successful descriptor resolution and rendezvous circuit setup
                 isDmHighPriority -> 2
-                isMediaPacket -> 2 // 2 attempts allows Tor rendezvous circuit setup to complete for media chunks
+                isMediaPacket -> 2
                 else -> 1
             }
             val connectTimeout = when {
-                isHandshake -> 28000 // 28s allows Tor v3 rendezvous circuit setup to complete on mobile
+                isHandshake -> 45000 // 45s gives Tor sufficient time to discover fresh v3 descriptors and establish rendezvous circuits
                 isDmHighPriority -> 25000
                 isInteractive -> 8000
-                isMediaPacket -> 28000 // 28s prevents premature chunk fast-fail over mobile Tor
+                isMediaPacket -> 28000
                 else -> 12000
             }
             for (attempt in 1..maxAttempts) {

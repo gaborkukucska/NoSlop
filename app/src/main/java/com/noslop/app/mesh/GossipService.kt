@@ -540,6 +540,8 @@ object GossipService {
                         if (pay != null && checkEntityExists!!("COMMENT", pay.commentId)) isTracked = true
                     }
                 }
+            } else {
+                isTracked = true
             }
             if (!isTracked) {
                 Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id} (anchor not tracked locally)")
@@ -550,6 +552,8 @@ object GossipService {
             val pay = packet.getCommentPayload()
             if (pay != null && checkEntityExists != null) {
                 if (checkEntityExists!!("POST", pay.postId)) isTracked = true
+            } else if (pay != null) {
+                isTracked = true
             }
             if (!isTracked) {
                 Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally)")
@@ -847,18 +851,21 @@ object GossipService {
 
         Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${trustedPeers.size} trusted peers.")
         
+        val isUserAction = packet.type == "POST" || packet.type == "EDIT_POST" || packet.type == "DELETE_POST" ||
+            packet.type == "COMMENT" || packet.type == "EDIT_COMMENT" || packet.type == "DELETE_COMMENT" ||
+            packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "MESSAGE" || packet.type == "CHAT_REACTION"
+
         for (peer in trustedPeers) {
-            // Skip peers that are in cooldown due to repeated failures
-            if (isPeerInCooldown(peer.onionAddress)) {
+            // Skip peers in cooldown, but always allow direct user actions (reactions, comments, posts) through
+            if (!isUserAction && isPeerInCooldown(peer.onionAddress)) {
                 Logger.debug(TAG, "Skipping broadcast to ${peer.onionAddress}: peer in cooldown")
                 continue
             }
             
             scope.launch {
                 val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
-                val isCreatorPost = tx.repository.getAppSetting("is_creator_enabled") == "true" &&
-                    (packet.type == "POST" || packet.type == "DELETE_POST" || packet.type == "EDIT_POST")
-                val peerSenderId = if (peerIdentitySetting == "burnable" || (isCreatorPost && peer.isTemporary)) {
+                val isCreatorTraffic = tx.repository.getAppSetting("is_creator_enabled") == "true"
+                val peerSenderId = if (peerIdentitySetting == "burnable" || (isCreatorTraffic && peer.isTemporary)) {
                     tx.repository.getBurnableIdentity()?.publicKeyB64 ?: packet.senderId
                 } else {
                     tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId

@@ -328,7 +328,6 @@ object PreloadManager {
 
         val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context).apply {
             setAllowedVideoJoiningTimeMs(0L)
-            forceEnableMediaCodecAsynchronousQueueing()
             setEnableDecoderFallback(true)
         }
 

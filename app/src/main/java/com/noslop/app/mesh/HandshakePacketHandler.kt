@@ -256,6 +256,7 @@ class HandshakePacketHandler(
             bio = handPay.bio ?: peer.bio
         ))
         
+        GossipService.recordSendSuccess(handPay.fromHomeNode)
         GossipService.flushFirewallBuffer(handPay.fromUserId)
         // Always trigger inventory sync upon handshake confirmation to pull peer broadcasts immediately
         repo.requestInventorySync(peer)
@@ -456,7 +457,7 @@ class HandshakePacketHandler(
                 isOnline = true,
                 lastSeenAt = System.currentTimeMillis()
             ))
-            if (cameBackOnline) {
+            if (cameBackOnline && peer.isTrusted) {
                 refreshDeletionBudgetFor(peer.handle)
                 resendGroupInvitesForPeer(announcePay.authorId, announcePay.onionAddress)
             }

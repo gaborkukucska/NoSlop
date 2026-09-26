@@ -152,13 +152,15 @@ class MeshSocialRepository(
     }
 
     fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
-        if (onionAddress.isBlank() || com.noslop.app.mesh.GossipService.isPeerInCooldown(onionAddress)) {
+        if (onionAddress.isBlank()) return
+        val list = pendingOutboxMessages[recipientPub]
+        val hasHandshake = list?.any { it.type == "CONNECTION_REQUEST" || it.type == "USER_HANDSHAKE" } == true
+        if (!hasHandshake && com.noslop.app.mesh.GossipService.isPeerInCooldown(onionAddress)) {
             return
         }
         if (!inFlightFlushes.add(recipientPub)) return // Prevent racing flushes on the same peer
 
         // 1. Flush standard DM outbox
-        val list = pendingOutboxMessages[recipientPub]
         if (list != null) {
             val toSend = synchronized(list) { list.toList() }
             if (toSend.isNotEmpty()) {
@@ -246,7 +248,8 @@ class MeshSocialRepository(
                 if (hasPending) {
                     val allPeers = peerDao.getAllPeersList().filter { it.onionAddress.isNotBlank() }
                     for (peer in allPeers) {
-                        if (com.noslop.app.mesh.GossipService.isPeerInCooldown(peer.onionAddress)) continue
+                        val hasHandshake = pendingOutboxMessages[peer.publicKeyB64]?.any { it.type == "CONNECTION_REQUEST" || it.type == "USER_HANDSHAKE" } == true
+                        if (!hasHandshake && com.noslop.app.mesh.GossipService.isPeerInCooldown(peer.onionAddress)) continue
                         if (peer.isTrusted || pendingOutboxMessages.containsKey(peer.publicKeyB64)) {
                             flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
                         }
@@ -420,16 +423,10 @@ class MeshSocialRepository(
                         }
                     }
 
-                    // Periodic Deletion Sync
-                    if (myKeys != null) {
+                    // Periodic Deletion Sync — only broadcast if there are trusted online peers to receive it
+                    val onlineTrustedPeers = peers.any { it.isTrusted && it.isOnline && it.onionAddress.isNotBlank() }
+                    if (myKeys != null && onlineTrustedPeers) {
                         val currentTimestamp = System.currentTimeMillis()
-                        // --- NOSLOP_DELETION_BUDGET_V1 ---
-                        // Was: every orphaned post, every cycle, forever. Now a
-                        // bounded budget per post, and at most
-                        // MAX_DELETIONS_PER_CYCLE per heartbeat so a large
-                        // backlog cannot monopolise the loop (each send is
-                        // paced 2s, so 100 pending deletions previously meant a
-                        // 200-second cycle doing nothing else).
                         val orphanedPosts = postDao.getPendingDeletionsByAuthor(
                             myKeys.publicKeyB64,
                             MAX_DELETION_BROADCASTS,
@@ -738,6 +735,7 @@ class MeshSocialRepository(
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
         val isTemp = peer.isTemporary || contactIdentity == "burnable"
         peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = isTemp))
+        com.noslop.app.mesh.GossipService.recordSendSuccess(peer.onionAddress)
         _incomingRequestFlow.value = null
         
         // Sync with hub before dispatching so the hub firewall is aware of the new peer

@@ -155,6 +155,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openCommentsForPost(postId: String, commentId: String? = null) {
         _openCommentsState.value = Pair(postId, commentId)
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.requestAllPeersInventorySync()
+        }
     }
 
     fun consumeCommentsEvent() {

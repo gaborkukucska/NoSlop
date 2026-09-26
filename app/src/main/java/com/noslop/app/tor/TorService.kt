@@ -273,10 +273,8 @@ object TorService {
             }
 
             if (!serviceStarted) {
-                // Nothing is coming. Fail fast instead of polling a port that
-                // cannot open; the caller's retry loop will try again later.
-                Logger.warn(TAG, "TorService could not be started at all — skipping the readiness poll")
-                _torState.value = TorState.FAILED
+                Logger.warn(TAG, "TorService could not be started while backgrounded — leaving in IDLE until app foregrounded")
+                _torState.value = TorState.IDLE
                 return
             }
 

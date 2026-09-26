@@ -273,7 +273,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     LaunchedEffect(initialRoute) {
         if (initialRoute != null) {
-            val routeClean = initialRoute.substringBeforeLast("-")
+            val routeClean = initialRoute.replace(Regex("""-\d{10,}$"""), "").trim()
             if (routeClean.startsWith("chat/")) {
                 selectedTab = 1
                 viewModel.selectGroupChat(null)
@@ -295,8 +295,12 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             } else if (routeClean.startsWith("post/")) {
                 selectedTab = 0
                 val routeData = routeClean.removePrefix("post/")
-                val postId = routeData.substringBefore("/")
-                val commentId = if (routeData.contains("comment/")) routeData.substringAfter("comment/") else null
+                val postId = routeData.substringBefore("/comment/").substringBefore("/")
+                val commentId = if (routeData.contains("/comment/")) {
+                    routeData.substringAfter("/comment/").substringBefore("/")
+                } else if (routeData.contains("comment/")) {
+                    routeData.substringAfter("comment/").substringBefore("/")
+                } else null
                 
                 viewModel.ensurePostInFeed(postId)
                 if (commentId != null || routeData.contains("comment")) {

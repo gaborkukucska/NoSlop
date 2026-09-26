@@ -140,9 +140,24 @@ object MeshPacketVerifier {
 
         // --- CommentPacketHandler ---
         "COMMENT" -> packet.getCommentPayload()?.let { p ->
-            var s = "${p.postId}|${p.comment.id}|${p.comment.content}|${p.comment.timestamp}"
-            if (p.comment.authorAvatarB64 != null) s += "|${p.comment.authorAvatarB64}"
-            Signed(s, p.comment.signature, p.comment.authorId)
+            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString(), p.comment.authorAvatarB64
+            )
+            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString()
+            )
+            var pipePayload = "${p.postId}|${p.comment.id}|${p.comment.content}|${p.comment.timestamp}"
+            if (p.comment.authorAvatarB64 != null) pipePayload += "|${p.comment.authorAvatarB64}"
+
+            val sig = p.comment.signature
+            val signer = p.comment.authorId
+            val matchedPayload = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipePayload, sig, signer) -> pipePayload
+                else -> encWithAvatar
+            }
+            Signed(matchedPayload, sig, signer)
         }
 
         "EDIT_COMMENT" -> packet.getEditCommentPayload()?.let { p ->
