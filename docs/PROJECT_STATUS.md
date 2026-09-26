@@ -7,6 +7,8 @@
   * Dynamically bound Reddit API client User-Agent to `BuildConfig.APPLICATION_ID` and `BuildConfig.VERSION_NAME`.
 * **PlayerView Artwork Display Mode Migration (`VideoPlayer.kt`)**:
   * Migrated deprecated `useArtwork = false` to official Media3 `artworkDisplayMode = PlayerView.ARTWORK_DISPLAY_MODE_OFF`, preventing ExoPlayer default artwork from flashing over Coil thumbnails.
+* **HMAC-Only Proxy Authentication (`app/build.gradle.kts`, `ProxyAuth.kt`)**:
+  * Set `PROXY_SEND_LEGACY_SECRET = false` by default, eliminating raw `X-Proxy-Secret` cleartext header transmission. Requests authenticate strictly via dynamic HMAC-SHA256 (`X-Proxy-Timestamp` + `X-Proxy-Signature`).
 * **YouTube Internal Client Enhancement & Unit Test Suite (`YouTubeInternalClient.kt`, `YouTubeInternalClientTest.kt`)**:
   * Updated `extractVideoId` to recognize `yt_` prefix IDs used by `FeedItem.id`.
   * Added unit test suite `YouTubeInternalClientTest.kt` verifying watch URLs, shorts, embeds, youtu.be, raw IDs, stream ID registrations, and nonce advancement.
@@ -852,9 +854,7 @@ Ordered by how much it would hurt to ship without it.
 3. **`lastRestoreNeedsIdentityRecovery` is set but never read.** A cross-device
    restore brings data back and silently loses the identity. Wire it into the
    restore screen before telling anyone device migration works.
-4. **The proxy secret still crosses the wire.** `PROXY_SEND_LEGACY_SECRET`
-   defaults to true. Flip it, and `ACCEPT_LEGACY_SECRET` in the Worker, once
-   enough installs have updated.
+4. ~~**The proxy secret still crosses the wire.**~~ **Resolved 2026-09-26**: `PROXY_SEND_LEGACY_SECRET` is set to `false` and the Cloudflare Worker enforces `ACCEPT_LEGACY_SECRET = false`. Raw secrets no longer cross the wire; authentication is 100% HMAC-SHA256.
 5. **No user-configurable Worker endpoint.** This is the part of §1.2 that
    genuinely removes the single point of failure, and it needs a Settings UI
    rather than a config change.

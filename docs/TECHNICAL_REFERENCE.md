@@ -1817,12 +1817,10 @@ length rather than the frame.
 ### 17.6 Proxy credentials — `NOSLOP_PROXY_SECRET_V1`
 
 `PROXY_URL`, `PROXY_SECRET` and `PROXY_SEND_LEGACY_SECRET` are BuildConfig
-fields sourced from Gradle properties, so the shipped secret is no longer in
-the public repo and rotation is a property change. The Worker accepts either
-the legacy header or a valid HMAC during rollout, and reports which via
-`X-Proxy-Auth`. Reddit and Jamendo sign the full proxied URL; YouTube signs the
-JSON body — the Worker reconstructs both candidates because changing what the
-client signs would break every installed copy at once.
+fields sourced from Gradle properties, with `PROXY_SEND_LEGACY_SECRET` defaulting
+to `false`. The shipped secret is no longer in the public repo and the raw secret
+never crosses the wire. Authentication is 100% dynamic HMAC-SHA256 verified by the
+Cloudflare Worker (`ACCEPT_LEGACY_SECRET = false`), reporting `X-Proxy-Auth: hmac`.
 
 ### 17.7 Identity fallback — `NOSLOP_UNLOCK_FALLBACK_V1`
 

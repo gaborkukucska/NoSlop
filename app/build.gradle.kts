@@ -47,7 +47,7 @@ android {
         buildConfigField(
             "boolean",
             "PROXY_SEND_LEGACY_SECRET",
-            (project.findProperty("NOSLOP_PROXY_LEGACY_SECRET") ?: "true").toString()
+            (project.findProperty("NOSLOP_PROXY_LEGACY_SECRET") ?: "false").toString()
         )
     }
 
