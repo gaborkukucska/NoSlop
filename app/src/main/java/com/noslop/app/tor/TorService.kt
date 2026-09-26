@@ -638,6 +638,9 @@ object TorService {
      */
     suspend fun waitForProxy(timeoutSeconds: Int = 60): Boolean = // FIX: Change signature default to 60
         withContext(Dispatchers.IO) {
+            if (_torState.value == TorState.READY || _torState.value == TorState.PROXY_READY) {
+                return@withContext true
+            }
             Logger.info(TAG, "Polling $PROXY_HOST:$SOCKS_PORT for Tor proxy readiness...")
             for (attempt in 1..timeoutSeconds) {
                 try {

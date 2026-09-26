@@ -299,8 +299,8 @@ class FeedRepository(
         for (source in rssSources) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    if (com.noslop.app.ui.PreloadManager.isVideoActive) {
-                        kotlinx.coroutines.delay(800L)
+                    while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                        kotlinx.coroutines.delay(2000L)
                     }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                         kotlinx.coroutines.delay(1000L) // Stagger requests across Tor
@@ -317,6 +317,9 @@ class FeedRepository(
         for (category in activeCategories) {
             backgroundJobs.add(async(dispatcher) {
                 try {
+                    while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                        kotlinx.coroutines.delay(2000L)
+                    }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                         kotlinx.coroutines.delay(1200L)
                     }
@@ -332,8 +335,8 @@ class FeedRepository(
         for (creator in remainingCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    if (com.noslop.app.ui.PreloadManager.isVideoActive) {
-                        kotlinx.coroutines.delay(800L)
+                    while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                        kotlinx.coroutines.delay(2000L)
                     }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                         kotlinx.coroutines.delay(1200L) // Stagger requests across Tor

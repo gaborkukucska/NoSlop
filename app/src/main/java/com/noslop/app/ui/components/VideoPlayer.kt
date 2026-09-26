@@ -1033,9 +1033,12 @@ private fun ExoVideoPlayer(
     // bandwidth starvation; a full buffer with no READY means the container or
     // codec is the problem. These look identical in the old logs.
     val diagStartMs = remember(url, retryKey) { System.currentTimeMillis() }
+    var lastNetworkByteTimeMs by remember(url, retryKey) { mutableStateOf(System.currentTimeMillis()) }
+    var networkBytesReceivedInSession by remember(url, retryKey) { mutableStateOf(0L) }
     LaunchedEffect(url, retryKey, isVisible) {
         if (!isVisible) return@LaunchedEffect
         var lastBufPos = -1L
+        var lastBytesCount = 0L
         var stalledSamples = 0
         var continuousBufferingSamples = 0
         var stablePlaySamples = 0
@@ -1076,18 +1079,23 @@ private fun ExoVideoPlayer(
                 val bufPos = p.bufferedPosition
                 if (baselineBufPos < 0L) baselineBufPos = bufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
-                if (delta > 0L) com.noslop.app.tor.TorService.noteMediaProgress()
-                // Any byte progress means the buffer is advancing over Tor
-                val isAdvancing = delta > 0L
+                val bytesDelta = networkBytesReceivedInSession - lastBytesCount
+                lastBytesCount = networkBytesReceivedInSession
+                val now = System.currentTimeMillis()
+                val hasRecentNetworkBytes = (now - lastNetworkByteTimeMs) < 12_000L || bytesDelta > 0L
+
+                if (delta > 0L || hasRecentNetworkBytes) com.noslop.app.tor.TorService.noteMediaProgress()
+                // True advancement: either decoded timeline advance OR active byte transfer over Tor socket
+                val isAdvancing = delta > 0L || hasRecentNetworkBytes
                 stalledSamples = if (isAdvancing) 0 else (stalledSamples + 1)
                 Logger.info(
                     PLAYBACK_DIAG_TAG,
-                    "sample +${System.currentTimeMillis() - diagStartMs}ms " +
+                    "sample +${now - diagStartMs}ms " +
                         "state=${playbackStateName(p.playbackState)} bufPos=$bufPos " +
-                        "delta=${delta}ms pct=${p.bufferedPercentage} " +
+                        "delta=${delta}ms bytesRecv=${networkBytesReceivedInSession / 1024}KB pct=${p.bufferedPercentage} " +
                         "playWhenReady=${p.playWhenReady} stalledFor=${stalledSamples * 2}s (bufTime=${continuousBufferingSamples * 2}s) | $rawUrl"
                 )
-                if (stalledSamples == 5 || continuousBufferingSamples == 5) {
+                if (stalledSamples == 5 || continuousBufferingSamples == 10) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "NO PROGRESS for 10s — buffer has not advanced. | $rawUrl"
@@ -1095,9 +1103,9 @@ private fun ExoVideoPlayer(
                 }
 
                 // Mid-stream or initial stall recovery over Tor.
-                // Allow 22s (11 samples) on Tor to accommodate SOCKS setup, TLS, Range seek, and initial chunk transfer
-                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 11 else 5
-                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 15)
+                // Allow 26s (13 samples with 0 bytes transferred) on Tor
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 13 else 5
+                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 25)
                 if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
@@ -1243,8 +1251,22 @@ private fun ExoVideoPlayer(
             } else {
                 HttpClientProvider.activeClearnetClient
             }
+            val transferListener = object : androidx.media3.datasource.TransferListener {
+                override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+                override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+                override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
+                    if (isNetwork && bytesTransferred > 0) {
+                        lastNetworkByteTimeMs = System.currentTimeMillis()
+                        networkBytesReceivedInSession += bytesTransferred
+                        com.noslop.app.tor.TorService.noteMediaProgress()
+                    }
+                }
+                override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+            }
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(client)
+                .setTransferListener(transferListener)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+                .setTransferListener(transferListener)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
             val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context).apply {

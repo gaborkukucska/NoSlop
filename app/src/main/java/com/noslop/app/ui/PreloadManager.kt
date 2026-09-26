@@ -45,7 +45,7 @@ object PreloadManager {
     // capture shows "Stored preloaded player for l_P-bF8-UgQ" followed by
     // "Evicting preloaded player for l_P-bF8-UgQ" while that video was the one
     // on screen. 3 is what the comment already describes.
-    private const val MAX_PRELOAD = 3
+    private const val MAX_PRELOAD = 4
 
     // Don't bother buffering a stream that dies before the user can plausibly
     // reach it; VideoPlayer will re-resolve on arrival instead.
@@ -263,14 +263,14 @@ object PreloadManager {
         rawUrl: String,
         expiresAtMs: Long,
         deferred: CompletableDeferred<Unit>
-    ) {
+    ) = kotlinx.coroutines.withContext(Dispatchers.Main) {
         val cacheKey = cacheKeyFor(rawUrl)
         val existing = preloadedPlayers[cacheKey]
         if (existing != null) {
             if (existing.resolvedUrl == resolvedUrl && existing.expiresAtMs > System.currentTimeMillis()) {
                 Logger.info("PRELOAD", "Already preloaded and still fresh: $cacheKey")
                 finish(rawUrl, deferred)
-                return
+                return@withContext
             }
             Logger.info("PRELOAD", "Discarding stale preloaded player for $cacheKey before re-warming")
             preloadedPlayers.remove(cacheKey)?.player?.release()
@@ -470,9 +470,18 @@ object PreloadManager {
      */
     fun invalidate(rawUrl: String) {
         val cacheKey = cacheKeyFor(rawUrl)
-        preloadedPlayers.remove(cacheKey)?.let {
-            Logger.info("PRELOAD", "Invalidated preloaded player for $cacheKey")
-            it.player.release()
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            preloadedPlayers.remove(cacheKey)?.let {
+                Logger.info("PRELOAD", "Invalidated preloaded player for $cacheKey")
+                it.player.release()
+            }
+        } else {
+            kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                preloadedPlayers.remove(cacheKey)?.let {
+                    Logger.info("PRELOAD", "Invalidated preloaded player for $cacheKey")
+                    it.player.release()
+                }
+            }
         }
         cancelledTasks.add(rawUrl)
         pendingTasks.remove(rawUrl)

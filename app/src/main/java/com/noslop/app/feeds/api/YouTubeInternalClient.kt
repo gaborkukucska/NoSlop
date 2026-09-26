@@ -154,9 +154,9 @@ object YouTubeInternalClient {
         com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
             .newBuilder()
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-            .callTimeout(25, TimeUnit.SECONDS)
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(35, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -544,12 +544,19 @@ object YouTubeInternalClient {
             val valid = formats.mapNotNull { element ->
                 val obj = element.asJsonObject ?: return@mapNotNull null
                 val pair = extractFormatStreamUrl(obj) ?: return@mapNotNull null
-                if (isTor && (pair.first.contains("gcr=ir", ignoreCase = true) || pair.first.contains("gcr=sy", ignoreCase = true) || pair.first.contains("gcr=cu", ignoreCase = true))) {
-                    Logger.warn(TAG, "Skipping restricted geo-locked stream format (itag=${pair.second}) over Tor")
-                    null
-                } else {
-                    pair
+                if (isTor) {
+                    val clen = obj.get("contentLength")?.asString?.toLongOrNull()
+                        ?: Regex("[?&]clen=(\\d+)").find(pair.first)?.groupValues?.get(1)?.toLongOrNull()
+                    if (clen != null && clen > 250L * 1024 * 1024) {
+                        Logger.warn(TAG, "Skipping stream format (itag=${pair.second}, size=${clen / (1024 * 1024)}MB) exceeding 250MB Tor ceiling")
+                        return@mapNotNull null
+                    }
+                    if (pair.first.contains("gcr=ir", ignoreCase = true) || pair.first.contains("gcr=sy", ignoreCase = true) || pair.first.contains("gcr=cu", ignoreCase = true)) {
+                        Logger.warn(TAG, "Skipping restricted geo-locked stream format (itag=${pair.second}) over Tor")
+                        return@mapNotNull null
+                    }
                 }
+                pair
             }
             if (valid.isNotEmpty()) {
                 val chosen = when (quality) {
