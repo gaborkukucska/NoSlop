@@ -9,6 +9,10 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+base {
+    archivesName.set("NoSlop")
+}
+
 android {
     namespace = "com.noslop.app"
     compileSdk = 36
