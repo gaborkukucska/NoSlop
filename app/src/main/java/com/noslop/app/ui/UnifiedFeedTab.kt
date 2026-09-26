@@ -539,9 +539,14 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                 }
                             } else if (route.startsWith("post/")) {
                             selectedTab = 0
-                            val routeData = route.removePrefix("post/")
-                            val postId = routeData.substringBefore("/")
-                            val commentId = if (routeData.contains("comment/")) routeData.substringAfter("comment/") else null
+                            val cleanRoute = route.replace(Regex("""-\d{10,}$"""), "").trim()
+                            val routeData = cleanRoute.removePrefix("post/")
+                            val postId = routeData.substringBefore("/comment/").substringBefore("/")
+                            val commentId = if (routeData.contains("/comment/")) {
+                                routeData.substringAfter("/comment/").substringBefore("/")
+                            } else if (routeData.contains("comment/")) {
+                                routeData.substringAfter("comment/").substringBefore("/")
+                            } else null
                             viewModel.ensurePostInFeed(postId)
                             if (commentId != null || routeData.contains("comment")) {
                                 viewModel.openCommentsForPost(postId, commentId)
@@ -742,14 +747,18 @@ fun UnifiedFeedTab(
         }
     }
 
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds, viewedHistoryRecords, showOldMeshPosts) {
+    var restoreItemId by remember { mutableStateOf<String?>(null) }
+    val openCommentsState by viewModel.openCommentsState.collectAsState()
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds, viewedHistoryRecords, showOldMeshPosts, restoreItemId, openCommentsState) {
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
+        val targetNavId = restoreItemId ?: openCommentsState?.first
         val filtered = unifiedFeed.filter { item ->
             val isOwnPost = item is UnifiedItem.Mesh && (item.post.authorPublicKeyB64 == localKeys?.publicKeyB64 || item.post.authorPublicKeyB64 == viewModel.burnableKeys.value?.publicKeyB64)
+            val isTargetNavPost = targetNavId != null && item.id == targetNavId
             if (filterMode == "My Content") {
                 if (!isOwnPost) return@filter false
-            } else if (isOwnPost && !filterMode.startsWith("Author:")) {
+            } else if (isOwnPost && !isTargetNavPost && !filterMode.startsWith("Author:")) {
                 return@filter false
             }
 
@@ -846,7 +855,6 @@ fun UnifiedFeedTab(
         }
     }
 
-    var restoreItemId by remember { mutableStateOf<String?>(null) }
     var hasRestoredInitialPosition by remember { mutableStateOf(false) }
     val isSavedPositionLoaded by viewModel.isSavedPositionLoaded.collectAsState()
     val savedTargetId by viewModel.savedActiveItemId.collectAsState()

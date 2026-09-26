@@ -1,5 +1,29 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-26) — Clearnet over Tor Playback Hardening, Handshake Reliability, Comment/Reaction Sync & ANR Elimination (v0.6.5-alpha)
+
+* **Clearnet Playback over Tor Stabilization & Stall Detector Byte Tracking (`VideoPlayer.kt`, `HttpClientProvider.kt`, `YouTubeInternalClient.kt`)**:
+  * Attached an `OkHttpDataSource` `TransferListener` to ExoPlayer tracking actual network byte arrivals (`lastNetworkByteTimeMs`, `networkBytesReceivedInSession`). Over Tor, while ExoPlayer downloads container headers and initial frames (`bufferedPosition == 0L`), active byte transfer now resets `stalledSamples = 0`, completely stopping false-alarm watchdog circuit escapes.
+  * Raised continuous buffering timeout ceiling to 50s and cushioned Tor SOCKS media timeouts (connect 35s, read 45s).
+  * Enforced 250MB Tor video stream size ceiling (`NOSLOP_TOR_SIZE_CEILING_V1`) in `YouTubeInternalClient.extractUrlFromPlayerResponse()`, preventing massive multi-gigabyte or 12-hour progressive video streams (like the 1,426 MB format observed in logs) from stalling playback over Tor.
+  * Paused background feed sync in `FeedRepository.kt` with an active while-loop while videos are active or preloading (`while (PreloadManager.isVideoActive || PreloadManager.currentlyPlayingUrl != null) delay(2000L)`), stopping 37+ parallel API queries from choking Tor video buffers.
+  * Expanded `PreloadManager.MAX_PRELOAD` from 3 to 4, eliminating immediate cache eviction of upcoming slides. Synchronized map and player release operations on `Dispatchers.Main`.
+  * Added unit test suite `ClearnetTorMediaTest.kt` verifying stream size ceilings, watchdog byte progress, TorService fast-pathing, and circuit failover simulation.
+* **Tor Hidden Service Handshake Reliability (`MeshTransport.kt`, `MeshSocialRepository.kt`, `HandshakePacketHandler.kt`)**:
+  * Raised handshake connect timeout to 45s with 3 attempts in `MeshTransport.kt`, giving Tor sufficient time to discover newly published v3 descriptors and establish 6-hop rendezvous circuits over mobile/emulator connections.
+  * Exempted handshake packets (`CONNECTION_REQUEST`, `USER_HANDSHAKE`) from peer cooldown traps in `flushOutboxForPeer()` and `startOutboxWorker()`.
+  * Throttled orphaned post deletion sync in `MeshSocialRepository.kt` to only broadcast when trusted peers are online, preventing continuous SOCKS proxy socket storms.
+  * Cleared peer cooldown immediately on handshake accept via `GossipService.recordSendSuccess(peer.onionAddress)`.
+* **Mesh Comment & Reaction Sync and Notification Deep-Links (`CommentPacketHandler.kt`, `ReactionPacketHandler.kt`, `MeshPacketVerifier.kt`, `UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
+  * Added dual-mode signature verification (length-prefixed `CryptoService.encodeForSigning` and legacy pipe) across `CommentPacketHandler.kt`, `ReactionPacketHandler.kt`, and `MeshPacketVerifier.kt`, fixing signature rejection of incoming mesh comments.
+  * Fixed UUID truncation and own-post exclusion in `UnifiedFeedTab.kt`: preserved full UUIDs in notification routes (`replace(Regex("""-\d{10,}$"""), "")`), hoisted `restoreItemId`, and exempted the navigated target post (`isTargetNavPost`) from the `isOwnPost` filter so the author's own broadcast renders on screen behind the comments modal.
+  * Elevated `POST`, `COMMENT`, `REACTION`, `VOTE`, and `SYNC_*` packets to high priority in `MeshTransport.kt` (25s connect timeout, 2 attempts) and exempted user interactions from transient cooldown drops.
+  * Auto-triggered `requestAllPeersInventorySync()` when opening the comments sheet in `NoSlopViewModel.kt`, pulling historical and missing comments from connected peers.
+* **Emulator ANR Elimination & Tor Auto-Recovery on Foreground (`VideoPlayer.kt`, `PreloadManager.kt`, `TorService.kt`, `MainActivity.kt`)**:
+  * Removed `forceEnableMediaCodecAsynchronousQueueing()` from `DefaultRenderersFactory` in `VideoPlayer.kt` and `PreloadManager.kt`, eliminating software decoder deadlocks and system ANR ("Close or Wait") freezes on Android emulators.
+  * Handled Android 12+ background `ForegroundServiceStartNotAllowedException` in `TorService.startTor()` by resetting to `IDLE` instead of `FAILED`.
+  * Added automatic Tor restart in `MainActivity.onResume()` when Tor is in `IDLE` or `FAILED` state, clearing the "Tor Required" overlay on resume.
+
 ## Completed Changes (2026-09-26) — Flavor ApplicationId Decoupling, PlayerView Artwork & YouTube Tests (v0.6.5-alpha)
 
 * **Distribution Flavor ApplicationId Decoupling (`app/build.gradle.kts`, `RedditApiClient.kt`)**:

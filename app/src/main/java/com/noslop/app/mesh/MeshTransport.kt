@@ -166,6 +166,7 @@ class MeshTransport(
             packet.type == "POST" || packet.type == "EDIT_POST" || packet.type == "DELETE_POST" ||
             packet.type == "COMMENT" || packet.type == "EDIT_COMMENT" || packet.type == "DELETE_COMMENT" ||
             packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE" ||
+            packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "SYNC_REQUEST" || packet.type == "SYNC_RESPONSE" ||
             packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "SYNC_REQUEST" || packet.type == "SYNC_RESPONSE"
 
         val isMediaPacket = packet.type.startsWith("MEDIA_")
