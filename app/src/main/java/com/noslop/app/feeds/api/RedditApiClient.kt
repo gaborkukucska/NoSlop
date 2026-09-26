@@ -69,7 +69,7 @@ object RedditApiClient {
             val proxiedUrl = url.replace("https://www.reddit.com", "${ProxyAuth.PROXY_URL}/reddit")
             val reqBuilder = Request.Builder()
                 .url(proxiedUrl)
-                .header("User-Agent", "android:com.noslop.me.app:v0.6.3 (by /u/NoSlopApp)")
+                .header("User-Agent", "android:${com.noslop.app.BuildConfig.APPLICATION_ID}:${com.noslop.app.BuildConfig.VERSION_NAME} (by /u/NoSlopApp)")
             
             ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
             val request = reqBuilder.build()

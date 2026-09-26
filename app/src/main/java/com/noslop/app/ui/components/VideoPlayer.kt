@@ -1495,6 +1495,7 @@ private fun ExoVideoPlayer(
                         )
                         player = exoPlayer
                         useController = false
+                        artworkDisplayMode = androidx.media3.ui.PlayerView.ARTWORK_DISPLAY_MODE_OFF
                         keepScreenOn = isActivelyPlaying
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }

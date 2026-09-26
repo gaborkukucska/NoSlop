@@ -55,10 +55,12 @@ android {
     productFlavors {
         create("play") {
             dimension = "distribution"
+            applicationId = "com.noslop.me.app"
             buildConfigField("boolean", "ENABLE_IN_APP_UPDATER", "false")
         }
         create("github") {
             dimension = "distribution"
+            applicationId = "com.noslop.app"
             buildConfigField("boolean", "ENABLE_IN_APP_UPDATER", "true")
         }
     }

@@ -97,9 +97,11 @@ object YouTubeInternalClient {
 
     fun extractVideoId(url: String): String? {
         if (url.isBlank()) return null
-        if (url.length == 11 && !url.contains("/") && !url.contains(".")) return url
+        val trimmed = url.trim()
+        if (trimmed.length == 11 && !trimmed.contains("/") && !trimmed.contains(".")) return trimmed
+        if (trimmed.startsWith("yt_") && trimmed.length == 14 && !trimmed.contains("/")) return trimmed.removePrefix("yt_")
         val reg = Regex("(?:v=|/v/|/embed/|youtu\\.be/|/shorts/)([a-zA-Z0-9_-]{11})")
-        val match = reg.find(url)
+        val match = reg.find(trimmed)
         return match?.groupValues?.get(1)
     }
 
