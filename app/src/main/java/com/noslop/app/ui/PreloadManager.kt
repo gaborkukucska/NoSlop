@@ -543,25 +543,62 @@ class AdaptiveTorLoadControl(
         foregroundControl.onPrepared()
         backgroundControl.onPrepared()
     }
-    override fun onTracksSelected(timeline: androidx.media3.common.Timeline, trackGroups: androidx.media3.exoplayer.source.TrackGroupArray, trackSelections: Array<androidx.media3.exoplayer.trackselection.ExoTrackSelection>) {
-        foregroundControl.onTracksSelected(timeline, trackGroups, trackSelections)
-        backgroundControl.onTracksSelected(timeline, trackGroups, trackSelections)
+
+    override fun onTracksSelected(
+        timeline: androidx.media3.common.Timeline,
+        mediaPeriodId: androidx.media3.exoplayer.source.MediaSource.MediaPeriodId,
+        renderers: Array<out androidx.media3.exoplayer.Renderer>,
+        trackGroups: androidx.media3.exoplayer.source.TrackGroupArray,
+        trackSelections: Array<out androidx.media3.exoplayer.trackselection.ExoTrackSelection>
+    ) {
+        foregroundControl.onTracksSelected(timeline, mediaPeriodId, renderers, trackGroups, trackSelections)
+        backgroundControl.onTracksSelected(timeline, mediaPeriodId, renderers, trackGroups, trackSelections)
     }
+
+    override fun onTracksSelected(
+        renderers: Array<out androidx.media3.exoplayer.Renderer>,
+        trackGroups: androidx.media3.exoplayer.source.TrackGroupArray,
+        trackSelections: Array<out androidx.media3.exoplayer.trackselection.ExoTrackSelection>
+    ) {
+        foregroundControl.onTracksSelected(renderers, trackGroups, trackSelections)
+        backgroundControl.onTracksSelected(renderers, trackGroups, trackSelections)
+    }
+
     override fun onStopped() {
         foregroundControl.onStopped()
         backgroundControl.onStopped()
     }
+
     override fun onReleased() {
         foregroundControl.onReleased()
         backgroundControl.onReleased()
     }
+
     override fun getAllocator(): androidx.media3.exoplayer.upstream.Allocator = activeControl.allocator
     override fun getBackBufferDurationUs(): Long = activeControl.backBufferDurationUs
     override fun retainBackBufferFromKeyframe(): Boolean = activeControl.retainBackBufferFromKeyframe()
+
     override fun shouldContinueLoading(playbackPositionUs: Long, bufferedDurationUs: Long, playbackSpeed: Float): Boolean {
         return activeControl.shouldContinueLoading(playbackPositionUs, bufferedDurationUs, playbackSpeed)
     }
-    override fun shouldStartPlayback(bufferedDurationUs: Long, playbackSpeed: Float, rebuffering: Boolean, targetLiveOffsetUs: Long): Boolean {
+
+    override fun shouldStartPlayback(
+        timeline: androidx.media3.common.Timeline,
+        mediaPeriodId: androidx.media3.exoplayer.source.MediaSource.MediaPeriodId,
+        bufferedDurationUs: Long,
+        playbackSpeed: Float,
+        rebuffering: Boolean,
+        targetLiveOffsetUs: Long
+    ): Boolean {
+        return activeControl.shouldStartPlayback(timeline, mediaPeriodId, bufferedDurationUs, playbackSpeed, rebuffering, targetLiveOffsetUs)
+    }
+
+    override fun shouldStartPlayback(
+        bufferedDurationUs: Long,
+        playbackSpeed: Float,
+        rebuffering: Boolean,
+        targetLiveOffsetUs: Long
+    ): Boolean {
         return activeControl.shouldStartPlayback(bufferedDurationUs, playbackSpeed, rebuffering, targetLiveOffsetUs)
     }
 }
