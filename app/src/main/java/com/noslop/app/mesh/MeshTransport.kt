@@ -157,24 +157,19 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
+        val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
         val isDmHighPriority = packet.type == "MESSAGE" || packet.type == "DELETE_MESSAGE" ||
-            packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" ||
             packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
             packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
             packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC" ||
-            packet.type == "CHAT_REACTION" ||
-            packet.type == "POST" || packet.type == "EDIT_POST" || packet.type == "DELETE_POST" ||
-            packet.type == "COMMENT" || packet.type == "EDIT_COMMENT" || packet.type == "DELETE_COMMENT" ||
-            packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE" ||
-            packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "SYNC_REQUEST" || packet.type == "SYNC_RESPONSE" ||
-            packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "SYNC_REQUEST" || packet.type == "SYNC_RESPONSE"
+            packet.type == "CHAT_REACTION"
 
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isInteractive = packet.type == "TYPING" || packet.type == "READ_RECEIPT"
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
 
-        // Critical user messaging and media chunking bypass peer cooldown entirely
-        val bypassCooldown = isDmHighPriority || isMediaPacket
+        // Only genuine 1:1 real-time user messages and handshakes bypass cooldown; all background gossip respects cooldown
+        val bypassCooldown = isHandshake || packet.type == "MESSAGE"
         if (!bypassCooldown && GossipService.isPeerInCooldown(onionAddress)) {
             Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub

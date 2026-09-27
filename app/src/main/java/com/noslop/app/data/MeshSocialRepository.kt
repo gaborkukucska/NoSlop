@@ -423,9 +423,13 @@ class MeshSocialRepository(
                         }
                     }
 
-                    // Periodic Deletion Sync — only broadcast if there are trusted online peers to receive it
-                    val onlineTrustedPeers = peers.any { it.isTrusted && it.isOnline && it.onionAddress.isNotBlank() }
-                    if (myKeys != null && onlineTrustedPeers) {
+                    // Periodic Deletion Sync — only broadcast if there are trusted online peers that are not in cooldown
+                    // Defer background deletion broadcasts while user is actively watching or buffering videos
+                    val isVideoActive = com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null
+                    val onlineReachablePeers = peers.any { 
+                        it.isTrusted && it.isOnline && it.onionAddress.isNotBlank() && !com.noslop.app.mesh.GossipService.isPeerInCooldown(it.onionAddress) 
+                    }
+                    if (myKeys != null && onlineReachablePeers && !isVideoActive) {
                         val currentTimestamp = System.currentTimeMillis()
                         val orphanedPosts = postDao.getPendingDeletionsByAuthor(
                             myKeys.publicKeyB64,

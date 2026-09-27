@@ -851,14 +851,13 @@ object GossipService {
 
         Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${trustedPeers.size} trusted peers.")
         
-        val isUserAction = packet.type == "POST" || packet.type == "EDIT_POST" || packet.type == "DELETE_POST" ||
-            packet.type == "COMMENT" || packet.type == "EDIT_COMMENT" || packet.type == "DELETE_COMMENT" ||
-            packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "MESSAGE" || packet.type == "CHAT_REACTION"
+        // Only immediate 1:1 user messages bypass cooldown; background posts/deletions must respect cooldown
+        val isDirectUserMessage = packet.type == "MESSAGE"
 
         for (peer in trustedPeers) {
-            // Skip peers in cooldown, but always allow direct user actions (reactions, comments, posts) through
-            if (!isUserAction && isPeerInCooldown(peer.onionAddress)) {
-                Logger.debug(TAG, "Skipping broadcast to ${peer.onionAddress}: peer in cooldown")
+            // Skip peers in cooldown to prevent socket storms to offline hidden services
+            if (!isDirectUserMessage && isPeerInCooldown(peer.onionAddress)) {
+                Logger.debug(TAG, "Skipping broadcast of ${packet.type} to ${peer.onionAddress}: peer in cooldown")
                 continue
             }
             
