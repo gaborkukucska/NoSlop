@@ -68,6 +68,23 @@ object PreloadManager {
     var currentlyPlayingUrl: String? = null
     @Volatile
     var isVideoActive: Boolean = false
+    @Volatile
+    var lastNetworkByteTimeMs: Long = System.currentTimeMillis()
+    @Volatile
+    var networkBytesReceivedInSession: Long = 0L
+
+    val globalTransferListener = object : androidx.media3.datasource.TransferListener {
+        override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+        override fun onBytesTransferred(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
+            if (isNetwork && bytesTransferred > 0) {
+                lastNetworkByteTimeMs = System.currentTimeMillis()
+                networkBytesReceivedInSession += bytesTransferred
+                com.noslop.app.tor.TorService.noteMediaProgress()
+            }
+        }
+        override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
+    }
 
     // LinkedHashMap is not thread-safe, but preloadedPlayers is only ever accessed
     // from the main thread: preWarm() is called via launch{} from a Composable
@@ -305,19 +322,16 @@ object PreloadManager {
             com.noslop.app.net.HttpClientProvider.activeClearnetClient
         }
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(mediaHttpClient)
+            .setTransferListener(globalTransferListener)
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+            .setTransferListener(globalTransferListener)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // Compact preloader buffer: buffers 8-15s of head data and yields 100% of Tor bandwidth to active playback
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                8000,  // min buffer (8s) - buffers enough for instant swipe playback
-                15000, // max buffer (15s) - stops downloading in background so active video gets full bandwidth
-                1000,  // buffer for playback (1.0s) - ready to play fast
-                4000   // buffer for playback after rebuffer (4s)
-            )
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
+        // AdaptiveTorLoadControl: 10s-20s while preloading in background; automatically expands
+        // to 50s-75s with 60s back-buffer when claimed as the active on-screen player.
+        val loadControl = AdaptiveTorLoadControl(
+            isForeground = { currentlyPlayingUrl == rawUrl }
+        )
 
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
@@ -457,6 +471,7 @@ object PreloadManager {
 
         preloadedPlayers.remove(cacheKey)
         currentlyPlayingUrl = rawUrl
+        lastNetworkByteTimeMs = System.currentTimeMillis()
         Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey")
         return entry.player
     }
@@ -499,3 +514,55 @@ object PreloadManager {
         }
     }
 }
+
+/**
+ * Dynamically switches between background preloading buffers (10s-20s) and
+ * active foreground playback buffers (50s-75s with 60s backbuffer) so Tor bandwidth
+ * is conserved during preloading while active playback never starves or stalls mid-stream.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+class AdaptiveTorLoadControl(
+    private val isForeground: () -> Boolean
+) : androidx.media3.exoplayer.LoadControl {
+    private val foregroundControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(50000, 75000, 1200, 4000)
+        .setBackBuffer(60000, true)
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+
+    private val backgroundControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(10000, 20000, 1200, 4000)
+        .setBackBuffer(0, false)
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+
+    private val activeControl: androidx.media3.exoplayer.LoadControl
+        get() = if (isForeground()) foregroundControl else backgroundControl
+
+    override fun onPrepared() {
+        foregroundControl.onPrepared()
+        backgroundControl.onPrepared()
+    }
+    override fun onTracksSelected(timeline: androidx.media3.common.Timeline, trackGroups: androidx.media3.exoplayer.source.TrackGroupArray, trackSelections: Array<androidx.media3.exoplayer.trackselection.ExoTrackSelection>) {
+        foregroundControl.onTracksSelected(timeline, trackGroups, trackSelections)
+        backgroundControl.onTracksSelected(timeline, trackGroups, trackSelections)
+    }
+    override fun onStopped() {
+        foregroundControl.onStopped()
+        backgroundControl.onStopped()
+    }
+    override fun onReleased() {
+        foregroundControl.onReleased()
+        backgroundControl.onReleased()
+    }
+    override fun getAllocator(): androidx.media3.exoplayer.upstream.Allocator = activeControl.allocator
+    override fun getBackBufferDurationUs(): Long = activeControl.backBufferDurationUs
+    override fun retainBackBufferFromKeyframe(): Boolean = activeControl.retainBackBufferFromKeyframe()
+    override fun shouldContinueLoading(playbackPositionUs: Long, bufferedDurationUs: Long, playbackSpeed: Float): Boolean {
+        return activeControl.shouldContinueLoading(playbackPositionUs, bufferedDurationUs, playbackSpeed)
+    }
+    override fun shouldStartPlayback(bufferedDurationUs: Long, playbackSpeed: Float, rebuffering: Boolean, targetLiveOffsetUs: Long): Boolean {
+        return activeControl.shouldStartPlayback(bufferedDurationUs, playbackSpeed, rebuffering, targetLiveOffsetUs)
+    }
+}
+

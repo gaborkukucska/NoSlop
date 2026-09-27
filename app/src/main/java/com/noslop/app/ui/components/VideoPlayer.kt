@@ -333,7 +333,6 @@ private suspend fun doResolve(rawUrl: String, quality: String, isPreload: Boolea
             }
             VideoSource.Embed("https://archive.org/embed/$id")
         }
-        rawUrl.startsWith("http") -> VideoSource.Direct(rawUrl)
         else -> VideoSource.Unavailable
     }
 
@@ -373,7 +372,8 @@ private fun isDirectFileUrl(url: String): Boolean {
 }
 
 private fun isYouTubeUrl(url: String): Boolean =
-    url.contains("youtube.com") || url.contains("youtu.be") || url.contains("youtube-nocookie.com")
+    (url.contains("youtube.com") || url.contains("youtu.be") || url.contains("youtube-nocookie.com")) &&
+        extractYouTubeId(url) != null
 
 private fun isVimeoUrl(url: String): Boolean =
     url.contains("vimeo.com")
@@ -1079,10 +1079,12 @@ private fun ExoVideoPlayer(
                 val bufPos = p.bufferedPosition
                 if (baselineBufPos < 0L) baselineBufPos = bufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
-                val bytesDelta = networkBytesReceivedInSession - lastBytesCount
-                lastBytesCount = networkBytesReceivedInSession
+                val totalBytes = networkBytesReceivedInSession + com.noslop.app.ui.PreloadManager.networkBytesReceivedInSession
+                val bytesDelta = totalBytes - lastBytesCount
+                lastBytesCount = totalBytes
                 val now = System.currentTimeMillis()
-                val hasRecentNetworkBytes = (now - lastNetworkByteTimeMs) < 12_000L || bytesDelta > 0L
+                val latestByteTime = maxOf(lastNetworkByteTimeMs, com.noslop.app.ui.PreloadManager.lastNetworkByteTimeMs)
+                val hasRecentNetworkBytes = (now - latestByteTime) < 14_000L || bytesDelta > 0L
 
                 if (delta > 0L || hasRecentNetworkBytes) com.noslop.app.tor.TorService.noteMediaProgress()
                 // True advancement: either decoded timeline advance OR active byte transfer over Tor socket

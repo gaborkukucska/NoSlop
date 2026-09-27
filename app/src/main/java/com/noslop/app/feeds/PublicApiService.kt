@@ -112,8 +112,11 @@ object PublicApiService {
                         fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
                         fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
                     } else {
-                        fetchAsync("api-yt-trending") { YouTubeInternalClient.getTrendingVideos() }
-                        fetchAsync("api-invidious-search") { InvidiousApiClient.getTrendingVideos() }
+                        // Steer trending videos with user keywords/categories instead of generic 'trending latest' which is dominated by sports highlights
+                        val topic = userKeywords.firstOrNull() ?: "technology science documentaries"
+                        val trendingQuery = "$topic trending"
+                        fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(trendingQuery, recentOnly = true) }
+                        fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(trendingQuery) }
                         fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                         fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                         val tiktokKey = apiKeyRepo.getKey("tiktok")
@@ -138,7 +141,7 @@ object PublicApiService {
                     fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                     fetchAsync("api-wikimedia-featured") { 
                         val isGeneric = query.isBlank() || query.equals("Art", ignoreCase = true) || query.equals("Photography", ignoreCase = true)
-                        val targetQuery = if (isGeneric) "photography" else query
+                        val targetQuery = if (isGeneric) (userKeywords.firstOrNull() ?: "landscape architecture nature space") else query
                         WikimediaApiClient.searchImages(targetQuery)
                     }
                     fetchAsync("api-artic-artworks") { ArtInstituteClient.fetchArtworks(query) }
@@ -231,8 +234,6 @@ object PublicApiService {
                 }
                 else -> {
                     addLocal()  // NOSLOP_LOCAL_SEARCH_V1 — any type
-                    // --- NOSLOP_SEARCH_SOURCES_V1 --- keyless text coverage
-                    fetchAsync("api-wikipedia-search") { WikipediaApiClient.searchArticles(query, language = language) }
                     // --- NOSLOP_SOURCE_AGE_V1 ---
                     // This branch serves the creator/interest auto-searches, and
                     // it was fetching all-time results — which is where the

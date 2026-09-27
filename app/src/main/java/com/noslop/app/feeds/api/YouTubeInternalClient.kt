@@ -559,21 +559,26 @@ object YouTubeInternalClient {
                 pair
             }
             if (valid.isNotEmpty()) {
-                val chosen = when (quality) {
-                    "low" -> valid.firstOrNull { it.second == 18 } ?: valid.first()
-                    "medium" -> valid.firstOrNull { it.second == 22 } ?: valid.firstOrNull { it.second == 18 } ?: valid.first()
-                    // Prefer 18 over an arbitrary last entry: it is the small,
-                    // Tor-friendly 360p muxed format that every working capture
-                    // in this project has used.
+                val chosen = when {
+                    isTor && quality != "high" -> valid.firstOrNull { it.second == 18 } ?: valid.firstOrNull { it.second == 22 } ?: valid.first()
+                    quality == "low" -> valid.firstOrNull { it.second == 18 } ?: valid.first()
+                    quality == "medium" -> valid.firstOrNull { it.second == 22 } ?: valid.firstOrNull { it.second == 18 } ?: valid.first()
                     else -> valid.firstOrNull { it.second == 22 } ?: valid.firstOrNull { it.second == 18 } ?: valid.last()
                 }
                 return chosen.first
             }
         }
 
-        // 2. HLS. Muxed and adaptive-bitrate fallback.
+        // 2. HLS. Muxed and adaptive-bitrate fallback (skip live broadcast manifests over Tor to prevent ERROR_CODE_BEHIND_LIVE_WINDOW).
         val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
         if (!hlsUrl.isNullOrBlank()) {
+            val isLiveHls = hlsUrl.contains("yt_live_broadcast", ignoreCase = true) ||
+                            hlsUrl.contains("playlist_type/DVR", ignoreCase = true) ||
+                            hlsUrl.contains("/source/yt_live", ignoreCase = true)
+            if (isTor && isLiveHls) {
+                Logger.warn(TAG, "Skipping live HLS stream over Tor (unsupported circuit latency)")
+                return null
+            }
             Logger.info(TAG, "Using HLS manifest — muxed and adaptive bitrate")
             return hlsUrl
         }
@@ -793,8 +798,11 @@ object YouTubeInternalClient {
                             val isAgeOrPrivate = reason.contains("age", ignoreCase = true) || 
                                 reason.contains("inappropriate", ignoreCase = true) || 
                                 reason.contains("private", ignoreCase = true)
-                            if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE" || isAgeOrPrivate) {
-                                Logger.warn(TAG, "Video $videoId is permanently unplayable ($playability / $reason). Bailing immediately.")
+                            val isLiveStream = root.getAsJsonObject("videoDetails")?.get("isLive")?.asBoolean == true ||
+                                root.getAsJsonObject("videoDetails")?.get("isLiveContent")?.asBoolean == true ||
+                                root.getAsJsonObject("playabilityStatus")?.has("liveStreamability") == true
+                            if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE" || isAgeOrPrivate || (isTor && isLiveStream)) {
+                                Logger.warn(TAG, "Video $videoId is unplayable over Tor ($playability / $reason / isLive=$isLiveStream). Bailing immediately.")
                                 response.close()
                                 return@withContext null
                             }

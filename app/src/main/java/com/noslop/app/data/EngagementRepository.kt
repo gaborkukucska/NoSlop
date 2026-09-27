@@ -62,6 +62,14 @@ fun normalizeUrlKey(url: String?): String {
         val videoId = clean.substringAfter("youtu.be/").substringBefore("?").substringBefore("#")
         if (videoId.isNotBlank()) return "yt_$videoId"
     }
+    if (clean.contains("youtube.com/shorts/")) {
+        val videoId = clean.substringAfter("youtube.com/shorts/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (clean.contains("youtube.com/embed/")) {
+        val videoId = clean.substringAfter("youtube.com/embed/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
     
     // Vimeo video ID preservation
     if (clean.contains("vimeo.com/")) {

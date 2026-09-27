@@ -257,8 +257,9 @@ class FeedRepository(
         val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(parallelism)
 
         val shuffledCreators = creatorKeywordList.shuffled()
-        val rampUpCreators = if (!hasExistingItems) shuffledCreators.take(4) else emptyList()
-        val remainingCreators = if (!hasExistingItems) shuffledCreators.drop(4) else shuffledCreators
+        val rampUpCount = if (!hasExistingItems) 4 else 6
+        val rampUpCreators = shuffledCreators.take(rampUpCount)
+        val remainingCreators = shuffledCreators.drop(rampUpCount)
 
         // --- Phase 1: Ramp-Up (Fast initial fetch only needed if database is empty) ---
         if (!hasExistingItems) {
@@ -335,11 +336,8 @@ class FeedRepository(
         for (creator in remainingCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
-                        kotlinx.coroutines.delay(2000L)
-                    }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                        kotlinx.coroutines.delay(1200L) // Stagger requests across Tor
+                        kotlinx.coroutines.delay(1800L) // Gentle stagger across Tor
                     } else {
                         kotlinx.coroutines.delay(300L)  // Stagger requests across clearnet
                     }

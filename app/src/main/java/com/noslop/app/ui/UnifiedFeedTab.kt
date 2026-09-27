@@ -987,20 +987,22 @@ fun UnifiedFeedTab(
 
     LaunchedEffect(pagerState.settledPage, hasRestoredInitialPosition) {
         val currentPage = pagerState.settledPage
-        if (hasRestoredInitialPosition && lastSettledPage >= 0 && lastSettledPage in unifiedItems.indices && lastSettledPage != currentPage) {
-            if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked") {
-                val leftItem = unifiedItems[lastSettledPage]
-                if (leftItem is UnifiedItem.Feed) {
-                    viewModel.markItemReadState(leftItem.item.id, true)
-                    viewModel.markItemViewed(leftItem.id, isMesh = false)
-                    viewModel.recordItemSwiped(leftItem.id)
-                } else if (leftItem is UnifiedItem.Mesh) {
-                    viewModel.markItemViewed(leftItem.id, isMesh = true)
-                    viewModel.recordItemSwiped(leftItem.id)
+        if (hasRestoredInitialPosition && currentPage in unifiedItems.indices) {
+            val fromPage = if (lastSettledPage >= 0) lastSettledPage else currentPage
+            val range = if (fromPage <= currentPage) fromPage until currentPage else (currentPage + 1)..fromPage
+            for (p in range) {
+                if (p in unifiedItems.indices && filterMode != "History" && filterMode != "Saved" && filterMode != "Liked") {
+                    val itemToMark = unifiedItems[p]
+                    if (itemToMark is UnifiedItem.Feed) {
+                        viewModel.markItemReadState(itemToMark.item.id, true)
+                        viewModel.markItemViewed(itemToMark.id, isMesh = false)
+                        viewModel.recordItemSwiped(itemToMark.id)
+                    } else if (itemToMark is UnifiedItem.Mesh) {
+                        viewModel.markItemViewed(itemToMark.id, isMesh = true)
+                        viewModel.recordItemSwiped(itemToMark.id)
+                    }
                 }
             }
-        }
-        if (hasRestoredInitialPosition && currentPage in unifiedItems.indices) {
             lastSettledPage = currentPage
         }
     }
@@ -2236,8 +2238,8 @@ private fun isVideoItem(item: UnifiedItem): Boolean {
         is UnifiedItem.Feed -> {
             val type = item.item.mediaType?.lowercase() ?: ""
             val url = (item.item.mediaUrl ?: item.item.url ?: "").lowercase()
-            type.contains("video") || url.contains("youtube") || url.contains("youtu.be") ||
-            url.contains("vimeo") || url.endsWith(".mp4") || url.endsWith(".webm") ||
+            type.contains("video") || com.noslop.app.feeds.api.YouTubeInternalClient.extractVideoId(url) != null ||
+            url.contains("vimeo.com/") || url.endsWith(".mp4") || url.endsWith(".webm") ||
             url.endsWith(".m3u8") || url.endsWith(".mpd")
         }
         is UnifiedItem.Mesh -> {

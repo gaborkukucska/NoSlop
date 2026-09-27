@@ -962,9 +962,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (groups.isEmpty()) return emptyList()
 
-        // Fair creator distribution: partition priority creators and shuffle them so all 40+ creators rotate
-        val priorityGroups = groups.values.filter { it.any(isPriority) }.shuffled()
-        val otherGroups = groups.values.filter { !it.any(isPriority) }
+        // Equal creator distribution: shuffle priority creator queues so high-frequency daily
+        // uploaders do not monopolize all slots and starve creators who upload weekly or monthly
+        val priorityGroups = groups.filter { it.value.any(isPriority) }
+            .values
+            .map { it.toMutableList() }
+            .shuffled()
+        val otherGroups = groups.filter { !it.value.any(isPriority) }
+            .values
+            .map { it.toMutableList() }
         val queues = priorityGroups + otherGroups
 
         val result = mutableListOf<T>()
@@ -1419,8 +1425,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             else {
                 val title = item.title.lowercase()
                 val author = item.author?.lowercase() ?: ""
-                val excerpt = item.excerpt?.lowercase() ?: ""
-                creators.any { title.contains(it) || author.contains(it) || excerpt.contains(it) }
+                val isWiki = author == "wikipedia" || item.apiSource == "wikipedia"
+                if (isWiki) false
+                else {
+                    creators.any { c -> author.contains(c) || (title.contains(c) && isVideoFeedItem(item)) }
+                }
             }
         }
 
