@@ -1267,23 +1267,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         // Clean up any remaining ghost peers stored only for this deleted group
         if (existing != null) {
-            val remainingGroups = db.groupChatDao().getAllGroupChatsList()
-            val remainingGroupMembers = remainingGroups.flatMap {
-                try {
-                    com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
-                } catch (_: Exception) { emptyList() }
-            }.toSet()
             val deletedGroupMembers = try {
                 com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList() + existing.adminPublicKeyB64
             } catch (_: Exception) { emptyList() }
-            for (memberPub in deletedGroupMembers) {
-                if (memberPub !in remainingGroupMembers && memberPub != myKeys.publicKeyB64 && memberPub != burnableKeys?.publicKeyB64) {
-                    val p = peerDao.getPeerByPublicKey(memberPub)
-                    if (p != null && !p.isTrusted && !p.isDiscoverable) {
-                        peerDao.deletePeer(p)
-                    }
-                }
-            }
+            cleanupOrphanedGroupPeers(deletedGroupMembers, excludedGroupId = groupId)
         }
     }
 
@@ -1340,22 +1327,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.groupChatDao().deleteGroupChat(groupId)
 
         // 3. Clean up ghost peers stored only for this group to prevent them appearing as Pending Requests
-        val otherGroups = db.groupChatDao().getAllGroupChatsList()
-        val otherGroupMembers = otherGroups.flatMap {
-            try {
-                com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
-            } catch (_: Exception) { emptyList() }
-        }.toSet()
-
-        for (memberPub in allGroupPeers) {
-            if (memberPub !in otherGroupMembers && memberPub != myKeys.publicKeyB64 && memberPub != burnable?.publicKeyB64) {
-                val p = peerDao.getPeerByPublicKey(memberPub)
-                if (p != null && !p.isTrusted && !p.isDiscoverable) {
-                    peerDao.deletePeer(p)
-                    Logger.info("REPOSITORY", "Cleaned up non-contact group peer: ${p.handle}")
-                }
-            }
-        }
+        cleanupOrphanedGroupPeers(allGroupPeers, excludedGroupId = groupId)
 
         Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${signingKey.publicKeyB64.take(8)}... and cleaned up group peers")
     }
@@ -1674,7 +1646,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     val isUsingInsecureStorage = identityRepository.isUsingInsecureStorage
 
-    private var hubSyncJob: kotlinx.coroutines.Job? = null
+    suspend fun cleanupOrphanedGroupPeers(candidatePubs: Collection<String>, excludedGroupId: String? = null) = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity()
+        val burnable = getBurnableIdentity()
+        val otherGroups = db.groupChatDao().getAllGroupChatsList().filter { excludedGroupId == null || it.groupId != excludedGroupId }
+        val otherGroupMembers = otherGroups.flatMap {
+            try {
+                com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+            } catch (_: Exception) { emptyList() }
+        }.toSet()
+
+        for (memberPub in candidatePubs) {
+            if (memberPub !in otherGroupMembers && memberPub != myKeys?.publicKeyB64 && memberPub != burnable?.publicKeyB64) {
+                val p = peerDao.getPeerByPublicKey(memberPub)
+                if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                    peerDao.deletePeer(p)
+                    Logger.info("REPOSITORY", "Cleaned up non-contact group peer: ${p.handle}")
+                }
+            }
+        }
+    }
 
     fun startPresenceHeartbeat() {
         // Clean up any duplicate temporary peers that were erroneously promoted to contacts
@@ -1702,21 +1693,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             } catch (_: Exception) {}
         }
         meshSocialRepository.startPresenceHeartbeat()
-        
-        if (hubSyncJob?.isActive == true) return
-        hubSyncJob = repositoryScope.launch {
-            while (isActive) {
-                try {
-                    val hubStatus = getAppSetting("hub_deployment_status")
-                    if (!hubStatus.isNullOrBlank()) {
-                        pullMeshPacketsFromHub()
-                    }
-                } catch (e: Exception) {
-                    // Ignore connection timeouts to prevent log spam when offline
-                }
-                delay(3000L)
-            }
-        }
     }
 
     // --- Media / Notification / Foreground Settings (delegated to SettingsRepository) ---

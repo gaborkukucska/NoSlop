@@ -1,30 +1,25 @@
 # Project Status - NoSlop
 
-## Completed Changes (2026-09-29) — Codebase Audit, Dead Code Pruning, Hub Sync Race & Wire Signature Parity
+## Completed Changes (2026-09-29) — Comprehensive Codebase Audit, Mesh Firewall Whitelist, Structured Concurrency & Dead Code Elimination
 
-* **Wire Protocol Dual-Mode Signature Parity (`MeshPacketVerifier.kt`, `CommentPacketHandler.kt`, `HandshakePacketHandler.kt`)**:
-  * Fixed critical signature verification rejections for `DELETE_COMMENT`: `MeshPacketVerifier.kt` previously tested only `encodeForSigning` while `MeshSocialRepository` signed with legacy pipe format (`postId|commentId|authorId|timestamp`), causing valid comment deletions to be dropped. Added dual-mode verification across `MeshPacketVerifier.kt` and `CommentPacketHandler.kt`.
-  * Fixed `FOLLOW` / `UNFOLLOW` signature mismatch: `NoSlopRepository.toggleFollowPeer()` signed with `encodeForSigning` while verifiers tested only pipe format. Added dual-mode verification across `MeshPacketVerifier.kt` and `HandshakePacketHandler.kt`.
-  * Fixed `CONNECTION_REJECTED` signature mismatch: `MeshSocialRepository.rejectConnectionRequest()` signed with `encodeForSigning` while `HandshakePacketHandler.handleConnectionRejected()` tested only pipe format. Added dual-mode verification.
-* **Dead Code & Unused Function Pruning (`NoSlopViewModel.kt`, `Daos.kt`, `HubSetupScreen.kt`)**:
-  * Pruned uncalled `takeDiverse` extension function in `NoSlopViewModel.kt` (superseded by `takeRoundRobin`).
-  * Removed hardcoded dead `isUsingFallback = false` variable and simplified feed loading conditions.
-  * Pruned unused DAO queries in `Daos.kt` (`ViewedHistoryDao.pruneOldest`, `deleteOlderThan`, `SwipeTrackerDao.deleteOldSwipes`, `getSwipeForItem`).
-  * Cleaned up `NotificationDao.deleteGroupInviteNotifications` parameter defaults.
-  * Removed unused `unknownErrorMsg` variable in `HubSetupScreen.kt`.
-* **Smart Hub Sync Startup Race Elimination (`NoSlopViewModel.kt`, `NoSlopRepository.kt`, `HubSyncWorker.kt`)**:
-  * Fixed asynchronous startup race in `NoSlopViewModel.init`: the Smart Hub Sync loop previously checked `if (_isOnboardingComplete.value)` synchronously on the main thread before the Room read completed, preventing background sync from starting. Re-evaluated asynchronously against `repository.isOnboardingComplete()`.
-  * Made `NoSlopRepository.syncPullHistoricalDataFromHub()` resilient: now sets `hasPulledHistoricalData = true` only upon receiving a successful response from the Hub, allowing seamless retry if the connection blips during cold start.
-  * Extracted `NoSlopRepository.isPrivateLanAddress()` and reused it in `HubSyncWorker.kt`, eliminating duplicate private IPv4 validation logic.
-  * Unified non-admin group departures: routed non-admin `deleteGroupChat()` directly to `leaveGroupChat()`, eliminating divergent group exit logic.
-* **UI Dialog De-duplication (`HubSetupScreen.kt`)**:
-  * Extracted reusable `HostKeyPromptDialog` composable, removing a 40-line duplicated `AlertDialog` between the active dashboard view and the setup wizard view.
-* **Mesh Filter Logic Enforcement (`GossipService.kt`)**:
-  * Step 4.5 now actively evaluates `filterSettings.allowIncomingReactions` and `filterSettings.allowIncomingComments` when anchors are not tracked locally, adhering to the documented privacy design.
-* **Documentation Synchronization (`TECHNICAL_REFERENCE.md`, `WIRE_PROTOCOL_REFERENCE.md`, `PROJECT_STATUS.md`)**:
-  * Corrected `TECHNICAL_REFERENCE.md` §3.8 wordlist size to 2053 entries (BIP-39-shaped, ~132 bits entropy, no checksum word).
-  * Aligned `TECHNICAL_REFERENCE.md` §4.6 with the active mesh filter architecture (unrestricted outgoing native engagement, gated clearnet shares).
-  * Documented dual-mode signature verification in `WIRE_PROTOCOL_REFERENCE.md`.
+* **Mesh Firewall Whitelist & Backoff Retention (`GossipService.kt`)**:
+  * Added `CONNECTION_REJECTED` to `isConnectionPacket` so decline notices from untrusted peers pass the firewall without being dropped as untrusted.
+  * Added `FOLLOW` and `UNFOLLOW` (`isFollowPacket`) to the firewall whitelist (with 5/60s rate-limiting) so non-contact followers can follow creator nodes.
+  * Added `ANNOUNCE_INVIDIOUS_INSTANCE` to the firewall whitelist (with 5/60s rate-limiting) so healthy public Invidious video instances can be gossiped mesh-wide.
+  * Corrected `cleanupFailureTracking()` retention from 5.5 minutes to 2 hours (`2 * 3600_000L`), preventing premature eviction of peers under 30-minute Tor socket cooldowns.
+* **Feed Sync Structured Concurrency & Hang Elimination (`FeedRepository.kt`)**:
+  * Detached Phase 2 and 3 background sync onto an independent supervisor scope (`bgScope.launch`) rather than launching as child `async` coroutines of `withContext(Dispatchers.IO)`. This prevents `refreshFeeds()` from blocking indefinitely when video playback is active.
+* **Consolidated Hub Polling & Ghost Peer Cleanup (`NoSlopRepository.kt`, `NoSlopViewModel.kt`, `HandshakePacketHandler.kt`)**:
+  * Pruned redundant 3-second repository `hubSyncJob` to eliminate dual-polling race conditions with `NoSlopViewModel`'s 5-second Smart Hub loop.
+  * Extracted `cleanupOrphanedGroupPeers` in `NoSlopRepository` to unify 4 duplicated ghost peer cleanup blocks across `deleteGroupChat`, `leaveGroupChat`, and `HandshakePacketHandler`.
+* **Creator Auto-Accept & Channel Cut-Off Fixes (`HandshakePacketHandler.kt`, `ChannelMetadataResolver.kt`, `NoSlopViewModel.kt`)**:
+  * Keyed creator auto-accept rate limits per sender ID rather than using a single global bucket of 10 per hour for the entire node.
+  * Fixed channel creation cut-off fast path in `ChannelMetadataResolver.kt`: video publication timestamps are now only used as an upper bound when `publishedAt <= cutoffMs`, preventing pre-2022 channels with recent uploads from being falsely marked as post-2022 AI channels and banned.
+* **Wire Protocol Dual-Mode Verification & Dead Code Pruning (`MeshPacketVerifier.kt`, `MediaCaptureManager.kt`, `MediaManager.kt`, `YouTubeInternalClient.kt`)**:
+  * Added dual-mode verification for `EDIT_COMMENT` in `MeshPacketVerifier.kt` to achieve 100% parity with `CommentPacketHandler`.
+  * Pruned dead `mediaRecorder` and `audioFile` fields in `MediaCaptureManager.kt`.
+  * Replaced hardcoded `16 * 1024` with `MIN_CHUNK_SIZE` in `MediaManager.requestNextChunks()`.
+  * Pruned dead `usingProxy` player branches and uncalled proxy attestation methods in `YouTubeInternalClient.kt`.
 
 ## Completed Changes (2026-09-26) — Clearnet over Tor Playback Hardening, Handshake Reliability, Comment/Reaction Sync & ANR Elimination (v0.6.5-alpha)
 

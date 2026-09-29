@@ -2,7 +2,6 @@ package com.noslop.app.mesh
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -30,9 +29,6 @@ class MediaCaptureManager(private val context: Context) {
     private var imageCapture: ImageCapture? = null
     private var videoCapture: VideoCapture<Recorder>? = null
     private var recording: Recording? = null
-    
-    private var mediaRecorder: MediaRecorder? = null
-    private var audioFile: File? = null
 
     /**
      * Start the camera for preview and preparation.

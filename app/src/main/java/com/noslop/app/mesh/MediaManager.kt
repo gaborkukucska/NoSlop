@@ -619,7 +619,7 @@ object MediaManager {
                         
                         dl.ssthresh = Math.max(2.0, dl.currentConcurrency * 0.5)
                         dl.currentConcurrency = 1.0
-                        dl.currentChunkSize = Math.max(16 * 1024, dl.currentChunkSize / 2)
+                        dl.currentChunkSize = Math.max(MIN_CHUNK_SIZE, dl.currentChunkSize / 2)
                         dl.consecutiveTimeouts++
                     }
                     

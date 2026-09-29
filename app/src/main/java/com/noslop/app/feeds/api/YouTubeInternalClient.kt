@@ -25,41 +25,6 @@ object YouTubeInternalClient {
     const val UNKNOWN_PUBLISH_DATE = 0L
     private const val API_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
 
-    // --- NOSLOP_YT_COLDSTART_V1 ---
-    private const val PROXY_COOLDOWN_MS = 5 * 60 * 1000L
-
-    @Volatile
-    private var proxyBlockedUntilMs = 0L
-
-
-
-    private fun notePlayerProxyBlocked(code: Int) {
-        proxyBlockedUntilMs = System.currentTimeMillis() + PROXY_COOLDOWN_MS
-        Logger.warn(TAG, "Proxy returned $code — bypassing it for ${PROXY_COOLDOWN_MS / 60000}m")
-    }
-
-    // --- NOSLOP_PROXY_ATTESTATION_V1 ---
-    // A refusal does not have to be an HTTP error. LOGIN_REQUIRED arrives as a
-    // perfectly successful 200 carrying a playabilityStatus, so the check
-    // above never saw it and the proxy could serve refusals indefinitely
-    // without being marked bad.
-    //
-    // In the 19:11 capture that mattered enormously: ZERO resolves succeeded
-    // before an unrelated 403 happened to trigger the bypass, and all four
-    // that did succeed afterwards were signed for Tor exit IPs — i.e. they had
-    // gone direct. One Cloudflare egress serving every user is now a more
-    // flagged address than a fresh Tor exit, so the proxy has become the cause
-    // of the attestation failures it was built to avoid.
-    private fun notePlayerProxyRefused(clientName: String) {
-        proxyBlockedUntilMs = System.currentTimeMillis() + PROXY_COOLDOWN_MS
-        Logger.warn(
-            TAG,
-            "Proxy returned LOGIN_REQUIRED for $clientName — its egress IP is being " +
-                "attested against. Bypassing it for ${PROXY_COOLDOWN_MS / 60000}m and going " +
-                "direct over Tor."
-        )
-    }
-
     /**
      * Player endpoint. ALWAYS direct, never through the API proxy.
      *
@@ -754,7 +719,6 @@ object YouTubeInternalClient {
                     val payloadStr = payload.toString()
                     val requestBody = payloadStr.toRequestBody(jsonMediaType)
 
-                    val usingProxy = false
                     val requestBuilder = Request.Builder()
                         .url(playerEndpoint())
                         .header("Content-Type", "application/json")
@@ -769,24 +733,7 @@ object YouTubeInternalClient {
                         requestBuilder.header("Referer", "https://www.youtube.com/")
                     }
 
-                    if (usingProxy) {
-                        ProxyAuth.applyProxyAuthHeaders(requestBuilder, payloadStr)
-                    }
-
                     var response = activePlayerClient.newCall(requestBuilder.build()).execute()
-                    var wentDirectAlready = false
-                    if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
-                        notePlayerProxyBlocked(response.code)
-                        wentDirectAlready = true
-                        val directReqBuilder = requestBuilder
-                            .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
-                            .removeHeader("X-Proxy-Secret")
-                            .removeHeader("X-Proxy-Timestamp")
-                            .removeHeader("X-Proxy-Signature")
-                            
-                        response.close()
-                        response = activePlayerClient.newCall(directReqBuilder.build()).execute()
-                    }
                     
                     if (response.isSuccessful) {
                         val bodyStr = response.body?.string()
@@ -818,41 +765,6 @@ object YouTubeInternalClient {
                                     Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
                                 }
                             } else if ((playability == "LOGIN_REQUIRED" || playability == "UNPLAYABLE" || playability == "ERROR") && isTor) {
-                                if (playability == "LOGIN_REQUIRED" && usingProxy && !wentDirectAlready) {
-                                    notePlayerProxyRefused(config.clientName)
-                                    response.close()
-                                    val retryDirect = requestBuilder
-                                        .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
-                                        .removeHeader("X-Proxy-Secret")
-                                        .removeHeader("X-Proxy-Timestamp")
-                                        .removeHeader("X-Proxy-Signature")
-                                        .build()
-                                    val directResponse = activePlayerClient.newCall(retryDirect).execute()
-                                    val directBody = if (directResponse.isSuccessful) directResponse.body?.string() else null
-                                    directResponse.close()
-                                    if (!directBody.isNullOrBlank()) {
-                                        val directRoot = gson.fromJson(directBody, JsonObject::class.java)
-                                        val directStatus =
-                                            directRoot.getAsJsonObject("playabilityStatus")?.get("status")?.asString
-                                        if (directStatus == "OK") {
-                                            val directUrl = extractUrlFromPlayerResponse(directRoot, quality)
-                                            if (directUrl != null) {
-                                                Logger.info(
-                                                    TAG,
-                                                    "Resolved direct video stream using ${config.clientName} " +
-                                                        "for $videoId (direct over Tor, proxy refused)"
-                                                )
-                                                return@withContext directUrl
-                                            }
-                                        }
-                                        Logger.warn(
-                                            TAG,
-                                            "Direct-over-Tor retry for ${config.clientName} also returned " +
-                                                "${directStatus ?: "no status"} — this one is genuinely gated."
-                                        )
-                                    }
-                                    continue
-                                }
                                 Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Circuit $currentStreamId likely blocked.")
                                 response.close()
 

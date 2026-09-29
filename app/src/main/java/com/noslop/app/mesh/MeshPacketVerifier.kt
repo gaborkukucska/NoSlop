@@ -161,9 +161,24 @@ object MeshPacketVerifier {
         }
 
         "EDIT_COMMENT" -> packet.getEditCommentPayload()?.let { p ->
-            var s = "${p.postId}|${p.commentId}|${p.content}|${p.timestamp}"
-            if (p.authorAvatarB64 != null) s += "|${p.authorAvatarB64}"
-            Signed(s, p.signature, p.authorId)
+            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.commentId, p.content, p.timestamp.toString(), p.authorAvatarB64
+            )
+            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.commentId, p.content, p.timestamp.toString()
+            )
+            var pipePayload = "${p.postId}|${p.commentId}|${p.content}|${p.timestamp}"
+            if (p.authorAvatarB64 != null) pipePayload += "|${p.authorAvatarB64}"
+
+            val sig = p.signature
+            val signer = p.authorId
+            val matchedPayload = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipePayload, sig, signer) -> pipePayload
+                else -> encWithAvatar
+            }
+            Signed(matchedPayload, sig, signer)
         }
 
         "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.let { p ->

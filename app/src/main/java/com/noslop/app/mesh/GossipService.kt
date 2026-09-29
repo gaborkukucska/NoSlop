@@ -107,7 +107,8 @@ object GossipService {
         while (iterator.hasNext()) {
             val entry = iterator.next()
             val (_, lastFailureTime) = entry.value
-            if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS + PEER_COOLDOWN_MS) {
+            // Retain failures for up to 2 hours so 30-minute cooldowns are not prematurely wiped
+            if (now - lastFailureTime > 2 * 3600_000L) {
                 iterator.remove()
             }
         }
@@ -389,14 +390,16 @@ object GossipService {
 
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
         val isGroupControl = packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" || packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC"
-        val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || isGroupControl
+        val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "CONNECTION_REJECTED" || isGroupControl
         val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT" || packet.type == "PEER_REMOVED"
         val isDeletePacket = packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
+        val isFollowPacket = packet.type == "FOLLOW" || packet.type == "UNFOLLOW"
+        val isInvidiousAnnounce = packet.type == "ANNOUNCE_INVIDIOUS_INSTANCE"
 
-        // P1-6: Dedicated rate limit for discoverable announcements & identity updates (5 per 60s per sender)
-        if (isDiscoverable || isIdentityUpdate) {
+        // Dedicated rate limit for unauthenticated announcements, follows, & identity updates (5 per 60s per sender)
+        if (isDiscoverable || isIdentityUpdate || isFollowPacket || isInvidiousAnnounce) {
             val now = System.currentTimeMillis()
             val limitList = announcementRateLimits.getOrPut(senderId) { ArrayList() }
             synchronized(limitList) {
@@ -438,7 +441,7 @@ object GossipService {
             } catch (_: Exception) { false }
         } else false
 
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isInvidiousAnnounce) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)

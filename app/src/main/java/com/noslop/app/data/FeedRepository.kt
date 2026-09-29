@@ -294,74 +294,50 @@ class FeedRepository(
             _feedBuildStatus.value = ""
         }
 
-        // --- Phase 2: Background Sync (low concurrency to keep Tor circuit responsive for UI) ---
-        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Any>>()
+        // Phase 1 finished: unblock caller immediately while Phases 2 & 3 run on detached background scope
+        isSyncRunning.set(false)
+        _feedBuildStatus.value = ""
 
-        for (source in rssSources) {
-            backgroundJobs.add(async(dispatcher) {
-                try {
+        // --- Phase 2 & 3: Background Sync on detached scope (does not hold withContext hostage) ---
+        val bgScope = kotlinx.coroutines.CoroutineScope(dispatcher + kotlinx.coroutines.SupervisorJob())
+        bgScope.launch {
+            try {
+                for (source in rssSources) {
                     while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
                         kotlinx.coroutines.delay(2000L)
                     }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                        kotlinx.coroutines.delay(1000L) // Stagger requests across Tor
+                        kotlinx.coroutines.delay(1000L)
                     } else {
-                        kotlinx.coroutines.delay(250L)  // Stagger requests across clearnet
+                        kotlinx.coroutines.delay(250L)
                     }
-                    fetchRssSource(source, allNegative)
-                } catch (e: Exception) {
-                    Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
+                    try { fetchRssSource(source, allNegative) } catch (e: Exception) { Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}") }
                 }
-            })
-        }
 
-        for (category in activeCategories) {
-            backgroundJobs.add(async(dispatcher) {
-                try {
+                for (category in activeCategories) {
                     while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
                         kotlinx.coroutines.delay(2000L)
                     }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                         kotlinx.coroutines.delay(1200L)
                     }
-                    fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
-                } catch (e: Exception) {
-                    Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
+                    try { fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo) } catch (e: Exception) { Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}") }
                 }
-            })
-        }
 
-        // --- Phase 3: Creator Specific API searches for ALL configured creators ---
-        // Ensure every channel added by the user is queried across Tor with non-blocking staggers
-        for (creator in remainingCreators) {
-            backgroundJobs.add(async(dispatcher) {
-                try {
+                for (creator in remainingCreators) {
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                        kotlinx.coroutines.delay(1800L) // Gentle stagger across Tor
+                        kotlinx.coroutines.delay(1800L)
                     } else {
-                        kotlinx.coroutines.delay(300L)  // Stagger requests across clearnet
+                        kotlinx.coroutines.delay(300L)
                     }
-                    fetchCreatorVideos(creator)
-                } catch (e: Exception) {
-                    Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
+                    try { fetchCreatorVideos(creator) } catch (e: Exception) { Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}") }
                 }
-            })
-        }
-
-        // Phase 1 finished: initial content is ready for UI. Unblock callers immediately.
-        isSyncRunning.set(false)
-        _feedBuildStatus.value = ""
-
-        // Run Phase 2 & 3 in background so long while-loops waiting for video idle do not block UI refresh state
-        kotlinx.coroutines.CoroutineScope(dispatcher + kotlinx.coroutines.SupervisorJob()).launch {
-            try {
-                kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
             } catch (e: Exception) {
                 Logger.warn(TAG, "Background sync exception: ${e.message}")
             } finally {
                 _feedBuildStatus.value = ""
             }
-            Logger.info(TAG, "Feed synchronization completed.")
+            Logger.info(TAG, "Feed background synchronization completed.")
         }
     }
 

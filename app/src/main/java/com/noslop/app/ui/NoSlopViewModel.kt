@@ -1339,7 +1339,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope.launch(Dispatchers.IO) {
                 candidateItems.forEach { item ->
                     item.author?.let { author ->
-                        com.noslop.app.feeds.api.ChannelMetadataResolver.resolveCreationDate(author, item.publishedAt)
+                        com.noslop.app.feeds.api.ChannelMetadataResolver.resolveCreationDate(author, item.publishedAt, cutoffMs)
                     }
                 }
             }

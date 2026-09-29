@@ -27,16 +27,15 @@ object ChannelMetadataResolver {
      * Asynchronously resolves creation date for an author.
      * Uses video upload timestamp as a fallback upper bound when exact join date is unavailable.
      */
-    suspend fun resolveCreationDate(author: String?, publishedAt: Long = 0L): Long? = withContext(Dispatchers.IO) {
+    suspend fun resolveCreationDate(author: String?, publishedAt: Long = 0L, cutoffMs: Long = 0L): Long? = withContext(Dispatchers.IO) {
         if (author.isNullOrBlank()) return@withContext null
         val key = author.lowercase().trim()
 
         val cached = cache[key]
         if (cached != null) return@withContext if (cached == -1L) null else cached
 
-        // Fast path: if video has a valid publishedAt timestamp, use it as a reliable upper bound
-        // without burning scarce Tor SOCKS circuits on third-party channel lookups.
-        if (publishedAt > 0L) {
+        // Fast path: if video has a publishedAt older than cutoff, channel was created <= cutoff
+        if (cutoffMs > 0L && publishedAt in 1L..cutoffMs) {
             cache[key] = publishedAt
             return@withContext publishedAt
         }
