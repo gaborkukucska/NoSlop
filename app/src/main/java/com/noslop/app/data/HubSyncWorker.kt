@@ -29,9 +29,7 @@ class HubSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
 
         val isLegacy = hubStatus == "Active (Legacy Connection)"
         val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
-        val isPrivateLan = lanIp != null && (lanIp == "127.0.0.1" || lanIp == "localhost" ||
-                lanIp.startsWith("192.168.") || lanIp.startsWith("10.") ||
-                (lanIp.startsWith("172.") && (lanIp.substringAfter("172.").substringBefore(".").toIntOrNull() ?: 0) in 16..31))
+        val isPrivateLan = NoSlopRepository.isPrivateLanAddress(lanIp)
 
         val mnemonic = repo.getWordCloudMnemonic()
         if (mnemonic.isBlank()) {

@@ -585,22 +585,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 Logger.info("VM", "One-time YouTube date migration: purged stale items")
             }
             
-            // Smart Hub Sync Loop
-            if (_isOnboardingComplete.value) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    var lastPeerSync = 0L
-                    while (true) {
-                        if (!repository.getAppSetting("hub_deployment_status").isNullOrBlank()) {
-                            if (System.currentTimeMillis() - lastPeerSync > 60_000) {
-                                repository.syncPeersWithHub()
-                                repository.syncPostsWithHub()
-                                lastPeerSync = System.currentTimeMillis()
-                            }
-                            repository.syncDmsWithHub()
-                            repository.pullMeshPacketsFromHub()
+            // Smart Hub Sync Loop: starts whenever an onboarding or linked hub state is detected
+            viewModelScope.launch(Dispatchers.IO) {
+                var lastPeerSync = 0L
+                while (true) {
+                    if (repository.isOnboardingComplete() && !repository.getAppSetting("hub_deployment_status").isNullOrBlank()) {
+                        if (System.currentTimeMillis() - lastPeerSync > 60_000) {
+                            repository.syncPeersWithHub()
+                            repository.syncPostsWithHub()
+                            lastPeerSync = System.currentTimeMillis()
                         }
-                        kotlinx.coroutines.delay(5000)
+                        repository.syncDmsWithHub()
+                        repository.pullMeshPacketsFromHub()
                     }
+                    kotlinx.coroutines.delay(5000)
                 }
             }
         }
@@ -990,21 +988,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         return result
     }
 
-    private fun <T> Iterable<T>.takeDiverse(limit: Int, keySelector: (T) -> String, isPriority: (T) -> Boolean = { false }): List<T> {
-        val result = mutableListOf<T>()
-        val counts = mutableMapOf<String, Int>()
-        for (item in this) {
-            if (result.size >= limit) break
-            val key = keySelector(item)
-            val count = counts.getOrDefault(key, 0)
-            val maxAllowed = if (isPriority(item)) limit else 2 // Creators bypass diversity limits!
-            if (count < maxAllowed) {
-                result.add(item)
-                counts[key] = count + 1
-            }
-        }
-        return result
-    }
+    // takeDiverse pruned: superseded by fair takeRoundRobin
 
     fun clearSearchAndRestoreFeed() {
         viewModelScope.launch {
@@ -1270,7 +1254,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         // Strict non-resurrection: never bring back items the user already saw, swiped, or reacted to.
         val isFeedMode = actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random"
-        val isUsingFallback = false
         if (isFeedMode && unseenFeeds.isEmpty() && !_isRefreshingFeeds.value && !isSearchActive) {
             refreshFeeds()
         }
@@ -1364,7 +1347,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         // In feed-centric modes (Live Feed & Random), also exclude viewed items and swiped mesh posts
         // so the feed feels fresh. NOT applied in specific filter tabs (Audio, Images, Articles, Videos) so users can browse all content.
-        if (!isUsingFallback && !isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || (actualFilter == "Mesh" && !_showOldMeshPosts.value))) {
+        if (!isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || (actualFilter == "Mesh" && !_showOldMeshPosts.value))) {
             val hiddenIds = cachedViewedIds + cachedExcludedIds
             if (hiddenIds.isNotEmpty()) {
                 unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }

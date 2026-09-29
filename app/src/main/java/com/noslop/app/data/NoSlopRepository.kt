@@ -155,8 +155,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val hubStatus = getAppSetting("hub_deployment_status") ?: return@withContext null
         val isLegacy = hubStatus == "Active (Legacy Connection)"
         val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
-        
-        val isPrivateLan = lanIp != null && (lanIp == "127.0.0.1" || lanIp == "localhost" || lanIp.startsWith("192.168.") || lanIp.startsWith("10.") || (lanIp.startsWith("172.") && (lanIp.substringAfter("172.").substringBefore(".").toIntOrNull() ?: 0) in 16..31))
+        val isPrivateLan = isPrivateLanAddress(lanIp)
         
         if (isPrivateLan && lanIp != null) {
             try {
@@ -349,7 +348,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val hubStatus = getAppSetting("hub_deployment_status")
         if (hubStatus.isNullOrBlank()) return@withContext
         if (hasPulledHistoricalData) return@withContext
-        hasPulledHistoricalData = true
 
         ensureAdminPeerExists()
 
@@ -448,6 +446,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         
         // 3. Pull Peers
         val resPeers = invokeHubApi("get_mesh_peers", JSONObject())
+        if (resDms != null || resPosts != null || resPeers != null) {
+            hasPulledHistoricalData = true
+        }
         if (resPeers != null && resPeers.has("peers")) {
             val peersArray = resPeers.getJSONArray("peers")
             for (i in 0 until peersArray.length()) {
@@ -1256,15 +1257,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             db.groupChatDao().deleteGroupChat(groupId)
             Logger.info("REPOSITORY", "Admin deleted group $groupId and dispatched GROUP_DELETE to ${members.size} members")
         } else if (existing != null) {
-            // Non-admin: remove self from member list via GROUP_UPDATE, then delete locally
-            val members: MutableList<String> = try {
-                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toMutableList()
-            } catch (e: Exception) { mutableListOf() }
-            members.remove(myKeys.publicKeyB64)
-            updateGroupChat(groupId, existing.title, existing.description, existing.avatarB64,
-                existing.allowMemberInvites, existing.allowMemberSelfRemove, members)
-            // updateGroupChat auto-deletes locally when self is removed
-            Logger.info("REPOSITORY", "Non-admin left group $groupId via GROUP_UPDATE")
+            // Non-admin: delegate directly to leaveGroupChat for complete exit, burnable resolution, and ghost cleanup
+            leaveGroupChat(groupId)
+            return@withContext
         } else {
             // Group not found locally — just ensure cleanup
             db.groupChatDao().deleteGroupChat(groupId)
@@ -1878,6 +1873,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEAK12RuYO4u9W6tuUc2Hr7ZkcYTuUs6QSR8P4ePGKKWXg="
         const val OFFICIAL_CREATOR_ONION = "fnozdomdxc55lovw4uonq6x3mzdrqtxfftuqjepq7ypdyyuklf4i7cqd.onion"
         const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAfFAMyI71qis42am7fyx0L8Th/giuitRXwFfSEmnX/Ws="
+
+        fun isPrivateLanAddress(ip: String?): Boolean {
+            if (ip.isNullOrBlank()) return false
+            return ip == "127.0.0.1" || ip == "localhost" ||
+                    ip.startsWith("192.168.") || ip.startsWith("10.") ||
+                    (ip.startsWith("172.") && (ip.substringAfter("172.").substringBefore(".").toIntOrNull() ?: 0) in 16..31)
+        }
     }
 
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()

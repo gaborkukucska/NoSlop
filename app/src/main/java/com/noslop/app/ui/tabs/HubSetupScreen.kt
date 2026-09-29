@@ -181,40 +181,18 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
         }
 
         if (hostKeyPromptData != null) {
-            AlertDialog(
-                onDismissRequest = {
-                    hostKeyContinuation?.invoke(false)
+            HostKeyPromptDialog(
+                host = hostKeyPromptData!!.first,
+                fingerprint = hostKeyPromptData!!.second,
+                onConfirm = {
+                    hostKeyContinuation?.invoke(true)
                     hostKeyPromptData = null
                     hostKeyContinuation = null
                 },
-                containerColor = SurfaceDark,
-                title = { Text("Verify SSH Host Key".tr, color = TextLight, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column {
-                        Text("Connecting to ${hostKeyPromptData!!.first} for the first time.".tr, color = TextMuted)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Fingerprint:".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
-                        Text(hostKeyPromptData!!.second, color = TextLight, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Your private identity will be sent to this host. Confirm you trust this machine.".tr, color = TextMuted, fontSize = 12.sp)
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            hostKeyContinuation?.invoke(true)
-                            hostKeyPromptData = null
-                            hostKeyContinuation = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                    ) { Text("Trust & Pin".tr, fontWeight = FontWeight.Bold) }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        hostKeyContinuation?.invoke(false)
-                        hostKeyPromptData = null
-                        hostKeyContinuation = null
-                    }) { Text("Reject".tr, color = DestructiveRed) }
+                onDismiss = {
+                    hostKeyContinuation?.invoke(false)
+                    hostKeyPromptData = null
+                    hostKeyContinuation = null
                 }
             )
         }
@@ -699,7 +677,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                 }
             },
             confirmButton = {
-                val unknownErrorMsg = "Unknown Error".tr
                 if (deployError == null) {
                     Button(
                         onClick = { startDeployment(com.noslop.app.net.OverwriteStrategy.PROMPT) },
@@ -742,40 +719,18 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
     }
 
     if (hostKeyPromptData != null) {
-        AlertDialog(
-            onDismissRequest = {
-                hostKeyContinuation?.invoke(false)
+        HostKeyPromptDialog(
+            host = hostKeyPromptData!!.first,
+            fingerprint = hostKeyPromptData!!.second,
+            onConfirm = {
+                hostKeyContinuation?.invoke(true)
                 hostKeyPromptData = null
                 hostKeyContinuation = null
             },
-            containerColor = SurfaceDark,
-            title = { Text("Verify SSH Host Key".tr, color = TextLight, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Connecting to ${hostKeyPromptData!!.first} for the first time.".tr, color = TextMuted)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Fingerprint:".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
-                    Text(hostKeyPromptData!!.second, color = TextLight, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Your private identity will be sent to this host. Confirm you trust this machine.".tr, color = TextMuted, fontSize = 12.sp)
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        hostKeyContinuation?.invoke(true)
-                        hostKeyPromptData = null
-                        hostKeyContinuation = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) { Text("Trust & Pin".tr, fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    hostKeyContinuation?.invoke(false)
-                    hostKeyPromptData = null
-                    hostKeyContinuation = null
-                }) { Text("Reject".tr, color = DestructiveRed) }
+            onDismiss = {
+                hostKeyContinuation?.invoke(false)
+                hostKeyPromptData = null
+                hostKeyContinuation = null
             }
         )
     }
@@ -841,4 +796,37 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
             }
         )
     }
+}
+
+@Composable
+fun HostKeyPromptDialog(
+    host: String,
+    fingerprint: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = { Text("Verify SSH Host Key".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text("Connecting to {host} for the first time.".tr.replace("{host}", host), color = TextMuted)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Fingerprint:".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Text(fingerprint, color = TextLight, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Your private identity will be sent to this host. Confirm you trust this machine.".tr, color = TextMuted, fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+            ) { Text("Trust & Pin".tr, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Reject".tr, color = DestructiveRed) }
+        }
+    )
 }
