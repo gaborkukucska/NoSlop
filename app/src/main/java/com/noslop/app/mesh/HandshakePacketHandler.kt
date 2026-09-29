@@ -301,8 +301,11 @@ class HandshakePacketHandler(
         val isOldPacket = (System.currentTimeMillis() - rejectPay.timestamp) > 5 * 60 * 1000L
         if (isOldPacket) return true
 
-        val payloadToVerify = "${rejectPay.fromUserId}|${rejectPay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, signature, rejectPay.fromUserId)) return false
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(rejectPay.fromUserId, rejectPay.timestamp.toString())
+        val pipePayload = "${rejectPay.fromUserId}|${rejectPay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, signature, rejectPay.fromUserId) ||
+            CryptoService.verify(pipePayload, signature, rejectPay.fromUserId)
+        if (!isValid) return false
 
         val peer = peerDao.getPeerByPublicKey(rejectPay.fromUserId)
         if (peer != null && !peer.isTrusted) {
@@ -663,8 +666,13 @@ class HandshakePacketHandler(
     suspend fun handleFollow(packet: NetworkPacket): Boolean {
         val followPay = packet.getFollowPayload() ?: return false
         val signature = followPay.signature
-        val payloadToVerify = "${followPay.followedPublicKeyB64}|${followPay.followerPublicKeyB64}|${followPay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, signature, followPay.followerPublicKeyB64)) {
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            followPay.followedPublicKeyB64, followPay.followerPublicKeyB64, followPay.timestamp.toString()
+        )
+        val pipePayload = "${followPay.followedPublicKeyB64}|${followPay.followerPublicKeyB64}|${followPay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, signature, followPay.followerPublicKeyB64) ||
+            CryptoService.verify(pipePayload, signature, followPay.followerPublicKeyB64)
+        if (!isValid) {
             Logger.warn(TAG, "Invalid signature on FOLLOW packet from ${followPay.followerPublicKeyB64}")
             return false
         }

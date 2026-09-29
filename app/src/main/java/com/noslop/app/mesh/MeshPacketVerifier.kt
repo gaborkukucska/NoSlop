@@ -167,7 +167,12 @@ object MeshPacketVerifier {
         }
 
         "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.let { p ->
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.commentId, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.commentId, p.authorId, p.timestamp.toString())
+            val pipe = "${p.postId}|${p.commentId}|${p.authorId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
         }
 
         // --- ReactionPacketHandler ---
@@ -275,11 +280,12 @@ object MeshPacketVerifier {
         }
 
         "FOLLOW", "UNFOLLOW" -> packet.getFollowPayload()?.let { p ->
-            Signed(
-                "${p.followedPublicKeyB64}|${p.followerPublicKeyB64}|${p.timestamp}",
-                p.signature,
-                p.followerPublicKeyB64
-            )
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.followedPublicKeyB64, p.followerPublicKeyB64, p.timestamp.toString())
+            val pipe = "${p.followedPublicKeyB64}|${p.followerPublicKeyB64}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.followerPublicKeyB64
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(enc, sig, signer)) enc else pipe
+            Signed(matched, sig, signer)
         }
 
         "GROUP_INVITE" -> packet.getGroupInvitePayload()?.let { p ->

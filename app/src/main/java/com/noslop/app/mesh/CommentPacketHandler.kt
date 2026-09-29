@@ -113,11 +113,19 @@ class CommentPacketHandler(
 
     suspend fun handleEditComment(packet: NetworkPacket): Boolean {
         val editPay = packet.getEditCommentPayload() ?: return false
-        var payloadToVerify = "${editPay.postId}|${editPay.commentId}|${editPay.content}|${editPay.timestamp}"
+        val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            editPay.postId, editPay.commentId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
+        )
+        val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            editPay.postId, editPay.commentId, editPay.content, editPay.timestamp.toString()
+        )
+        var pipePayload = "${editPay.postId}|${editPay.commentId}|${editPay.content}|${editPay.timestamp}"
         if (editPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${editPay.authorAvatarB64}"
+            pipePayload += "|${editPay.authorAvatarB64}"
         }
-        val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId)
+        val isValid = CryptoService.verify(encWithAvatar, editPay.signature, editPay.authorId) ||
+            CryptoService.verify(encNoAvatar, editPay.signature, editPay.authorId) ||
+            CryptoService.verify(pipePayload, editPay.signature, editPay.authorId)
         if (!isValid) return false
 
         val existingComment = commentDao.getCommentById(editPay.commentId)
@@ -136,8 +144,12 @@ class CommentPacketHandler(
 
     suspend fun handleDeleteComment(packet: NetworkPacket): Boolean {
         val deletePay = packet.getDeleteCommentPayload() ?: return false
-        val payloadToVerify = "${deletePay.postId}|${deletePay.commentId}|${deletePay.authorId}|${deletePay.timestamp}"
-        val isValid = CryptoService.verify(payloadToVerify, deletePay.signature, deletePay.authorId)
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            deletePay.postId, deletePay.commentId, deletePay.authorId, deletePay.timestamp.toString()
+        )
+        val pipePayload = "${deletePay.postId}|${deletePay.commentId}|${deletePay.authorId}|${deletePay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, deletePay.signature, deletePay.authorId) ||
+            CryptoService.verify(pipePayload, deletePay.signature, deletePay.authorId)
         if (!isValid) return false
 
         val existingComment = commentDao.getCommentById(deletePay.commentId)
