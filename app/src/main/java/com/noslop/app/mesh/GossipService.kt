@@ -543,8 +543,8 @@ object GossipService {
             } else {
                 isTracked = true
             }
-            if (!isTracked && !filterSettings.allowIncomingReactions) {
-                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id} (anchor not tracked locally and allowIncomingReactions is false)")
+            if (!isTracked) {
+                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id} (anchor not tracked locally)")
                 return false
             }
         } else if (packet.type == "COMMENT") {
@@ -555,8 +555,8 @@ object GossipService {
             } else if (pay != null) {
                 isTracked = true
             }
-            if (!isTracked && !filterSettings.allowIncomingComments) {
-                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally and allowIncomingComments is false)")
+            if (!isTracked) {
+                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally)")
                 return false
             }
         } else if (packet.type == "POST") {

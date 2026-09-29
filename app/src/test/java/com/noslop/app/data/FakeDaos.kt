@@ -66,6 +66,18 @@ class FakeViewedHistoryDao : ViewedHistoryDao {
 
     override suspend fun getCount(): Int = items.size
 
+    override suspend fun pruneOldest(count: Int) {
+        items.values.sortedBy { it.viewedAt }.take(count).map { it.itemId }
+            .forEach { items.remove(it) }
+        publish()
+    }
+    
+    override suspend fun deleteOlderThan(timestamp: Long) {
+        val toRemove = items.values.filter { it.viewedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { items.remove(it) }
+        publish()
+    }
+    
     override suspend fun clearAllViewedHistory() {
         items.clear()
         publish()
@@ -78,6 +90,11 @@ class FakeSwipeTrackerDao : SwipeTrackerDao {
     override suspend fun getExcludedIds(): List<String> =
         swipes.values.filter { it.swipeCount >= 2 }.map { it.itemId }
     override suspend fun upsertSwipe(tracker: SwipeTracker) { swipes[tracker.itemId] = tracker }
+    override suspend fun getSwipeForItem(itemId: String): SwipeTracker? = swipes[itemId]
+    override suspend fun deleteOldSwipes(timestamp: Long) {
+        val toRemove = swipes.values.filter { it.lastSwipedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { swipes.remove(it) }
+    }
     override suspend fun clearAllSwipeHistory() { swipes.clear() }
 }
 

@@ -236,7 +236,7 @@ class MeshPacketVerifierTest {
     fun connectionRejected_dualMode_supportsEncodeForSigningAndPipe() {
         // Length-prefixed format (MeshSocialRepository.rejectConnectionRequest)
         val encString = CryptoService.encodeForSigning(alice.publicKeyB64, "1700000000")
-        val payloadEnc = ConnectionRejectedPayload(alice.publicKeyB64, 1700000000L)
+        val payloadEnc = ConnectionRejectedPayload(alice.publicKeyB64, 1700000000L, sign(encString))
         assertEquals(
             MeshPacketVerifier.Verdict.VALID,
             MeshPacketVerifier.verify(packet("CONNECTION_REJECTED", payloadEnc, signature = sign(encString)))
@@ -244,7 +244,7 @@ class MeshPacketVerifierTest {
 
         // Pipe format
         val pipeString = "${alice.publicKeyB64}|1700000000"
-        val payloadPipe = ConnectionRejectedPayload(alice.publicKeyB64, 1700000000L)
+        val payloadPipe = ConnectionRejectedPayload(alice.publicKeyB64, 1700000000L, sign(pipeString))
         assertEquals(
             MeshPacketVerifier.Verdict.VALID,
             MeshPacketVerifier.verify(packet("CONNECTION_REJECTED", payloadPipe, signature = sign(pipeString)))

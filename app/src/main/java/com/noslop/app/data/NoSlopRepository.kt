@@ -1259,7 +1259,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         } else if (existing != null) {
             // Non-admin: delegate directly to leaveGroupChat for complete exit, burnable resolution, and ghost cleanup
             leaveGroupChat(groupId)
-            return@withContext
+            return
         } else {
             // Group not found locally — just ensure cleanup
             db.groupChatDao().deleteGroupChat(groupId)

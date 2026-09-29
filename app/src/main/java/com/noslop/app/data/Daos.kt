@@ -440,6 +440,12 @@ interface ViewedHistoryDao {
     @Query("SELECT COUNT(*) FROM viewed_history")
     suspend fun getCount(): Int
 
+    @Query("DELETE FROM viewed_history WHERE itemId IN (SELECT itemId FROM viewed_history ORDER BY viewedAt ASC LIMIT :count)")
+    suspend fun pruneOldest(count: Int)
+
+    @Query("DELETE FROM viewed_history WHERE viewedAt < :timestamp")
+    suspend fun deleteOlderThan(timestamp: Long)
+
     @Query("DELETE FROM viewed_history")
     suspend fun clearAllViewedHistory()
 }
@@ -449,8 +455,14 @@ interface SwipeTrackerDao {
     @Query("SELECT itemId FROM swipe_tracker WHERE swipeCount >= 1")
     suspend fun getExcludedIds(): List<String>
 
+    @Query("DELETE FROM swipe_tracker WHERE lastSwipedAt < :timestamp")
+    suspend fun deleteOldSwipes(timestamp: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSwipe(tracker: SwipeTracker)
+
+    @Query("SELECT * FROM swipe_tracker WHERE itemId = :itemId LIMIT 1")
+    suspend fun getSwipeForItem(itemId: String): SwipeTracker?
 
     @Query("DELETE FROM swipe_tracker")
     suspend fun clearAllSwipeHistory()

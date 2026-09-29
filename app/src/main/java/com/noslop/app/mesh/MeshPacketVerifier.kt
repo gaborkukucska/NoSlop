@@ -228,7 +228,12 @@ object MeshPacketVerifier {
         }
 
         "CONNECTION_REJECTED" -> packet.getConnectionRejectedPayload()?.let { p ->
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.fromUserId, p.timestamp.toString()), packet.signature, p.fromUserId)
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.fromUserId, p.timestamp.toString())
+            val pipe = "${p.fromUserId}|${p.timestamp}"
+            val sig = packet.signature ?: p.signature
+            val signer = p.fromUserId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
         }
 
         "ANNOUNCE_PEER" -> packet.getAnnouncePeerPayload()?.let { p ->
