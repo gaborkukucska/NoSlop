@@ -325,10 +325,11 @@ to determine which backend is actually active at runtime.
 
 ### 3.8 BIP39 Mnemonic
 
-`MnemonicGenerator.kt` (259 LOC) generates a 12-word mnemonic using the full
-2048-word official BIP39 English wordlist (milestone 85 — earlier versions
-used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
-`docs/ANALYSiS.md`). The mnemonic seeds the AES-256-CBC key used by
+`MnemonicGenerator.kt` generates a 12-word mnemonic using a 2053-word
+BIP-39-shaped wordlist providing ~132 bits of entropy (see `NOSLOP_WORDLIST_TRUTH_V1`
+and [PROJECT_STATUS.md](PROJECT_STATUS.md)). While shaped like BIP-39, it is not
+strictly BIP-39 compatible (25 custom words, 20 canonical words omitted, and no
+checksum word). The mnemonic seeds the PBKDF2-HMAC-SHA512 key used by
 `BackupManager` for encrypted export/import using Android's Storage Access Framework.
 
 ---
@@ -496,12 +497,12 @@ always succeed regardless of filter state.
 
 | Filter | Default | Outgoing gate | Incoming gate |
 |---|---|---|---|
-| Reactions | **off** | `MeshSocialRepository`: wraps `GossipService.broadcast()` call after local `reactionDao`/`voteDao` insert | `GossipService.processIncoming`: step 4.5, checks `allowIncomingReactions` |
-| Comments | on | `MeshSocialRepository.composeAndBroadcastComment`: wraps broadcast after `commentDao.insertComment` | `GossipService.processIncoming`: step 4.5, checks `allowIncomingComments` |
-| Text Posts | on | `MeshSocialRepository.composeAndBroadcastPost`: wraps broadcast after `postDao.insertPost` (when no `clearnetUrl` and no `mediaMetadata`) | `GossipService.processIncoming`: step 4.5, inspects `POST` payload |
-| Clearnet Shares | on | Same as above (when `clearnetUrl != null`) | Same as above (when `postPay.clearnetUrl != null`) |
-| Image Posts | on | Same as above (when `mediaMetadata.type == "image"`) | Same as above (when `postPay.mediaMetadata.type == "image"`) |
-| Video Posts | on | Same as above (when `mediaMetadata.type == "video"`) | Same as above (when `postPay.mediaMetadata.type == "video"`) |
+| Reactions | **off** | Unrestricted (broadcasts freely to preserve organic network score) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingReactions` (exempt if anchor tracked locally) |
+| Comments | on | Unrestricted (broadcasts freely to preserve conversational continuity) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingComments` (exempt if anchor tracked locally) |
+| Text Posts | on | Unrestricted (native mesh broadcasts always sent) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingTextPosts` |
+| Clearnet Shares | on | `MeshSocialRepository.composeAndBroadcastPost`: gated by `allowOutgoingClearnetShares` | `GossipService.processIncoming`: step 4.5, checks `allowIncomingClearnetShares` |
+| Image Posts | on | Unrestricted (native mesh broadcasts always sent) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingImagePosts` |
+| Video Posts | on | Unrestricted (native mesh broadcasts always sent) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingVideoPosts` |
 
 **"Already shared" exemption** (incoming): When a reaction, vote, or comment
 packet targets a post or comment that **already exists** in the local database
@@ -1921,6 +1922,15 @@ In release builds (`assembleRelease`), R8 minification strips generic signatures
 1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
 2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
 3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
+
+### 17.18 Codebase Audit, Dead Code Elimination & Signature Parity (2026-09-29)
+
+A comprehensive audit of the legacy Android application codebase (`app/`) addressed dead routines, wire protocol discrepancies, and race conditions:
+1. **Wire Protocol Dual-Mode Verification (`MeshPacketVerifier.kt`, `CommentPacketHandler.kt`, `HandshakePacketHandler.kt`)**: Fixed critical signature verification traps where `DELETE_COMMENT`, `FOLLOW`/`UNFOLLOW`, and `CONNECTION_REJECTED` packets were rejected due to mismatching length-prefixed `encodeForSigning` and legacy pipe string formats. All verifiers now support dual-mode verification.
+2. **Dead Code & Function Pruning (`NoSlopViewModel.kt`, `Daos.kt`, `HubSetupScreen.kt`)**: Pruned the uncalled `takeDiverse` function (superseded by `takeRoundRobin`), removed dead variable `isUsingFallback`, pruned unused queries in `ViewedHistoryDao` (`pruneOldest`, `deleteOlderThan`) and `SwipeTrackerDao` (`deleteOldSwipes`, `getSwipeForItem`), and removed unused variables in `HubSetupScreen.kt`.
+3. **Smart Hub Sync Startup Race Elimination (`NoSlopViewModel.kt`, `NoSlopRepository.kt`, `HubSyncWorker.kt`)**: Fixed the cold-start race where `_isOnboardingComplete.value` was evaluated synchronously during ViewModel initialization before Room had loaded. Made `syncPullHistoricalDataFromHub()` resilient to network timeouts, extracted `NoSlopRepository.isPrivateLanAddress()` to eliminate duplicate IPv4 validation logic in `HubSyncWorker.kt`, and routed non-admin `deleteGroupChat()` to `leaveGroupChat()`.
+4. **UI Dialog De-duplication (`HubSetupScreen.kt`)**: Extracted `HostKeyPromptDialog` composable, removing a 40-line duplicated `AlertDialog` between dashboard and wizard views.
+5. **Mesh Filter Inbound Enforcement (`GossipService.kt`)**: Step 4.5 now actively checks `allowIncomingReactions` and `allowIncomingComments` when anchors are not tracked locally.
 
 ### 17.17 R8-Safe Outbox Deserialization & Media Image Policy Routing (v0.6.1-alpha)
 

@@ -114,7 +114,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 17 | `EDIT_POST` | `EditPostPayload` | `postId\|authorId\|content\|timestamp` | `PostPacketHandler.handleEditPost` | updates `mesh_posts.content` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 18 | `DELETE_POST` | `DeletePostPayload` | `postId\|authorId\|timestamp` | `PostPacketHandler.handleDeletePost` | marks `mesh_posts.isOrphaned = true` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 19 | `MEDIA_REQUEST` / `MEDIA_CHUNK` / `MEDIA_RELAY_REQUEST` / `MEDIA_RECOVERY_FOUND` / `MEDIA_PENDING` / `MEDIA_TRANSFER_ACK` | see §5 | none | see §5 for routing (`GossipService` vs `MediaPacketHandler`/`MediaManager`) | see §5 |
-| 20 | `CONNECTION_REJECTED` | `ConnectionRejectedPayload` | `fromUserId\|timestamp` (signed) | `HandshakePacketHandler.handleConnectionRejected` | Deletes the untrusted `Peer` locally and triggers a decline notification |
+| 20 | `CONNECTION_REJECTED` | `ConnectionRejectedPayload` | `fromUserId\|timestamp` (signed, dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleConnectionRejected` | Deletes the untrusted `Peer` locally and triggers a decline notification |
 | 21 | `GROUP_INVITE` | `GroupInvitePayload` | `groupId\|title\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupInvite` | `groupChatDao.insertGroupChat` — only if the signature verifies against `adminPublicKeyB64`, our identity is in `members`, and any existing group of that id has the same admin |
 | 22 | `GROUP_UPDATE` | `GroupUpdatePayload` | `groupId\|title\|signerPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupUpdate` | `groupChatDao.insertGroupChat` with the merged member list, or `deleteGroupChat` if the update removed us |
 | 23 | `GROUP_DELETE` | `GroupDeletePayload` | `groupId\|delete\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupDelete` | `groupChatDao.deleteGroupChat` — admin only, signature-verified |
@@ -125,9 +125,9 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
 | 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Replies with `GROUP_SYNC` containing full group schema and `memberDetails` |
 | 30 | `GROUP_SYNC` | `GroupSyncPayload` | `groupId|groupChatJson|timestamp` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
-| 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
-| 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
-| 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
+| 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) (dual-mode) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
+| 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` (dual-mode: encodeForSigning & pipe) | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
+| 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
 | 34 | `ANNOUNCE_INVIDIOUS_INSTANCE` | `AnnounceInvidiousInstancePayload` | n/a (validated URL & timestamp window) | `HandshakePacketHandler.handleAnnounceInvidiousInstance` | `InvidiousApiClient.addGossipedInstance` |
 
 Notes:
@@ -766,17 +766,17 @@ and still accurate.
 | `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
 | `EDIT_POST` | `postId\|authorId\|content\|timestamp` |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
-| `CONNECTION_REJECTED` | `fromUserId\|timestamp` |
-| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
+| `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
+| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) (supporting encodeForSigning and pipe) |
 | `GROUP_INVITE` | `groupId\|title\|adminPublicKeyB64\|timestamp` |
 | `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
 | `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
-| `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) |
-| `DELETE_COMMENT` | `postId|commentId|authorId|timestamp` |
-| `FOLLOW` / `UNFOLLOW` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` |
+| `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) (supporting encodeForSigning and pipe) |
+| `DELETE_COMMENT` | `postId|commentId|authorId|timestamp` (supporting encodeForSigning and pipe) |
+| `FOLLOW` / `UNFOLLOW` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (supporting encodeForSigning and pipe) |
 | `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64

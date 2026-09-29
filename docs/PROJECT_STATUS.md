@@ -1,5 +1,31 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-29) — Codebase Audit, Dead Code Pruning, Hub Sync Race & Wire Signature Parity
+
+* **Wire Protocol Dual-Mode Signature Parity (`MeshPacketVerifier.kt`, `CommentPacketHandler.kt`, `HandshakePacketHandler.kt`)**:
+  * Fixed critical signature verification rejections for `DELETE_COMMENT`: `MeshPacketVerifier.kt` previously tested only `encodeForSigning` while `MeshSocialRepository` signed with legacy pipe format (`postId|commentId|authorId|timestamp`), causing valid comment deletions to be dropped. Added dual-mode verification across `MeshPacketVerifier.kt` and `CommentPacketHandler.kt`.
+  * Fixed `FOLLOW` / `UNFOLLOW` signature mismatch: `NoSlopRepository.toggleFollowPeer()` signed with `encodeForSigning` while verifiers tested only pipe format. Added dual-mode verification across `MeshPacketVerifier.kt` and `HandshakePacketHandler.kt`.
+  * Fixed `CONNECTION_REJECTED` signature mismatch: `MeshSocialRepository.rejectConnectionRequest()` signed with `encodeForSigning` while `HandshakePacketHandler.handleConnectionRejected()` tested only pipe format. Added dual-mode verification.
+* **Dead Code & Unused Function Pruning (`NoSlopViewModel.kt`, `Daos.kt`, `HubSetupScreen.kt`)**:
+  * Pruned uncalled `takeDiverse` extension function in `NoSlopViewModel.kt` (superseded by `takeRoundRobin`).
+  * Removed hardcoded dead `isUsingFallback = false` variable and simplified feed loading conditions.
+  * Pruned unused DAO queries in `Daos.kt` (`ViewedHistoryDao.pruneOldest`, `deleteOlderThan`, `SwipeTrackerDao.deleteOldSwipes`, `getSwipeForItem`).
+  * Cleaned up `NotificationDao.deleteGroupInviteNotifications` parameter defaults.
+  * Removed unused `unknownErrorMsg` variable in `HubSetupScreen.kt`.
+* **Smart Hub Sync Startup Race Elimination (`NoSlopViewModel.kt`, `NoSlopRepository.kt`, `HubSyncWorker.kt`)**:
+  * Fixed asynchronous startup race in `NoSlopViewModel.init`: the Smart Hub Sync loop previously checked `if (_isOnboardingComplete.value)` synchronously on the main thread before the Room read completed, preventing background sync from starting. Re-evaluated asynchronously against `repository.isOnboardingComplete()`.
+  * Made `NoSlopRepository.syncPullHistoricalDataFromHub()` resilient: now sets `hasPulledHistoricalData = true` only upon receiving a successful response from the Hub, allowing seamless retry if the connection blips during cold start.
+  * Extracted `NoSlopRepository.isPrivateLanAddress()` and reused it in `HubSyncWorker.kt`, eliminating duplicate private IPv4 validation logic.
+  * Unified non-admin group departures: routed non-admin `deleteGroupChat()` directly to `leaveGroupChat()`, eliminating divergent group exit logic.
+* **UI Dialog De-duplication (`HubSetupScreen.kt`)**:
+  * Extracted reusable `HostKeyPromptDialog` composable, removing a 40-line duplicated `AlertDialog` between the active dashboard view and the setup wizard view.
+* **Mesh Filter Logic Enforcement (`GossipService.kt`)**:
+  * Step 4.5 now actively evaluates `filterSettings.allowIncomingReactions` and `filterSettings.allowIncomingComments` when anchors are not tracked locally, adhering to the documented privacy design.
+* **Documentation Synchronization (`TECHNICAL_REFERENCE.md`, `WIRE_PROTOCOL_REFERENCE.md`, `PROJECT_STATUS.md`)**:
+  * Corrected `TECHNICAL_REFERENCE.md` §3.8 wordlist size to 2053 entries (BIP-39-shaped, ~132 bits entropy, no checksum word).
+  * Aligned `TECHNICAL_REFERENCE.md` §4.6 with the active mesh filter architecture (unrestricted outgoing native engagement, gated clearnet shares).
+  * Documented dual-mode signature verification in `WIRE_PROTOCOL_REFERENCE.md`.
+
 ## Completed Changes (2026-09-26) — Clearnet over Tor Playback Hardening, Handshake Reliability, Comment/Reaction Sync & ANR Elimination (v0.6.5-alpha)
 
 * **Clearnet Playback over Tor Stabilization & Stall Detector Byte Tracking (`VideoPlayer.kt`, `HttpClientProvider.kt`, `YouTubeInternalClient.kt`)**:

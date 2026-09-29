@@ -202,6 +202,66 @@ class MeshPacketVerifierTest {
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("FOLLOW", p)))
     }
 
+    @Test
+    fun follow_dualMode_supportsEncodeForSigningAndPipe() {
+        // Length-prefixed format (NoSlopRepository.toggleFollowPeer)
+        val encString = CryptoService.encodeForSigning(mallory.publicKeyB64, alice.publicKeyB64, "1700000000")
+        val payloadEnc = FollowPayload(mallory.publicKeyB64, alice.publicKeyB64, 1700000000L, sign(encString), "follow")
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("FOLLOW", payloadEnc)))
+
+        // Pipe format
+        val pipeString = "${mallory.publicKeyB64}|${alice.publicKeyB64}|1700000000"
+        val payloadPipe = FollowPayload(mallory.publicKeyB64, alice.publicKeyB64, 1700000000L, sign(pipeString), "follow")
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("FOLLOW", payloadPipe)))
+    }
+
+    @Test
+    fun deleteComment_dualMode_supportsPipeAndEncodeForSigning() {
+        // Pipe format (MeshSocialRepository.deleteComment)
+        val pipeString = "post-1|comm-1|${alice.publicKeyB64}|1700000000"
+        val payloadPipe = DeleteCommentPayload("post-1", "comm-1", alice.publicKeyB64, 1700000000L, sign(pipeString))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("DELETE_COMMENT", payloadPipe)))
+
+        // Length-prefixed format (CryptoService.encodeForSigning)
+        val encString = CryptoService.encodeForSigning("post-1", "comm-1", alice.publicKeyB64, "1700000000")
+        val payloadEnc = DeleteCommentPayload("post-1", "comm-1", alice.publicKeyB64, 1700000000L, sign(encString))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("DELETE_COMMENT", payloadEnc)))
+
+        // Tampered author rejected
+        val tampered = payloadEnc.copy(authorId = mallory.publicKeyB64)
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("DELETE_COMMENT", tampered)))
+    }
+
+    @Test
+    fun connectionRejected_dualMode_supportsEncodeForSigningAndPipe() {
+        // Length-prefixed format (MeshSocialRepository.rejectConnectionRequest)
+        val encString = CryptoService.encodeForSigning(alice.publicKeyB64, "1700000000")
+        val payloadEnc = ConnectionRejectedPayload(alice.publicKeyB64, 1700000000L)
+        assertEquals(
+            MeshPacketVerifier.Verdict.VALID,
+            MeshPacketVerifier.verify(packet("CONNECTION_REJECTED", payloadEnc, signature = sign(encString)))
+        )
+
+        // Pipe format
+        val pipeString = "${alice.publicKeyB64}|1700000000"
+        val payloadPipe = ConnectionRejectedPayload(alice.publicKeyB64, 1700000000L)
+        assertEquals(
+            MeshPacketVerifier.Verdict.VALID,
+            MeshPacketVerifier.verify(packet("CONNECTION_REJECTED", payloadPipe, signature = sign(pipeString)))
+        )
+    }
+
+    @Test
+    fun editComment_dualMode_supportsPipeAndAvatar() {
+        val pipeString = "post-1|comm-1|Updated comment|1700000000"
+        val payloadPipe = EditCommentPayload("post-1", "comm-1", alice.publicKeyB64, null, "Updated comment", 1700000000L, sign(pipeString))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_COMMENT", payloadPipe)))
+
+        val pipeAvatar = "post-1|comm-1|Updated comment|1700000000|AVATAR"
+        val payloadPipeAvatar = EditCommentPayload("post-1", "comm-1", alice.publicKeyB64, "AVATAR", "Updated comment", 1700000000L, sign(pipeAvatar))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_COMMENT", payloadPipeAvatar)))
+    }
+
     // --- The types that sign the envelope rather than the payload ---
 
     @Test
