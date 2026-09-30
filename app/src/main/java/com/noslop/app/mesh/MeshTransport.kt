@@ -218,13 +218,13 @@ class MeshTransport(
         try {
             val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
             val maxAttempts = when {
-                isHandshake -> 3 // 3 attempts ensures successful descriptor resolution and rendezvous circuit setup
+                isHandshake -> 2 // 2 attempts allows fast-fail to background persistent outbox
                 isDmHighPriority -> 2
                 isMediaPacket -> 2
                 else -> 1
             }
             val connectTimeout = when {
-                isHandshake -> 45000 // 45s gives Tor sufficient time to discover fresh v3 descriptors and establish rendezvous circuits
+                isHandshake -> 25000 // 25s allows Tor v3 rendezvous circuit setup while avoiding multi-minute freezes
                 isDmHighPriority -> 25000
                 isInteractive -> 8000
                 isMediaPacket -> 28000

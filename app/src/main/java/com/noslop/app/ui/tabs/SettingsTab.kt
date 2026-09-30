@@ -1464,14 +1464,6 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             val scope = rememberCoroutineScope()
 
                             if (showMnemonicDialog) {
-                                LaunchedEffect(isExporting) {
-                                    if (isExporting && mnemonicInput.isBlank()) {
-                                        val activeMnemonic = viewModel.getActiveMnemonic()
-                                        if (!activeMnemonic.isNullOrBlank()) {
-                                            mnemonicInput = activeMnemonic
-                                        }
-                                    }
-                                }
 
                                 AlertDialog(
                                     onDismissRequest = { showMnemonicDialog = false },
@@ -1906,20 +1898,22 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
         }
 
         var advisoryOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.NONE) }
+        var advisoryMnemonicInput by remember { mutableStateOf("") }
+        var showAdvisoryMnemonicPrompt by remember { mutableStateOf(false) }
         val advisoryScope = rememberCoroutineScope()
         val advisoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-            if (uri != null) {
+            if (uri != null && advisoryMnemonicInput.isNotBlank()) {
                 val mediaOpt = advisoryOption
+                val mnemonic = advisoryMnemonicInput.trim()
                 advisoryScope.launch {
-                    val mnemonic = viewModel.getActiveMnemonic() ?: ""
-                    if (mnemonic.isNotBlank()) {
-                        viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
-                            if (success) {
-                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.LENGTH_SHORT).show()
-                            }
+                    viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
+                        if (success) {
+                            android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
+                advisoryMnemonicInput = ""
+                showAdvisoryMnemonicPrompt = false
                 viewModel.dismissBackupPrompt()
             }
         }
@@ -1940,6 +1934,22 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text("Store your encrypted backup archive in multiple safe locations (e.g. USB flash drive, password manager, or offline storage):".tr, color = TextLight, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    if (showAdvisoryMnemonicPrompt) {
+                        OutlinedTextField(
+                            value = advisoryMnemonicInput,
+                            onValueChange = { advisoryMnemonicInput = it },
+                            label = { Text("Enter Word Cloud (Mnemonic)".tr) },
+                            placeholder = { Text("12 recovery words...".tr) },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentGreen,
+                                unfocusedBorderColor = BorderSubtle,
+                                focusedTextColor = TextLight,
+                                unfocusedTextColor = TextLight
+                            )
+                        )
+                    }
 
                     Card(
                         modifier = Modifier
@@ -1993,13 +2003,17 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
             confirmButton = {
                 Button(
                     onClick = {
-                        val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
-                        val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                        advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                        if (!showAdvisoryMnemonicPrompt) {
+                            showAdvisoryMnemonicPrompt = true
+                        } else if (advisoryMnemonicInput.isNotBlank()) {
+                            val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                            val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                            advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) {
-                    Text("Export Backup Now".tr, fontWeight = FontWeight.Bold)
+                    Text(if (showAdvisoryMnemonicPrompt) "Choose File Location".tr else "Export Backup Now".tr, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

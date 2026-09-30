@@ -804,9 +804,19 @@ class MeshSocialRepository(
         }
     }
 
+    private val lastDmSyncRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     suspend fun requestDmSync(peer: Peer) = withContext(Dispatchers.IO) {
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
         if (!peer.isTrusted || peer.onionAddress.isBlank()) return@withContext
+
+        val now = System.currentTimeMillis()
+        val lastReq = lastDmSyncRequests[peer.publicKeyB64] ?: 0L
+        if (now - lastReq < 10_000L) {
+            Logger.debug(TAG, "Skipping duplicate DM sync request to ${peer.handle} within 10s window")
+            return@withContext
+        }
+        lastDmSyncRequests[peer.publicKeyB64] = now
 
         val since = messageDao.getLatestReceivedTimestamp(peer.publicKeyB64) ?: 0L
         val payload = com.noslop.app.mesh.DmSyncRequestPayload(since = since)

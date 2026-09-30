@@ -41,6 +41,14 @@ class DmPacketHandler(
         }
 
         val msgPay = packet.getMessagePayload() ?: return false
+
+        // Deduplication: if message already exists locally, do not re-notify or re-download media
+        val existingMsg = messageDao.getMessageById(msgPay.id)
+        if (existingMsg != null) {
+            Logger.debug(TAG, "Dropping duplicate DM ${msgPay.id}: already delivered")
+            return true
+        }
+
         val peer = peerDao.getPeerByPublicKey(packet.senderId)
         val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
         

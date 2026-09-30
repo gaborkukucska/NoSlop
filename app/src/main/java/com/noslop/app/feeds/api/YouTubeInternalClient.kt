@@ -141,8 +141,40 @@ object YouTubeInternalClient {
 
     private fun executeSearchRequest(payloadStr: String): okhttp3.Response? {
         val requestBody = payloadStr.toRequestBody(jsonMediaType)
-        val reqBuilder = Request.Builder()
-            .url("${ProxyAuth.PROXY_URL}/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+        val hasProxySecret = ProxyAuth.PROXY_SECRET.isNotBlank()
+
+        if (hasProxySecret) {
+            val reqBuilder = Request.Builder()
+                .url("${ProxyAuth.PROXY_URL}/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+                .header("X-YouTube-Client-Name", "1")
+                .header("X-YouTube-Client-Version", CLIENT_VERSION)
+                .header("X-Goog-Api-Format-Version", "2")
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .post(requestBody)
+
+            ProxyAuth.applyProxyAuthHeaders(reqBuilder, payloadStr)
+            val request = reqBuilder.build()
+
+            var response: okhttp3.Response? = null
+            try {
+                val probeClient = client.newBuilder()
+                    .callTimeout(8, TimeUnit.SECONDS)
+                    .connectTimeout(6, TimeUnit.SECONDS)
+                    .readTimeout(6, TimeUnit.SECONDS)
+                    .build()
+                response = probeClient.newCall(request).execute()
+                if (response.isSuccessful) return response
+                response.close()
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Proxy search request threw exception: ${e.message}")
+            }
+        }
+
+        // Direct request to YouTube InnerTube search endpoint
+        val directReq = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
             .header("X-YouTube-Client-Name", "1")
             .header("X-YouTube-Client-Version", CLIENT_VERSION)
             .header("X-Goog-Api-Format-Version", "2")
@@ -150,34 +182,13 @@ object YouTubeInternalClient {
             .header("Referer", "https://www.youtube.com/")
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
             .post(requestBody)
-
-        ProxyAuth.applyProxyAuthHeaders(reqBuilder, payloadStr)
-        val request = reqBuilder.build()
-
-        var response: okhttp3.Response? = null
-        try {
-            response = client.newCall(request).execute()
+            .build()
+        return try {
+            client.newCall(directReq).execute()
         } catch (e: Exception) {
-            Logger.warn(TAG, "Proxy request threw exception: ${e.message}")
+            Logger.warn(TAG, "Direct YouTube search failed: ${e.message}")
+            null
         }
-
-        if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
-            val directReq = request.newBuilder()
-                .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                .removeHeader("X-Proxy-Secret")
-                .removeHeader("X-Proxy-Timestamp")
-                .removeHeader("X-Proxy-Signature")
-                .header("X-YouTube-Client-Name", "1")
-                .header("X-YouTube-Client-Version", CLIENT_VERSION)
-                .header("X-Goog-Api-Format-Version", "2")
-                .header("Origin", "https://www.youtube.com")
-                .header("Referer", "https://www.youtube.com/")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                .build()
-            response?.close()
-            response = client.newCall(directReq).execute()
-        }
-        return response
     }
 
     /**
