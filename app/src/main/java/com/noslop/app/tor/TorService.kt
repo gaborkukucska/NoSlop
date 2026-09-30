@@ -92,6 +92,7 @@ object TorService {
     val torState: StateFlow<TorState> = _torState.asStateFlow()
 
     private var bootstrapJob: kotlinx.coroutines.Job? = null
+    private var networkCallbackRegistered = false
     private var currentPrivateKeyB64: String? = null
     private var currentBurnablePrivateKeyB64: String? = null
     var currentBurnableOnionAddress: String? = null
@@ -230,6 +231,28 @@ object TorService {
         bootstrapJob?.cancel()
 
         writeTorrc(context)
+
+        // Register network callback once to automatically restart Tor when network connectivity returns
+        if (!networkCallbackRegistered) {
+            try {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                cm?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        val state = _torState.value
+                        if (state == TorState.FAILED || state == TorState.IDLE) {
+                            Logger.info(TAG, "Network became available while Tor was in state $state. Triggering auto-recovery...")
+                            scope.launch {
+                                delay(1000L)
+                                startTor(context, currentPrivateKeyB64, currentBurnablePrivateKeyB64, forceRestart = false)
+                            }
+                        }
+                    }
+                })
+                networkCallbackRegistered = true
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Failed to register network callback: ${e.message}")
+            }
+        }
 
         // Register for status broadcasts
         try {
@@ -512,7 +535,7 @@ object TorService {
      * Falls back to a real end-to-end routing check, which is also proof.
      */
     private fun confirmBootstrapThenPromote() {
-        if (bootstrapConfirmJob?.isActive == true) return
+        if (bootstrapConfirmJob?.isActive == true || bootstrapJob?.isActive == true) return
         bootstrapConfirmJob = scope.launch {
             val bootstrapped = waitForBootstrap(timeoutSeconds = 120)
             if (bootstrapped) {

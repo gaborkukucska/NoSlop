@@ -167,8 +167,8 @@ class MeshTransport(
         val torReady = if (torState == com.noslop.app.tor.TorState.READY) {
             true
         } else if (isHandshake || isDmHighPriority) {
-            // User-initiated handshakes and DMs wait up to 25s for Tor circuits to reach READY
-            com.noslop.app.tor.TorService.awaitReady(timeoutMs = 25000L)
+            // User-initiated handshakes and DMs wait up to 60s for Tor circuits to reach READY on cold start/recovery
+            com.noslop.app.tor.TorService.awaitReady(timeoutMs = 60000L)
         } else {
             // Background packets (ANNOUNCE_PEER, SYNC, etc.) must not flood Tor while it is bootstrapping
             false

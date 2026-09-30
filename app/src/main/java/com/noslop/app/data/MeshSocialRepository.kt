@@ -230,7 +230,10 @@ class MeshSocialRepository(
         outboxWorkerJob = repositoryScope.launch(Dispatchers.IO) {
             while (isActive) {
                 kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
-                // Defer background outbox flushes during active video playback to prevent Tor socket congestion
+                // Do not flush outbox if Tor is not ready or during active video playback
+                if (com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
+                    continue
+                }
                 if (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
                     continue
                 }

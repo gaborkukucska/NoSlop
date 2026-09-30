@@ -370,7 +370,7 @@ object GossipService {
         // 3. Rate limit: 20 packets per sender per 10-second window
         // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
-        val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
+        val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "DM_SYNC_REQUEST"
         val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT" || packet.type == "PEER_REMOVED"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
@@ -385,15 +385,17 @@ object GossipService {
             }
         }
 
-        // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
+                // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
         val isGroupControl = packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" || packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC"
-        val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "CONNECTION_REJECTED" || isGroupControl
+        val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "CONNECTION_REJECTED" || packet.type == "ANNOUNCE_PEER" || isGroupControl
         val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT" || packet.type == "PEER_REMOVED"
         val isDeletePacket = packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
         val isFollowPacket = packet.type == "FOLLOW" || packet.type == "UNFOLLOW"
         val isInvidiousAnnounce = packet.type == "ANNOUNCE_INVIDIOUS_INSTANCE"
+        val isDirectedMessageForUs = packet.type == "MESSAGE" && !packet.targetUserId.isNullOrBlank() && 
+            (checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64))
 
         // Dedicated rate limit for unauthenticated announcements, follows, & identity updates (5 per 60s per sender)
         if (isDiscoverable || isIdentityUpdate || isFollowPacket || isInvidiousAnnounce) {
@@ -438,7 +440,7 @@ object GossipService {
             } catch (_: Exception) { false }
         } else false
 
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isInvidiousAnnounce) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isInvidiousAnnounce && !isDirectedMessageForUs) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
