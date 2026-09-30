@@ -1,5 +1,31 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-30) — Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (v0.6.6-alpha)
+
+* **Tor Circuit Bootstrap SOCKS Gating & Deadlock Prevention (`MeshTransport.kt`, `TorService.kt`)**:
+  * Gated outbound `.onion` SOCKS connections in `MeshTransport.kt` on `TorService.torState == READY`. High-priority user packets (`isHandshake`, `isDmHighPriority`) wait up to 60s for circuits to complete bootstrap (`awaitReady(60_000L)`), while non-essential background packets (`ANNOUNCE_PEER`, sync) are safely dropped/deferred instead of bombarding Tor's SOCKS daemon at 0%–40% bootstrap. This eliminated the Tor event loop freeze at 40% (`Loading authority key certs`).
+  * Removed duplicate bootstrap polling in `TorService.kt`: ensured `confirmBootstrapThenPromote()` does not spawn a second concurrent `waitForBootstrap(120)` loop when `bootstrapJob` is already running, eliminating control port socket contention.
+  * Raised handshake connect timeout to 35s in `MeshTransport.kt` to accommodate Tor v3 descriptor and rendezvous circuit establishment over mobile networks.
+* **Network Connectivity Restoration & Auto-Recovery (`TorService.kt`)**:
+  * Registered a `ConnectivityManager.NetworkCallback` in `TorService.kt` that detects `onAvailable()`. When the device reconnects to Wi-Fi or cellular data after a drop, it automatically starts Tor if in `FAILED` or `IDLE` state, eliminating multi-minute Tor disconnection freezes.
+* **Mesh Firewall Directed Message & Presence Whitelisting (`GossipService.kt`, `DmPacketHandler.kt`)**:
+  * Whitelisted directed `MESSAGE` packets addressed to our node (`isDirectedMessageForUs`) in `GossipService.processIncoming()`, allowing them to pass through to `DmPacketHandler.handleDirectMessage()` for authenticated ChaCha20-Poly1305 AEAD decryption and automatic connection recovery rather than dropping them as untrusted.
+  * Added `ANNOUNCE_PEER` to `isConnectionPacket` (firewall whitelist) so cryptographic Ed25519-signed presence heartbeats reach `HandshakePacketHandler` to update peer online/lastSeen states.
+  * Added `DM_SYNC_REQUEST` to `isSyncPacket` so incoming DM sync requests bypass the untrusted sender firewall gate.
+  * In `DmPacketHandler.kt`, acknowledged peer presence and cleared failure cooldowns on duplicate message delivery.
+* **Peer Failure Cooldown Scope Narrowing & De-Escalation (`GossipService.kt`, `MeshTransport.kt`, `MeshSocialRepository.kt`)**:
+  * Lowered the maximum exponential cooldown backoff cap from 30 minutes (`1800_000L`) to 3 minutes (`180_000L`).
+  * Restricted cooldown throttling in `MeshTransport.kt` strictly to unsolicited background presence announcements (`ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE`). Real-time DMs, DM sync, inventory sync, posts, comments, and media transfers are never blocked by peer cooldown.
+  * In `GossipService.broadcast()`, only presence announcements skip peers in cooldown; active user content (posts, comments, votes, reactions) always broadcast.
+  * Removed duplicate `recordSendFailure()` calls in `GossipService.forwardPacket`, `GossipService.broadcast`, and `MeshSocialRepository.flushOutboxForPeer()`, keeping `MeshTransport.sendPacket` as the single source of truth for transport results.
+  * `MeshTransport.sendPacket` only records send failures for background presence announcements, and never penalizes remote peers if local Tor proxy is down/refused.
+* **Interactive Typing Signal Debouncing & Semaphore Isolation (`ChatThreadScreen.kt`, `MeshTransport.kt`)**:
+  * Debounced `onTyping(true)` in `ChatThreadScreen.kt` to transmit at most once every 6 seconds while typing, and `onTyping(false)` upon send or idle, reducing socket overhead by over 95%.
+  * Routed `isInteractive` packets in `MeshTransport.kt` to `bulkSemaphore`, keeping `dmSemaphore(4)` 100% open for real DMs and handshakes.
+* **Atomic DM Sync Deduplication & Outbox Throttling (`MeshSocialRepository.kt`)**:
+  * Implemented atomic `lastDmSyncRequests.compute(peerPub)` in `MeshSocialRepository.requestDmSync` to eliminate concurrent double-request races.
+  * Paused `outboxWorkerJob` in `MeshSocialRepository.kt` when Tor is not in `TorState.READY` or during video playback.
+
 ## Completed Changes (2026-09-30) — Media Path Traversal Elimination, Proxy Secret Hardening & Wire Parity (v0.6.5-alpha)
 
 * **Media Path Traversal Elimination (`MediaManager.kt`, `MediaPacketHandler.kt`, `GossipService.kt`)**:

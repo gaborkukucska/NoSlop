@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.6.5-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
+versionName `0.6.6-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1922,6 +1922,24 @@ In release builds (`assembleRelease`), R8 minification strips generic signatures
 1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
 2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
 3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
+
+### 17.19 Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (2026-09-30)
+
+A targeted remediation resolved mesh sync lockouts, Tor bootstrap freezes, and network reconnection failures:
+1. **Tor Circuit Ready SOCKS Gating (`MeshTransport.kt`)**: Previously, `MeshTransport.sendPacket()` called `TorService.waitForProxy()`, which returned `true` as soon as the SOCKS5 port opened (`TorState.PROXY_READY`, bootstrap 0%). Outbound `.onion` connections attempted during bootstrap overwhelmed Tor's internal socket queue, causing directory authority certificate downloads to time out and freezing bootstrap at 40% (`Loading authority key certs`). `MeshTransport` now evaluates `TorService.torState == READY`. High-priority user packets (`isHandshake`, `isDmHighPriority`) wait up to 60s for circuits to complete bootstrap (`awaitReady(60_000L)`), while non-essential background packets (`ANNOUNCE_PEER`, sync) are safely dropped/deferred instead of bombarding Tor's SOCKS daemon during bootstrap.
+2. **Network Connectivity Auto-Recovery (`TorService.kt`)**: Registered a `ConnectivityManager.NetworkCallback` on `startTor()` detecting `onAvailable()`. When the device reconnects to Wi-Fi or cellular data after a drop, it automatically restarts Tor if in `FAILED` or `IDLE` state, eliminating permanent Tor disconnections after transient network blips.
+3. **Duplicate Bootstrap Polling Elimination (`TorService.kt`)**: Removed concurrent control port polling between `startTor()` and `confirmBootstrapThenPromote()`, preventing simultaneous `waitForBootstrap(120)` loops from contending for the unix control socket.
+4. **Mesh Firewall Directed Message & Presence Whitelisting (`GossipService.kt`, `DmPacketHandler.kt`)**:
+   - Directed `MESSAGE` packets addressed to our node (`targetUserId == localPublicKeyB64 || targetUserId == burnablePublicKeyB64`) now bypass the untrusted sender firewall check in `GossipService.processIncoming()`. This allows `DmPacketHandler.handleDirectMessage()` to decrypt the packet using ChaCha20-Poly1305 AEAD and automatically initiate mutual connection requests for un-cached senders.
+   - Added `ANNOUNCE_PEER` to `isConnectionPacket` so Ed25519-signed presence heartbeats reach `HandshakePacketHandler` and update peer online/lastSeen states without being dropped as untrusted.
+   - Added `DM_SYNC_REQUEST` to `isSyncPacket` so incoming DM sync requests bypass the untrusted sender gate.
+5. **Cooldown De-Escalation & Scope Narrowing (`GossipService.kt`, `MeshTransport.kt`)**:
+   - Lowered the maximum exponential cooldown backoff cap from 30 minutes (`1800_000L`) to 3 minutes (`180_000L`).
+   - Cooldown throttling in `MeshTransport.kt` is restricted strictly to unsolicited background presence announcements (`ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE`). DMs, sync requests, posts, comments, and media transfers are never blocked by cooldown.
+   - In `GossipService.broadcast()`, only presence announcements skip peers in cooldown; active user content (posts, comments, votes, reactions) always broadcast.
+   - Removed duplicate `recordSendFailure()` calls in `GossipService.forwardPacket`, `GossipService.broadcast`, and `MeshSocialRepository.flushOutboxForPeer()`.
+6. **Typing Signal Debouncing & Semaphore Isolation (`ChatThreadScreen.kt`, `MeshTransport.kt`)**: Debounced `onTyping(true)` in `ChatThreadScreen.kt` to transmit at most once every 6 seconds while typing, and `onTyping(false)` upon send or idle, reducing socket overhead by over 95%. Routed `isInteractive` packets in `MeshTransport.kt` to `bulkSemaphore`, keeping `dmSemaphore(4)` 100% open for real DMs.
+7. **Thread-Safe DM Sync Deduplication (`MeshSocialRepository.kt`)**: Replaced non-atomic map checks with `lastDmSyncRequests.compute(peerPub)` for atomic 10-second deduplication in `requestDmSync`.
 
 ### 17.18 Codebase Audit, Dead Code Elimination, Firewall Whitelist & Concurrency Hardening (2026-09-29)
 

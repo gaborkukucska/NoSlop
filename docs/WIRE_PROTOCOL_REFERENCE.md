@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-09-25)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-09-30)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -152,6 +152,12 @@ Notes:
   on receipt using dual-mode verification: length-prefixed `CryptoService.encodeForSigning`
   as primary, with fallback to legacy pipe-delimited strings (`fromUserId|fromUsername|fromHomeNode|timestamp`
   + optional `authorAvatarB64` and `bio`).
+- `ANNOUNCE_PEER` (row 14) and `DM_SYNC_REQUEST` are whitelisted through
+  the gossip firewall (`GossipService.processIncoming`), ensuring presence
+  heartbeats and direct message sync packets are processed and peer online
+  states update correctly. Directed `MESSAGE` packets (row 2) addressed to
+  the local node bypass the untrusted sender gate so ChaCha20-Poly1305 AEAD
+  decryption in `DmPacketHandler` serves as the cryptographic authenticity check.
 - On multi-identity Creator Nodes, outbound `POST` broadcasts dynamically stamp `senderId`
   with either the burnable identity public key (for temporary follower contacts) or main identity public key
   (for personal contacts), ensuring recipient firewalls accept the packet.
