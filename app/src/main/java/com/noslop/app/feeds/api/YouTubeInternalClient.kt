@@ -52,7 +52,6 @@ object YouTubeInternalClient {
     
     private const val CLIENT_NAME = "WEB"
     private const val CLIENT_VERSION = "2.20240717.01.00"
-    private val startupTimestampMs = System.currentTimeMillis()
     
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
@@ -431,9 +430,6 @@ object YouTubeInternalClient {
         payload.addProperty("contentCheckOk", true)
         return payload
     }
-
-    // --- NOSLOP_GEO_LOCK_V1 ---
-    private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
     // Evaluate up to 2 configs before advancing circuit nonce
     private const val EXIT_BLOCKED_THRESHOLD = 2

@@ -36,8 +36,7 @@ android {
         // anyone building from a clean clone.
         //
         // NOSLOP_PROXY_LEGACY_SECRET controls whether the raw secret is still
-        // sent as an X-Proxy-Secret header. Keep it true until the Cloudflare
-        // Worker accepts HMAC-only requests, then set it to false.
+        // sent as an X-Proxy-Secret header. Defaults to false.
         buildConfigField(
             "String",
             "PROXY_URL",
@@ -46,7 +45,7 @@ android {
         buildConfigField(
             "String",
             "PROXY_SECRET",
-            "\"" + (project.findProperty("NOSLOP_PROXY_SECRET") ?: "NoSlopRocks2026") + "\""
+            "\"" + (project.findProperty("NOSLOP_PROXY_SECRET") ?: "") + "\""
         )
         buildConfigField(
             "boolean",

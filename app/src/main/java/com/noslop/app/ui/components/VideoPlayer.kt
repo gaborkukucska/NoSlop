@@ -220,7 +220,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
         // Never poison sourceCache with an Unavailable result from a speculative background preload.
         if (!(isPreload && result is VideoSource.Unavailable)) {
-            val videoId = extractYouTubeId(rawUrl) ?: ""
+            val videoId = YouTubeInternalClient.extractVideoId(rawUrl) ?: ""
             val nonce = if (videoId.isNotBlank()) YouTubeInternalClient.getStreamNonce(videoId) else 0
             sourceCache[cacheKey] = CachedSource(
                 source = result,
@@ -373,17 +373,10 @@ private fun isDirectFileUrl(url: String): Boolean {
 
 private fun isYouTubeUrl(url: String): Boolean =
     (url.contains("youtube.com") || url.contains("youtu.be") || url.contains("youtube-nocookie.com")) &&
-        extractYouTubeId(url) != null
+        YouTubeInternalClient.extractVideoId(url) != null
 
 private fun isVimeoUrl(url: String): Boolean =
     url.contains("vimeo.com")
-
-private fun extractYouTubeId(url: String): String? = when {
-    url.contains("v=")      -> url.substringAfter("v=").substringBefore("&").substringBefore("/").takeIf { it.isNotBlank() }
-    url.contains("/embed/") -> url.substringAfter("/embed/").substringBefore("?").substringBefore("/").takeIf { it.isNotBlank() }
-    url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?").substringBefore("/").takeIf { it.isNotBlank() }
-    else -> null
-}
 
 private fun extractVimeoId(url: String): String? = when {
     url.contains("/video/") -> url.substringAfter("/video/").substringBefore("?").substringBefore("/").takeIf { it.isNotBlank() }
@@ -398,7 +391,7 @@ private const val YT_CIRCUIT_BREAKER_THRESHOLD = 5
 private const val YT_CIRCUIT_BREAKER_RESET_MS = 45 * 1000L // 45 seconds
 
 private suspend fun resolveYouTubeSource(url: String, quality: String, isPreload: Boolean = false): VideoSource {
-    val videoId = extractYouTubeId(url) ?: run {
+    val videoId = YouTubeInternalClient.extractVideoId(url) ?: run {
         Logger.warn("VIDEO_RESOLVE", "Could not extract YouTube video ID from: $url")
         return VideoSource.Unavailable
     }
@@ -1119,7 +1112,7 @@ private fun ExoVideoPlayer(
                     }
                     stalledSamples = 0
                     continuousBufferingSamples = 0
-                    val videoId = extractYouTubeId(rawUrl)
+                    val videoId = YouTubeInternalClient.extractVideoId(rawUrl)
                     if (videoId != null) {
                         com.noslop.app.feeds.api.YouTubeInternalClient.advanceStreamNonce(videoId)
                     }

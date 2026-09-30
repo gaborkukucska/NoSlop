@@ -89,6 +89,28 @@ class MeshPacketVerifierTest {
     }
 
     @Test
+    fun editPost_dualMode_supportsEncodeForSigningAndPipe() {
+        val sEnc = CryptoService.encodeForSigning("post-1", alice.publicKeyB64, "edited", "1700000000", null)
+        val pEnc = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sEnc))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_POST", pEnc)))
+
+        val sPipe = "post-1|${alice.publicKeyB64}|edited|1700000000"
+        val pPipe = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sPipe))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_POST", pPipe)))
+    }
+
+    @Test
+    fun reaction_dualMode_supportsEncodeForSigningAndPipe() {
+        val sEnc = CryptoService.encodeForSigning("post-1", "like", alice.publicKeyB64, "1700000000")
+        val pEnc = ReactionPayload("post-1", "like", alice.publicKeyB64, 1700000000L, sign(sEnc))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("REACTION", pEnc)))
+
+        val sPipe = "post-1|like|${alice.publicKeyB64}|1700000000"
+        val pPipe = ReactionPayload("post-1", "like", alice.publicKeyB64, 1700000000L, sign(sPipe))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("REACTION", pPipe)))
+    }
+
+    @Test
     fun deletePost_format() {
         val s = CryptoService.encodeForSigning("post-9", alice.publicKeyB64, "99")
         val p = DeletePostPayload("post-9", alice.publicKeyB64, 99L, sign(s))

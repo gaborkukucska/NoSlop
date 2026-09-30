@@ -109,12 +109,6 @@ data class MediaRecoveryFoundPayload(
 )
 
 @Keep
-data class MediaPendingPayload(
-    @SerializedName("media_id") val mediaId: String,
-    @SerializedName("chunk_index") val chunkIndex: Int
-)
-
-@Keep
 data class MediaTransferAckPayload(
     @SerializedName("media_id") val mediaId: String
 )

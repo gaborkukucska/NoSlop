@@ -157,8 +157,12 @@ class PostPacketHandler(
         val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
         )
+        val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString()
+        )
         val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
         val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId) ||
+            CryptoService.verify(payloadNoAvatar, editPay.signature, editPay.authorId) ||
             CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId)
         if (!isValid) return false
 

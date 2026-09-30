@@ -18,12 +18,20 @@ class MediaPacketHandler(
 
     suspend fun handleMediaRequest(packet: NetworkPacket): Boolean {
         val mediaReq = packet.getMediaRequestPayload() ?: return false
+        if (!MediaManager.isValidMediaId(mediaReq.mediaId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_REQUEST with invalid mediaId: ${mediaReq.mediaId}")
+            return false
+        }
         MediaManager.handleMediaRequest(packet.senderId, mediaReq)
         return true
     }
 
     suspend fun handleMediaChunk(packet: NetworkPacket): Boolean {
         val chunk = packet.getMediaChunkPayload() ?: return false
+        if (!MediaManager.isValidMediaId(chunk.mediaId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_CHUNK with invalid mediaId: ${chunk.mediaId}")
+            return false
+        }
         
         // Zero-copy forward if we are acting as a relay
         GossipService.forwardRelayChunk(chunk.mediaId, packet)
@@ -35,6 +43,10 @@ class MediaPacketHandler(
 
     suspend fun handleMediaRecoveryFound(packet: NetworkPacket): Boolean {
         val found = packet.getMediaRecoveryFoundPayload() ?: return false
+        if (!MediaManager.isValidMediaId(found.mediaId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_RECOVERY_FOUND with invalid mediaId: ${found.mediaId}")
+            return false
+        }
         MediaManager.handleRecoveryFound(packet.senderId, found.mediaId, found.onionAddress)
         return true
     }

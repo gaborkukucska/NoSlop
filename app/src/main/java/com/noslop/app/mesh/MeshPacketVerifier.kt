@@ -119,19 +119,32 @@ object MeshPacketVerifier {
             val sig = p.signature
             val signer = p.authorId
             val matchedPayload = when {
-                sig != null && com.noslop.app.crypto.CryptoService.verify(pipeNoAvatar, sig, signer) -> pipeNoAvatar
-                sig != null && com.noslop.app.crypto.CryptoService.verify(pipeWithAvatar, sig, signer) -> pipeWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
                 sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipeWithAvatar, sig, signer) -> pipeWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipeNoAvatar, sig, signer) -> pipeNoAvatar
                 else -> encWithAvatar
             }
             Signed(matchedPayload, sig, signer)
         }
 
         "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
-            val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
             )
-            Signed(s, p.signature, p.authorId)
+            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.authorId, p.content, p.timestamp.toString()
+            )
+            val pipe = "${p.postId}|${p.authorId}|${p.content}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer) -> pipe
+                else -> encWithAvatar
+            }
+            Signed(matched, sig, signer)
         }
 
         "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
@@ -192,7 +205,12 @@ object MeshPacketVerifier {
 
         // --- ReactionPacketHandler ---
         "REACTION" -> packet.getReactionPayload()?.let { p ->
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.reactionType, p.authorId, p.timestamp.toString())
+            val pipe = "${p.postId}|${p.reactionType}|${p.authorId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(enc, sig, signer)) enc else pipe
+            Signed(matched, sig, signer)
         }
 
         "VOTE" -> packet.getVotePayload()?.let { p ->

@@ -30,6 +30,9 @@ class HubSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val isLegacy = hubStatus == "Active (Legacy Connection)"
         val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
         val isPrivateLan = NoSlopRepository.isPrivateLanAddress(lanIp)
+        val canCleartextLan = isPrivateLan && lanIp != null && try {
+            android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(lanIp)
+        } catch (_: Throwable) { false }
 
         val mnemonic = repo.getWordCloudMnemonic()
         if (mnemonic.isBlank()) {
@@ -55,8 +58,8 @@ class HubSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 )
                 .build()
 
-            // 1. Try local private LAN over rawClearnetClient first (port 8080)
-            if (isPrivateLan && lanIp != null) {
+            // 1. Try local private LAN over rawClearnetClient first (port 8080) if permitted by policy
+            if (canCleartextLan && lanIp != null) {
                 try {
                     val lanUrl = "http://$lanIp:8080/api/backup/push"
                     val request = Request.Builder().url(lanUrl).post(requestBody).build()

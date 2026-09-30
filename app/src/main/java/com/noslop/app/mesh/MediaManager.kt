@@ -19,6 +19,22 @@ import java.util.concurrent.LinkedBlockingQueue
 
 object MediaManager {
     private const val TAG = "MEDIA_MANAGER"
+
+    fun isValidMediaId(mediaId: String?): Boolean {
+        if (mediaId.isNullOrBlank()) return false
+        if (mediaId.length > 128) return false
+        if (mediaId.contains("..") || mediaId.contains("/") || mediaId.contains("\\")) return false
+        return mediaId.matches(Regex("^[A-Za-z0-9._-]+$"))
+    }
+
+    private fun isPathInDirectory(file: File, directory: File): Boolean {
+        return try {
+            val dirPath = directory.canonicalPath + File.separator
+            file.canonicalPath.startsWith(dirPath)
+        } catch (_: Exception) {
+            false
+        }
+    }
     
     // Dynamic Chunk Sizing Bounds tuned for Tor (fewer sockets, larger payloads)
     const val MIN_CHUNK_SIZE = 128 * 1024
@@ -259,7 +275,7 @@ object MediaManager {
             ).mapNotNull { repo.context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } + File(repo.context.filesDir, "NoSlop")
 
             for (id in mediaIds) {
-                if (id.isBlank()) continue
+                if (!isValidMediaId(id)) continue
                 for (dir in possibleDirs) {
                     if (!dir.exists()) continue
                     File(dir, id).takeIf { it.exists() }?.delete()
@@ -302,10 +318,12 @@ object MediaManager {
     }
 
     fun copyFileToMediaDirectory(source: File, type: String?, id: String): File? {
+        if (!isValidMediaId(id)) return null
         val repo = repository ?: return null
         return try {
             val destDir = getMediaDirectory(type)
             val destFile = File(destDir, id)
+            if (!isPathInDirectory(destFile, destDir)) return null
             if (source.canonicalPath != destFile.canonicalPath) {
                 source.copyTo(destFile, overwrite = true)
             }
@@ -374,6 +392,10 @@ object MediaManager {
     }
 
     suspend fun startDownload(metadata: MediaMetadata, rawPeerOnion: String?) {
+        if (!isValidMediaId(metadata.id)) {
+            Logger.warn(TAG, "Refusing download for invalid mediaId: ${metadata.id}")
+            return
+        }
         val peerOnion = when {
             rawPeerOnion != null && rawPeerOnion.endsWith(".onion") -> rawPeerOnion
             metadata.originNode != null && metadata.originNode.endsWith(".onion") -> metadata.originNode
@@ -711,7 +733,7 @@ object MediaManager {
                 } else {
                     dl.currentConcurrency += 1.0 / Math.floor(dl.currentConcurrency) // Congestion avoidance
                 }
-                dl.currentConcurrency = Math.min(2.0, dl.currentConcurrency) // Max 2 concurrent requests over Tor
+                dl.currentConcurrency = Math.min(MAX_CONCURRENCY.toDouble(), dl.currentConcurrency)
             }
             requestNextChunks(dl)
         }
@@ -719,9 +741,15 @@ object MediaManager {
 
     private fun finishDownload(dl: ActiveDownload) {
         val repo = repository ?: return
+        if (!isValidMediaId(dl.metadata.id)) return
         try {
             val mediaDir = getMediaDirectory(dl.metadata.type)
             val finalFile = File(mediaDir, dl.metadata.id)
+            if (!isPathInDirectory(finalFile, mediaDir)) {
+                Logger.error(TAG, "Path traversal attempt blocked in finishDownload: ${dl.metadata.id}")
+                dl.status = ActiveDownload.Status.ERROR
+                return
+            }
             
             if (dl.partFile.exists()) {
                 dl.partFile.renameTo(finalFile)
@@ -894,6 +922,7 @@ object MediaManager {
     }
 
     private fun findLocalFile(repo: NoSlopRepository, mediaId: String): File? {
+        if (!isValidMediaId(mediaId)) return null
         val possibleDirs = listOf(
             Environment.DIRECTORY_PICTURES,
             Environment.DIRECTORY_MOVIES,
@@ -902,8 +931,9 @@ object MediaManager {
         )
         for (dirType in possibleDirs) {
             val baseDir = repo.context.getExternalFilesDir(dirType) ?: repo.context.filesDir
-            val candidate = File(File(baseDir, "NoSlop"), mediaId)
-            if (candidate.exists()) {
+            val noSlopDir = File(baseDir, "NoSlop")
+            val candidate = File(noSlopDir, mediaId)
+            if (isPathInDirectory(candidate, noSlopDir) && candidate.exists()) {
                 candidate.setLastModified(System.currentTimeMillis()) // Touch for LRU
                 return candidate
             }
@@ -912,10 +942,12 @@ object MediaManager {
     }
 
     fun getLocalFile(mediaId: String, type: String? = null): File? {
+        if (!isValidMediaId(mediaId)) return null
         val repo = repository ?: return null
         if (type != null) {
-            val primary = File(getMediaDirectory(type), mediaId)
-            if (primary.exists()) {
+            val mediaDir = getMediaDirectory(type)
+            val primary = File(mediaDir, mediaId)
+            if (isPathInDirectory(primary, mediaDir) && primary.exists()) {
                 primary.setLastModified(System.currentTimeMillis()) // Touch for LRU
                 return primary
             }
@@ -968,9 +1000,12 @@ object MediaManager {
     }
 
     fun exportToPublicDownloads(context: Context, mediaId: String, fileName: String): Boolean {
+        if (!isValidMediaId(mediaId)) return false
+        val cleanName = fileName.replace("..", "").replace("/", "").replace("\\", "").trim()
+        val effectiveName = if (cleanName.isBlank()) mediaId else cleanName
         return try {
             val srcFile = getLocalFile(mediaId) ?: return false
-            var safeName = fileName
+            var safeName = effectiveName
             if (!safeName.contains(".") || safeName.endsWith(".bin")) {
                 val meta = getMetadataSync(mediaId)
                 val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(meta?.mimeType)

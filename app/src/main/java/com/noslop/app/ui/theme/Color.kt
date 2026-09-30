@@ -12,12 +12,3 @@ val TextLight = Color(0xFFF0F0F0)
 val TextMuted = Color(0xFF666666)
 val DestructiveRed = Color(0xFFFF4444)
 val TemporaryAmber = Color(0xFFFFB300)
-
-// Material Dark/Light compatible sets
-val Purple80 = AccentGreen
-val PurpleGrey80 = TextMuted
-val Pink80 = DestructiveRed
-
-val Purple40 = Color(0xFF00B360)
-val PurpleGrey40 = Color(0xFF4A4A4A)
-val Pink40 = Color(0xFFD32F2F)

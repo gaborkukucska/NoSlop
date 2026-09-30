@@ -23,11 +23,14 @@ object ProxyAuth {
     }
 
     fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
+        val secret = PROXY_SECRET
+        if (secret.isBlank()) return
+
         val timestamp = (System.currentTimeMillis() / 1000).toString()
         val signatureInput = "$timestamp:$payloadStr"
         val hmacSig = try {
             val sha256HMAC = javax.crypto.Mac.getInstance("HmacSHA256")
-            val secretKey = javax.crypto.spec.SecretKeySpec(PROXY_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
+            val secretKey = javax.crypto.spec.SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256")
             sha256HMAC.init(secretKey)
             val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
             hash.joinToString("") { "%02x".format(it) }
@@ -36,10 +39,12 @@ object ProxyAuth {
             ""
         }
 
-        if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET) {
-            builder.header("X-Proxy-Secret", PROXY_SECRET)
+        if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET && secret.isNotBlank()) {
+            builder.header("X-Proxy-Secret", secret)
         }
-        builder.header("X-Proxy-Timestamp", timestamp)
-        builder.header("X-Proxy-Signature", hmacSig)
+        if (hmacSig.isNotBlank()) {
+            builder.header("X-Proxy-Timestamp", timestamp)
+            builder.header("X-Proxy-Signature", hmacSig)
+        }
     }
 }

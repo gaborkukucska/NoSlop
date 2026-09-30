@@ -43,7 +43,6 @@ object LanguageManager {
         "cs" to "Čeština",
         "sv" to "Svenska",
         "ro" to "Română",
-        "el" to "Ελληνικά",
         "vi" to "Tiếng Việt",
         "hi" to "हिन्दी"
     )

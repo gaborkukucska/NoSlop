@@ -156,8 +156,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val isLegacy = hubStatus == "Active (Legacy Connection)"
         val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
         val isPrivateLan = isPrivateLanAddress(lanIp)
+        val canCleartextLan = isPrivateLan && lanIp != null && try {
+            android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(lanIp)
+        } catch (_: Throwable) { false }
         
-        if (isPrivateLan && lanIp != null) {
+        if (canCleartextLan && lanIp != null) {
             try {
                 val url = "http://$lanIp:8080/api/invoke"
                 val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()

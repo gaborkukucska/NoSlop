@@ -36,7 +36,6 @@ object GossipService {
     // Track persistent send failures to avoid spamming unreachable peers
     private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
     private val PEER_FAILURE_THRESHOLD = 3
-    private val PEER_FAILURE_WINDOW_MS = 5 * 60 * 1000L // 5 minutes
     private val PEER_COOLDOWN_MS = 30 * 1000L // 30 seconds cooldown
 
     fun recordDeletedPeer(publicKeyB64: String) {
@@ -228,7 +227,6 @@ object GossipService {
     private fun cleanupRateLimitsAndFirewall() {
         val now = System.currentTimeMillis()
         val rateLimitWindowMs = 10_000L
-        val firewallTtlMs = 10 * 60 * 1000L
 
         val rateLimitIter = senderRateLimits.entries.iterator()
         while (rateLimitIter.hasNext()) {
@@ -282,6 +280,7 @@ object GossipService {
     }
 
     suspend fun forwardRelayChunk(mediaId: String, packet: NetworkPacket): Boolean {
+        if (!MediaManager.isValidMediaId(mediaId)) return false
         val state = relayStates[mediaId] ?: return false
         state.lastActivity = System.currentTimeMillis()
         
@@ -652,10 +651,16 @@ object GossipService {
     private fun handleRelayRequest(senderId: String, packet: NetworkPacket) {
         val payload = packet.getMediaRelayRequestPayload() ?: return
         val mediaId = payload.mediaId
+        if (!MediaManager.isValidMediaId(mediaId)) {
+            Logger.warn(TAG, "Relay: Rejected invalid mediaId in MEDIA_RELAY_REQUEST: $mediaId")
+            return
+        }
 
         // 1. Do we have it?
         val mediaDir = File(transport?.repository?.context?.filesDir, "media")
-        if (File(mediaDir, mediaId).exists()) {
+        val localMedia = File(mediaDir, mediaId)
+        val isContained = try { localMedia.canonicalPath.startsWith(mediaDir.canonicalPath + File.separator) } catch (_: Exception) { false }
+        if (isContained && localMedia.exists()) {
             Logger.info(TAG, "Relay: We have media $mediaId. Responding to $senderId")
             scope.launch {
                 val isTargetTemp = peerDao?.getPeerByPublicKey(senderId)?.isTemporary == true
@@ -681,6 +686,7 @@ object GossipService {
     }
 
     fun delegateUnknownMediaRequest(senderId: String, mediaId: String) {
+        if (!MediaManager.isValidMediaId(mediaId)) return
         val state = relayStates.getOrPut(mediaId) { RelayState(mediaId) }
         if (!state.listeners.contains(senderId)) {
             state.listeners.add(senderId)

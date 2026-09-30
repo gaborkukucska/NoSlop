@@ -7,7 +7,6 @@ data class MediaSettings(
     val maxFileSizeMB: Int = 250,
     val autoDownloadFriends: Boolean = true,
     val autoDownloadPublic: Boolean = false,
-    val cacheRelayedMedia: Boolean = false,
     val backgroundPlayEnabled: Boolean = false,
     val backgroundPlayOutsideApp: Boolean = false,
     val videoQuality: String = "medium",
