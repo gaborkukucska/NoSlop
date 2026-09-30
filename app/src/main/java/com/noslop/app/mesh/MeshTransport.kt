@@ -150,13 +150,6 @@ class MeshTransport(
         }
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
         
-        // Ensure Tor proxy is ready before attempting send
-        val torReady = com.noslop.app.tor.TorService.waitForProxy(timeoutSeconds = 5)
-        if (!torReady) {
-            Logger.error(TAG, "Cannot send packet: Tor proxy not responding on $socksPort")
-            return@withContext pushedToHub
-        }
-
         val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
         val isDmHighPriority = packet.type == "MESSAGE" || packet.type == "DELETE_MESSAGE" ||
             packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
@@ -168,10 +161,29 @@ class MeshTransport(
         val isInteractive = packet.type == "TYPING" || packet.type == "READ_RECEIPT"
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
 
-        // Only genuine 1:1 real-time user messages and handshakes bypass cooldown; all background gossip respects cooldown
-        val bypassCooldown = isHandshake || packet.type == "MESSAGE"
-        if (!bypassCooldown && GossipService.isPeerInCooldown(onionAddress)) {
-            Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
+        // Ensure Tor circuits are established before attempting SOCKS sends to .onion addresses.
+        // During Tor bootstrap, do NOT hammer SOCKS proxy with background traffic to prevent Tor event loop freezes.
+        val torState = com.noslop.app.tor.TorService.torState.value
+        val torReady = if (torState == com.noslop.app.tor.TorState.READY) {
+            true
+        } else if (isHandshake || isDmHighPriority) {
+            // User-initiated handshakes and DMs wait up to 25s for Tor circuits to reach READY
+            com.noslop.app.tor.TorService.awaitReady(timeoutMs = 25000L)
+        } else {
+            // Background packets (ANNOUNCE_PEER, SYNC, etc.) must not flood Tor while it is bootstrapping
+            false
+        }
+
+        if (!torReady) {
+            Logger.debug(TAG, "Cannot send ${packet.type} to $onionAddress: Tor circuits not established (state=$torState)")
+            return@withContext pushedToHub
+        }
+
+        // Only unsolicited background presence announcements respect peer cooldown.
+        // User DMs, DM sync, inventory sync, posts, comments, and media chunk transfers must never be blocked by cooldown.
+        val isBackgroundAnnounce = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE"
+        if (isBackgroundAnnounce && GossipService.isPeerInCooldown(onionAddress)) {
+            Logger.debug(TAG, "Skipping background ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub
         }
 
@@ -183,9 +195,8 @@ class MeshTransport(
             dmSemaphore.acquire()
             acquiredDm = true
         } else if (isInteractive) {
-            if (dmSemaphore.tryAcquire()) {
-                acquiredDm = true
-            } else if (bulkSemaphore.tryAcquire()) {
+            // Interactive signals (typing, read receipts) use bulkSemaphore only so dmSemaphore remains 100% open for real DMs
+            if (bulkSemaphore.tryAcquire()) {
                 acquiredBulk = true
             } else {
                 Logger.warn(TAG, "Dropping interactive ${packet.type} to $onionAddress: circuits busy")
@@ -224,11 +235,11 @@ class MeshTransport(
                 else -> 1
             }
             val connectTimeout = when {
-                isHandshake -> 25000 // 25s allows Tor v3 rendezvous circuit setup while avoiding multi-minute freezes
+                isHandshake -> 35000 // 35s accommodates Tor v3 descriptor and rendezvous circuit establishment
                 isDmHighPriority -> 25000
-                isInteractive -> 8000
+                isInteractive -> 10000
                 isMediaPacket -> 28000
-                else -> 12000
+                else -> 15000
             }
             for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
@@ -273,7 +284,9 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            if (!isHandshake && !isMediaPacket && !isInteractive) {
+            // Only background presence announcements should penalize peer failure tracking.
+            // DMs, handshakes, user posts, media, and interactive packets should never trigger cooldown lockout.
+            if (isBackgroundAnnounce) {
                 GossipService.recordSendFailure(onionAddress)
             }
             return@withContext pushedToHub

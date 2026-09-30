@@ -172,10 +172,8 @@ class MeshSocialRepository(
                             if (success) {
                                 list.remove(packet)
                                 savePersistedOutbox()
-                                com.noslop.app.mesh.GossipService.recordSendSuccess(onionAddress)
                                 Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
                             } else {
-                                com.noslop.app.mesh.GossipService.recordSendFailure(onionAddress)
                                 break
                             }
                         }
@@ -215,10 +213,8 @@ class MeshSocialRepository(
                         val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                         if (success) {
                             db.pendingGroupMessageDao().delete(pending.groupId, pending.memberPub, pending.msgId)
-                            com.noslop.app.mesh.GossipService.recordSendSuccess(onionAddress)
                             Logger.info(TAG, "Delivered pending group message ${pending.msgId} to $onionAddress")
                         } else {
-                            com.noslop.app.mesh.GossipService.recordSendFailure(onionAddress)
                             break
                         }
                     }
@@ -811,12 +807,19 @@ class MeshSocialRepository(
         if (!peer.isTrusted || peer.onionAddress.isBlank()) return@withContext
 
         val now = System.currentTimeMillis()
-        val lastReq = lastDmSyncRequests[peer.publicKeyB64] ?: 0L
-        if (now - lastReq < 10_000L) {
+        var shouldSkip = false
+        lastDmSyncRequests.compute(peer.publicKeyB64) { _, lastReq ->
+            if (lastReq != null && now - lastReq < 10_000L) {
+                shouldSkip = true
+                lastReq
+            } else {
+                now
+            }
+        }
+        if (shouldSkip) {
             Logger.debug(TAG, "Skipping duplicate DM sync request to ${peer.handle} within 10s window")
             return@withContext
         }
-        lastDmSyncRequests[peer.publicKeyB64] = now
 
         val since = messageDao.getLatestReceivedTimestamp(peer.publicKeyB64) ?: 0L
         val payload = com.noslop.app.mesh.DmSyncRequestPayload(since = since)

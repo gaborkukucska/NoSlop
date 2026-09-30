@@ -46,6 +46,10 @@ class DmPacketHandler(
         val existingMsg = messageDao.getMessageById(msgPay.id)
         if (existingMsg != null) {
             Logger.debug(TAG, "Dropping duplicate DM ${msgPay.id}: already delivered")
+            peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
+                GossipService.recordSendSuccess(it)
+            }
+            repo.updatePeerTypingState(packet.senderId, false)
             return true
         }
 

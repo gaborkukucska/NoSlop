@@ -781,18 +781,31 @@ fun ChatInputBar(
 
         val coroutineScope = rememberCoroutineScope()
         var typingStopJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+        var wasTyping by remember { mutableStateOf(false) }
+        var lastTypingSentTime by remember { mutableLongStateOf(0L) }
 
         AndroidGifTextField(
             value = rawText,
             onValueChange = { 
                 rawText = it
-                onTyping(it.isNotEmpty())
-                typingStopJob?.cancel()
-                if (it.isNotEmpty()) {
+                val isTyping = it.isNotEmpty()
+                val now = System.currentTimeMillis()
+                if (isTyping) {
+                    if (!wasTyping || (now - lastTypingSentTime > 6000L)) {
+                        wasTyping = true
+                        lastTypingSentTime = now
+                        onTyping(true)
+                    }
+                    typingStopJob?.cancel()
                     typingStopJob = coroutineScope.launch {
                         kotlinx.coroutines.delay(4000L)
+                        wasTyping = false
                         onTyping(false)
                     }
+                } else if (wasTyping) {
+                    wasTyping = false
+                    typingStopJob?.cancel()
+                    onTyping(false)
                 }
             },
             hint = "Message...",
@@ -801,6 +814,7 @@ fun ChatInputBar(
             onSend = { 
                 if (rawText.isNotBlank() || hasAttachment) {
                     typingStopJob?.cancel()
+                    wasTyping = false
                     onTyping(false)
                     onSendMessage(rawText)
                     rawText = ""

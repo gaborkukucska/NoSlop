@@ -50,13 +50,12 @@ object GossipService {
         val now = System.currentTimeMillis()
         val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: (0 to 0L)
         
-        // Retain consecutive failure count until a send succeeds, resetting only after 2h inactivity
         val effectiveCount = if (now - lastFailureTime > 2 * 3600_000L) 1 else count + 1
         peerSendFailures[peerOnionAddress] = effectiveCount to now
         
         if (effectiveCount >= PEER_FAILURE_THRESHOLD) {
-            val exponent = (effectiveCount - PEER_FAILURE_THRESHOLD).coerceAtMost(6)
-            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(1800_000L)
+            val exponent = (effectiveCount - PEER_FAILURE_THRESHOLD).coerceAtMost(4)
+            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(180_000L) // Max 3 minutes
             Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times. Cooldown for ${cooldownMs/1000}s")
         }
     }
@@ -71,9 +70,8 @@ object GossipService {
         val now = System.currentTimeMillis()
         
         if (count >= PEER_FAILURE_THRESHOLD) {
-            // Exponential backoff: 30s * 2^(count - 3), capped up to 30 minutes (1800s) to prevent Tor circuit congestion from persistently dead peers
-            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(6)
-            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(1800_000L)
+            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(4)
+            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(180_000L) // Max 3 minutes
             
             if (now - lastFailureTime < cooldownMs) {
                 return true
@@ -811,12 +809,7 @@ object GossipService {
             }
             
             scope.launch {
-                val success = tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, forwardedPacket)
-                if (success) {
-                    recordSendSuccess(peer.onionAddress)
-                } else {
-                    recordSendFailure(peer.onionAddress)
-                }
+                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, forwardedPacket)
             }
         }
     }
@@ -860,12 +853,12 @@ object GossipService {
 
         Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${trustedPeers.size} trusted peers.")
         
-        // Only immediate 1:1 user messages bypass cooldown; background posts/deletions must respect cooldown
-        val isDirectUserMessage = packet.type == "MESSAGE"
+        // Only unsolicited background presence announcements skip peers in cooldown.
+        // User posts, comments, reactions, votes, edits, deletes, and sync requests must always broadcast.
+        val isPresenceAnnounce = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE"
 
         for (peer in trustedPeers) {
-            // Skip peers in cooldown to prevent socket storms to offline hidden services
-            if (!isDirectUserMessage && isPeerInCooldown(peer.onionAddress)) {
+            if (isPresenceAnnounce && isPeerInCooldown(peer.onionAddress)) {
                 Logger.debug(TAG, "Skipping broadcast of ${packet.type} to ${peer.onionAddress}: peer in cooldown")
                 continue
             }
@@ -879,12 +872,7 @@ object GossipService {
                     tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId
                 }
                 val outboundPacket = if (packet.senderId != peerSenderId) packet.copy(senderId = peerSenderId) else packet
-                val success = tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, outboundPacket)
-                if (success) {
-                    recordSendSuccess(peer.onionAddress)
-                } else {
-                    recordSendFailure(peer.onionAddress)
-                }
+                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, outboundPacket)
             }
         }
     }
