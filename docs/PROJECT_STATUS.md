@@ -1,5 +1,25 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-30) — Media Path Traversal Elimination, Proxy Secret Hardening & Wire Parity (v0.6.5-alpha)
+
+* **Media Path Traversal Elimination (`MediaManager.kt`, `MediaPacketHandler.kt`, `GossipService.kt`)**:
+  * Implemented `MediaManager.isValidMediaId` enforcing character whitelisting (`^[A-Za-z0-9._-]+$`), length constraints (<= 128 chars), and strict prohibition of directory traversal sequences (`..`, `/`, `\`).
+  * Enforced canonical path containment checks (`isPathInDirectory`) across `findLocalFile`, `getLocalFile`, `copyFileToMediaDirectory`, and `finishDownload`, preventing malicious remote peers from traversing out of media storage to read or overwrite database and preference files.
+  * Sanitized public download exports in `MediaManager.exportToPublicDownloads` against path manipulation.
+  * Hardened `MediaPacketHandler` and `GossipService` to drop malformed or traversal media IDs at the firewall and relay boundary.
+* **Shared Proxy Secret Literal Removal (`build.gradle.kts`, `ProxyAuth.kt`)**:
+  * Removed hardcoded default `"NoSlopRocks2026"` from `app/build.gradle.kts`, defaulting `PROXY_SECRET` to empty string.
+  * Updated `ProxyAuth.kt` to bypass HMAC signing headers when `PROXY_SECRET` is blank.
+* **Wire Protocol Signature Parity & Test Suite Expansion (`MeshPacketVerifier.kt`, `PostPacketHandler.kt`, `MeshPacketVerifierTest.kt`)**:
+  * Added dual-mode verification for `EDIT_POST` and `REACTION` in `MeshPacketVerifier.kt`, preventing valid legacy-signed edits and reactions from being dropped before relay.
+  * Added `encNoAvatar` to `PostPacketHandler.handleEditPost` for 100% verifier-handler symmetry.
+  * Added unit test coverage for `editPost_dualMode` and `reaction_dualMode` in `MeshPacketVerifierTest.kt`.
+* **LAN Hub Policy Gating (`NoSlopRepository.kt`, `HubSyncWorker.kt`)**:
+  * Evaluated `NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(lanIp)` before attempting unencrypted LAN HTTP connections, eliminating cleartext violation exceptions and connection delays.
+* **Codebase Pruning & Deduplication (`VideoPlayer.kt`, `YouTubeInternalClient.kt`, `Packets.kt`, `MediaSettings.kt`, `Color.kt`, `LanguageManager.kt`, `GossipService.kt`)**:
+  * Deduplicated YouTube ID extraction by routing `VideoPlayer.kt` to `YouTubeInternalClient.extractVideoId`.
+  * Pruned unreferenced `MediaPendingPayload`, `cacheRelayedMedia`, unused template colors, dead variables (`PEER_FAILURE_WINDOW_MS`, `firewallTtlMs`, `startupTimestampMs`, `GEO_LOCK_PATTERN`), and removed Greek (`el`) from `LanguageManager` due to missing language asset.
+
 ## Completed Changes (2026-09-29) — Comprehensive Codebase Audit, Mesh Firewall Whitelist, Structured Concurrency & Dead Code Elimination
 
 * **Mesh Firewall Whitelist & Backoff Retention (`GossipService.kt`)**:
