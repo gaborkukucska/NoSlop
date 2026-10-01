@@ -158,7 +158,13 @@ Notes:
   states update correctly. Directed `MESSAGE` packets (row 2) addressed to
   the local node bypass the untrusted sender gate so ChaCha20-Poly1305 AEAD
   decryption in `DmPacketHandler` serves as the cryptographic authenticity check.
-- On multi-identity Creator Nodes, outbound `POST` broadcasts dynamically stamp `senderId`
+- - **Friends-Only Broadcast Isolation**: Outbound packets for friends-only broadcasts (`POST` with `privacy = "friends"`,
+  and `EDIT_POST`, `DELETE_POST`, `COMMENT`, `REACTION`, etc. with `hops = 1`) are strictly isolated to trusted
+  direct peer connections (`isTrusted && !isTemporary && contactSetting != "burnable"`) and the post author. Temporary
+  contacts and creator nodes connected via severable temporary connections are excluded from broadcast distribution
+  and historical/inventory sync.
+
+On multi-identity Creator Nodes, outbound `POST` broadcasts dynamically stamp `senderId`
   with either the burnable identity public key (for temporary follower contacts) or main identity public key
   (for personal contacts), ensuring recipient firewalls accept the packet.
 - **Friends-Only Broadcast Isolation**: Outbound packets for friends-only broadcasts (`POST` with `privacy = "friends"`,

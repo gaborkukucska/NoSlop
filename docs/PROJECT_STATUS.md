@@ -3,6 +3,21 @@
 ## Completed Changes (2026-10-01) — Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (v0.6.7-alpha)
 
 * **Friends-Only Broadcast Isolation to Trusted Direct Peers (`GossipService.kt`, `MeshSocialRepository.kt`)**:
+  * Excluded temporary contacts (`peer.isTemporary`) and peers connected via severable temporary connections (`contact_identity_${peer.publicKeyB64} == "burnable"`) from receiving Friends Only mesh broadcasts (`privacy == "friends"` or `hops == 1`). Friends Only content is now strictly broadcast to authentic trusted direct personal peers (`peer.isTrusted && !peer.isTemporary && contactSetting != "burnable"`).
+  * Ensured post authors always receive comments and reactions on their own friends-only posts regardless of creator status (`targetPostAuthor` resolution in `GossipService.broadcast` and `processIncoming`).
+  * Outbound Friends Only broadcasts on Creator nodes now strictly use the node's primary personal identity (`getLocalIdentity()`) instead of the severable burnable creator identity, guaranteeing that personal friends recognize the author and that follower contacts are not leaked private broadcasts.
+  * In `GossipService.processIncoming()`, added firewall gating that drops any inbound Friends Only broadcast arriving from non-direct peers (temporary contacts or burnable connections) unless they are the authentic post author.
+  * Enforced that Friends Only packets are never forwarded across the mesh (`forwardPacket` drop and `shouldForward = false`).
+* **Friends-Only Historical & Inventory Sync Protection (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**:
+  * In `SyncPacketHandler.handleSyncRequest()` and `handleInventorySyncRequest()`, gated candidate posts, comments, and reactions: sync requests from temporary contacts or severable burnable connections strictly filter out `privacy == "friends"` posts and their engagement data. For direct trusted friends, comments and reactions on friends-only posts are bi-directionally synchronized between the author and the recipient (`post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == packet.senderId`).
+  * In `SyncPacketHandler.handleSyncResponse()`, incoming Friends Only posts from non-direct peers are dropped unless sent by the post's author.
+  * In `MeshSocialRepository.requestInventorySync()`, outgoing inventory hash lists filter out Friends Only posts when synchronizing with non-direct peers, preventing the leaking of private post IDs or hashes to temporary contacts and creator nodes.
+* **Test Suite Expansion (`GossipServiceTest.kt`)**:
+  * Added unit test coverage in `GossipServiceTest.kt` asserting that `GossipService.broadcast()` excludes temporary contacts and creator nodes connected via severable connections when sending Friends Only broadcasts, and verifying that `processIncoming()` blocks incoming Friends Only broadcasts from temporary or burnable peers.
+
+## Completed Changes (2026-10-01) — Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (v0.6.7-alpha)
+
+* **Friends-Only Broadcast Isolation to Trusted Direct Peers (`GossipService.kt`, `MeshSocialRepository.kt`)**:
   * Excluded temporary contacts (`peer.isTemporary`), creator nodes (`peer.isCreator`), and peers connected via severable temporary connections (`contact_identity_${peer.publicKeyB64} == "burnable"`) from receiving Friends Only mesh broadcasts (`privacy == "friends"` or `hops == 1`). Friends Only content is now strictly broadcast to authentic trusted direct personal peers (`peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactIdentity != "burnable"`).
   * Outbound Friends Only broadcasts on Creator nodes now strictly use the node's primary personal identity (`getLocalIdentity()`) instead of the severable burnable creator identity, guaranteeing that personal friends recognize the author and that follower contacts are not leaked private broadcasts.
   * In `GossipService.processIncoming()`, added firewall gating that drops any inbound Friends Only broadcast arriving from non-direct peers (temporary contacts, creator nodes, or burnable connections).
