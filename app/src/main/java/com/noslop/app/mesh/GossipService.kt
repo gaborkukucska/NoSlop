@@ -34,25 +34,51 @@ object GossipService {
     private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
     
     // Track persistent send failures to avoid spamming unreachable peers
-    fun isFriendsOnlyPacket(packet: NetworkPacket): Boolean {
+    suspend fun isFriendsOnlyPacket(packet: NetworkPacket): Boolean {
         if (packet.type == "POST") {
             val postPay = packet.getPostPayload()
-            if (postPay != null && postPay.privacy == "friends") return true
+            return postPay != null && postPay.privacy == "friends"
         }
         if (packet.type == "EDIT_POST") {
             val editPay = packet.getEditPostPayload()
-            if (editPay != null && editPay.privacy == "friends") return true
+            return editPay != null && editPay.privacy == "friends"
         }
         if (packet.type == "GROUP_MESSAGE") {
             val groupPay = packet.getGroupMessagePayload()
-            if (groupPay != null && groupPay.privacy == "friends") return true
+            return groupPay != null && groupPay.privacy == "friends"
         }
+        // For engagement/actions on posts: check target post's privacy in local database
+        val targetPostId = when (packet.type) {
+            "DELETE_POST" -> packet.getDeletePostPayload()?.postId
+            "COMMENT" -> packet.getCommentPayload()?.postId
+            "EDIT_COMMENT" -> packet.getEditCommentPayload()?.postId
+            "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.postId
+            "REACTION" -> packet.getReactionPayload()?.postId
+            "VOTE" -> packet.getVotePayload()?.postId
+            "COMMENT_REACTION" -> {
+                val commId = packet.getCommentReactionPayload()?.commentId
+                commId?.let { transport?.repository?.context?.let { ctx -> com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).commentDao().getCommentById(it)?.postId } }
+            }
+            "COMMENT_VOTE" -> {
+                val commId = packet.getCommentVotePayload()?.commentId
+                commId?.let { transport?.repository?.context?.let { ctx -> com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).commentDao().getCommentById(it)?.postId } }
+            }
+            else -> null
+        }
+        if (!targetPostId.isNullOrBlank()) {
+            val postDao = transport?.repository?.context?.let { ctx ->
+                com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).postDao()
+            }
+            val targetPost = postDao?.getPostById(targetPostId)
+            if (targetPost != null) {
+                return targetPost.privacy == "friends"
+            }
+        }
+        // Fallback for originated broadcasts where hops is explicitly 1 for friends-only engagement
         if (packet.hops == 1) {
             val socialTypes = setOf(
-                "POST", "EDIT_POST", "DELETE_POST",
-                "COMMENT", "EDIT_COMMENT", "DELETE_COMMENT",
-                "REACTION", "VOTE", "COMMENT_REACTION", "COMMENT_VOTE",
-                "GROUP_MESSAGE"
+                "DELETE_POST", "COMMENT", "EDIT_COMMENT", "DELETE_COMMENT",
+                "REACTION", "VOTE", "COMMENT_REACTION", "COMMENT_VOTE"
             )
             if (packet.type in socialTypes) {
                 return true
@@ -469,12 +495,14 @@ object GossipService {
 
         if (isFriendsOnlyPacket(packet)) {
             val dao = peerDao
-            val peer = dao?.getPeerByPublicKey(senderId)
-            val contactSetting = transport?.repository?.getAppSetting("contact_identity_${senderId}")
-            val isTrustedDirect = peer != null && peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactSetting != "burnable"
-            if (!isTrustedDirect) {
-                Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/creator/burnable)")
-                return false
+            if (dao != null) {
+                val peer = dao.getPeerByPublicKey(senderId)
+                val contactSetting = transport?.repository?.getAppSetting("contact_identity_${senderId}")
+                val isTrustedDirect = peer != null && peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactSetting != "burnable"
+                if (!isTrustedDirect) {
+                    Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/creator/burnable)")
+                    return false
+                }
             }
         }
 
