@@ -857,13 +857,13 @@ class MeshSocialRepository(
     suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
-        val isTrustedDirectPeer = peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactIdentity != "burnable"
+        val isTrustedDirectPeer = peer.isTrusted && !peer.isTemporary && contactIdentity != "burnable"
 
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = myKeys.publicKeyB64
         val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
             if (post.privacy == "friends") {
-                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+                isTrustedDirectPeer && (post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == peer.publicKeyB64)
             } else {
                 true
             }

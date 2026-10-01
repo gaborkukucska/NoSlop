@@ -87,6 +87,38 @@ object GossipService {
         return false
     }
 
+    private suspend fun getTargetPostAuthor(packet: NetworkPacket): String? {
+        val targetPostId = when (packet.type) {
+            "DELETE_POST" -> packet.getDeletePostPayload()?.postId
+            "COMMENT" -> packet.getCommentPayload()?.postId
+            "EDIT_COMMENT" -> packet.getEditCommentPayload()?.postId
+            "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.postId
+            "REACTION" -> packet.getReactionPayload()?.postId
+            "VOTE" -> packet.getVotePayload()?.postId
+            "COMMENT_REACTION" -> {
+                val commId = packet.getCommentReactionPayload()?.commentId
+                commId?.let { transport?.repository?.context?.let { ctx -> com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).commentDao().getCommentById(it)?.postId } }
+            }
+            "COMMENT_VOTE" -> {
+                val commId = packet.getCommentVotePayload()?.commentId
+                commId?.let { transport?.repository?.context?.let { ctx -> com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).commentDao().getCommentById(it)?.postId } }
+            }
+            "POST" -> packet.getPostPayload()?.authorId
+            "EDIT_POST" -> packet.getEditPostPayload()?.authorId
+            else -> null
+        }
+        if (packet.type == "POST" || packet.type == "EDIT_POST") {
+            return targetPostId
+        }
+        if (!targetPostId.isNullOrBlank()) {
+            val postDao = transport?.repository?.context?.let { ctx ->
+                com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).postDao()
+            }
+            return postDao?.getPostById(targetPostId)?.authorPublicKeyB64
+        }
+        return null
+    }
+
     private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
     private val PEER_FAILURE_THRESHOLD = 3
     private val PEER_COOLDOWN_MS = 30 * 1000L // 30 seconds cooldown
@@ -498,9 +530,11 @@ object GossipService {
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 val contactSetting = transport?.repository?.getAppSetting("contact_identity_${senderId}")
-                val isTrustedDirect = peer != null && peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactSetting != "burnable"
-                if (!isTrustedDirect) {
-                    Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/creator/burnable)")
+                val isSeverableOrTemporary = peer == null || !peer.isTrusted || peer.isTemporary || contactSetting == "burnable"
+                val targetPostAuthor = getTargetPostAuthor(packet)
+                val isPostAuthor = targetPostAuthor != null && senderId == targetPostAuthor
+                if (isSeverableOrTemporary && !isPostAuthor) {
+                    Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/burnable)")
                     return false
                 }
             }
@@ -913,12 +947,14 @@ object GossipService {
         } else emptySet()
 
         val isFriendsOnly = isFriendsOnlyPacket(packet)
+        val targetPostAuthor = getTargetPostAuthor(packet)
         val activePeers = dao.getAllPeersList()
         val targetPeers = if (isFriendsOnly) {
             activePeers.filter { peer ->
                 val contactSetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
-                peer.isTrusted && !peer.isTemporary && !peer.isCreator &&
-                    contactSetting != "burnable" &&
+                val isSeverableOrTemporary = peer.isTemporary || contactSetting == "burnable"
+                val isPostAuthor = targetPostAuthor != null && peer.publicKeyB64 == targetPostAuthor
+                peer.isTrusted && (!isSeverableOrTemporary || isPostAuthor) &&
                     peer.publicKeyB64 != localPublicKeyB64 &&
                     peer.onionAddress.isNotBlank()
             }
