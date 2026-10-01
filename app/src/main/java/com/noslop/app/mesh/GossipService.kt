@@ -34,6 +34,33 @@ object GossipService {
     private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
     
     // Track persistent send failures to avoid spamming unreachable peers
+    fun isFriendsOnlyPacket(packet: NetworkPacket): Boolean {
+        if (packet.type == "POST") {
+            val postPay = packet.getPostPayload()
+            if (postPay != null && postPay.privacy == "friends") return true
+        }
+        if (packet.type == "EDIT_POST") {
+            val editPay = packet.getEditPostPayload()
+            if (editPay != null && editPay.privacy == "friends") return true
+        }
+        if (packet.type == "GROUP_MESSAGE") {
+            val groupPay = packet.getGroupMessagePayload()
+            if (groupPay != null && groupPay.privacy == "friends") return true
+        }
+        if (packet.hops == 1) {
+            val socialTypes = setOf(
+                "POST", "EDIT_POST", "DELETE_POST",
+                "COMMENT", "EDIT_COMMENT", "DELETE_COMMENT",
+                "REACTION", "VOTE", "COMMENT_REACTION", "COMMENT_VOTE",
+                "GROUP_MESSAGE"
+            )
+            if (packet.type in socialTypes) {
+                return true
+            }
+        }
+        return false
+    }
+
     private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
     private val PEER_FAILURE_THRESHOLD = 3
     private val PEER_COOLDOWN_MS = 30 * 1000L // 30 seconds cooldown
@@ -440,6 +467,17 @@ object GossipService {
             } catch (_: Exception) { false }
         } else false
 
+        if (isFriendsOnlyPacket(packet)) {
+            val dao = peerDao
+            val peer = dao?.getPeerByPublicKey(senderId)
+            val contactSetting = transport?.repository?.getAppSetting("contact_identity_${senderId}")
+            val isTrustedDirect = peer != null && peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactSetting != "burnable"
+            if (!isTrustedDirect) {
+                Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/creator/burnable)")
+                return false
+            }
+        }
+
         if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isInvidiousAnnounce && !isDirectedMessageForUs) {
             val dao = peerDao
             if (dao != null) {
@@ -632,12 +670,9 @@ object GossipService {
             pushToHubIfLinked(packet)
             
             var shouldForward = true
-            if (packet.type == "POST") {
-                val postPay = packet.getPostPayload()
-                if (postPay != null && postPay.privacy == "friends") {
-                    shouldForward = false
-                    Logger.info(TAG, "Not forwarding POST ${packet.id} because privacy is friends-only")
-                }
+            if (isFriendsOnlyPacket(packet)) {
+                shouldForward = false
+                Logger.info(TAG, "Not forwarding ${packet.type} ${packet.id} because privacy is friends-only")
             }
             
             if (shouldForward) {
@@ -764,6 +799,10 @@ object GossipService {
         val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) return
         
+        if (isFriendsOnlyPacket(packet)) {
+            return
+        }
+
         val currentHops = packet.hops ?: DEFAULT_MAX_HOPS
         if (currentHops <= 1) {
             return // Will expire on next hop
@@ -845,21 +884,32 @@ object GossipService {
             } catch (_: Exception) { emptySet() }
         } else emptySet()
 
+        val isFriendsOnly = isFriendsOnlyPacket(packet)
         val activePeers = dao.getAllPeersList()
-        val trustedPeers = activePeers.filter { (it.isTrusted || it.publicKeyB64 in groupMemberPubs) && it.publicKeyB64 != localPublicKeyB64 && it.onionAddress.isNotBlank() }
+        val targetPeers = if (isFriendsOnly) {
+            activePeers.filter { peer ->
+                val contactSetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
+                peer.isTrusted && !peer.isTemporary && !peer.isCreator &&
+                    contactSetting != "burnable" &&
+                    peer.publicKeyB64 != localPublicKeyB64 &&
+                    peer.onionAddress.isNotBlank()
+            }
+        } else {
+            activePeers.filter { (it.isTrusted || it.publicKeyB64 in groupMemberPubs) && it.publicKeyB64 != localPublicKeyB64 && it.onionAddress.isNotBlank() }
+        }
 
-        if (trustedPeers.isEmpty()) {
-            Logger.debug(TAG, "No trusted peers connected to broadcast packet ${packet.id}")
+        if (targetPeers.isEmpty()) {
+            Logger.debug(TAG, "No eligible peers connected to broadcast packet ${packet.id} (isFriendsOnly=$isFriendsOnly)")
             return
         }
 
-        Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${trustedPeers.size} trusted peers.")
+        Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${targetPeers.size} peers (isFriendsOnly=$isFriendsOnly).")
         
         // Only unsolicited background presence announcements skip peers in cooldown.
         // User posts, comments, reactions, votes, edits, deletes, and sync requests must always broadcast.
         val isPresenceAnnounce = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE"
 
-        for (peer in trustedPeers) {
+        for (peer in targetPeers) {
             if (isPresenceAnnounce && isPeerInCooldown(peer.onionAddress)) {
                 Logger.debug(TAG, "Skipping broadcast of ${packet.type} to ${peer.onionAddress}: peer in cooldown")
                 continue
@@ -868,7 +918,7 @@ object GossipService {
             scope.launch {
                 val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
                 val isCreatorTraffic = tx.repository.getAppSetting("is_creator_enabled") == "true"
-                val peerSenderId = if (peerIdentitySetting == "burnable" || (isCreatorTraffic && peer.isTemporary)) {
+                val peerSenderId = if (!isFriendsOnly && (peerIdentitySetting == "burnable" || (isCreatorTraffic && peer.isTemporary))) {
                     tx.repository.getBurnableIdentity()?.publicKeyB64 ?: packet.senderId
                 } else {
                     tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId

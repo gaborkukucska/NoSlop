@@ -581,7 +581,7 @@ class MeshSocialRepository(
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
         val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
-        val myKeys = (if (isCreator) getBurnableIdentity() else null) ?: getLocalIdentity() ?: return@withContext null
+        val myKeys = (if (isCreator && privacy != "friends") getBurnableIdentity() else null) ?: getLocalIdentity() ?: return@withContext null
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
         val id = postIdOverride ?: UUID.randomUUID().toString()
@@ -856,11 +856,21 @@ class MeshSocialRepository(
 
     suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
+        val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
+        val isTrustedDirectPeer = peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactIdentity != "burnable"
+
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = myKeys.publicKeyB64
-        val candidatePosts = postDao.getPostsSince(syncCutoff).toMutableList()
-        val olderOwnPosts = postDao.getPostsSince(0L).filter {
-            it.timestamp <= syncCutoff && it.authorPublicKeyB64 == myPub
+        val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
+            if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }.toMutableList()
+        val olderOwnPosts = postDao.getPostsSince(0L).filter { post ->
+            post.timestamp <= syncCutoff && post.authorPublicKeyB64 == myPub &&
+            (post.privacy != "friends" || isTrustedDirectPeer)
         }
         candidatePosts.addAll(olderOwnPosts)
         val inventory = candidatePosts.map { post ->

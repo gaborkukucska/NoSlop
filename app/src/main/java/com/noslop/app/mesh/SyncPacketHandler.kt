@@ -50,7 +50,19 @@ class SyncPacketHandler(
 
     suspend fun handleSyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val syncPay = packet.getSyncRequestPayload() ?: return false
-        val recentPosts = postDao.getPostsSince(syncPay.since).filter { !it.isOrphaned }
+        val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
+        val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
+        val isTrustedDirectPeer = requestingPeer != null && requestingPeer.isTrusted &&
+            !requestingPeer.isTemporary && !requestingPeer.isCreator && contactIdentity != "burnable"
+        val myPub = localKeys.publicKeyB64
+
+        val recentPosts = postDao.getPostsSince(syncPay.since).filter { post ->
+            !post.isOrphaned && if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }
         val postPayloads = recentPosts.map { post ->
             val rawMediaId = post.mediaUrl?.substringAfterLast("/")
             PostPayload(
@@ -79,14 +91,26 @@ class SyncPacketHandler(
             )
         }
 
-        // Also include comments and reactions for full sync
-        val recentComments = commentDao.getCommentsSince(syncPay.since)
+        // Also include comments and reactions for full sync (strictly exclude friends-only for non-direct peers)
+        val recentComments = commentDao.getCommentsSince(syncPay.since).filter { comment ->
+            val post = postDao.getPostById(comment.postId)
+            post != null && !post.isOrphaned && if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
-        val recentReactions = reactionDao.getReactionsSince(syncPay.since)
+        val recentReactions = reactionDao.getReactionsSince(syncPay.since).filter { reaction ->
+            val post = postDao.getPostById(reaction.postId)
+            post != null && !post.isOrphaned && if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
-
-        val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
             val maxBatchSize = 25
             val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
@@ -150,14 +174,26 @@ class SyncPacketHandler(
         val syncPay = packet.getInventorySyncRequestPayload() ?: return false
         val peerInventory = syncPay.inventory.associate { it.id to it.hash }
         
+        val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
+        val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
+        val isTrustedDirectPeer = requestingPeer != null && requestingPeer.isTrusted &&
+            !requestingPeer.isTemporary && !requestingPeer.isCreator && contactIdentity != "burnable"
+
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = localKeys.publicKeyB64
         val myBurnablePub = repo.getBurnableIdentity()?.publicKeyB64
-        val candidatePosts = postDao.getPostsSince(syncCutoff).filter { !it.isOrphaned }.toMutableList()
+        val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
+            !post.isOrphaned && if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }.toMutableList()
         // Always include own authored broadcasts regardless of age
-        val olderOwnPosts = postDao.getPostsSince(0L).filter {
-            !it.isOrphaned && it.timestamp <= syncCutoff &&
-            (it.authorPublicKeyB64 == myPub || (myBurnablePub != null && it.authorPublicKeyB64 == myBurnablePub))
+        val olderOwnPosts = postDao.getPostsSince(0L).filter { post ->
+            !post.isOrphaned && post.timestamp <= syncCutoff &&
+            (post.authorPublicKeyB64 == myPub || (myBurnablePub != null && post.authorPublicKeyB64 == myBurnablePub)) &&
+            (post.privacy != "friends" || isTrustedDirectPeer)
         }
         candidatePosts.addAll(olderOwnPosts)
         
@@ -199,13 +235,25 @@ class SyncPacketHandler(
             )
         }
 
-        val recentComments = commentDao.getCommentsSince(syncCutoff)
+        val recentComments = commentDao.getCommentsSince(syncCutoff).filter { comment ->
+            val post = postDao.getPostById(comment.postId)
+            post != null && !post.isOrphaned && if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
-        val recentReactions = reactionDao.getReactionsSince(syncCutoff)
+        val recentReactions = reactionDao.getReactionsSince(syncCutoff).filter { reaction ->
+            val post = postDao.getPostById(reaction.postId)
+            post != null && !post.isOrphaned && if (post.privacy == "friends") {
+                isTrustedDirectPeer && post.authorPublicKeyB64 == myPub
+            } else {
+                true
+            }
+        }
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
-
-        val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
             val maxBatchSize = 25
             val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
@@ -266,9 +314,18 @@ class SyncPacketHandler(
 
     suspend fun handleSyncResponse(packet: NetworkPacket): Boolean {
         val syncPay = packet.getSyncResponsePayload() ?: return false
+        val senderPeer = peerDao.getPeerByPublicKey(packet.senderId)
+        val senderContactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
+        val isSenderTrustedDirect = senderPeer != null && senderPeer.isTrusted &&
+            !senderPeer.isTemporary && !senderPeer.isCreator && senderContactIdentity != "burnable"
+
         val filterSettings = try { repo.getMeshFilterSettings() ?: MeshFilterSettings() } catch (e: Exception) { MeshFilterSettings() }
         var stored = 0
         for (postPay in syncPay.posts) {
+            if (postPay.privacy == "friends" && !isSenderTrustedDirect) {
+                Logger.warn(TAG, "Sync: Dropped incoming friends-only post ${postPay.id} from non-direct peer ${packet.senderId}")
+                continue
+            }
             if (postPay.clearnetUrl != null && !filterSettings.allowIncomingClearnetShares) {
                 Logger.info(TAG, "Sync: Mesh Filter dropped incoming clearnet share post ${postPay.id}")
                 continue
