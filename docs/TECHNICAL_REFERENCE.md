@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.6.6-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
+versionName `0.6.7-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1922,6 +1922,14 @@ In release builds (`assembleRelease`), R8 minification strips generic signatures
 1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
 2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
 3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
+
+### 17.20 Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (2026-10-01)
+
+A security and privacy hardening pass restricted Friends Only broadcasts and sync to authentic direct personal contacts:
+1. **Friends-Only Broadcast Isolation (`GossipService.kt`, `MeshSocialRepository.kt`)**: Previously, `GossipService.broadcast()` sent packets to all peers in `peerDao.getAllPeersList()` matching `isTrusted == true`. Because temporary contacts (follower pairing) and creator nodes could hold `isTrusted == true`, they were receiving Friends Only broadcasts. `GossipService.broadcast()` now evaluates `isFriendsOnlyPacket(packet)`. If true, `targetPeers` is strictly restricted to trusted direct personal connections (`peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactSetting != "burnable"`).
+2. **Primary Identity Authorship for Friends Content (`MeshSocialRepository.kt`)**: `composeAndBroadcastPost()` previously selected the burnable identity when `is_creator_enabled == true`. For Friends Only posts (`privacy == "friends"`), it now strictly authors and signs with the primary personal identity (`getLocalIdentity()`), ensuring friends verify the personal key and burnable follower identities are never stamped on private content.
+3. **Historical & Inventory Sync Privacy Isolation (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**: In `handleSyncRequest` and `handleInventorySyncRequest`, posts with `privacy == "friends"` and their comments/reactions are withheld from temporary contacts, creator nodes, and burnable connections. In `requestInventorySync`, outgoing inventory hashes omit friends-only posts when querying non-direct peers. In `handleSyncResponse`, incoming friends-only posts from non-direct peers are dropped.
+4. **Firewall Inbound & Forwarding Isolation (`GossipService.kt`)**: Inbound Friends Only packets from non-direct peers are blocked at the gossip firewall. `forwardPacket` unconditionally drops friends-only packets.
 
 ### 17.19 Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (2026-09-30)
 

@@ -161,6 +161,87 @@ class GossipServiceTest {
     }
 
     @Test
+    fun firewall_dropsFriendsOnlyFromTemporaryOrCreatorOrBurnable() = runBlocking {
+        val prevEnforce = MeshPacketVerifier.enforce
+        MeshPacketVerifier.enforce = false
+        try {
+            val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+            // Trusted direct friend
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("direct-friend") } returns com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, isTemporary = false, isCreator = false)
+            // Temporary contact
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("temp-contact") } returns com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, isTemporary = true, isCreator = false)
+            // Creator node
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("creator-node") } returns com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, isTemporary = false, isCreator = true)
+
+            val mockRepo = io.mockk.mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
+            io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_direct-friend") } returns null
+            io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_temp-contact") } returns "burnable"
+            io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_creator-node") } returns "burnable"
+
+            val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
+            io.mockk.every { mockTx.repository } returns mockRepo
+
+            GossipService.initialize(mockDao, mockTx, "local-key")
+
+            val friendsPostPayload = com.noslop.app.mesh.PostPayload(
+                id = "f-1", authorId = "any", authorName = "any", authorPublicKey = "any",
+                originNode = null, content = "friends only", timestamp = System.currentTimeMillis(),
+                privacy = "friends"
+            )
+            val jsonPayload = com.google.gson.Gson().toJsonTree(friendsPostPayload)
+
+            val packetFromFriend = NetworkPacket(id = "p-1", hops = 1, senderId = "direct-friend", type = "POST", payload = jsonPayload)
+            val packetFromTemp = NetworkPacket(id = "p-2", hops = 1, senderId = "temp-contact", type = "POST", payload = jsonPayload)
+            val packetFromCreator = NetworkPacket(id = "p-3", hops = 1, senderId = "creator-node", type = "POST", payload = jsonPayload)
+
+            assertTrue("Direct friend can send friends-only post", GossipService.processIncoming(packetFromFriend))
+            assertFalse("Temporary contact blocked from sending friends-only post", GossipService.processIncoming(packetFromTemp))
+            assertFalse("Creator node blocked from sending friends-only post", GossipService.processIncoming(packetFromCreator))
+        } finally {
+            MeshPacketVerifier.enforce = prevEnforce
+        }
+    }
+
+    @Test
+    fun broadcast_excludesTemporaryContactsAndCreatorNodesForFriendsOnly() = runBlocking {
+        val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+        val friendPeer = com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, isTemporary = false, isCreator = false)
+        val tempPeer = com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, isTemporary = true, isCreator = false)
+        val creatorPeer = com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, isTemporary = false, isCreator = true)
+
+        io.mockk.coEvery { mockDao.getAllPeersList() } returns listOf(friendPeer, tempPeer, creatorPeer)
+
+        val mockRepo = io.mockk.mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
+        io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_direct-friend") } returns null
+        io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_temp-contact") } returns "burnable"
+        io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_creator-node") } returns "burnable"
+        io.mockk.coEvery { mockRepo.getAppSetting("hub_deployment_status") } returns null
+
+        val sentOnions = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
+        io.mockk.every { mockTx.repository } returns mockRepo
+        io.mockk.coEvery { mockTx.sendPacket(capture(sentOnions), any(), any()) } returns true
+
+        GossipService.initialize(mockDao, mockTx, "local-key")
+
+        val friendsPostPayload = com.noslop.app.mesh.PostPayload(
+            id = "f-bcast", authorId = "local-key", authorName = "me", authorPublicKey = "local-key",
+            originNode = null, content = "friends only broadcast", timestamp = System.currentTimeMillis(),
+            privacy = "friends"
+        )
+        val friendsPacket = NetworkPacket(id = "p-bcast", hops = 1, senderId = "local-key", type = "POST", payload = com.google.gson.Gson().toJsonTree(friendsPostPayload))
+
+        GossipService.broadcast(friendsPacket)
+
+        // Allow launched coroutines to complete
+        kotlinx.coroutines.delay(100)
+
+        assertTrue("Direct friend must receive friends-only broadcast", sentOnions.contains("friend.onion"))
+        assertFalse("Temporary contact must NOT receive friends-only broadcast", sentOnions.contains("temp.onion"))
+        assertFalse("Creator node must NOT receive friends-only broadcast", sentOnions.contains("creator.onion"))
+    }
+
+    @Test
     fun firewall_respectsMeshFilters() = runBlocking {
         val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
         io.mockk.coEvery { mockDao.getPeerByPublicKey("trusted") } returns com.noslop.app.data.Peer("trusted", "", "", "", isTrusted = true)

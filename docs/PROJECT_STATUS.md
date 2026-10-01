@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-01) — Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (v0.6.7-alpha)
+
+* **Friends-Only Broadcast Isolation to Trusted Direct Peers (`GossipService.kt`, `MeshSocialRepository.kt`)**:
+  * Excluded temporary contacts (`peer.isTemporary`), creator nodes (`peer.isCreator`), and peers connected via severable temporary connections (`contact_identity_${peer.publicKeyB64} == "burnable"`) from receiving Friends Only mesh broadcasts (`privacy == "friends"` or `hops == 1`). Friends Only content is now strictly broadcast to authentic trusted direct personal peers (`peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactIdentity != "burnable"`).
+  * Outbound Friends Only broadcasts on Creator nodes now strictly use the node's primary personal identity (`getLocalIdentity()`) instead of the severable burnable creator identity, guaranteeing that personal friends recognize the author and that follower contacts are not leaked private broadcasts.
+  * In `GossipService.processIncoming()`, added firewall gating that drops any inbound Friends Only broadcast arriving from non-direct peers (temporary contacts, creator nodes, or burnable connections).
+  * Enforced that Friends Only packets are never forwarded across the mesh (`forwardPacket` drop and `shouldForward = false`).
+* **Friends-Only Historical & Inventory Sync Protection (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**:
+  * In `SyncPacketHandler.handleSyncRequest()` and `handleInventorySyncRequest()`, gated candidate posts, comments, and reactions: sync requests from temporary contacts, creator nodes, or severable burnable connections strictly filter out `privacy == "friends"` posts and their engagement data.
+  * In `SyncPacketHandler.handleSyncResponse()`, incoming Friends Only posts from non-direct peers are dropped.
+  * In `MeshSocialRepository.requestInventorySync()`, outgoing inventory hash lists filter out Friends Only posts when synchronizing with non-direct peers, preventing the leaking of private post IDs or hashes to temporary contacts and creator nodes.
+* **Test Suite Expansion (`GossipServiceTest.kt`)**:
+  * Added unit test coverage in `GossipServiceTest.kt` asserting that `GossipService.broadcast()` excludes temporary contacts and creator nodes when sending Friends Only broadcasts, and verifying that `processIncoming()` blocks incoming Friends Only broadcasts from temporary, creator, or burnable peers.
+
 ## Completed Changes (2026-09-30) — Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (v0.6.6-alpha)
 
 * **Tor Circuit Bootstrap SOCKS Gating & Deadlock Prevention (`MeshTransport.kt`, `TorService.kt`)**:

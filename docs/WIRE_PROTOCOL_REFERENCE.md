@@ -161,6 +161,11 @@ Notes:
 - On multi-identity Creator Nodes, outbound `POST` broadcasts dynamically stamp `senderId`
   with either the burnable identity public key (for temporary follower contacts) or main identity public key
   (for personal contacts), ensuring recipient firewalls accept the packet.
+- **Friends-Only Broadcast Isolation**: Outbound packets for friends-only broadcasts (`POST` with `privacy = "friends"`,
+  and `EDIT_POST`, `DELETE_POST`, `COMMENT`, `REACTION`, etc. with `hops = 1`) are strictly isolated to trusted
+  direct peer connections (`isTrusted && !isTemporary && !isCreator && contactSetting != "burnable"`). Temporary
+  contacts and creator nodes connected via severable temporary connections are excluded from broadcast distribution
+  and historical/inventory sync.
 - Rows 21–23 (the `GROUP_*` family): all three carry a signature and all
   three verify it. `GROUP_INVITE` and `GROUP_DELETE` verify against the
   `adminPublicKeyB64` in the payload, and `GROUP_DELETE` additionally
