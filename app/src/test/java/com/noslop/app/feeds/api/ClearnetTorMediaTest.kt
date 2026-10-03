@@ -70,8 +70,8 @@ class ClearnetTorMediaTest {
             "formats": [
               {
                 "itag": 18,
-                "url": "https://rr5---sn.googlevideo.com/videoplayback?expire=123&clen=350000000",
-                "contentLength": "350000000"
+                "url": "https://rr5---sn.googlevideo.com/videoplayback?expire=123&clen=950000000",
+                "contentLength": "950000000"
               }
             ]
           }
@@ -149,12 +149,12 @@ class ClearnetTorMediaTest {
         val testVideoId = "simulatedFailoverTest"
         val initialNonce = YouTubeInternalClient.getStreamNonce(testVideoId)
 
-        // Simulate 2 failed client configs tripping the circuit escape
-        val exitBlockedThreshold = 2
+        // Simulate 4 failed client configs tripping the circuit escape
+        val exitBlockedThreshold = 4
         var refusedCount = 0
         var rotated = false
 
-        for (attempt in 1..2) {
+        for (attempt in 1..4) {
             refusedCount++
             if (refusedCount >= exitBlockedThreshold) {
                 YouTubeInternalClient.advanceStreamNonce(testVideoId)

@@ -442,8 +442,8 @@ object YouTubeInternalClient {
         return payload
     }
 
-    // Evaluate up to 2 configs before advancing circuit nonce
-    private const val EXIT_BLOCKED_THRESHOLD = 2
+    // Evaluate up to 4 configs before advancing circuit nonce (ensures ANDROID_VR format 18 is evaluated)
+    private const val EXIT_BLOCKED_THRESHOLD = 4
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -519,8 +519,11 @@ object YouTubeInternalClient {
                 if (isTor) {
                     val clen = obj.get("contentLength")?.asString?.toLongOrNull()
                         ?: Regex("[?&]clen=(\\d+)").find(pair.first)?.groupValues?.get(1)?.toLongOrNull()
-                    if (clen != null && clen > 250L * 1024 * 1024) {
-                        Logger.warn(TAG, "Skipping stream format (itag=${pair.second}, size=${clen / (1024 * 1024)}MB) exceeding 250MB Tor ceiling")
+                    // Format 18 (360p muxed) is already the lowest bitrate video format YouTube provides.
+                    // Allow up to 800MB (approx. 3.5 hours of 360p video) so normal full-length videos don't fail.
+                    val maxAllowedBytes = if (pair.second == 18) 800L * 1024 * 1024 else 400L * 1024 * 1024
+                    if (clen != null && clen > maxAllowedBytes) {
+                        Logger.warn(TAG, "Skipping stream format (itag=${pair.second}, size=${clen / (1024 * 1024)}MB) exceeding ${maxAllowedBytes / (1024 * 1024)}MB Tor ceiling")
                         return@mapNotNull null
                     }
                     if (pair.first.contains("gcr=ir", ignoreCase = true) || pair.first.contains("gcr=sy", ignoreCase = true) || pair.first.contains("gcr=cu", ignoreCase = true)) {

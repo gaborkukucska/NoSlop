@@ -1081,7 +1081,8 @@ private fun ExoVideoPlayer(
 
                 if (delta > 0L || hasRecentNetworkBytes) com.noslop.app.tor.TorService.noteMediaProgress()
                 // True advancement: either decoded timeline advance OR active byte transfer over Tor socket
-                val isAdvancing = delta > 0L || hasRecentNetworkBytes
+                // During active BUFFERING, require meaningful buffer advancement (not just tiny trickle bytes)
+                val isAdvancing = if (isBuffering) (delta >= 1000L || bytesDelta > 32 * 1024L) else (delta > 0L || hasRecentNetworkBytes)
                 stalledSamples = if (isAdvancing) 0 else (stalledSamples + 1)
                 Logger.info(
                     PLAYBACK_DIAG_TAG,
@@ -1090,7 +1091,7 @@ private fun ExoVideoPlayer(
                         "delta=${delta}ms bytesRecv=${networkBytesReceivedInSession / 1024}KB pct=${p.bufferedPercentage} " +
                         "playWhenReady=${p.playWhenReady} stalledFor=${stalledSamples * 2}s (bufTime=${continuousBufferingSamples * 2}s) | $rawUrl"
                 )
-                if (stalledSamples == 5 || continuousBufferingSamples == 10) {
+                if (stalledSamples == 5 || continuousBufferingSamples == 8) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "NO PROGRESS for 10s — buffer has not advanced. | $rawUrl"
@@ -1098,9 +1099,10 @@ private fun ExoVideoPlayer(
                 }
 
                 // Mid-stream or initial stall recovery over Tor.
-                // Allow 26s (13 samples with 0 bytes transferred) on Tor
-                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 13 else 5
-                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= 25)
+                // Escape after 22s of stalls or 24s (12 samples) of continuous buffering on Tor
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 11 else 5
+                val continuousBufferingCeiling = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 12 else 8
+                val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= continuousBufferingCeiling)
                 if (isStalled && url.contains("googlevideo") && canRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
