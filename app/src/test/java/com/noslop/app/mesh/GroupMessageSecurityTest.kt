@@ -143,6 +143,28 @@ class GroupMessageSecurityTest {
     }
 
     @Test
+    fun groupUpdate_canonicalSigning_roundTrips() {
+        val timestamp = 1700000000L
+        val updatePayloadToSign = CryptoService.encodeForSigning(
+            groupId, "Updated Title", admin.publicKeyB64, timestamp.toString(),
+            alice.publicKeyB64, "", "", "New Desc", "avatarB64", "true", "true"
+        )
+        val sig = CryptoService.sign(updatePayloadToSign, admin.privateKeyB64)
+        assertTrue(CryptoService.verify(updatePayloadToSign, sig, admin.publicKeyB64))
+    }
+
+    @Test
+    fun groupLeave_canonicalSigning_verified() {
+        val timestamp = 1700000000L
+        val leavePayloadToSign = CryptoService.encodeForSigning(
+            groupId, "", alice.publicKeyB64, timestamp.toString(),
+            "", alice.publicKeyB64, "", "", "", "", ""
+        )
+        val sig = CryptoService.sign(leavePayloadToSign, alice.privateKeyB64)
+        assertTrue(CryptoService.verify(leavePayloadToSign, sig, alice.publicKeyB64))
+    }
+
+    @Test
     fun storeAndForward_queue_enqueue_flush_delete_cycle() = kotlinx.coroutines.runBlocking {
         val pendingMsg = PendingGroupMessage(
             groupId = groupId,

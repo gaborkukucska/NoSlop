@@ -621,11 +621,6 @@ object GossipService {
         // real packet it was impersonating.
         markProcessed(packetId)
 
-        // F18: Update peer liveness and clear failure cooldown ONLY after packet has survived authentication
-        peerDao?.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
-            recordSendSuccess(it)
-        }
-
         // 4.5. Mesh Filters (Incoming)
         val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()
         if (packet.type == "REACTION" || packet.type == "VOTE" || 

@@ -337,8 +337,19 @@ class SyncPacketHandler(
             val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
             val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
             val sig = postPay.signature ?: ""
-            val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.clearnetUrl == null
-            val isValid = CryptoService.verify(payloadCanonical, sig, postPay.authorId) ||
+
+            if (postPay.mediaMetadata != null && postPay.mediaId != postPay.mediaMetadata.id) {
+                Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — mediaId/metadata mismatch")
+                continue
+            }
+            if (postPay.mediaId != null && postPay.mediaMetadata == null) {
+                Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — mediaId present without mediaMetadata")
+                continue
+            }
+
+            val isCanonical = CryptoService.verify(payloadCanonical, sig, postPay.authorId)
+            val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.mediaMetadata == null && postPay.clearnetUrl == null
+            val isValid = isCanonical ||
                 (isLegacySafe && (
                     CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
                     CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
@@ -353,22 +364,6 @@ class SyncPacketHandler(
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
 
-            // F06: Transactional checks for existing post ownership, tombstone, and newer timestamp
-            val existingPost = postDao.getPostById(postPay.id)
-            if (existingPost != null) {
-                if (existingPost.isOrphaned) {
-                    Logger.debug(TAG, "Sync: Skipping orphaned post ${postPay.id} — already deleted locally")
-                    continue
-                }
-                if (existingPost.authorPublicKeyB64 != postPay.authorId) {
-                    Logger.warn(TAG, "Sync: Rejecting post ${postPay.id} — author mismatch with existing post")
-                    continue
-                }
-                if (existingPost.timestamp >= postPay.timestamp) {
-                    Logger.debug(TAG, "Sync: Skipping stale post ${postPay.id}")
-                    continue
-                }
-            }
             val post = MeshPost(
                 id = postPay.id,
                 authorPublicKeyB64 = postPay.authorId,
@@ -388,7 +383,11 @@ class SyncPacketHandler(
                 clearnetMediaType = postPay.clearnetMediaType,
                 mediaSize = postPay.mediaMetadata?.size ?: 0L
             )
-            postDao.insertPost(post)
+            val inserted = postDao.insertPostSafely(post)
+            if (!inserted) {
+                Logger.debug(TAG, "Sync: Dropping post ${postPay.id} — already deleted, author mismatch, or older timestamp")
+                continue
+            }
             
             if (postPay.mediaMetadata != null) {
                 com.noslop.app.mesh.MediaManager.checkAndAutoDownload(

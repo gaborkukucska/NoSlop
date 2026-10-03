@@ -48,8 +48,19 @@ class PostPacketHandler(
         val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
         val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
         val sig = postPay.signature ?: ""
-        val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.clearnetUrl == null
-        val isValid = CryptoService.verify(payloadCanonical, sig, postPay.authorId) ||
+        // R05: Enforce strict mediaId == mediaMetadata.id consistency
+        if (postPay.mediaMetadata != null && postPay.mediaId != postPay.mediaMetadata.id) {
+            Logger.warn(TAG, "Rejected POST ${postPay.id}: mediaMetadata.id does not match mediaId")
+            return false
+        }
+        if (postPay.mediaId != null && postPay.mediaMetadata == null) {
+            Logger.warn(TAG, "Rejected POST ${postPay.id}: mediaId present without mediaMetadata")
+            return false
+        }
+
+        val isCanonical = CryptoService.verify(payloadCanonical, sig, postPay.authorId)
+        val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.mediaMetadata == null && postPay.clearnetUrl == null
+        val isValid = isCanonical ||
             (isLegacySafe && (
                 CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
                 CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
@@ -76,23 +87,6 @@ class PostPacketHandler(
             }
         }
 
-        // F06: Prevent resurrection of orphaned post, cross-author collision, or stale replay
-        val existingPost = postDao.getPostById(postPay.id)
-        if (existingPost != null) {
-            if (existingPost.isOrphaned) {
-                Logger.debug(TAG, "Dropping POST ${postPay.id}: post is already deleted/tombstoned")
-                return true
-            }
-            if (existingPost.authorPublicKeyB64 != postPay.authorId) {
-                Logger.warn(TAG, "Rejecting POST ${postPay.id}: author mismatch with existing post")
-                return false
-            }
-            if (existingPost.timestamp >= postPay.timestamp) {
-                Logger.debug(TAG, "Dropping stale POST ${postPay.id}: existing post is newer or equal")
-                return true
-            }
-        }
-
         val resolvedOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
         val meshPost = MeshPost(
             id = postPay.id,
@@ -115,7 +109,12 @@ class PostPacketHandler(
             isOrphaned = false,
             mediaSize = postPay.mediaMetadata?.size ?: 0L
         )
-        postDao.insertPost(meshPost)
+        // R07: Transactional and atomic post insertion
+        val inserted = postDao.insertPostSafely(meshPost)
+        if (!inserted) {
+            Logger.debug(TAG, "Dropping POST ${postPay.id}: post exists with newer timestamp, is orphaned, or author mismatch")
+            return true
+        }
 
         // New Broadcast Notifications
         val myKeys = repo.getLocalIdentity()
@@ -179,10 +178,15 @@ class PostPacketHandler(
 
     suspend fun handleEditPost(packet: NetworkPacket): Boolean {
         val editPay = packet.getEditPostPayload() ?: return false
+        if (editPay.mediaMetadata != null && editPay.mediaId != editPay.mediaMetadata.id) {
+            Logger.warn(TAG, "Rejected EDIT_POST ${editPay.postId}: mediaMetadata.id does not match mediaId")
+            return false
+        }
+
         val effectivePrivacy = editPay.privacy ?: "public"
         val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64,
-            effectivePrivacy, editPay.mediaId
+            effectivePrivacy, editPay.mediaId, editPay.clearnetUrl
         )
         val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
@@ -191,7 +195,7 @@ class PostPacketHandler(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString()
         )
         val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
-        val isLegacySafe = effectivePrivacy == "public" && editPay.mediaId == null
+        val isLegacySafe = effectivePrivacy == "public" && editPay.mediaId == null && editPay.mediaMetadata == null && editPay.clearnetUrl == null
         val isValid = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId) ||
             (isLegacySafe && (
                 CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId) ||
@@ -202,32 +206,29 @@ class PostPacketHandler(
 
         val existingPost = postDao.getPostById(editPay.postId)
         if (existingPost != null) {
-            if (existingPost.authorPublicKeyB64 != editPay.authorId) {
-                Logger.warn(TAG, "Rejected EDIT_POST: Author mismatch")
-                return false
-            }
-            if (!existingPost.isOrphaned && editPay.timestamp >= existingPost.timestamp) {
-                val peer = peerDao.getPeerByPublicKey(editPay.authorId)
-                val resolvedOnion = editPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
-                val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" } ?: existingPost.mediaUrl
-                val newMediaType = editPay.mediaMetadata?.type ?: existingPost.mediaType
-                val newThumb = editPay.mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
-                val newSize = editPay.mediaMetadata?.size ?: existingPost.mediaSize
-                val newPrivacy = editPay.privacy ?: existingPost.privacy
+            val peer = peerDao.getPeerByPublicKey(editPay.authorId)
+            val resolvedOnion = editPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
+            val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" } ?: existingPost.mediaUrl
+            val newMediaType = editPay.mediaMetadata?.type ?: existingPost.mediaType
+            val newThumb = editPay.mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
+            val newSize = editPay.mediaMetadata?.size ?: existingPost.mediaSize
+            val newPrivacy = editPay.privacy ?: existingPost.privacy
 
-                postDao.updatePostDetails(
-                    id = editPay.postId,
-                    newContent = editPay.content,
-                    newTimestamp = editPay.timestamp,
-                    newSignature = editPay.signature,
-                    mediaUrl = newMediaUrl,
-                    mediaType = newMediaType,
-                    thumbnailB64 = newThumb,
-                    mediaSize = newSize,
-                    privacy = newPrivacy
-                )
+            val success = postDao.editPostSafely(
+                id = editPay.postId,
+                authorId = editPay.authorId,
+                newContent = editPay.content,
+                newTimestamp = editPay.timestamp,
+                newSignature = editPay.signature,
+                authorAvatarB64 = editPay.authorAvatarB64,
+                mediaUrl = newMediaUrl,
+                mediaType = newMediaType,
+                thumbnailB64 = newThumb,
+                mediaSize = newSize,
+                privacy = newPrivacy
+            )
+            if (success) {
                 Logger.info(TAG, "Applied EDIT_POST for ${editPay.postId}")
-
                 if (editPay.mediaMetadata != null) {
                     val peerOnion = editPay.mediaMetadata.originNode ?: peer?.onionAddress
                     MediaManager.checkAndAutoDownload(
@@ -237,6 +238,9 @@ class PostPacketHandler(
                         peerOnion
                     )
                 }
+            } else {
+                Logger.warn(TAG, "Rejected EDIT_POST for ${editPay.postId}: author mismatch, post orphaned, or older timestamp")
+                return false
             }
         }
         return true
@@ -250,16 +254,9 @@ class PostPacketHandler(
         val isValid = CryptoService.verify(payloadToVerify, deletePay.signature, deletePay.authorId)
         if (!isValid) return false
 
-        val existingPost = postDao.getPostById(deletePay.postId)
-        if (existingPost != null) {
-            if (existingPost.authorPublicKeyB64 != deletePay.authorId) {
-                Logger.warn(TAG, "Rejected DELETE_POST: Author mismatch")
-                return false
-            }
-            if (!existingPost.isOrphaned && deletePay.timestamp >= existingPost.timestamp) {
-                postDao.markPostOrphaned(deletePay.postId)
-                Logger.info(TAG, "Applied DELETE_POST for ${deletePay.postId}")
-            }
+        val success = postDao.deletePostSafely(deletePay.postId, deletePay.authorId, deletePay.timestamp)
+        if (success) {
+            Logger.info(TAG, "Applied DELETE_POST for ${deletePay.postId}")
         }
         return true
     }

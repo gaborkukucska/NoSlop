@@ -247,7 +247,8 @@ data class EditPostPayload(
     val signature: String,
     @SerializedName("media_id") val mediaId: String? = null,
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
-    val privacy: String? = null
+    val privacy: String? = null,
+    @SerializedName("clearnet_url") val clearnetUrl: String? = null
 )
 
 @Keep

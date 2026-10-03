@@ -255,6 +255,49 @@ class WireProtocolTest {
     }
 
     @Test
+    fun editPostPayload_roundTrips() {
+        val edit = EditPostPayload(
+            postId = "post-1",
+            authorId = "author-xyz",
+            authorAvatarB64 = "b64avatar",
+            content = "Updated post content",
+            timestamp = 1700000000000L,
+            signature = "sig-edit-123",
+            mediaId = "media-456",
+            mediaMetadata = MediaMetadata(
+                id = "media-456",
+                type = "image",
+                mimeType = "image/jpeg",
+                size = 1024,
+                chunkCount = 1
+            ),
+            privacy = "friends",
+            clearnetUrl = "https://example.com/story"
+        )
+        val packet = NetworkPacket(
+            senderId = "author-xyz",
+            type = "EDIT_POST",
+            payload = gson.toJsonTree(edit)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getEditPostPayload()
+        assertNotNull(extracted)
+        assertEquals("post-1", extracted?.postId)
+        assertEquals("author-xyz", extracted?.authorId)
+        assertEquals("b64avatar", extracted?.authorAvatarB64)
+        assertEquals("Updated post content", extracted?.content)
+        assertEquals("sig-edit-123", extracted?.signature)
+        assertEquals("media-456", extracted?.mediaId)
+        assertEquals("friends", extracted?.privacy)
+        assertEquals("https://example.com/story", extracted?.clearnetUrl)
+
+        val json = gson.toJson(edit)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("post_id"))
+        assertTrue(obj.has("author_id"))
+        assertTrue(obj.has("clearnet_url"))
+    }
+
+    @Test
     fun followPayload_roundTrips() {
         val follow = FollowPayload(
             followedPublicKeyB64 = "node-target",

@@ -303,10 +303,11 @@ EOF_SHIM
                 chmod 700 "${'$'}HOME/.hainet_deploy_tmp/sudo"
                 export PATH="${'$'}HOME/.hainet_deploy_tmp:${'$'}PATH"
                 
+                DEPLOY_DIR="${'$'}PWD"
                 cleanup() {
                     rm -f "${'$'}HOME/.hainet_askpass"
                     rm -rf "${'$'}HOME/.hainet_deploy_tmp"
-                    rm -f gen_tor.py reset_ident.py hai/hub_config.json
+                    rm -f "${'$'}DEPLOY_DIR/gen_tor.py" "${'$'}DEPLOY_DIR/reset_ident.py" "${'$'}DEPLOY_DIR/hai/hub_config.json" "${'$'}DEPLOY_DIR/hs_ed25519_secret_key"
                     unset SUDO_PASS
                     unset SUDO_ASKPASS
                 }
@@ -553,6 +554,8 @@ EOF
                 
                 # Step 3: Write config from base64 payload
                 echo '[STEP 3/5] Writing hub configuration...'
+                touch hai/hub_config.json
+                chmod 600 hai/hub_config.json
                 echo "$configB64" | base64 -d > hai/hub_config.json
                 echo "  Config written (${'$'}(wc -c < hai/hub_config.json) bytes)"
                 

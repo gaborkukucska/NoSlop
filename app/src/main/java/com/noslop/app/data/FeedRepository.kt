@@ -33,6 +33,14 @@ import kotlinx.coroutines.withContext
  *
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
+sealed class FeedSyncResult {
+    object Success : FeedSyncResult()
+    object AlreadyRunning : FeedSyncResult()
+    object Disabled : FeedSyncResult()
+    data class RetryableFailure(val reason: String) : FeedSyncResult()
+    data class FatalError(val exception: Throwable) : FeedSyncResult()
+}
+
 internal fun matchesNegativeKeywords(text: String, negativeKeywords: List<String>): Boolean {
     val lowerText = text.lowercase()
     for (kw in negativeKeywords) {
@@ -59,14 +67,14 @@ class FeedRepository(
     private val OFFICIAL_NEGATIVE_KEYWORDS =
         listOf("nude", "porn", "murder", "rape", "gore", "nsfw", "sex", "kill")
 
-    private val isSyncRunning = java.util.concurrent.atomic.AtomicBoolean(false)
-    private var activeSyncJob: kotlinx.coroutines.Job? = null
+    private val syncMutex = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var activeSyncDeferred: kotlinx.coroutines.Deferred<FeedSyncResult>? = null
     private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     fun cancelSync() {
-        activeSyncJob?.cancel()
-        activeSyncJob = null
-        isSyncRunning.set(false)
+        val deferred = activeSyncDeferred
+        activeSyncDeferred = null
+        deferred?.cancel()
         _feedBuildStatus.value = ""
     }
 
@@ -207,28 +215,51 @@ class FeedRepository(
      * Loops over active feed sources and parses them, storing items in Room database.
      * Then runs the public API pipeline for content enrichment.
      */
-    suspend fun refreshFeeds(awaitCompletion: Boolean = false) = withContext(Dispatchers.IO) {
+    suspend fun refreshFeeds(awaitCompletion: Boolean = false): FeedSyncResult = withContext(Dispatchers.IO) {
         if (!isAggregatorEnabled()) {
             Logger.info(TAG, "Aggregator is disabled via settings. Skipping feed fetch.")
-            return@withContext
-        }
-        if (!isSyncRunning.compareAndSet(false, true)) {
-            if (awaitCompletion) {
-                activeSyncJob?.join()
-            } else {
-                Logger.info(TAG, "Feed sync is already in progress. Skipping redundant request.")
-            }
-            return@withContext
+            return@withContext FeedSyncResult.Disabled
         }
 
+        val deferred = syncMutex.withLock {
+            val existing = activeSyncDeferred
+            if (existing != null && existing.isActive) {
+                if (awaitCompletion) {
+                    existing
+                } else {
+                    Logger.info(TAG, "Feed sync is already in progress. Skipping redundant request.")
+                    return@withContext FeedSyncResult.AlreadyRunning
+                }
+            } else {
+                val newDeferred = syncScope.async(Dispatchers.IO) {
+                    executeSyncPass()
+                }
+                activeSyncDeferred = newDeferred
+                newDeferred
+            }
+        }
+
+        return@withContext if (awaitCompletion) {
+            try {
+                deferred.await()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FeedSyncResult.FatalError(e)
+            }
+        } else {
+            FeedSyncResult.Success
+        }
+    }
+
+    private suspend fun executeSyncPass(): FeedSyncResult {
         try {
             ensureDefaultApiSourcesExist()
 
             // --- NOSLOP_TOR_GATE_UI_V1 ---
             if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
                 Logger.warn(TAG, "Tor not ready — skipping feed sync rather than fetching outside Tor")
-                isSyncRunning.set(false)
-                return@withContext
+                return FeedSyncResult.RetryableFailure("Tor not ready")
             }
 
             Logger.info(TAG, "Starting feed synchronization...")
@@ -237,8 +268,7 @@ class FeedRepository(
 
             if (activeSources.isEmpty() && userCategories.isEmpty()) {
                 Logger.warn(TAG, "No active feed sources or categories found to sync")
-                isSyncRunning.set(false)
-                return@withContext
+                return FeedSyncResult.Success
             }
 
             val hasExistingItems = feedDao.getItemCount() > 0
@@ -266,7 +296,6 @@ class FeedRepository(
             val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(parallelism)
 
             val shuffledCreators = creatorKeywordList.shuffled()
-            // F08: When items exist, do not drop creators from background fetch
             val (rampUpCreators, remainingCreators) = if (!hasExistingItems) {
                 val count = 4.coerceAtMost(shuffledCreators.size)
                 shuffledCreators.take(count) to shuffledCreators.drop(count)
@@ -281,14 +310,14 @@ class FeedRepository(
                 val firstRss = rssSources.firstOrNull()
                 if (firstRss != null) {
                     rssSources.remove(firstRss)
-                    rampUpJobs.add(async(dispatcher) {
+                    rampUpJobs.add(syncScope.async(dispatcher) {
                         _feedBuildStatus.value = "Preparing your feed..."
                         fetchRssSource(firstRss, allNegative)
                     })
                 }
 
                 for (creator in rampUpCreators) {
-                    rampUpJobs.add(async(dispatcher) {
+                    rampUpJobs.add(syncScope.async(dispatcher) {
                         _feedBuildStatus.value = "Preparing your feed..."
                         fetchCreatorVideos(creator)
                     })
@@ -297,7 +326,7 @@ class FeedRepository(
                 val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
                 for (cat in priorityCats) {
                     activeCategories.remove(cat)
-                    rampUpJobs.add(async(dispatcher) {
+                    rampUpJobs.add(syncScope.async(dispatcher) {
                         _feedBuildStatus.value = "Preparing your feed..."
                         fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
                     })
@@ -307,76 +336,64 @@ class FeedRepository(
                 _feedBuildStatus.value = ""
             }
 
-            // --- Phase 2 & 3: Background Sync tracked in activeSyncJob (F09) ---
-            val bgJob = syncScope.launch(dispatcher) {
+            // --- Phase 2 & 3: Background Sync (R08: owned by activeSyncDeferred) ---
+            for (source in rssSources) {
+                while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                    kotlinx.coroutines.delay(2000L)
+                }
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    kotlinx.coroutines.delay(1000L)
+                } else {
+                    kotlinx.coroutines.delay(250L)
+                }
                 try {
-                    for (source in rssSources) {
-                        while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
-                            kotlinx.coroutines.delay(2000L)
-                        }
-                        if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                            kotlinx.coroutines.delay(1000L)
-                        } else {
-                            kotlinx.coroutines.delay(250L)
-                        }
-                        try {
-                            fetchRssSource(source, allNegative)
-                        } catch (e: Exception) {
-                            if (e is kotlinx.coroutines.CancellationException) throw e
-                            Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
-                        }
-                    }
-
-                    for (category in activeCategories) {
-                        while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
-                            kotlinx.coroutines.delay(2000L)
-                        }
-                        if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                            kotlinx.coroutines.delay(1200L)
-                        }
-                        try {
-                            fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
-                        } catch (e: Exception) {
-                            if (e is kotlinx.coroutines.CancellationException) throw e
-                            Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
-                        }
-                    }
-
-                    for (creator in remainingCreators) {
-                        if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                            kotlinx.coroutines.delay(1800L)
-                        } else {
-                            kotlinx.coroutines.delay(300L)
-                        }
-                        try {
-                            fetchCreatorVideos(creator)
-                        } catch (e: Exception) {
-                            if (e is kotlinx.coroutines.CancellationException) throw e
-                            Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
-                        }
-                    }
+                    fetchRssSource(source, allNegative)
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    Logger.warn(TAG, "Background sync exception: ${e.message}")
-                } finally {
-                    _feedBuildStatus.value = ""
-                    isSyncRunning.set(false)
-                    activeSyncJob = null
-                    Logger.info(TAG, "Feed background synchronization completed.")
+                    Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
                 }
             }
 
-            activeSyncJob = bgJob
-
-            if (awaitCompletion) {
-                bgJob.join()
+            for (category in activeCategories) {
+                while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                    kotlinx.coroutines.delay(2000L)
+                }
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    kotlinx.coroutines.delay(1200L)
+                }
+                try {
+                    fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
+                }
             }
+
+            for (creator in remainingCreators) {
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    kotlinx.coroutines.delay(1800L)
+                } else {
+                    kotlinx.coroutines.delay(300L)
+                }
+                try {
+                    fetchCreatorVideos(creator)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
+                }
+            }
+
+            Logger.info(TAG, "Feed background synchronization completed.")
+            return FeedSyncResult.Success
         } catch (e: Exception) {
-            _feedBuildStatus.value = ""
-            isSyncRunning.set(false)
-            activeSyncJob = null
             if (e is kotlinx.coroutines.CancellationException) throw e
-            Logger.error(TAG, "Feed sync setup/ramp-up failed: ${e.message}")
+            Logger.error(TAG, "Feed sync setup/execution failed: ${e.message}")
+            return FeedSyncResult.RetryableFailure(e.message ?: "Sync failed")
+        } finally {
+            _feedBuildStatus.value = ""
+            syncMutex.withLock {
+                activeSyncDeferred = null
+            }
         }
     }
 

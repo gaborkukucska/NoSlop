@@ -340,6 +340,7 @@ at render time.
 | `media_id`? | String | ID of updated media attachment, if present |
 | `media_metadata`? | Object | Media descriptor object, if present |
 | `privacy`? | String | `"public"` (hops=6) or `"friends"` (hops=1) |
+| `clearnet_url`? | String | Clearnet URL anchor if editing a shared post |
 
 ### DELETE_POST
 **Type:** `DELETE_POST` · class `DeletePostPayload`

@@ -120,7 +120,10 @@ private val sourceCache = ConcurrentHashMap<String, CachedSource>(64)
 fun invalidateAllOnRouteTransition() {
     sourceCache.clear()
     PreloadManager.evictAll()
-    Logger.info("VIDEO_ROUTE", "Invalidated all cached sources and preloaded players on network route transition")
+    try {
+        coil.Coil.imageLoader(com.noslop.app.NoSlopApp.repository.context).memoryCache?.clear()
+    } catch (_: Exception) {}
+    Logger.info("VIDEO_ROUTE", "Invalidated all cached sources, preloaded players, and image memory caches on network route transition")
 }
 
 // Re-resolve this far BEFORE the stated expiry, so a slow handshake or a
@@ -659,9 +662,23 @@ fun VideoPlayer(
         }
     }
 
+    var lastTorRouting by remember(url) { mutableStateOf(isTorRouting) }
     LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible, activeVisible, isTorRouting) {
         // Offscreen next slide is warmed by PreloadManager; VideoPlayer only resolves for the visible slide
         if (!isVisible && !activeVisible) return@LaunchedEffect
+
+        // R14: Active player teardown on route change (do not early return!)
+        val routeChanged = (isTorRouting != lastTorRouting)
+        if (routeChanged) {
+            lastTorRouting = isTorRouting
+            Logger.info("VIDEO_ROUTE", "Network route changed to isTorRouting=$isTorRouting for $url — tearing down active player")
+            source = null
+            isVideoReady = false
+            directPlaybackFailed = false
+            retryTrigger++
+            return@LaunchedEffect
+        }
+
         // If retryTrigger was reset to 0 after stable playback, do NOT re-resolve or kill the player
         if (retryTrigger == 0 && isVideoReady && source != null) return@LaunchedEffect
         val forceRefresh = retryTrigger > 0

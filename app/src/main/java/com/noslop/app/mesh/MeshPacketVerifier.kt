@@ -108,6 +108,9 @@ object MeshPacketVerifier {
 
         // --- PostPacketHandler ---
         "POST" -> packet.getPostPayload()?.let { p ->
+            if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) return@let null
+            if (p.mediaId != null && p.mediaMetadata == null) return@let null
+
             val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 p.privacy, p.mediaId, p.clearnetUrl
@@ -122,7 +125,7 @@ object MeshPacketVerifier {
             val pipeWithAvatar = "${p.id}|${p.authorId}|${p.content}|${p.timestamp}|${p.authorAvatarB64}"
             val sig = p.signature
             val signer = p.authorId
-            val isLegacySafe = p.privacy == "public" && p.mediaId == null && p.clearnetUrl == null
+            val isLegacySafe = p.privacy == "public" && p.mediaId == null && p.mediaMetadata == null && p.clearnetUrl == null
             val matchedPayload = when {
                 sig != null && com.noslop.app.crypto.CryptoService.verify(encCanonical, sig, signer) -> encCanonical
                 isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
@@ -135,10 +138,12 @@ object MeshPacketVerifier {
         }
 
         "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
+            if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) return@let null
+
             val effectivePrivacy = p.privacy ?: "public"
             val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
-                effectivePrivacy, p.mediaId
+                effectivePrivacy, p.mediaId, p.clearnetUrl
             )
             val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
@@ -149,7 +154,7 @@ object MeshPacketVerifier {
             val pipe = "${p.postId}|${p.authorId}|${p.content}|${p.timestamp}"
             val sig = p.signature
             val signer = p.authorId
-            val isLegacySafe = effectivePrivacy == "public" && p.mediaId == null
+            val isLegacySafe = effectivePrivacy == "public" && p.mediaId == null && p.mediaMetadata == null && p.clearnetUrl == null
             val matched = when {
                 sig != null && com.noslop.app.crypto.CryptoService.verify(encCanonical, sig, signer) -> encCanonical
                 isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar

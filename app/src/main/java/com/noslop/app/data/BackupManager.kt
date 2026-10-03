@@ -167,10 +167,17 @@ object BackupManager {
                     Logger.warn(TAG, "Failed to export identity JSON: ${e.message}")
                 }
 
-                // F10: Export decrypted group chat messages into portable backup JSON
+                // F10 / R11: Export decrypted group chat messages streaming into portable backup JSON
+                var tempGroupMsgsFile: File? = null
                 try {
                     val db = NoSlopDatabase.getDatabase(context)
-                    val groupMsgsArray = org.json.JSONArray()
+                    var exportedCount = 0
+                    var failedDecryptCount = 0
+                    tempGroupMsgsFile = File(tempDir, "group_msgs_${System.currentTimeMillis()}.json")
+                    val writer = java.io.BufferedWriter(java.io.OutputStreamWriter(java.io.FileOutputStream(tempGroupMsgsFile), Charsets.UTF_8))
+                    val jsonWriter = com.google.gson.stream.JsonWriter(writer)
+                    jsonWriter.beginArray()
+
                     db.openHelper.readableDatabase.query(
                         "SELECT id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId FROM chat_messages WHERE chatWithPeerPub LIKE '%-%' OR chatWithPeerPub IN (SELECT groupId FROM group_chats)"
                     ).use { cursor ->
@@ -187,29 +194,37 @@ object BackupManager {
 
                             val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decryptOrNull(ciphertext, nonce, groupId, id)
                             if (plaintext != null) {
-                                val item = org.json.JSONObject().apply {
-                                    put("id", id)
-                                    put("groupId", groupId)
-                                    put("senderPub", senderPub)
-                                    put("plaintext", plaintext)
-                                    put("timestamp", ts)
-                                    if (!mediaId.isNullOrBlank()) put("mediaId", mediaId)
-                                    if (!mediaType.isNullOrBlank()) put("mediaType", mediaType)
-                                    if (!replyTo.isNullOrBlank()) put("replyToMessageId", replyTo)
-                                }
-                                groupMsgsArray.put(item)
+                                jsonWriter.beginObject()
+                                jsonWriter.name("id").value(id)
+                                jsonWriter.name("groupId").value(groupId)
+                                jsonWriter.name("senderPub").value(senderPub)
+                                jsonWriter.name("plaintext").value(plaintext)
+                                jsonWriter.name("timestamp").value(ts)
+                                if (!mediaId.isNullOrBlank()) jsonWriter.name("mediaId").value(mediaId)
+                                if (!mediaType.isNullOrBlank()) jsonWriter.name("mediaType").value(mediaType)
+                                if (!replyTo.isNullOrBlank()) jsonWriter.name("replyToMessageId").value(replyTo)
+                                jsonWriter.endObject()
+                                exportedCount++
+                            } else {
+                                failedDecryptCount++
                             }
                         }
                     }
-                    if (groupMsgsArray.length() > 0) {
-                        val tempGroupMsgsFile = File(context.cacheDir, "group_messages_backup.json")
-                        tempGroupMsgsFile.writeText(groupMsgsArray.toString(), Charsets.UTF_8)
+                    jsonWriter.endArray()
+                    jsonWriter.close()
+
+                    if (failedDecryptCount > 0) {
+                        Logger.warn(TAG, "Group message export: $failedDecryptCount message(s) could not be decrypted with current key")
+                    }
+
+                    if (exportedCount > 0) {
                         addToZip(zos, tempGroupMsgsFile, "group_messages_backup.json")
-                        tempGroupMsgsFile.delete()
-                        Logger.info(TAG, "Exported ${groupMsgsArray.length()} portable group message(s) to archive")
+                        Logger.info(TAG, "Exported $exportedCount portable group message(s) to archive")
                     }
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Failed exporting portable group messages: ${e.message}")
+                } finally {
+                    tempGroupMsgsFile?.delete()
                 }
 
                 // Add API keys as JSON for cross-device portability
@@ -491,22 +506,71 @@ object BackupManager {
                     }
                 }
 
-                // Verify database integrity in staging area before committing (F13)
+                // 1. Verify database integrity in staging area before committing (F13 / R09)
                 if (hasStagedDb) {
                     val stagedDbFile = File(stageDir, "database.db")
                     try {
                         val testDb = android.database.sqlite.SQLiteDatabase.openDatabase(
                             stagedDbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
                         )
-                        testDb.rawQuery("PRAGMA quick_check", null).use { it.moveToFirst() }
+                        val checkResult = testDb.rawQuery("PRAGMA quick_check", null).use { cursor ->
+                            if (cursor.moveToFirst()) cursor.getString(0) else "failed"
+                        }
                         testDb.close()
+                        if (!checkResult.equals("ok", ignoreCase = true)) {
+                            Logger.error(TAG, "Staged database failed integrity check: $checkResult")
+                            return false
+                        }
                     } catch (dbEx: Exception) {
                         Logger.error(TAG, "Staged database failed integrity check: ${dbEx.message}")
                         return false
                     }
                 }
 
-                // Commit: Safely close active Room database only right before replacing files (F13)
+                // 2. Validate staged identity JSON (if present) BEFORE touching live target
+                var parsedIdentityObj: org.json.JSONObject? = null
+                if (hasPortableIdentity) {
+                    val stagedIdFile = File(stageDir, "identity_backup.json")
+                    try {
+                        val jsonStr = stagedIdFile.readText(Charsets.UTF_8)
+                        val obj = org.json.JSONObject(jsonStr)
+                        if (!obj.has("publicKeyB64") || !obj.has("privateKeyB64") ||
+                            !obj.has("encPublicKeyB64") || !obj.has("encPrivateKeyB64")) {
+                            Logger.error(TAG, "Staged identity JSON is missing required key material")
+                            return false
+                        }
+                        parsedIdentityObj = obj
+                    } catch (idEx: Exception) {
+                        Logger.error(TAG, "Staged identity JSON is malformed: ${idEx.message}")
+                        return false
+                    }
+                }
+
+                // 3. Validate staged API keys JSON (if present)
+                var parsedApiObj: org.json.JSONObject? = null
+                val stagedApi = File(stageDir, "api_keys_backup.json")
+                if (stagedApi.exists()) {
+                    try {
+                        parsedApiObj = org.json.JSONObject(stagedApi.readText(Charsets.UTF_8))
+                    } catch (apiEx: Exception) {
+                        Logger.warn(TAG, "Staged api_keys_backup.json is malformed: ${apiEx.message}")
+                    }
+                }
+
+                // 4. Validate staged group messages JSON (if present)
+                var parsedGroupMsgsArray: org.json.JSONArray? = null
+                if (!stagedGroupMessagesJson.isNullOrBlank()) {
+                    try {
+                        parsedGroupMsgsArray = org.json.JSONArray(stagedGroupMessagesJson)
+                    } catch (gmEx: Exception) {
+                        Logger.error(TAG, "Staged group_messages_backup.json is malformed: ${gmEx.message}")
+                        return false
+                    }
+                }
+
+                // --- COMMIT PHASE (All validations passed) ---
+
+                // Commit 1: Safely close active Room database only right before replacing files (F13 / R09)
                 if (hasStagedDb) {
                     NoSlopDatabase.closeInstance()
                     val targetDb = context.getDatabasePath(DB_NAME)
@@ -515,11 +579,9 @@ object BackupManager {
                     File(stageDir, "database.db").copyTo(targetDb, overwrite = true)
                 }
 
-                // F11: Restore portable credentials and make them authoritative
-                if (hasPortableIdentity) {
-                    val stagedIdFile = File(stageDir, "identity_backup.json")
-                    val jsonStr = stagedIdFile.readText(Charsets.UTF_8)
-                    val obj = org.json.JSONObject(jsonStr)
+                // Commit 2: F11 / R12: Restore portable credentials, clearing destination-only secrets
+                if (hasPortableIdentity && parsedIdentityObj != null) {
+                    val obj = parsedIdentityObj
 
                     val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                     if (secureFile.exists()) secureFile.delete()
@@ -534,8 +596,8 @@ object BackupManager {
                         androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                         androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                     )
-                    val edit = freshPrefs.edit()
-                        .putString("ed25519_private_key", obj.getString("privateKeyB64"))
+                    val edit = freshPrefs.edit().clear() // R12: Clear existing destination keys first!
+                    edit.putString("ed25519_private_key", obj.getString("privateKeyB64"))
                         .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
                         .putString("pub_ed25519", obj.getString("publicKeyB64"))
                         .putString("pub_enc", obj.getString("encPublicKeyB64"))
@@ -556,31 +618,37 @@ object BackupManager {
                             .putString("burnable_onion", bObj.getString("onionAddress"))
                             .putString("burnable_display_name", bObj.getString("displayName"))
                     }
-                    edit.apply()
-                    restoredKeystoreSealedIdentity = true
-                    Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
+                    val committed = edit.commit() // R12: Synchronous verified commit
+                    if (!committed) {
+                        Logger.error(TAG, "Failed committing restored identity into EncryptedSharedPreferences")
+                    } else {
+                        restoredKeystoreSealedIdentity = true
+                        Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
+                    }
                 } else {
                     // Legacy archive: Restore raw preferences
                     val rawPrefs = File(stageDir, "preferences.xml")
                     if (rawPrefs.exists()) {
                         rawPrefs.copyTo(File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml"), overwrite = true)
+                        restoredKeystoreSealedIdentity = true // R10: Mark legacy Keystore-sealed preference as restored!
                     }
                     val rawFallback = File(stageDir, "preferences_fallback.xml")
                     if (rawFallback.exists()) {
                         rawFallback.copyTo(File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml"), overwrite = true)
+                        restoredFallbackIdentity = true // R10: Mark fallback preference as restored!
                     }
                 }
 
-                // Restore API keys
-                val stagedApi = File(stageDir, "api_keys_backup.json")
-                if (stagedApi.exists()) {
-                    val jsonStr = stagedApi.readText(Charsets.UTF_8)
-                    val obj = org.json.JSONObject(jsonStr)
-                    val apiRepo = ApiKeyRepository(context)
-                    val keys = obj.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        apiRepo.setKey(k, obj.getString(k))
+                // Commit 3: Restore API keys, clearing destination keys (R12)
+                val apiRepo = ApiKeyRepository(context)
+                if (parsedApiObj != null) {
+                    val obj = parsedApiObj
+                    for (srv in ApiKeyRepository.SERVICES) {
+                        if (obj.has(srv.id)) {
+                            apiRepo.setKey(srv.id, obj.getString(srv.id))
+                        } else {
+                            apiRepo.setKey(srv.id, "") // Clear destination-only API key
+                        }
                     }
                 } else {
                     val stagedApiDir = File(stageDir, "api_keys")
@@ -591,23 +659,33 @@ object BackupManager {
                     }
                 }
 
-                // F10: Re-encrypt portable group chat messages using destination Keystore
-                if (!stagedGroupMessagesJson.isNullOrBlank()) {
+                // Commit 4: Re-encrypt portable group chat messages using destination Keystore (R11)
+                if (parsedGroupMsgsArray != null) {
                     try {
-                        val groupMsgsArray = org.json.JSONArray(stagedGroupMessagesJson)
+                        val groupMsgsArray = parsedGroupMsgsArray
                         val db = NoSlopDatabase.getDatabase(context)
+                        var reEncryptedCount = 0
                         for (idx in 0 until groupMsgsArray.length()) {
                             val item = groupMsgsArray.getJSONObject(idx)
                             val id = item.getString("id")
                             val groupId = item.getString("groupId")
+                            val senderPub = item.optString("senderPub", "")
                             val plaintext = item.getString("plaintext")
+                            val ts = item.optLong("timestamp", System.currentTimeMillis())
+                            val mediaId = item.optString("mediaId").takeIf { it.isNotBlank() }
+                            val mediaType = item.optString("mediaType").takeIf { it.isNotBlank() }
+                            val replyTo = item.optString("replyToMessageId").takeIf { it.isNotBlank() }
+
                             val (encCiphertext, ivB64) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext, groupId, id)
+
+                            // Use INSERT OR REPLACE so messages in logical backup are preserved even if raw DB lacked the row
                             db.openHelper.writableDatabase.execSQL(
-                                "UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?",
-                                arrayOf(encCiphertext, ivB64, id)
+                                "INSERT OR REPLACE INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                arrayOf(id, groupId, senderPub, encCiphertext, ivB64, ts, mediaId, mediaType, replyTo)
                             )
+                            reEncryptedCount++
                         }
-                        Logger.info(TAG, "Re-encrypted ${groupMsgsArray.length()} group message(s) under destination device Keystore key")
+                        Logger.info(TAG, "Re-encrypted $reEncryptedCount group message(s) under destination device Keystore key")
                     } catch (e: Exception) {
                         Logger.error(TAG, "Failed re-encrypting portable group messages: ${e.message}")
                     }
@@ -664,7 +742,7 @@ object BackupManager {
                         androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                         androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                     )
-                    freshPrefs.edit()
+                    freshPrefs.edit().clear() // R12: Clear existing destination keys first!
                         .putString("ed25519_private_key", derivedKeys.privateKeyB64)
                         .putString("enc_private_key", derivedKeys.encPrivateKeyB64)
                         .putString("mnemonic", cleanMnemonic)
@@ -676,7 +754,7 @@ object BackupManager {
                         .putString("display_name", derivedKeys.displayName)
                         .putString("onboarding_complete", "true")
                         .putString("identity_version", "2")
-                        .apply()
+                        .commit()
                     lastRestoreNeedsIdentityRecovery = false
                     Logger.info(TAG, "Identity deterministically re-derived and hardware-encrypted for new device.")
                 } catch (recEx: Exception) {

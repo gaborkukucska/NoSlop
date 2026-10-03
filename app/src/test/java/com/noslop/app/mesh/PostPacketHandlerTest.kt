@@ -48,11 +48,20 @@ class PostPacketHandlerTest {
     }
 
     /** Builds a POST packet whose signature covers [signedContent] but whose body carries [bodyContent]. */
-    private fun postPacket(signedContent: String, bodyContent: String = signedContent): NetworkPacket {
+    private fun postPacket(
+        signedContent: String,
+        bodyContent: String = signedContent,
+        privacy: String = "public",
+        mediaId: String? = null,
+        clearnetUrl: String? = null
+    ): NetworkPacket {
         val id = "post-1"
         val ts = 1_700_000_000_000L
         val signature = CryptoService.sign(
-            CryptoService.encodeForSigning(id, identity.publicKeyB64, signedContent, ts.toString(), null),
+            CryptoService.encodeForSigning(
+                id, identity.publicKeyB64, signedContent, ts.toString(), null,
+                privacy, mediaId, clearnetUrl
+            ),
             identity.privateKeyB64
         )
         val payload = PostPayload(
@@ -63,7 +72,11 @@ class PostPacketHandlerTest {
             originNode = null,
             content = bodyContent,
             timestamp = ts,
+            privacy = privacy,
             signature = signature,
+            mediaId = mediaId,
+            mediaMetadata = if (mediaId != null) MediaMetadata(id = mediaId, type = "image", mimeType = "image/jpeg", size = 100, chunkCount = 1) else null,
+            clearnetUrl = clearnetUrl
         )
         return NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(payload))
     }
@@ -97,5 +110,71 @@ class PostPacketHandlerTest {
         val packet = NetworkPacket(senderId = other.publicKeyB64, type = "POST", payload = Gson().toJsonTree(payload))
         assertFalse(handler.handlePost(packet))
         assertFalse(postDao.posts.containsKey("post-1"))
+    }
+
+    @Test
+    fun canonicalPost_withMediaAndClearnet_isAccepted() = runBlocking {
+        val packet = postPacket(
+            signedContent = "article with image",
+            privacy = "friends",
+            mediaId = "media-1",
+            clearnetUrl = "https://example.com/test"
+        )
+        assertTrue(handler.handlePost(packet))
+        assertTrue(postDao.posts.containsKey("post-1"))
+        val stored = postDao.posts["post-1"]
+        org.junit.Assert.assertEquals("friends", stored?.privacy)
+        org.junit.Assert.assertEquals("https://example.com/test", stored?.clearnetUrl)
+    }
+
+    @Test
+    fun post_withMismatchedMediaId_isRejected() = runBlocking {
+        val id = "post-mismatch"
+        val ts = 1_700_000_000_000L
+        val sig = CryptoService.sign(
+            CryptoService.encodeForSigning(id, identity.publicKeyB64, "content", ts.toString(), null, "public", "id-1", null),
+            identity.privateKeyB64
+        )
+        val payload = PostPayload(
+            id = id,
+            authorId = identity.publicKeyB64,
+            authorName = "alice",
+            authorPublicKey = identity.publicKeyB64,
+            originNode = null,
+            content = "content",
+            timestamp = ts,
+            privacy = "public",
+            signature = sig,
+            mediaId = "id-1",
+            mediaMetadata = MediaMetadata(id = "DIFFERENT-id", type = "image", mimeType = "image/jpeg", size = 100, chunkCount = 1)
+        )
+        val packet = NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(payload))
+        assertFalse("Mismatched mediaMetadata must be rejected", handler.handlePost(packet))
+        assertFalse(postDao.posts.containsKey(id))
+    }
+
+    @Test
+    fun handleEditPost_withCanonicalSignature_updatesPostDetails() = runBlocking {
+        // First insert original post
+        val origPacket = postPacket("original content")
+        assertTrue(handler.handlePost(origPacket))
+
+        // Now edit post with canonical 8-field signature
+        val editTs = 1_700_000_001_000L
+        val editSig = CryptoService.sign(
+            CryptoService.encodeForSigning("post-1", identity.publicKeyB64, "new content", editTs.toString(), null, "public", null, null),
+            identity.privateKeyB64
+        )
+        val editPayload = EditPostPayload(
+            postId = "post-1",
+            authorId = identity.publicKeyB64,
+            content = "new content",
+            timestamp = editTs,
+            signature = editSig,
+            privacy = "public"
+        )
+        val editPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "EDIT_POST", payload = Gson().toJsonTree(editPayload))
+        assertTrue(handler.handleEditPost(editPacket))
+        org.junit.Assert.assertEquals("new content", postDao.posts["post-1"]?.content)
     }
 }

@@ -170,8 +170,52 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
-    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy WHERE id = :id")
-    suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String)
+    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, authorAvatarB64 = :authorAvatarB64, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy WHERE id = :id")
+    suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, authorAvatarB64: String?, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String)
+
+    @Transaction
+    suspend fun insertPostSafely(post: MeshPost): Boolean {
+        val existing = getPostById(post.id)
+        if (existing != null) {
+            if (existing.isOrphaned) return false
+            if (existing.authorPublicKeyB64 != post.authorPublicKeyB64) return false
+            if (existing.timestamp >= post.timestamp) return false
+        }
+        insertPost(post)
+        return true
+    }
+
+    @Transaction
+    suspend fun editPostSafely(
+        id: String,
+        authorId: String,
+        newContent: String,
+        newTimestamp: Long,
+        newSignature: String,
+        authorAvatarB64: String?,
+        mediaUrl: String?,
+        mediaType: String?,
+        thumbnailB64: String?,
+        mediaSize: Long,
+        privacy: String
+    ): Boolean {
+        val existing = getPostById(id) ?: return false
+        if (existing.authorPublicKeyB64 != authorId) return false
+        if (existing.isOrphaned) return false
+        if (existing.timestamp > newTimestamp) return false
+        updatePostDetails(id, newContent, newTimestamp, newSignature, authorAvatarB64, mediaUrl, mediaType, thumbnailB64, mediaSize, privacy)
+        return true
+    }
+
+    @Transaction
+    suspend fun deletePostSafely(id: String, authorId: String, timestamp: Long): Boolean {
+        val existing = getPostById(id) ?: return false
+        if (existing.authorPublicKeyB64 != authorId) return false
+        if (existing.isOrphaned) return true
+        if (existing.timestamp > timestamp) return false
+        markPostOrphaned(id)
+        return true
+    }
 }
 
 @Dao

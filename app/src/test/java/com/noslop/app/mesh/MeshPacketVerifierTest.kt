@@ -49,7 +49,7 @@ class MeshPacketVerifierTest {
 
     @Test
     fun post_validSignatureAccepted_tamperedRejected() {
-        val expected = CryptoService.encodeForSigning("post-1", alice.publicKeyB64, "hello mesh", "1700000000", null)
+        val expected = CryptoService.encodeForSigning("post-1", alice.publicKeyB64, "hello mesh", "1700000000", null, "public", null, null)
         val good = PostPayload(
             id = "post-1",
             authorId = alice.publicKeyB64,
@@ -58,6 +58,7 @@ class MeshPacketVerifierTest {
             originNode = null,
             content = "hello mesh",
             timestamp = 1700000000L,
+            privacy = "public",
             signature = sign(expected)
         )
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("POST", good)))
@@ -73,7 +74,7 @@ class MeshPacketVerifierTest {
 
     @Test
     fun post_avatarIsAppendedToTheSignedString() {
-        val withAvatar = CryptoService.encodeForSigning("post-2", alice.publicKeyB64, "body", "42", "AVATARB64")
+        val withAvatar = CryptoService.encodeForSigning("post-2", alice.publicKeyB64, "body", "42", "AVATARB64", "public", null, null)
         val p = PostPayload(
             id = "post-2",
             authorId = alice.publicKeyB64,
@@ -83,6 +84,7 @@ class MeshPacketVerifierTest {
             originNode = null,
             content = "body",
             timestamp = 42L,
+            privacy = "public",
             signature = sign(withAvatar)
         )
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("POST", p)))
@@ -90,12 +92,12 @@ class MeshPacketVerifierTest {
 
     @Test
     fun editPost_dualMode_supportsEncodeForSigningAndPipe() {
-        val sEnc = CryptoService.encodeForSigning("post-1", alice.publicKeyB64, "edited", "1700000000", null)
-        val pEnc = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sEnc))
+        val sEnc = CryptoService.encodeForSigning("post-1", alice.publicKeyB64, "edited", "1700000000", null, "public", null, null)
+        val pEnc = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sEnc), privacy = "public")
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_POST", pEnc)))
 
         val sPipe = "post-1|${alice.publicKeyB64}|edited|1700000000"
-        val pPipe = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sPipe))
+        val pPipe = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sPipe), privacy = "public")
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_POST", pPipe)))
     }
 
@@ -191,6 +193,26 @@ class MeshPacketVerifierTest {
             signature = sign(s)
         )
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("IDENTITY_UPDATE", p)))
+    }
+
+    @Test
+    fun groupInvite_canonicalSignature_verified() {
+        val members = listOf(alice.publicKeyB64, mallory.publicKeyB64).sorted()
+        val s = CryptoService.encodeForSigning(
+            "grp-1", "My Group", alice.publicKeyB64, "1700000000",
+            members.joinToString(","), "true", "true"
+        )
+        val p = GroupInvitePayload(
+            groupId = "grp-1",
+            title = "My Group",
+            adminPublicKeyB64 = alice.publicKeyB64,
+            members = members,
+            allowMemberInvites = true,
+            allowMemberSelfRemove = true,
+            timestamp = 1700000000L,
+            signature = sign(s)
+        )
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("GROUP_INVITE", p)))
     }
 
     @Test

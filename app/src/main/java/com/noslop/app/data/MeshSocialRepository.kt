@@ -522,9 +522,12 @@ class MeshSocialRepository(
         val avatarB64 = userProfile.avatarB64
         val timestamp = System.currentTimeMillis()
 
+        val effectiveMediaId = mediaMetadata?.id ?: existingPost.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
+        val effectiveClearnetUrl = existingPost.clearnetUrl
+
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
             postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64,
-            privacy, mediaMetadata?.id
+            privacy, effectiveMediaId, effectiveClearnetUrl
         )
         val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
 
@@ -535,9 +538,10 @@ class MeshSocialRepository(
             content = newContent,
             timestamp = timestamp,
             signature = signature,
-            mediaId = mediaMetadata?.id,
+            mediaId = effectiveMediaId,
             mediaMetadata = mediaMetadata,
-            privacy = privacy
+            privacy = privacy,
+            clearnetUrl = effectiveClearnetUrl
         )
 
         val newMediaUrl = mediaMetadata?.id?.let { "noslop://${signingKey.onionAddress}/$it" } ?: existingPost.mediaUrl
@@ -545,11 +549,13 @@ class MeshSocialRepository(
         val newThumb = mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
         val newSize = mediaMetadata?.size ?: existingPost.mediaSize
 
-        postDao.updatePostDetails(
+        postDao.editPostSafely(
             id = postId,
+            authorId = signingKey.publicKeyB64,
             newContent = newContent,
             newTimestamp = timestamp,
             newSignature = signature,
+            authorAvatarB64 = avatarB64,
             mediaUrl = newMediaUrl,
             mediaType = newMediaType,
             thumbnailB64 = newThumb,

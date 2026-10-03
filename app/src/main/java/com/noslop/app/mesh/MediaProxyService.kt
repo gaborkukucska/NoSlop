@@ -89,12 +89,13 @@ object MediaProxyService {
     }
 
     private suspend fun handleHttpRequest(clientSocket: Socket) = withContext(Dispatchers.IO) {
-        if (activeConnections.get() >= MAX_ACTIVE_CONNECTIONS) {
+        val currentConnections = activeConnections.incrementAndGet()
+        if (currentConnections > MAX_ACTIVE_CONNECTIONS) {
+            activeConnections.decrementAndGet()
             Logger.warn(TAG, "Rejecting proxy request: max active connections ($MAX_ACTIVE_CONNECTIONS) reached")
             try { clientSocket.close() } catch (_: Exception) {}
             return@withContext
         }
-        activeConnections.incrementAndGet()
         try {
             clientSocket.soTimeout = 5000 // 5-second deadline for headers (F16)
             val input = clientSocket.getInputStream()
@@ -300,23 +301,49 @@ object MediaProxyService {
             var end = totalLength - 1
 
             var isPartial = false
-            if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=", ignoreCase = true)) {
-                val rangeSpec = rangeHeader.substringAfter("=").trim()
-                val parts = rangeSpec.split("-")
-                val startParsed = parts.getOrNull(0)?.toLongOrNull()
-                val endParsed = parts.getOrNull(1)?.toLongOrNull()
+            if (!rangeHeader.isNullOrBlank()) {
+                val headerValue = if (rangeHeader.startsWith("Range:", ignoreCase = true)) {
+                    rangeHeader.substringAfter(":").trim()
+                } else {
+                    rangeHeader.trim()
+                }
 
-                if (startParsed != null) {
-                    start = startParsed
-                    if (endParsed != null && endParsed in start until totalLength) {
-                        end = endParsed
+                if (headerValue.startsWith("bytes=", ignoreCase = true)) {
+                    val rangeSpec = headerValue.substringAfter("=").trim()
+                    if (rangeSpec.startsWith("-")) {
+                        // Suffix range: -N (last N bytes)
+                        val suffixLen = rangeSpec.removePrefix("-").toLongOrNull()
+                        if (suffixLen != null && suffixLen > 0) {
+                            start = maxOf(0L, totalLength - suffixLen)
+                            end = totalLength - 1
+                            isPartial = true
+                        }
+                    } else {
+                        val parts = rangeSpec.split("-")
+                        val startParsed = parts.getOrNull(0)?.toLongOrNull()
+                        val endParsed = parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.toLongOrNull()
+
+                        if (startParsed != null && startParsed in 0 until totalLength) {
+                            start = startParsed
+                            if (endParsed != null && endParsed in start until totalLength) {
+                                end = endParsed
+                            }
+                            isPartial = true
+                        }
                     }
-                    isPartial = true
                 }
             }
 
-            if (start > end || start >= totalLength) {
-                sendHttpError(output, 416, "Range Not Satisfiable")
+            if (start > end || start >= totalLength || (totalLength == 0L && isPartial)) {
+                val errorHeaders = """
+                    HTTP/1.1 416 Range Not Satisfiable
+                    Content-Range: bytes */$totalLength
+                    Content-Length: 0
+                    Connection: close
+                    
+                """.trimIndent().replace("\n", "\r\n") + "\r\n"
+                output.write(errorHeaders.toByteArray(Charsets.UTF_8))
+                output.flush()
                 return
             }
 
@@ -365,17 +392,17 @@ object MediaProxyService {
     }
 
     private fun readHttpHeaders(input: InputStream): List<String> {
-        val lines = mutableListOf<String>()
         val builder = java.lang.StringBuilder()
         var c: Int
         var totalBytes = 0
         val maxHeaderBytes = 16 * 1024 // 16 KB header limit (F16)
+        val deadline = System.currentTimeMillis() + 5000L // 5-second total header deadline (R16)
         try {
             while (input.read().also { c = it } != -1) {
                 builder.append(c.toChar())
                 totalBytes++
-                if (totalBytes >= maxHeaderBytes) {
-                    Logger.warn(TAG, "Header limit exceeded ($maxHeaderBytes bytes) — terminating request")
+                if (totalBytes >= maxHeaderBytes || System.currentTimeMillis() > deadline) {
+                    Logger.warn(TAG, "Header limit or deadline exceeded ($totalBytes bytes) — terminating request")
                     return emptyList()
                 }
                 if (builder.endsWith("\r\n\r\n")) {
@@ -384,9 +411,14 @@ object MediaProxyService {
             }
         } catch (e: Exception) {
             Logger.debug(TAG, "readHttpHeaders interrupted/timeout: ${e.message}")
+            return emptyList()
         }
-        val raw = builder.toString().trimEnd()
-        return if (raw.isEmpty()) emptyList() else raw.split("\r\n")
+        val raw = builder.toString()
+        if (!raw.endsWith("\r\n\r\n")) {
+            return emptyList()
+        }
+        val trimmed = raw.trimEnd()
+        return if (trimmed.isEmpty()) emptyList() else trimmed.split("\r\n")
     }
 
     private fun sendHttpError(output: OutputStream, code: Int, message: String) {

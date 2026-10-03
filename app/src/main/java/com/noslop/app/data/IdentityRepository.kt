@@ -52,7 +52,18 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             Logger.error(TAG, "EncryptedSharedPreferences failed on existing file (${e.message}). Quarantining unopenable file without destroying key material...")
             try {
                 val quarantine = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml.corrupt_${System.currentTimeMillis()}")
-                secureFile.renameTo(quarantine)
+                val renamed = secureFile.renameTo(quarantine)
+                if (renamed) {
+                    Logger.info(TAG, "Secure file quarantined to ${quarantine.name}. Attempting to re-initialize clean hardware Keystore preferences...")
+                    recovered = try {
+                        createEncryptedPrefs(context).also {
+                            Logger.info(TAG, "Successfully re-initialized hardware Keystore preferences after quarantine")
+                        }
+                    } catch (e2: Exception) {
+                        Logger.error(TAG, "Hardware Keystore is genuinely unavailable even after quarantine: ${e2.message}")
+                        null
+                    }
+                }
             } catch (renEx: Exception) {
                 Logger.error(TAG, "Failed to quarantine secure preference file: ${renEx.message}")
             }

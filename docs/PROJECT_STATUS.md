@@ -1,5 +1,34 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-04) — Protocol Canonicalization, Atomic Post Transactions, Task Ownership & Safe Recovery (v0.6.9-alpha)
+
+* **Post & Edit Canonical Signature Alignment (`MeshSocialRepository.kt`, `Packets.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`, `MeshPacketVerifier.kt`)**:
+  * Unified post and edit signing to 8 canonical fields (`id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl`), resolving R01 signature verification failures across historical inventory sync.
+  * Stored and updated `authorAvatarB64` in `PostDao.updatePostDetails` so avatars signed during post edits match the database entity upon sync serialization.
+  * Bounded legacy signature fallback strictly to public posts without attachments (`mediaId == null && mediaMetadata == null && clearnetUrl == null`), eliminating R05 downgrade and unauthenticated attachment injection vectors.
+* **Atomic Room Post Mutations (`Daos.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`)**:
+  * Introduced `@Transaction` operations in `PostDao` (`insertPostSafely`, `editPostSafely`, `deletePostSafely`), eliminating non-atomic check-then-insert race conditions between concurrent sync responses, deletions, and live broadcasts (R07).
+* **Canonical Group Updates, Invitations & Authority Enforcement (`NoSlopRepository.kt`, `HandshakePacketHandler.kt`, `MeshPacketVerifier.kt`)**:
+  * Synchronized wire fields with canonical signing representation for group updates and leaves, eliminating R02 rejection caused by omitted permission strings.
+  * Signed new-member invitations independently with `canonicalGroupInvitePayload`, resolving R03 where group update signatures were reused for group invites.
+  * Restricted legacy 4-field group signatures strictly to non-mutating updates, preventing unauthorized member or permission changes with captured admin signatures (R04).
+  * Bound group metadata, permissions, and authoritative membership updates in `handleGroupSync` strictly to verified admin signatures (`signerIsAdmin`), and required invite consent for unknown groups (R06).
+* **Synchronized Feed Task Lifecycle & WorkManager Outcome Reporting (`FeedRepository.kt`, `FeedSyncWorker.kt`, `NoSlopRepository.kt`)**:
+  * Coalesced setup, ramp-up, and background passes into a unified `activeSyncDeferred: Deferred<FeedSyncResult>` guarded by `syncMutex`, preventing workers from returning early before sync completes (R08).
+  * Propagated typed `FeedSyncResult` to `FeedSyncWorker`, returning `Result.retry()` on Tor unreadiness or setup failures.
+* **Safe Backup Validation, Staging Commit, Destination Secret Cleansing & Identity Recovery (`BackupManager.kt`, `IdentityRepository.kt`)**:
+  * Validated staged SQLite database integrity (`PRAGMA quick_check == "ok"`) and verified identity, API key, and group message schemas before committing live file replacements (R09).
+  * Marked legacy Keystore-sealed preference restores as `restoredKeystoreSealedIdentity = true`, restoring automatic cross-device deterministic recovery from mnemonics (R10).
+  * Streamed group message export via `JsonWriter` and restored messages with `INSERT OR REPLACE` to prevent history omission and RAM exhaustion (R11).
+  * Cleared destination preferences (`freshPrefs.edit().clear()`) before writing restored keys, preventing destination-only secrets from surviving restores (R12).
+  * Checked `renameTo` boolean result and attempted fresh hardware Keystore re-initialization when quarantining corrupted preference stores (R13).
+* **Active Player Teardown on Route Change, MediaProxy Range Support & Deployer Path Hygiene (`VideoPlayer.kt`, `MediaProxyService.kt`, `GossipService.kt`, `SshDeployer.kt`)**:
+  * Tracked `lastTorRouting` in `VideoPlayer.kt` and tore down active players on route transitions rather than early-returning, eliminating direct clearnet streaming leaks when enabling Tor (R14).
+  * Stripped `Range:` prefixes before evaluating `bytes=`, added support for prefix, suffix, and standard byte ranges with HTTP 416 responses for unsatisfiable ranges (R15).
+  * Enforced atomic connection admission (`incrementAndGet() > MAX_ACTIVE_CONNECTIONS`) and 5-second total header deadlines with strict CRLF-CRLF termination in `MediaProxyService` (R16).
+  * Removed unauthenticated liveness resets in `GossipService.processIncoming` (R17).
+  * Used absolute directory paths in SSH deployment cleanup traps and set `chmod 600` on secret files before writing (R18).
+
 ## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
 
 * **Tor Video Playback Optimization & 800MB Stream Ceiling (`YouTubeInternalClient.kt`, `VideoPlayer.kt`, `ClearnetTorMediaTest.kt`)**:

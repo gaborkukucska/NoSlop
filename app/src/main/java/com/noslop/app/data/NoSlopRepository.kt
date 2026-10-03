@@ -1109,11 +1109,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val signingKey = if (isAdmin) adminKeys else myKeys
         val sortedAdded = addedMembers.sorted().joinToString(",")
         val sortedRemoved = removedMembers.sorted().joinToString(",")
-        val sortedBanned = effectiveBannedList.sorted().joinToString(",")
+        val sortedBanned = if (isAdmin) effectiveBannedList.sorted().joinToString(",") else ""
+
+        val wireTitle = if (isAdmin) effectiveTitle else null
+        val wireDesc = if (isAdmin) effectiveDescription else null
+        val wireAvatar = if (isAdmin) effectiveAvatarB64 else null
+        val wireAllowInvites = if (isAdmin) effectiveAllowInvites else null
+        val wireAllowSelfRemove = if (isAdmin) effectiveAllowSelfRemove else null
+
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            groupId, effectiveTitle, signingKey.publicKeyB64, timestamp.toString(),
-            sortedAdded, sortedRemoved, sortedBanned, effectiveDescription, effectiveAvatarB64,
-            effectiveAllowInvites.toString(), effectiveAllowSelfRemove.toString()
+            groupId,
+            wireTitle ?: "",
+            signingKey.publicKeyB64,
+            timestamp.toString(),
+            sortedAdded,
+            sortedRemoved,
+            sortedBanned,
+            wireDesc ?: "",
+            wireAvatar ?: "",
+            wireAllowInvites?.toString() ?: "",
+            wireAllowSelfRemove?.toString() ?: ""
         )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         val allMembersForDetails = (newMembers + existing.adminPublicKeyB64).distinct()
@@ -1136,16 +1151,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
-            title = if (isAdmin) effectiveTitle else null,
-            avatarB64 = if (isAdmin) effectiveAvatarB64 else null,
-            description = if (isAdmin) effectiveDescription else null,
+            title = wireTitle,
+            avatarB64 = wireAvatar,
+            description = wireDesc,
             addedMembers = addedMembers.takeIf { it.isNotEmpty() },
             removedMembers = removedMembers.takeIf { it.isNotEmpty() },
             bannedMembers = if (isAdmin && effectiveBannedList.isNotEmpty()) effectiveBannedList else null,
             memberHandles = memberHandlesMap,
             memberDetails = memberDetailsMap,
-            allowMemberInvites = if (isAdmin) effectiveAllowInvites else null,
-            allowMemberSelfRemove = if (isAdmin) effectiveAllowSelfRemove else null,
+            allowMemberInvites = wireAllowInvites,
+            allowMemberSelfRemove = wireAllowSelfRemove,
             timestamp = timestamp,
             signature = signature
         )
@@ -1174,6 +1189,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // Newly added members don't have the group yet, so they need a full
         // GROUP_INVITE (not GROUP_UPDATE which requires the group to exist).
         if (addedMembers.isNotEmpty()) {
+            val inviteTimestamp = System.currentTimeMillis()
+            val sortedNewMembers = newMembers.sorted().joinToString(",")
+            val invitePayloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                groupId, effectiveTitle, adminKeys.publicKeyB64, inviteTimestamp.toString(),
+                sortedNewMembers, existing.allowMemberInvites.toString(), existing.allowMemberSelfRemove.toString()
+            )
+            val inviteSig = com.noslop.app.crypto.CryptoService.sign(invitePayloadToSign, adminKeys.privateKeyB64)
+
             val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
                 groupId = groupId,
                 title = effectiveTitle,
@@ -1185,8 +1208,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 memberDetails = memberDetailsMap,
                 allowMemberInvites = existing.allowMemberInvites,
                 allowMemberSelfRemove = existing.allowMemberSelfRemove,
-                timestamp = timestamp,
-                signature = signature,
+                timestamp = inviteTimestamp,
+                signature = inviteSig,
                 adminOnion = adminKeys.onionAddress,
                 adminEncPublicKey = adminKeys.encPublicKeyB64
             )
@@ -1309,18 +1332,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val timestamp = System.currentTimeMillis()
         val sortedRemoved = finalRemoved.sorted().joinToString(",")
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            groupId, existing.title, signingKey.publicKeyB64, timestamp.toString(),
-            "", sortedRemoved, "", existing.description, existing.avatarB64,
-            existing.allowMemberInvites.toString(), existing.allowMemberSelfRemove.toString()
+            groupId, "", signingKey.publicKeyB64, timestamp.toString(),
+            "", sortedRemoved, "", "", "",
+            "", ""
         )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
-            title = existing.title,
-            avatarB64 = existing.avatarB64,
-            description = existing.description,
+            title = null,
+            avatarB64 = null,
+            description = null,
             addedMembers = null,
             removedMembers = finalRemoved,
+            bannedMembers = null,
+            memberHandles = null,
+            memberDetails = null,
+            allowMemberInvites = null,
+            allowMemberSelfRemove = null,
             timestamp = timestamp,
             signature = signature
         )
@@ -1883,7 +1911,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()
 
-    suspend fun refreshFeeds(awaitCompletion: Boolean = false) = feedRepository.refreshFeeds(awaitCompletion)
+    suspend fun refreshFeeds(awaitCompletion: Boolean = false): FeedSyncResult = feedRepository.refreshFeeds(awaitCompletion)
     suspend fun deleteYouTubeItems() = feedRepository.deleteYouTubeItems()
 
     suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =

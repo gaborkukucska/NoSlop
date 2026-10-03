@@ -698,7 +698,6 @@ class HandshakePacketHandler(
     } catch (e: Exception) { mutableListOf() }
 
     private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
-        val title = update.title ?: existing.title
         val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
         val sortedAdded = update.addedMembers?.sorted()?.joinToString(",") ?: ""
         val sortedRemoved = update.removedMembers?.sorted()?.joinToString(",") ?: ""
@@ -707,6 +706,10 @@ class HandshakePacketHandler(
         val allowSelfRemove = update.allowMemberSelfRemove?.toString() ?: ""
         val desc = update.description ?: ""
         val avatar = update.avatarB64 ?: ""
+        val title = update.title ?: ""
+
+        val hasMutations = sortedAdded.isNotEmpty() || sortedRemoved.isNotEmpty() || sortedBanned.isNotEmpty() ||
+            desc.isNotEmpty() || avatar.isNotEmpty() || allowInvites.isNotEmpty() || allowSelfRemove.isNotEmpty()
 
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
@@ -714,11 +717,16 @@ class HandshakePacketHandler(
                 update.groupId, title, candidate, update.timestamp.toString(),
                 sortedAdded, sortedRemoved, sortedBanned, desc, avatar, allowInvites, allowSelfRemove
             )
-            val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(update.groupId, title, candidate, update.timestamp.toString())
-            val pipePayload = "${update.groupId}|$title|$candidate|${update.timestamp}"
-            if (CryptoService.verify(canonicalPayload, update.signature, candidate) ||
-                CryptoService.verify(encodePayload, update.signature, candidate) ||
-                CryptoService.verify(pipePayload, update.signature, candidate)) return candidate
+            if (CryptoService.verify(canonicalPayload, update.signature, candidate)) return candidate
+
+            // F03/R04: Old 4-field signatures are strictly disallowed from authorizing mutations!
+            if (!hasMutations) {
+                val effectiveTitle = update.title ?: existing.title
+                val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(update.groupId, effectiveTitle, candidate, update.timestamp.toString())
+                val pipePayload = "${update.groupId}|$effectiveTitle|$candidate|${update.timestamp}"
+                if (CryptoService.verify(encodePayload, update.signature, candidate) ||
+                    CryptoService.verify(pipePayload, update.signature, candidate)) return candidate
+            }
         }
         return null
     }
@@ -1080,41 +1088,60 @@ class HandshakePacketHandler(
             return false
         }
 
-        // Authorized and validated: sync member peers
-        syncMemberPeers(sync.memberDetails)
-
         if (existing == null) {
-            db.groupChatDao().insertGroupChat(group)
-            Logger.info(TAG, "Received new group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
-            return true
+            val isMyGroup = group.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && group.adminPublicKeyB64 == burnable.publicKeyB64)
+            val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${group.groupId}") != null
+            if (isMyGroup) {
+                syncMemberPeers(sync.memberDetails)
+                db.groupChatDao().insertGroupChat(group)
+                Logger.info(TAG, "Received own group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
+                return true
+            } else if (hasPendingInvite) {
+                syncMemberPeers(sync.memberDetails)
+                Logger.info(TAG, "Updated pending invite directory for '${group.title}' via GROUP_SYNC")
+                return true
+            } else {
+                Logger.warn(TAG, "Rejected GROUP_SYNC for unknown group '${group.groupId}': no invite accepted")
+                return false
+            }
         }
 
-        val isAdmin = existing.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && existing.adminPublicKeyB64 == burnable.publicKeyB64)
+        // F04/R06: Check whether the SIGNER is the admin
         val signerIsAdmin = CryptoService.verify(encPayload, sync.signature, existing.adminPublicKeyB64) ||
             CryptoService.verify(pipePayload, sync.signature, existing.adminPublicKeyB64)
+
+        syncMemberPeers(sync.memberDetails)
 
         val bannedSet = existing.getBannedMembers().toSet()
         val existingMembers = parseMembers(existing.membersJson)
         val incomingFiltered = incomingMembersList.filter { it !in bannedSet }
-        val mergedMembers = (existingMembers + incomingFiltered).filter { it !in bannedSet }.distinct()
+
+        // R06: If signer is admin, admin snapshot is authoritative for membership.
+        // If signer is ordinary member, only add members if member invites are allowed; never overwrite admin state.
+        val mergedMembers = if (signerIsAdmin) {
+            incomingFiltered.distinct()
+        } else if (existing.allowMemberInvites) {
+            (existingMembers + incomingFiltered).distinct()
+        } else {
+            existingMembers
+        }
 
         val mergedHandles = existing.getMemberHandles().toMutableMap()
         group.getMemberHandles().forEach { (k, v) -> mergedHandles[k] = v }
 
-        val mergedGroup = if (isAdmin) {
-            // Admin keeps its own title, avatar, description and permissions; merges discovered members
-            existing.copy(
-                membersJson = com.google.gson.Gson().toJson(mergedMembers),
-                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles)
-            )
-        } else {
-            // Member updates metadata from admin/sync and merges member lists
+        val mergedGroup = if (signerIsAdmin) {
             existing.copy(
                 title = group.title,
                 description = group.description ?: existing.description,
                 avatarB64 = group.avatarB64 ?: existing.avatarB64,
                 allowMemberInvites = group.allowMemberInvites,
                 allowMemberSelfRemove = group.allowMemberSelfRemove,
+                membersJson = com.google.gson.Gson().toJson(mergedMembers),
+                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles)
+            )
+        } else {
+            // Non-admin signer cannot modify title, description, avatar, or permissions!
+            existing.copy(
                 membersJson = com.google.gson.Gson().toJson(mergedMembers),
                 memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles)
             )
