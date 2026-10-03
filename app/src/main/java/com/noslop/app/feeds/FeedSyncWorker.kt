@@ -14,7 +14,7 @@ class FeedSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 Logger.info("FEED_SYNC", "Video playback in progress — deferring background feed sync to protect Tor bandwidth")
                 return Result.retry()
             }
-            NoSlopApp.repository.refreshFeeds()
+            NoSlopApp.repository.refreshFeeds(awaitCompletion = true)
             Logger.info("FEED_SYNC", "Background WorkManager feed sync completed")
             Result.success()
         } catch (e: Exception) {

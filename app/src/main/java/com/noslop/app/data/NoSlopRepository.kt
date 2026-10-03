@@ -1883,7 +1883,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()
 
-    suspend fun refreshFeeds() = feedRepository.refreshFeeds()
+    suspend fun refreshFeeds(awaitCompletion: Boolean = false) = feedRepository.refreshFeeds(awaitCompletion)
     suspend fun deleteYouTubeItems() = feedRepository.deleteYouTubeItems()
 
     suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =
