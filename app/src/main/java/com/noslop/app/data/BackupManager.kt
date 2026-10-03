@@ -101,11 +101,17 @@ object BackupManager {
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
 
-            // Checkpoint WAL using Room openHelper to ensure all data is flushed into mesh.db
+            // Checkpoint WAL using Room openHelper and inspect status (F13)
             try {
                 val db = NoSlopDatabase.getDatabase(context)
-                db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
-                Logger.info(TAG, "WAL checkpoint (TRUNCATE) completed via Room openHelper")
+                db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val busy = cursor.getInt(0)
+                        val log = cursor.getInt(1)
+                        val checkpointed = cursor.getInt(2)
+                        Logger.info(TAG, "WAL checkpoint (TRUNCATE) result: busy=$busy, log=$log, checkpointed=$checkpointed")
+                    }
+                }
             } catch (e: Exception) {
                 Logger.warn(TAG, "WAL checkpoint failed: ${e.message}")
             }
@@ -159,6 +165,51 @@ object BackupManager {
                     }
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Failed to export identity JSON: ${e.message}")
+                }
+
+                // F10: Export decrypted group chat messages into portable backup JSON
+                try {
+                    val db = NoSlopDatabase.getDatabase(context)
+                    val groupMsgsArray = org.json.JSONArray()
+                    db.openHelper.readableDatabase.query(
+                        "SELECT id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId FROM chat_messages WHERE chatWithPeerPub LIKE '%-%' OR chatWithPeerPub IN (SELECT groupId FROM group_chats)"
+                    ).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            val id = cursor.getString(0) ?: ""
+                            val groupId = cursor.getString(1) ?: ""
+                            val senderPub = cursor.getString(2) ?: ""
+                            val ciphertext = cursor.getString(3) ?: ""
+                            val nonce = cursor.getString(4) ?: ""
+                            val ts = cursor.getLong(5)
+                            val mediaId = cursor.getString(6)
+                            val mediaType = cursor.getString(7)
+                            val replyTo = cursor.getString(8)
+
+                            val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decryptOrNull(ciphertext, nonce, groupId, id)
+                            if (plaintext != null) {
+                                val item = org.json.JSONObject().apply {
+                                    put("id", id)
+                                    put("groupId", groupId)
+                                    put("senderPub", senderPub)
+                                    put("plaintext", plaintext)
+                                    put("timestamp", ts)
+                                    if (!mediaId.isNullOrBlank()) put("mediaId", mediaId)
+                                    if (!mediaType.isNullOrBlank()) put("mediaType", mediaType)
+                                    if (!replyTo.isNullOrBlank()) put("replyToMessageId", replyTo)
+                                }
+                                groupMsgsArray.put(item)
+                            }
+                        }
+                    }
+                    if (groupMsgsArray.length() > 0) {
+                        val tempGroupMsgsFile = File(context.cacheDir, "group_messages_backup.json")
+                        tempGroupMsgsFile.writeText(groupMsgsArray.toString(), Charsets.UTF_8)
+                        addToZip(zos, tempGroupMsgsFile, "group_messages_backup.json")
+                        tempGroupMsgsFile.delete()
+                        Logger.info(TAG, "Exported ${groupMsgsArray.length()} portable group message(s) to archive")
+                    }
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Failed exporting portable group messages: ${e.message}")
                 }
 
                 // Add API keys as JSON for cross-device portability
@@ -378,136 +429,203 @@ object BackupManager {
                 return false
             }
 
-            var restoredKeystoreSealedIdentity = false
-            var restoredFallbackIdentity = false
+            // F13: Stage and validate unzipped files before modifying live target state
+            val stageDir = File(tempDir, "restore_stage_${System.currentTimeMillis()}").apply { mkdirs() }
+            var hasPortableIdentity = false
+            var hasStagedDb = false
+            var stagedGroupMessagesJson: String? = null
 
-            // Unzip and restore
-            ZipInputStream(BufferedInputStream(FileInputStream(tempZip))).use { zis ->
-                var entry: ZipEntry?
-                while (zis.nextEntry.also { entry = it } != null) {
-                    val name = entry!!.name
-                    when {
-                        name == "database.db" -> {
-                            NoSlopDatabase.closeInstance()
-                            val targetDb = context.getDatabasePath(DB_NAME)
-                            val walFile = File(targetDb.path + "-wal")
-                            val shmFile = File(targetDb.path + "-shm")
-                            if (walFile.exists()) walFile.delete()
-                            if (shmFile.exists()) shmFile.delete()
-                            restoreFile(zis, targetDb)
+            try {
+                ZipInputStream(BufferedInputStream(FileInputStream(tempZip))).use { zis ->
+                    var entry: ZipEntry?
+                    while (zis.nextEntry.also { entry = it } != null) {
+                        val name = entry!!.name
+                        when {
+                            name == "database.db" -> {
+                                val stagedDb = File(stageDir, "database.db")
+                                restoreFile(zis, stagedDb)
+                                hasStagedDb = true
+                            }
+                            name == "identity_backup.json" -> {
+                                val stagedId = File(stageDir, "identity_backup.json")
+                                restoreFile(zis, stagedId)
+                                hasPortableIdentity = true
+                            }
+                            name == "group_messages_backup.json" -> {
+                                val stagedGroupMsgs = File(stageDir, "group_messages_backup.json")
+                                restoreFile(zis, stagedGroupMsgs)
+                                stagedGroupMessagesJson = stagedGroupMsgs.readText(Charsets.UTF_8)
+                            }
+                            name == "api_keys_backup.json" -> {
+                                val stagedApi = File(stageDir, "api_keys_backup.json")
+                                restoreFile(zis, stagedApi)
+                            }
+                            name == "preferences.xml" -> {
+                                restoreFile(zis, File(stageDir, "preferences.xml"))
+                            }
+                            name == "preferences_fallback.xml" -> {
+                                restoreFile(zis, File(stageDir, "preferences_fallback.xml"))
+                            }
+                            name.startsWith("api_keys/") -> {
+                                val fileName = name.removePrefix("api_keys/")
+                                if (isSafeEntryName(fileName)) {
+                                    val apiDir = File(stageDir, "api_keys").apply { mkdirs() }
+                                    restoreFile(zis, File(apiDir, fileName))
+                                }
+                            }
+                            name.startsWith("media/") -> {
+                                val parts = name.split("/")
+                                if (parts.size == 3) {
+                                    val dirType = parts[1]
+                                    val fileName = parts[2]
+                                    if (isSafeEntryName(dirType) && isSafeEntryName(fileName)) {
+                                        val mDir = File(stageDir, "media/$dirType").apply { mkdirs() }
+                                        restoreFile(zis, File(mDir, fileName))
+                                    }
+                                }
+                            }
                         }
-                        name == "identity_backup.json" -> {
-                            val tempIdFile = File(context.cacheDir, "restored_identity.json")
-                            restoreFile(zis, tempIdFile)
-                            try {
-                                val jsonStr = tempIdFile.readText(Charsets.UTF_8)
-                                val obj = org.json.JSONObject(jsonStr)
-                                val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
-                                if (secureFile.exists()) secureFile.delete()
+                        zis.closeEntry()
+                    }
+                }
 
-                                val masterKey = androidx.security.crypto.MasterKey.Builder(context)
-                                    .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-                                    .build()
-                                val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
-                                    context,
-                                    PREFS_NAME,
-                                    masterKey,
-                                    androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                                    androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                                )
-                                val edit = freshPrefs.edit()
-                                    .putString("ed25519_private_key", obj.getString("privateKeyB64"))
-                                    .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
-                                    .putString("pub_ed25519", obj.getString("publicKeyB64"))
-                                    .putString("pub_enc", obj.getString("encPublicKeyB64"))
-                                    .putString("handle", obj.getString("handle"))
-                                    .putString("tripcode", obj.getString("tripcode"))
-                                    .putString("onion", obj.getString("onionAddress"))
-                                    .putString("display_name", obj.getString("displayName"))
-                                    .putString("mnemonic", obj.optString("mnemonic", mnemonic))
-                                    .putString("onboarding_complete", "true")
-                                    .putString("identity_version", obj.optString("identity_version", "2"))
-                                if (obj.has("burnable")) {
-                                    val bObj = obj.getJSONObject("burnable")
-                                    edit.putString("burnable_ed25519_private_key", bObj.getString("privateKeyB64"))
-                                        .putString("burnable_enc_private_key", bObj.getString("encPrivateKeyB64"))
-                                        .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
-                                        .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
-                                        .putString("burnable_tripcode", bObj.getString("tripcode"))
-                                        .putString("burnable_onion", bObj.getString("onionAddress"))
-                                        .putString("burnable_display_name", bObj.getString("displayName"))
-                                }
-                                edit.apply()
-                                restoredKeystoreSealedIdentity = true
-                                Logger.info(TAG, "Restored sovereign identity directly into hardware Keystore")
-                            } catch (e: Exception) {
-                                Logger.error(TAG, "Failed parsing identity_backup.json: ${e.message}")
-                            } finally {
-                                tempIdFile.delete()
-                            }
+                // Verify database integrity in staging area before committing (F13)
+                if (hasStagedDb) {
+                    val stagedDbFile = File(stageDir, "database.db")
+                    try {
+                        val testDb = android.database.sqlite.SQLiteDatabase.openDatabase(
+                            stagedDbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                        )
+                        testDb.rawQuery("PRAGMA quick_check", null).use { it.moveToFirst() }
+                        testDb.close()
+                    } catch (dbEx: Exception) {
+                        Logger.error(TAG, "Staged database failed integrity check: ${dbEx.message}")
+                        return false
+                    }
+                }
+
+                // Commit: Safely close active Room database only right before replacing files (F13)
+                if (hasStagedDb) {
+                    NoSlopDatabase.closeInstance()
+                    val targetDb = context.getDatabasePath(DB_NAME)
+                    File(targetDb.path + "-wal").delete()
+                    File(targetDb.path + "-shm").delete()
+                    File(stageDir, "database.db").copyTo(targetDb, overwrite = true)
+                }
+
+                // F11: Restore portable credentials and make them authoritative
+                if (hasPortableIdentity) {
+                    val stagedIdFile = File(stageDir, "identity_backup.json")
+                    val jsonStr = stagedIdFile.readText(Charsets.UTF_8)
+                    val obj = org.json.JSONObject(jsonStr)
+
+                    val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
+                    if (secureFile.exists()) secureFile.delete()
+
+                    val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+                        .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                        .build()
+                    val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                        context,
+                        PREFS_NAME,
+                        masterKey,
+                        androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    )
+                    val edit = freshPrefs.edit()
+                        .putString("ed25519_private_key", obj.getString("privateKeyB64"))
+                        .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
+                        .putString("pub_ed25519", obj.getString("publicKeyB64"))
+                        .putString("pub_enc", obj.getString("encPublicKeyB64"))
+                        .putString("handle", obj.getString("handle"))
+                        .putString("tripcode", obj.getString("tripcode"))
+                        .putString("onion", obj.getString("onionAddress"))
+                        .putString("display_name", obj.getString("displayName"))
+                        .putString("mnemonic", obj.optString("mnemonic", mnemonic))
+                        .putString("onboarding_complete", "true")
+                        .putString("identity_version", obj.optString("identity_version", "2"))
+                    if (obj.has("burnable")) {
+                        val bObj = obj.getJSONObject("burnable")
+                        edit.putString("burnable_ed25519_private_key", bObj.getString("privateKeyB64"))
+                            .putString("burnable_enc_private_key", bObj.getString("encPrivateKeyB64"))
+                            .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
+                            .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
+                            .putString("burnable_tripcode", bObj.getString("tripcode"))
+                            .putString("burnable_onion", bObj.getString("onionAddress"))
+                            .putString("burnable_display_name", bObj.getString("displayName"))
+                    }
+                    edit.apply()
+                    Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
+                } else {
+                    // Legacy archive: Restore raw preferences
+                    val rawPrefs = File(stageDir, "preferences.xml")
+                    if (rawPrefs.exists()) {
+                        rawPrefs.copyTo(File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml"), overwrite = true)
+                    }
+                    val rawFallback = File(stageDir, "preferences_fallback.xml")
+                    if (rawFallback.exists()) {
+                        rawFallback.copyTo(File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml"), overwrite = true)
+                    }
+                }
+
+                // Restore API keys
+                val stagedApi = File(stageDir, "api_keys_backup.json")
+                if (stagedApi.exists()) {
+                    val jsonStr = stagedApi.readText(Charsets.UTF_8)
+                    val obj = org.json.JSONObject(jsonStr)
+                    val apiRepo = ApiKeyRepository(context)
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        apiRepo.setKey(k, obj.getString(k))
+                    }
+                } else {
+                    val stagedApiDir = File(stageDir, "api_keys")
+                    if (stagedApiDir.exists()) {
+                        stagedApiDir.listFiles()?.forEach { file ->
+                            file.copyTo(File(context.filesDir.parentFile, "shared_prefs/${file.name}"), overwrite = true)
                         }
-                        name == "api_keys_backup.json" -> {
-                            val tempApiFile = File(context.cacheDir, "restored_api_keys.json")
-                            restoreFile(zis, tempApiFile)
-                            try {
-                                val jsonStr = tempApiFile.readText(Charsets.UTF_8)
-                                val obj = org.json.JSONObject(jsonStr)
-                                val apiRepo = ApiKeyRepository(context)
-                                val keys = obj.keys()
-                                while (keys.hasNext()) {
-                                    val k = keys.next()
-                                    apiRepo.setKey(k, obj.getString(k))
-                                }
-                                Logger.info(TAG, "Restored API keys into hardware Keystore")
-                            } catch (e: Exception) {
-                                Logger.warn(TAG, "Failed parsing api_keys_backup.json: ${e.message}")
-                            } finally {
-                                tempApiFile.delete()
-                            }
+                    }
+                }
+
+                // F10: Re-encrypt portable group chat messages using destination Keystore
+                if (!stagedGroupMessagesJson.isNullOrBlank()) {
+                    try {
+                        val groupMsgsArray = org.json.JSONArray(stagedGroupMessagesJson)
+                        val db = NoSlopDatabase.getDatabase(context)
+                        for (idx in 0 until groupMsgsArray.length()) {
+                            val item = groupMsgsArray.getJSONObject(idx)
+                            val id = item.getString("id")
+                            val groupId = item.getString("groupId")
+                            val plaintext = item.getString("plaintext")
+                            val (encCiphertext, ivB64) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext, groupId, id)
+                            db.openHelper.writableDatabase.execSQL(
+                                "UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?",
+                                arrayOf(encCiphertext, ivB64, id)
+                            )
                         }
-                        name == "preferences.xml" -> {
-                            restoreFile(zis, File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml"))
-                            restoredKeystoreSealedIdentity = true
-                        }
-                        name == "preferences_fallback.xml" -> {
-                            restoreFile(zis, File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml"))
-                            restoredFallbackIdentity = true
-                        }
-                        name.startsWith("api_keys/") -> {
-                            val fileName = name.removePrefix("api_keys/")
-                            if (!isSafeEntryName(fileName)) {
-                                Logger.warn(TAG, "Skipping api_keys entry with an unsafe name")
-                                zis.closeEntry()
-                                continue
-                            }
-                            val parent = File(context.filesDir.parentFile, "shared_prefs")
-                            val target = File(parent, fileName)
-                            if (isInside(parent, target)) restoreFile(zis, target)
-                        }
-                        name.startsWith("media/") -> {
-                            val parts = name.split("/")
-                            if (parts.size == 3) {
-                                val dirType = parts[1]
-                                val fileName = parts[2]
-                                if (!isSafeEntryName(dirType) || !isSafeEntryName(fileName)) {
-                                    // NOSLOP_BACKUP_STREAMING_V1 — this is the zip-slip guard.
-                                    Logger.warn(TAG, "Skipping media entry with an unsafe path")
-                                    zis.closeEntry()
-                                    continue
-                                }
-                                val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
-                                val noSlopDir = File(baseDir, "NoSlop")
-                                val targetFile = File(noSlopDir, fileName)
-                                if (isInside(noSlopDir, targetFile)) {
-                                    restoreFile(zis, targetFile)
-                                } else {
-                                    Logger.warn(TAG, "Skipping media entry that resolves outside its target directory")
-                                }
+                        Logger.info(TAG, "Re-encrypted ${groupMsgsArray.length()} group message(s) under destination device Keystore key")
+                    } catch (e: Exception) {
+                        Logger.error(TAG, "Failed re-encrypting portable group messages: ${e.message}")
+                    }
+                }
+
+                // Restore media files
+                val stagedMediaDir = File(stageDir, "media")
+                if (stagedMediaDir.exists()) {
+                    stagedMediaDir.listFiles()?.forEach { dirTypeFile ->
+                        if (dirTypeFile.isDirectory) {
+                            val dirType = dirTypeFile.name
+                            val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                            val targetNoSlopDir = File(baseDir, "NoSlop").apply { mkdirs() }
+                            dirTypeFile.listFiles()?.forEach { file ->
+                                file.copyTo(File(targetNoSlopDir, file.name), overwrite = true)
                             }
                         }
                     }
-                    zis.closeEntry()
                 }
+            } finally {
+                stageDir.deleteRecursively()
             }
 
             // Cross-device detection: a Keystore-sealed identity file was restored
@@ -566,6 +684,8 @@ object BackupManager {
 
             Logger.info(TAG, "Import completed. Restart required.", "identityRecoveryNeeded=$lastRestoreNeedsIdentityRecovery")
             true
+        } catch (e: LegacyBackupConfirmationRequiredException) {
+            throw e
         } catch (e: Exception) {
             Logger.error(TAG, "Import failed: ${e.message}")
             false

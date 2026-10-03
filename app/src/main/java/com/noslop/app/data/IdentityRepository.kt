@@ -49,14 +49,12 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         val secureFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml")
         var recovered: android.content.SharedPreferences? = null
         if (secureFile.exists()) {
-            Logger.warn(TAG, "EncryptedSharedPreferences failed on existing file (${e.message}). Testing if Keystore functions after purging unopenable file...")
+            Logger.error(TAG, "EncryptedSharedPreferences failed on existing file (${e.message}). Quarantining unopenable file without destroying key material...")
             try {
-                secureFile.delete()
-                recovered = createEncryptedPrefs(context).also {
-                    Logger.info(TAG, "Successfully restored hardware-backed EncryptedSharedPreferences after clearing unopenable file")
-                }
-            } catch (e2: Exception) {
-                Logger.error(TAG, "Hardware Keystore is genuinely unavailable: ${e2.message}")
+                val quarantine = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml.corrupt_${System.currentTimeMillis()}")
+                secureFile.renameTo(quarantine)
+            } catch (renEx: Exception) {
+                Logger.error(TAG, "Failed to quarantine secure preference file: ${renEx.message}")
             }
         }
         if (recovered != null) {
@@ -86,7 +84,10 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
                 val payload = iv + encrypted
                 "ENC_GCM:" + android.util.Base64.encodeToString(payload, android.util.Base64.NO_WRAP)
-            } catch (e: Exception) { value }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Fallback encryption failed: ${e.message}")
+                throw SecurityException("Failed to encrypt secret into fallback storage", e)
+            }
         } else {
             value
         }
@@ -103,7 +104,10 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             cipher.init(javax.crypto.Cipher.DECRYPT_MODE, fallbackSecretKey, javax.crypto.spec.GCMParameterSpec(128, iv))
             val decrypted = cipher.doFinal(ciphertext)
             String(decrypted, Charsets.UTF_8)
-        } catch (e: Exception) { stored }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Fallback decryption failed: ${e.message}")
+            null
+        }
     }
 
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {

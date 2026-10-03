@@ -103,11 +103,11 @@ object GroupMessageCrypto {
      * If prefix is ENC:GCM2:, strictly validates AAD ($groupId|$msgId); does NOT fall back to unauthenticated decryption.
      * If prefix is legacy ENC:GCM:, decrypts without AAD for backward compatibility with pre-v0.5.2 rows.
      */
-    fun decrypt(ciphertextWithPrefix: String, ivB64: String, groupId: String = "", msgId: String = ""): String {
+    fun decryptOrNull(ciphertextWithPrefix: String, ivB64: String, groupId: String = "", msgId: String = ""): String? {
         val isV2 = ciphertextWithPrefix.startsWith(CIPHERTEXT_PREFIX_V2)
         val isLegacy = ciphertextWithPrefix.startsWith(LEGACY_CIPHERTEXT_PREFIX)
         if ((!isV2 && !isLegacy) || ivB64.isBlank()) {
-            return ciphertextWithPrefix
+            return null
         }
 
         val rawB64 = if (isV2) {
@@ -119,12 +119,12 @@ object GroupMessageCrypto {
         val ciphertextBytes = try {
             Base64.decode(rawB64, Base64.DEFAULT)
         } catch (e: Exception) {
-            return ciphertextWithPrefix
+            return null
         }
         val iv = try {
             Base64.decode(ivB64, Base64.DEFAULT)
         } catch (e: Exception) {
-            return ciphertextWithPrefix
+            return null
         }
 
         return try {
@@ -139,7 +139,11 @@ object GroupMessageCrypto {
         } catch (e: Exception) {
             invalidateCachedKey()
             com.noslop.app.debug.Logger.warn("CRYPTO", "Failed to decrypt group message: ${e.message}")
-            ciphertextWithPrefix
+            null
         }
+    }
+
+    fun decrypt(ciphertextWithPrefix: String, ivB64: String, groupId: String = "", msgId: String = ""): String {
+        return decryptOrNull(ciphertextWithPrefix, ivB64, groupId, msgId) ?: ciphertextWithPrefix
     }
 }

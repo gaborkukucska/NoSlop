@@ -2087,7 +2087,6 @@ fun toggleAggregator() {
                 val inputStream = context.contentResolver.openInputStream(uri)
                 if (inputStream != null) {
                     try {
-                        com.noslop.app.data.NoSlopDatabase.closeInstance()
                         val success = com.noslop.app.data.BackupManager.importData(
                             context, mnemonic, inputStream, allowLegacyUnauthenticated
                         )

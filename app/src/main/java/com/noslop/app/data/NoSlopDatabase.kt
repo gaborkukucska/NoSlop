@@ -188,16 +188,20 @@ abstract class NoSlopDatabase : RoomDatabase() {
 
                         // Idempotent: skip rows already carrying ENC:GCM2:
                         if (!ciphertext.startsWith(com.noslop.app.crypto.GroupMessageCrypto.CIPHERTEXT_PREFIX_V2)) {
-                            val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decrypt(ciphertext, nonce)
-                            val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(
-                                plaintext,
-                                groupId = groupId,
-                                msgId = id
-                            )
-                            database.execSQL(
-                                "UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?",
-                                arrayOf(encBody, iv, id)
-                            )
+                            val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decryptOrNull(ciphertext, nonce)
+                            if (plaintext != null) {
+                                val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(
+                                    plaintext,
+                                    groupId = groupId,
+                                    msgId = id
+                                )
+                                database.execSQL(
+                                    "UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?",
+                                    arrayOf(encBody, iv, id)
+                                )
+                            } else {
+                                com.noslop.app.debug.Logger.error("DATABASE", "Migration 13->14: Message $id could not be decrypted with group key; skipping re-encryption to preserve original ciphertext")
+                            }
                         }
                     }
                     cursor.close()
@@ -215,7 +219,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     NoSlopDatabase::class.java,
                     "mesh.db"
@@ -223,8 +227,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                 .build()
-                INSTANCE = instance
-                instance
+                .also { INSTANCE = it }
             }
         }
 
