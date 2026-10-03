@@ -2,6 +2,20 @@
 
 ## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
 
+* **Dedicated Untrusted DM Rate Limiting (`GossipService.kt`)**:
+  * Decoupled untrusted directed DMs into their own dedicated `dmRateLimits` tracking map, eliminating contention with lifecycle announcements (`announcementRateLimits`).
+  * Enforced a global rate limit of 30 unauthenticated DMs per 60s window across all senders to protect the node from attackers rotating spoofed sender IDs.
+* **Shared Privacy Predicate & Sync Query Caching (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**:
+  * Reused `SyncPacketHandler.canSharePost()` in `MeshSocialRepository.requestInventorySync()`, eliminating the last duplicate copy of the friends-only sync predicate.
+  * Hardened `postCache` in `SyncPacketHandler` using `containsKey` checks so missing posts cached as null are not repeatedly re-queried against Room SQLite.
+* **PostContext Pass-Through & Dead Code Pruning (`GossipService.kt`)**:
+  * Passed `postContext.isFriendsOnly` directly into `forwardPacket()` and eliminated redundant re-resolutions of post context in `processIncoming()`.
+  * Pruned unused private function `getTargetPostAuthor()`.
+* **Pre-Picker Backup Mnemonic Validation (`SettingsTab.kt`)**:
+  * Validated user-entered Word Cloud recovery words against active mnemonic before launching the system SAF `CreateDocument` file picker in both the primary backup dialog and advisory prompt, preventing aborted exports.
+* **Media Transfer Cooldown Bypass & Proxy Check Uniformity (`MeshTransport.kt`, `YouTubeInternalClient.kt`, `scripts/test_yt.sh`)**:
+  * Allowed `isMediaPacket` to bypass peer cooldown in `MeshTransport.sendPacket()` so active chunk downloads are not frozen for up to 3 minutes by transient circuit hiccups.
+  * Switched `YouTubeInternalClient` to use `ProxyAuth.isConfigured` and scrubbed legacy proxy secret from `scripts/test_yt.sh`.
 * **Contact Identity Authenticity & DM Firewall Hardening (`DmPacketHandler.kt`, `GossipService.kt`)**:
   * Relocated `contact_identity_${packet.senderId} = "burnable"` insertion in `DmPacketHandler.handleDirectMessage()` strictly after ChaCha20-Poly1305 AEAD decryption verification, preventing spoofed messages to creator IDs from corrupting legitimate friends' contact identities.
   * Added dedicated rate-limiting (10 packets per 60s per sender) in `GossipService.processIncoming()` for unauthenticated directed `MESSAGE` packets addressed to local node IDs.
