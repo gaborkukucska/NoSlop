@@ -233,8 +233,12 @@ class GossipServiceTest {
 
         GossipService.broadcast(friendsPacket)
 
-        // Allow launched coroutines to complete
-        kotlinx.coroutines.delay(100)
+        // Allow launched coroutines on Dispatchers.IO to complete
+        var waited = 0
+        while (!sentOnions.contains("friend.onion") && waited < 1500) {
+            kotlinx.coroutines.delay(25)
+            waited += 25
+        }
 
         assertTrue("Direct friend must receive friends-only broadcast", sentOnions.contains("friend.onion"))
         assertFalse("Temporary contact must NOT receive friends-only broadcast", sentOnions.contains("temp.onion"))
@@ -279,7 +283,7 @@ class GossipServiceTest {
         assertFalse("Double dot rejected", MediaManager.isValidMediaId(".."))
         assertFalse("Leading dot rejected", MediaManager.isValidMediaId(".hidden"))
         assertFalse("Path traversal rejected", MediaManager.isValidMediaId("../secret"))
-        assertFalse("Path traversal backslash rejected", MediaManager.isValidMediaId("..\secret"))
+        assertFalse("Path traversal backslash rejected", MediaManager.isValidMediaId("""..\secret"""))
         assertFalse("Slash rejected", MediaManager.isValidMediaId("folder/file.mp4"))
         assertFalse("Empty string rejected", MediaManager.isValidMediaId(""))
     }

@@ -25,7 +25,7 @@ object MediaManager {
     fun isValidMediaId(mediaId: String?): Boolean {
         if (mediaId.isNullOrBlank()) return false
         if (mediaId.length > 128) return false
-        if (mediaId.contains("..") || mediaId.contains("/") || mediaId.contains("\")) return false
+        if (mediaId.contains("..") || mediaId.contains("/") || mediaId.contains('\\')) return false
         return mediaId.matches(MEDIA_ID_REGEX)
     }
 

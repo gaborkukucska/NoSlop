@@ -71,7 +71,8 @@ class SyncPacketHandler(
         val recentPosts = postDao.getPostsSince(syncPay.since).filter { post ->
             !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
-        val postCache = recentPosts.associateBy { it.id }.toMutableMap()
+        val postCache = mutableMapOf<String, MeshPost?>()
+        recentPosts.forEach { postCache[it.id] = it }
 
         val postPayloads = recentPosts.map { post ->
             val rawMediaId = post.mediaUrl?.substringAfterLast("/")
@@ -193,7 +194,8 @@ class SyncPacketHandler(
             (post.privacy != "friends" || isTrustedDirectPeer)
         }
         candidatePosts.addAll(olderOwnPosts)
-        val postCache = candidatePosts.associateBy { it.id }.toMutableMap()
+        val postCache = mutableMapOf<String, MeshPost?>()
+        candidatePosts.forEach { postCache[it.id] = it }
         
         val missingOrUpdatedPosts = candidatePosts.filter { post ->
             val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
