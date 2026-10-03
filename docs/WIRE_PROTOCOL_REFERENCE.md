@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-09-30)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-03)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -158,6 +158,9 @@ Notes:
   states update correctly. Directed `MESSAGE` packets (row 2) addressed to
   the local node bypass the untrusted sender gate so ChaCha20-Poly1305 AEAD
   decryption in `DmPacketHandler` serves as the cryptographic authenticity check.
+  Unauthenticated incoming DMs are rate-limited to 10 packets per 60 seconds per
+  sender in `GossipService.processIncoming`, and peer contact identities are only
+  associated with burnable identities after cryptographic decryption succeeds.
 - - **Friends-Only Broadcast Isolation**: Outbound packets for friends-only broadcasts (`POST` with `privacy = "friends"`,
   and `EDIT_POST`, `DELETE_POST`, `COMMENT`, `REACTION`, etc. with `hops = 1`) are strictly isolated to trusted
   direct peer connections (`isTrusted && !isTemporary && contactSetting != "burnable"`) and the post author. Temporary

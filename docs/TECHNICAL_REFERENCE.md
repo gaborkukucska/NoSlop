@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.6.7-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
+versionName `0.6.8-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1922,6 +1922,18 @@ In release builds (`assembleRelease`), R8 minification strips generic signatures
 1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
 2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
 3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
+
+### 17.21 Contact Identity Authenticity, Tor Cooldown Balancing & Audit Hardening (2026-10-03)
+
+A security, performance, and correctness pass addressed the second round of external audit findings:
+1. **Authenticated Contact Identity Association (`DmPacketHandler.kt`, `GossipService.kt`)**: Previously, `DmPacketHandler.handleDirectMessage()` associated incoming senders with the burnable identity before decrypting payloads. An unauthenticated attacker could spoof a friend's public key as `senderId` to re-label legitimate contacts as "burnable". The database write is now strictly gated on successful ChaCha20-Poly1305 AEAD decryption. Incoming directed DMs from untrusted senders are rate-limited to 10 per 60s in `GossipService.processIncoming()`, and missing-key auto connection requests are throttled to 1 per 60s per sender.
+2. **Balanced Peer Failure Tracking & Cooldown (`MeshTransport.kt`, `GossipService.kt`)**: Re-enabled failure tracking on all send attempts (excluding interactive typing/read receipts). DMs and handshakes bypass cooldown so direct user communications are never blocked, while broadcasts, forwards, sync requests, and background presence respect cooldown (30s to 3m backoff) to prevent Tor socket storms to offline hidden services.
+3. **Unified Post Context Resolution (`GossipService.kt`)**: Replaced duplicate DB lookups across `isFriendsOnlyPacket` and `getTargetPostAuthor` with a single unified `resolvePostContext(packet): PostContext`. Removed the unsafe `hops == 1` heuristic that misclassified transit engagement packets.
+4. **Sync N+1 Query Elimination (`SyncPacketHandler.kt`)**: Replaced repeated `postDao.getPostById()` calls inside comment and reaction `filter {}` loops with a cached `postCache` map and `canSharePost()` helper.
+5. **Media ID & Traversal Hardening (`MediaManager.kt`, `GossipService.kt`)**: Pre-compiled `MEDIA_ID_REGEX = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")` rejecting leading dots and lone `.` / `..`. Sanitized public download filenames. Switched `handleRelayRequest()` to locate media via `MediaManager.getLocalFile(mediaId)`.
+6. **Proxy Fallback Gating (`ProxyAuth.kt`, `RedditApiClient.kt`, `JamendoApiClient.kt`)**: Added `ProxyAuth.isConfigured` check so Reddit and Jamendo skip proxy round-trips when `PROXY_SECRET` is blank.
+7. **Tor Service Lifecycle Safety (`TorService.kt`)**: Captured `applicationContext` instead of activity context for `ConnectivityManager.NetworkCallback`, unregistered the callback on `stopTor()`, and guarded `onAvailable()` against racing startup jobs.
+8. **Mnemonic Validation on Backup (`SettingsTab.kt`)**: Validated typed recovery words against active mnemonic before triggering SAF export.
 
 ### 17.20 Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (2026-10-01)
 

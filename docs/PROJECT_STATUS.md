@@ -1,5 +1,39 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
+
+* **Contact Identity Authenticity & DM Firewall Hardening (`DmPacketHandler.kt`, `GossipService.kt`)**:
+  * Relocated `contact_identity_${packet.senderId} = "burnable"` insertion in `DmPacketHandler.handleDirectMessage()` strictly after ChaCha20-Poly1305 AEAD decryption verification, preventing spoofed messages to creator IDs from corrupting legitimate friends' contact identities.
+  * Added dedicated rate-limiting (10 packets per 60s per sender) in `GossipService.processIncoming()` for unauthenticated directed `MESSAGE` packets addressed to local node IDs.
+  * Rate-limited automated connection requests in `DmPacketHandler` (at most once every 60s per sender) and prevented requests to peers with blank onion addresses.
+  * Removed unauthenticated calls to `recordSendSuccess()` and `updatePeerTypingState()` from the message deduplication path.
+* **Balanced Peer Failure Tracking & Tor Circuit Backoff (`MeshTransport.kt`, `GossipService.kt`)**:
+  * Re-enabled failure tracking across all outbound sends in `MeshTransport.sendPacket()` (excluding transient interactive signals `TYPING` and `READ_RECEIPT`).
+  * DMs (`isDmHighPriority`) and Handshakes (`isHandshake`) strictly bypass peer cooldown, ensuring active user communications and handshakes always attempt delivery.
+  * General broadcasts, forwards, sync requests, and background presence respect peer cooldown (30s to 3m backoff) in both `MeshTransport` and `GossipService.broadcast()`, stopping Tor socket storms against unreachable peers while preserving user traffic.
+* **Unified PostContext Resolution & Friends-Only Heuristic Elimination (`GossipService.kt`)**:
+  * Extracted `resolvePostContext(packet): PostContext` to compute privacy (`isFriendsOnly`) and `targetPostAuthor` in a single unified pass, eliminating repeated redundant Room queries per packet across firewall, forwarding, and broadcast paths.
+  * Removed the brittle `hops == 1` fallback heuristic that misclassified transit engagement packets as friends-only.
+  * Switched `GossipService.handleRelayRequest()` to query `MediaManager.getLocalFile(mediaId)` across all media directories.
+* **Sync Handler N+1 Query Elimination & Post Caching (`SyncPacketHandler.kt`)**:
+  * Extracted `canSharePost()` helper and introduced in-memory `postCache` maps across `handleSyncRequest()` and `handleInventorySyncRequest()`, resolving N+1 `postDao.getPostById()` lookups for comments and reactions.
+  * Removed duplicated declarations of `contactIdentity`.
+* **Media ID Path Traversal Hardening (`MediaManager.kt`)**:
+  * Pre-compiled `MEDIA_ID_REGEX = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")`, strictly rejecting leading dots and lone `.` / `..` IDs.
+  * Sanitized `exportToPublicDownloads` filenames using `File(fileName).name` and character allow-lists.
+* **Proxy Fallback Gating (`ProxyAuth.kt`, `RedditApiClient.kt`, `JamendoApiClient.kt`)**:
+  * Exposed `ProxyAuth.isConfigured` (`PROXY_SECRET.isNotBlank()`).
+  * Guarded Reddit and Jamendo API clients so requests skip the Cloudflare Worker proxy entirely and go direct when no proxy secret is configured.
+* **Tor Service Lifecycle & Concurrency Hardening (`TorService.kt`)**:
+  * Used `appContext = context.applicationContext` in `startTor()` to prevent Activity context leaks.
+  * Unregistered `networkCallback` on `stopTor()`.
+  * Guarded `NetworkCallback.onAvailable()` auto-recovery to prevent concurrent startup jobs.
+* **Backup Mnemonic Validation (`SettingsTab.kt`)**:
+  * Validated user-entered Word Cloud mnemonic against the active mnemonic in `SettingsTab` before initiating ZIP export.
+* **Test Suite Expansion (`GossipServiceTest.kt`, `SettingsRepositoryTest.kt`)**:
+  * Added unit test coverage in `GossipServiceTest.kt` verifying untrusted DM rate limiting, media ID validation, and robust coroutine polling for broadcast tests.
+  * Removed trailing comma syntax in `SettingsRepositoryTest.kt`.
+
 ## Completed Changes (2026-10-01) — Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (v0.6.7-alpha)
 
 * **Friends-Only Broadcast Isolation to Trusted Direct Peers (`GossipService.kt`, `MeshSocialRepository.kt`)**:
