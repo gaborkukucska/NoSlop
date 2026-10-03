@@ -2,6 +2,11 @@
 
 ## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
 
+* **Tor Video Playback Optimization & 800MB Stream Ceiling (`YouTubeInternalClient.kt`, `VideoPlayer.kt`, `ClearnetTorMediaTest.kt`)**:
+  * Raised progressive format 18 (360p muxed) Tor size ceiling from 250MB to 800MB, unblocking full-length 30–60 minute videos and documentaries (e.g. 314MB streams) while continuing to reject 1.5GB+ multi-hour or 4K files.
+  * Raised `EXIT_BLOCKED_THRESHOLD` from 2 to 4 configs in `YouTubeInternalClient`, ensuring token-free fallback clients (`ANDROID_VR` format 18 exemption and `TVHTML5_SIMPLY_EMBEDDED_PLAYER`) are evaluated on the active Tor circuit before advancing the stream isolation nonce, eliminating 20–30s multi-circuit hopping delays.
+  * Halved mid-stream continuous buffering stall timeout in `VideoPlayer.kt` from 50s (25 samples) down to 24s (12 samples) on Tor, and prevented trickling dying circuits (< 1000ms buffer advance with 0 bytes) from resetting stall detection, allowing frozen streams to recover and resume in half the time.
+  * Updated unit test vectors in `ClearnetTorMediaTest.kt` asserting the 800MB format 18 ceiling and 4-client circuit failover threshold.
 * **Dedicated Untrusted DM Rate Limiting (`GossipService.kt`)**:
   * Decoupled untrusted directed DMs into their own dedicated `dmRateLimits` tracking map, eliminating contention with lifecycle announcements (`announcementRateLimits`).
   * Enforced a global rate limit of 30 unauthenticated DMs per 60s window across all senders to protect the node from attackers rotating spoofed sender IDs.
