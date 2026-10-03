@@ -170,17 +170,20 @@ class FakePostDao : PostDao {
         newContent: String,
         newTimestamp: Long,
         newSignature: String,
+        authorAvatarB64: String?,
         mediaUrl: String?,
         mediaType: String?,
         thumbnailB64: String?,
         mediaSize: Long,
         privacy: String
     ) {
-        posts[id]?.let {
-            posts[id] = it.copy(
+        val existing = posts[id]
+        if (existing != null) {
+            posts[id] = existing.copy(
                 content = newContent,
                 timestamp = newTimestamp,
                 signature = newSignature,
+                authorAvatarB64 = authorAvatarB64 ?: existing.authorAvatarB64,
                 mediaUrl = mediaUrl,
                 mediaType = mediaType,
                 thumbnailB64 = thumbnailB64,

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Owns the **clearnet content aggregator**: feed sources & items (CRUD + observable flows), the
@@ -228,7 +229,7 @@ class FeedRepository(
                     existing
                 } else {
                     Logger.info(TAG, "Feed sync is already in progress. Skipping redundant request.")
-                    return@withContext FeedSyncResult.AlreadyRunning
+                    null
                 }
             } else {
                 val newDeferred = syncScope.async(Dispatchers.IO) {
@@ -237,7 +238,7 @@ class FeedRepository(
                 activeSyncDeferred = newDeferred
                 newDeferred
             }
-        }
+        } ?: return@withContext FeedSyncResult.AlreadyRunning
 
         return@withContext if (awaitCompletion) {
             try {

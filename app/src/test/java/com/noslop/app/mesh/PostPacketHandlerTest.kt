@@ -43,7 +43,9 @@ class PostPacketHandlerTest {
         every { db.peerDao() } returns peerDao
         identity = CryptoService.generateIdentity("alice")
         val repo = mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
-        io.mockk.coEvery { repo.getMeshFilterSettings() } returns com.noslop.app.data.MeshFilterSettings()
+        io.mockk.coEvery { repo.getMeshFilterSettings() } returns com.noslop.app.data.MeshFilterSettings(
+            allowIncomingClearnetShares = true
+        )
         handler = PostPacketHandler(repo = repo, db = db)
     }
 
