@@ -736,7 +736,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(group)
 
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, adminKeys.publicKeyB64, timestamp.toString())
+        val sortedMembers = allMembers.sorted().joinToString(",")
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            groupId, title, adminKeys.publicKeyB64, timestamp.toString(),
+            sortedMembers, allowMemberInvites.toString(), allowMemberSelfRemove.toString()
+        )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val memberDetailsMap = allMembers.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
@@ -1103,7 +1107,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.groupChatDao().insertGroupChat(updatedGroup)
 
         val signingKey = if (isAdmin) adminKeys else myKeys
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, effectiveTitle, signingKey.publicKeyB64, timestamp.toString())
+        val sortedAdded = addedMembers.sorted().joinToString(",")
+        val sortedRemoved = removedMembers.sorted().joinToString(",")
+        val sortedBanned = effectiveBannedList.sorted().joinToString(",")
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            groupId, effectiveTitle, signingKey.publicKeyB64, timestamp.toString(),
+            sortedAdded, sortedRemoved, sortedBanned, effectiveDescription, effectiveAvatarB64,
+            effectiveAllowInvites.toString(), effectiveAllowSelfRemove.toString()
+        )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         val allMembersForDetails = (newMembers + existing.adminPublicKeyB64).distinct()
         val memberDetailsMap = allMembersForDetails.mapNotNull { pub ->
@@ -1296,7 +1307,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val finalRemoved = listOf(signingKey.publicKeyB64)
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, existing.title, signingKey.publicKeyB64, timestamp.toString())
+        val sortedRemoved = finalRemoved.sorted().joinToString(",")
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            groupId, existing.title, signingKey.publicKeyB64, timestamp.toString(),
+            "", sortedRemoved, "", existing.description, existing.avatarB64,
+            existing.allowMemberInvites.toString(), existing.allowMemberSelfRemove.toString()
+        )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
@@ -1377,7 +1393,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }.toMap()
 
         val timestamp = group.createdAt
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
+        val sortedMembers = members.sorted().joinToString(",")
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString(),
+            sortedMembers, group.allowMemberInvites.toString(), group.allowMemberSelfRemove.toString()
+        )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = group.groupId,

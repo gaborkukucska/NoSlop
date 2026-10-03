@@ -700,11 +700,24 @@ class HandshakePacketHandler(
     private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
         val title = update.title ?: existing.title
         val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
+        val sortedAdded = update.addedMembers?.sorted()?.joinToString(",") ?: ""
+        val sortedRemoved = update.removedMembers?.sorted()?.joinToString(",") ?: ""
+        val sortedBanned = update.bannedMembers?.sorted()?.joinToString(",") ?: ""
+        val allowInvites = update.allowMemberInvites?.toString() ?: ""
+        val allowSelfRemove = update.allowMemberSelfRemove?.toString() ?: ""
+        val desc = update.description ?: ""
+        val avatar = update.avatarB64 ?: ""
+
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
+            val canonicalPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                update.groupId, title, candidate, update.timestamp.toString(),
+                sortedAdded, sortedRemoved, sortedBanned, desc, avatar, allowInvites, allowSelfRemove
+            )
             val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(update.groupId, title, candidate, update.timestamp.toString())
             val pipePayload = "${update.groupId}|$title|$candidate|${update.timestamp}"
-            if (CryptoService.verify(encodePayload, update.signature, candidate) ||
+            if (CryptoService.verify(canonicalPayload, update.signature, candidate) ||
+                CryptoService.verify(encodePayload, update.signature, candidate) ||
                 CryptoService.verify(pipePayload, update.signature, candidate)) return candidate
         }
         return null
@@ -714,14 +727,20 @@ class HandshakePacketHandler(
         val invite = packet.getGroupInvitePayload() ?: return false
 
         val candidates = (listOf(invite.adminPublicKeyB64) + invite.members).distinct()
+        val sortedMembers = invite.members.sorted().joinToString(",")
         var verifiedSigner: String? = null
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
+            val canonicalPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                invite.groupId, invite.title, candidate, invite.timestamp.toString(),
+                sortedMembers, invite.allowMemberInvites.toString(), invite.allowMemberSelfRemove.toString()
+            )
             val encCand = com.noslop.app.crypto.CryptoService.encodeForSigning(invite.groupId, invite.title, candidate, invite.timestamp.toString())
             val encAdmin = com.noslop.app.crypto.CryptoService.encodeForSigning(invite.groupId, invite.title, invite.adminPublicKeyB64, invite.timestamp.toString())
             val pipeCand = "${invite.groupId}|${invite.title}|$candidate|${invite.timestamp}"
             val pipeAdmin = "${invite.groupId}|${invite.title}|${invite.adminPublicKeyB64}|${invite.timestamp}"
-            if (CryptoService.verify(encCand, invite.signature, candidate) ||
+            if (CryptoService.verify(canonicalPayload, invite.signature, candidate) ||
+                CryptoService.verify(encCand, invite.signature, candidate) ||
                 CryptoService.verify(encAdmin, invite.signature, candidate) ||
                 CryptoService.verify(pipeCand, invite.signature, candidate) ||
                 CryptoService.verify(pipeAdmin, invite.signature, candidate)) {
@@ -846,7 +865,7 @@ class HandshakePacketHandler(
                 return false
             }
             if (removed.isNotEmpty()) {
-                val selfRemovalOnly = (removed.size == 1 && removed[0] == signer) || (removed.contains(signer) && removed.size <= 2)
+                val selfRemovalOnly = removed.all { it == signer }
                 if (!selfRemovalOnly || !existing.allowMemberSelfRemove) {
                     Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: a member may only remove themselves")
                     return false
@@ -1031,22 +1050,29 @@ class HandshakePacketHandler(
 
         val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, sync.groupChatJson, sync.timestamp.toString())
         val pipePayload = "${group.groupId}|${sync.groupChatJson}|${sync.timestamp}"
-        val groupMembers = parseMembers(group.membersJson)
-        val verifyCandidates = (listOfNotNull(packet.senderId, group.adminPublicKeyB64) + groupMembers).distinct()
-        val isValid = verifyCandidates.any { cand ->
+        val existing = db.groupChatDao().getGroupChatById(group.groupId)
+
+        // F04: Resolve authority strictly from stored group state if group is known; reject unverified incoming keys
+        val allowedSigners = if (existing != null) {
+            val existingMembers = parseMembers(existing.membersJson)
+            (listOf(existing.adminPublicKeyB64) + existingMembers).distinct()
+        } else {
+            listOf(group.adminPublicKeyB64)
+        }
+        val isValid = allowedSigners.any { cand ->
             CryptoService.verify(encPayload, sync.signature, cand) ||
             CryptoService.verify(pipePayload, sync.signature, cand)
         }
         if (!isValid) {
-            Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: signature verification failed")
+            Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: signature verification failed against stored authority")
             return false
         }
-        syncMemberPeers(sync.memberDetails)
 
+        // F04: Gate peer synchronization strictly on recipient membership validation
         val myKeys = repo.getLocalIdentity()
         val burnable = repo.getBurnableIdentity()
-        val members = parseMembers(group.membersJson)
-        val meInGroup = members.any {
+        val incomingMembersList = parseMembers(group.membersJson)
+        val meInGroup = incomingMembersList.any {
             it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
         } || group.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && group.adminPublicKeyB64 == burnable.publicKeyB64)
         if (!meInGroup) {
@@ -1054,7 +1080,9 @@ class HandshakePacketHandler(
             return false
         }
 
-        val existing = db.groupChatDao().getGroupChatById(group.groupId)
+        // Authorized and validated: sync member peers
+        syncMemberPeers(sync.memberDetails)
+
         if (existing == null) {
             db.groupChatDao().insertGroupChat(group)
             Logger.info(TAG, "Received new group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
@@ -1062,9 +1090,13 @@ class HandshakePacketHandler(
         }
 
         val isAdmin = existing.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && existing.adminPublicKeyB64 == burnable.publicKeyB64)
+        val signerIsAdmin = CryptoService.verify(encPayload, sync.signature, existing.adminPublicKeyB64) ||
+            CryptoService.verify(pipePayload, sync.signature, existing.adminPublicKeyB64)
+
+        val bannedSet = existing.getBannedMembers().toSet()
         val existingMembers = parseMembers(existing.membersJson)
-        val incomingMembers = parseMembers(group.membersJson)
-        val mergedMembers = (existingMembers + incomingMembers).distinct()
+        val incomingFiltered = incomingMembersList.filter { it !in bannedSet }
+        val mergedMembers = (existingMembers + incomingFiltered).filter { it !in bannedSet }.distinct()
 
         val mergedHandles = existing.getMemberHandles().toMutableMap()
         group.getMemberHandles().forEach { (k, v) -> mergedHandles[k] = v }

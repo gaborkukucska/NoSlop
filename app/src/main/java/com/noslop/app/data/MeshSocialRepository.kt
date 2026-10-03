@@ -523,7 +523,8 @@ class MeshSocialRepository(
         val timestamp = System.currentTimeMillis()
 
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64
+            postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64,
+            privacy, mediaMetadata?.id
         )
         val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
 
@@ -589,7 +590,8 @@ class MeshSocialRepository(
         val avatarB64 = userProfile.avatarB64
 
         val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            id, myKeys.publicKeyB64, content, timestamp.toString(), avatarB64
+            id, myKeys.publicKeyB64, content, timestamp.toString(), avatarB64,
+            privacy, mediaMetadata?.id, clearnetUrl
         )
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 

@@ -386,11 +386,6 @@ object GossipService {
 
         Logger.debug(TAG, "processIncoming: Analyzing ${packet.type} packet $packetId from ${senderId.take(16)}... (hops=${packet.hops ?: DEFAULT_MAX_HOPS})")
 
-        // If incoming packet is from a known peer, immediately clear any active failure cooldown
-        peerDao?.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
-            recordSendSuccess(it)
-        }
-
         // 1. TTL Check — drop if expired
         val hops = packet.hops ?: DEFAULT_MAX_HOPS
         if (hops <= 0) {
@@ -625,6 +620,11 @@ object GossipService {
         // A forgery never reaches this line, so it can no longer displace the
         // real packet it was impersonating.
         markProcessed(packetId)
+
+        // F18: Update peer liveness and clear failure cooldown ONLY after packet has survived authentication
+        peerDao?.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
+            recordSendSuccess(it)
+        }
 
         // 4.5. Mesh Filters (Incoming)
         val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()

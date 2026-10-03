@@ -48,6 +48,35 @@ class SyncPacketHandler(
         signature = signature
     )
 
+    private fun MeshPost.toPostPayload(): PostPayload {
+        val rawMediaId = mediaUrl?.substringAfterLast("/")
+        return PostPayload(
+            id = id,
+            authorId = authorPublicKeyB64,
+            authorName = authorHandle,
+            authorPublicKey = authorPublicKeyB64,
+            authorAvatarB64 = authorAvatarB64,
+            originNode = null,
+            content = content,
+            timestamp = timestamp,
+            privacy = privacy,
+            signature = signature,
+            mediaId = rawMediaId,
+            mediaMetadata = if (rawMediaId != null) MediaMetadata(
+                id = rawMediaId,
+                type = mediaType ?: "image",
+                mimeType = "application/octet-stream",
+                size = mediaSize,
+                chunkCount = 0,
+                thumbnailB64 = thumbnailB64
+            ) else null,
+            clearnetUrl = clearnetUrl,
+            clearnetTitle = clearnetTitle,
+            clearnetThumbnailUrl = clearnetThumbnailUrl,
+            clearnetMediaType = clearnetMediaType
+        )
+    }
+
     companion object {
         fun canSharePost(
             post: MeshPost,
@@ -76,33 +105,7 @@ class SyncPacketHandler(
         val postCache = mutableMapOf<String, MeshPost?>()
         recentPosts.forEach { postCache[it.id] = it }
 
-        val postPayloads = recentPosts.map { post ->
-            val rawMediaId = post.mediaUrl?.substringAfterLast("/")
-            PostPayload(
-                id = post.id,
-                authorId = post.authorPublicKeyB64,
-                authorName = post.authorHandle,
-                authorPublicKey = post.authorPublicKeyB64,
-                authorAvatarB64 = post.authorAvatarB64,
-                originNode = null,
-                content = post.content,
-                timestamp = post.timestamp,
-                signature = post.signature,
-                mediaId = rawMediaId,
-                mediaMetadata = if (rawMediaId != null) MediaMetadata(
-                    id = rawMediaId,
-                    type = post.mediaType ?: "image",
-                    mimeType = "application/octet-stream",
-                    size = 0,
-                    chunkCount = 0,
-                    thumbnailB64 = post.thumbnailB64
-                ) else null,
-                clearnetUrl = post.clearnetUrl,
-                clearnetTitle = post.clearnetTitle,
-                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
-                clearnetMediaType = post.clearnetMediaType
-            )
-        }
+        val postPayloads = recentPosts.map { it.toPostPayload() }
 
         // Also include comments and reactions for full sync (strictly exclude friends-only for non-direct peers)
         val recentComments = commentDao.getCommentsSince(syncPay.since).filter { comment ->
@@ -217,33 +220,7 @@ class SyncPacketHandler(
             peerInventory[post.id] != localHash
         }
 
-        val postPayloads = missingOrUpdatedPosts.map { post ->
-            val rawMediaId = post.mediaUrl?.substringAfterLast("/")
-            PostPayload(
-                id = post.id,
-                authorId = post.authorPublicKeyB64,
-                authorName = post.authorHandle,
-                authorPublicKey = post.authorPublicKeyB64,
-                authorAvatarB64 = post.authorAvatarB64,
-                originNode = null,
-                content = post.content,
-                timestamp = post.timestamp,
-                signature = post.signature,
-                mediaId = rawMediaId,
-                mediaMetadata = if (rawMediaId != null) MediaMetadata(
-                    id = rawMediaId,
-                    type = post.mediaType ?: "image",
-                    mimeType = "application/octet-stream",
-                    size = 0,
-                    chunkCount = 0,
-                    thumbnailB64 = post.thumbnailB64
-                ) else null,
-                clearnetUrl = post.clearnetUrl,
-                clearnetTitle = post.clearnetTitle,
-                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
-                clearnetMediaType = post.clearnetMediaType
-            )
-        }
+        val postPayloads = missingOrUpdatedPosts.map { it.toPostPayload() }
 
         val recentComments = commentDao.getCommentsSince(syncCutoff).filter { comment ->
             val post = if (postCache.containsKey(comment.postId)) postCache[comment.postId] else {
@@ -347,6 +324,10 @@ class SyncPacketHandler(
                 if (!filterSettings.allowIncomingTextPosts) continue
             }
 
+            val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64,
+                postPay.privacy, postPay.mediaId, postPay.clearnetUrl
+            )
             val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
             )
@@ -356,10 +337,14 @@ class SyncPacketHandler(
             val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
             val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
             val sig = postPay.signature ?: ""
-            val isValid = CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
-                CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
-                CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
-                CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
+            val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.clearnetUrl == null
+            val isValid = CryptoService.verify(payloadCanonical, sig, postPay.authorId) ||
+                (isLegacySafe && (
+                    CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
+                    CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
+                    CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
+                    CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
+                ))
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
                 continue
@@ -367,11 +352,22 @@ class SyncPacketHandler(
             val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
-            // Skip posts that are already locally orphaned (deleted) to prevent resurrection
+
+            // F06: Transactional checks for existing post ownership, tombstone, and newer timestamp
             val existingPost = postDao.getPostById(postPay.id)
-            if (existingPost != null && existingPost.isOrphaned) {
-                Logger.debug(TAG, "Sync: Skipping orphaned post ${postPay.id} — already deleted locally")
-                continue
+            if (existingPost != null) {
+                if (existingPost.isOrphaned) {
+                    Logger.debug(TAG, "Sync: Skipping orphaned post ${postPay.id} — already deleted locally")
+                    continue
+                }
+                if (existingPost.authorPublicKeyB64 != postPay.authorId) {
+                    Logger.warn(TAG, "Sync: Rejecting post ${postPay.id} — author mismatch with existing post")
+                    continue
+                }
+                if (existingPost.timestamp >= postPay.timestamp) {
+                    Logger.debug(TAG, "Sync: Skipping stale post ${postPay.id}")
+                    continue
+                }
             }
             val post = MeshPost(
                 id = postPay.id,
@@ -384,11 +380,13 @@ class SyncPacketHandler(
                 signature = postPay.signature ?: "",
                 mediaUrl = postPay.mediaId?.let { "noslop://${peerOnion}/$it" },
                 mediaType = postPay.mediaMetadata?.type,
+                privacy = postPay.privacy,
                 thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
                 clearnetUrl = postPay.clearnetUrl,
                 clearnetTitle = postPay.clearnetTitle,
                 clearnetThumbnailUrl = postPay.clearnetThumbnailUrl,
-                clearnetMediaType = postPay.clearnetMediaType
+                clearnetMediaType = postPay.clearnetMediaType,
+                mediaSize = postPay.mediaMetadata?.size ?: 0L
             )
             postDao.insertPost(post)
             

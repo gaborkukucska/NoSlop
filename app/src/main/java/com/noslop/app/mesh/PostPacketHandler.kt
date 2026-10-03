@@ -35,6 +35,10 @@ class PostPacketHandler(
             if (!filterSettings.allowIncomingTextPosts) return false
         }
 
+        val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64,
+            postPay.privacy, postPay.mediaId, postPay.clearnetUrl
+        )
         val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
             postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
         )
@@ -44,10 +48,14 @@ class PostPacketHandler(
         val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
         val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
         val sig = postPay.signature ?: ""
-        val isValid = CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
-            CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
-            CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
-            CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
+        val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.clearnetUrl == null
+        val isValid = CryptoService.verify(payloadCanonical, sig, postPay.authorId) ||
+            (isLegacySafe && (
+                CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
+                CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
+                CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
+                CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
+            ))
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
             return false
@@ -65,6 +73,23 @@ class PostPacketHandler(
             if (url.contains("youtube.com") || url.contains("youtu.be") || 
                 url.contains("vimeo.com") || url.contains("archive.org/embed")) {
                 effectiveClearnetType = "video"
+            }
+        }
+
+        // F06: Prevent resurrection of orphaned post, cross-author collision, or stale replay
+        val existingPost = postDao.getPostById(postPay.id)
+        if (existingPost != null) {
+            if (existingPost.isOrphaned) {
+                Logger.debug(TAG, "Dropping POST ${postPay.id}: post is already deleted/tombstoned")
+                return true
+            }
+            if (existingPost.authorPublicKeyB64 != postPay.authorId) {
+                Logger.warn(TAG, "Rejecting POST ${postPay.id}: author mismatch with existing post")
+                return false
+            }
+            if (existingPost.timestamp >= postPay.timestamp) {
+                Logger.debug(TAG, "Dropping stale POST ${postPay.id}: existing post is newer or equal")
+                return true
             }
         }
 
@@ -154,6 +179,11 @@ class PostPacketHandler(
 
     suspend fun handleEditPost(packet: NetworkPacket): Boolean {
         val editPay = packet.getEditPostPayload() ?: return false
+        val effectivePrivacy = editPay.privacy ?: "public"
+        val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64,
+            effectivePrivacy, editPay.mediaId
+        )
         val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
         )
@@ -161,9 +191,13 @@ class PostPacketHandler(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString()
         )
         val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
-        val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId) ||
-            CryptoService.verify(payloadNoAvatar, editPay.signature, editPay.authorId) ||
-            CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId)
+        val isLegacySafe = effectivePrivacy == "public" && editPay.mediaId == null
+        val isValid = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId) ||
+            (isLegacySafe && (
+                CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId) ||
+                CryptoService.verify(payloadNoAvatar, editPay.signature, editPay.authorId) ||
+                CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId)
+            ))
         if (!isValid) return false
 
         val existingPost = postDao.getPostById(editPay.postId)
