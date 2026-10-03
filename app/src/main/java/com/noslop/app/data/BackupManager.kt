@@ -430,6 +430,8 @@ object BackupManager {
             }
 
             // F13: Stage and validate unzipped files before modifying live target state
+            var restoredKeystoreSealedIdentity = false
+            var restoredFallbackIdentity = false
             val stageDir = File(tempDir, "restore_stage_${System.currentTimeMillis()}").apply { mkdirs() }
             var hasPortableIdentity = false
             var hasStagedDb = false
@@ -555,6 +557,7 @@ object BackupManager {
                             .putString("burnable_display_name", bObj.getString("displayName"))
                     }
                     edit.apply()
+                    restoredKeystoreSealedIdentity = true
                     Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
                 } else {
                     // Legacy archive: Restore raw preferences
@@ -631,7 +634,7 @@ object BackupManager {
             // Cross-device detection: a Keystore-sealed identity file was restored
             // but this device has no matching master key, and no fallback store
             // came along with it.
-            if (restoredKeystoreSealedIdentity && !restoredFallbackIdentity && !canOpenRestoredIdentity(context)) {
+            if (!hasPortableIdentity && restoredKeystoreSealedIdentity && !restoredFallbackIdentity && !canOpenRestoredIdentity(context)) {
                 Logger.info(TAG, "Cross-device restore detected: re-deriving identity deterministically from mnemonic using local hardware Keystore...")
                 val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                 if (secureFile.exists()) secureFile.delete()

@@ -42,8 +42,11 @@ object MediaProxyService {
         return diff == 0
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var proxyScope: CoroutineScope? = null
     private var serverSocket: ServerSocket? = null
+    private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
+    private const val MAX_ACTIVE_CONNECTIONS = 16
+
     var isRunning = false
         private set
 
@@ -51,6 +54,8 @@ object MediaProxyService {
         if (isRunning) return
         Logger.info(TAG, "Starting MediaProxyService...")
         isRunning = true
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        proxyScope = scope
         scope.launch {
             try {
                 serverSocket = ServerSocket().apply {
@@ -74,7 +79,9 @@ object MediaProxyService {
     fun stop() {
         isRunning = false
         try { serverSocket?.close() } catch (e: Exception) {}
-        scope.cancel()
+        serverSocket = null
+        proxyScope?.cancel()
+        proxyScope = null
     }
 
     fun buildProxyUrl(onionAddress: String, mediaId: String): String {
@@ -82,7 +89,14 @@ object MediaProxyService {
     }
 
     private suspend fun handleHttpRequest(clientSocket: Socket) = withContext(Dispatchers.IO) {
+        if (activeConnections.get() >= MAX_ACTIVE_CONNECTIONS) {
+            Logger.warn(TAG, "Rejecting proxy request: max active connections ($MAX_ACTIVE_CONNECTIONS) reached")
+            try { clientSocket.close() } catch (_: Exception) {}
+            return@withContext
+        }
+        activeConnections.incrementAndGet()
         try {
+            clientSocket.soTimeout = 5000 // 5-second deadline for headers (F16)
             val input = clientSocket.getInputStream()
             val output = clientSocket.getOutputStream()
             
@@ -152,7 +166,8 @@ object MediaProxyService {
             if (localFile != null && localFile.exists()) {
                 Logger.info(TAG, "Serving $mediaId from disk cache at ${localFile.absolutePath}")
                 val metadata = MediaManager.getMetadataSync(mediaId)
-                streamFile(localFile, metadata?.mimeType ?: "application/octet-stream", output)
+                val rangeHeader = requestLines.find { it.startsWith("Range:", ignoreCase = true) }
+                streamFile(localFile, metadata?.mimeType ?: "application/octet-stream", output, rangeHeader)
                 return@withContext
             }
 
@@ -273,32 +288,77 @@ object MediaProxyService {
         } catch (e: Exception) {
             Logger.warn(TAG, "Media streaming proxy interrupted: ${e.message}")
         } finally {
+            activeConnections.decrementAndGet()
             try { clientSocket.close() } catch (e: Exception) {}
         }
     }
 
-    private fun streamFile(file: File, contentType: String, output: OutputStream) {
+    private fun streamFile(file: File, contentType: String, output: OutputStream, rangeHeader: String? = null) {
         try {
-            val headers = """
-                HTTP/1.1 200 OK
+            val totalLength = file.length()
+            var start = 0L
+            var end = totalLength - 1
+
+            var isPartial = false
+            if (!rangeHeader.isNullOrBlank() && rangeHeader.startsWith("bytes=", ignoreCase = true)) {
+                val rangeSpec = rangeHeader.substringAfter("=").trim()
+                val parts = rangeSpec.split("-")
+                val startParsed = parts.getOrNull(0)?.toLongOrNull()
+                val endParsed = parts.getOrNull(1)?.toLongOrNull()
+
+                if (startParsed != null) {
+                    start = startParsed
+                    if (endParsed != null && endParsed in start until totalLength) {
+                        end = endParsed
+                    }
+                    isPartial = true
+                }
+            }
+
+            if (start > end || start >= totalLength) {
+                sendHttpError(output, 416, "Range Not Satisfiable")
+                return
+            }
+
+            val contentLength = end - start + 1
+            val headers = if (isPartial) {
+                """
+                HTTP/1.1 206 Partial Content
                 Content-Type: $contentType
-                Content-Length: ${file.length()}
+                Content-Range: bytes $start-$end/$totalLength
+                Content-Length: $contentLength
+                Accept-Ranges: bytes
                 Connection: close
                 
-            """.trimIndent().replace("\n", "\r\n") + "\r\n"
-            
+                """.trimIndent().replace("\n", "\r\n") + "\r\n"
+            } else {
+                """
+                HTTP/1.1 200 OK
+                Content-Type: $contentType
+                Content-Length: $totalLength
+                Accept-Ranges: bytes
+                Connection: close
+                
+                """.trimIndent().replace("\n", "\r\n") + "\r\n"
+            }
+
             output.write(headers.toByteArray(Charsets.UTF_8))
             output.flush()
 
-            file.inputStream().use { input ->
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                raf.seek(start)
                 val buffer = ByteArray(32 * 1024)
-                var bytesRead: Int
-                while (input.read(buffer).also { bytesRead = it } != -1) {
+                var remaining = contentLength
+                while (remaining > 0) {
+                    val toRead = Math.min(buffer.size.toLong(), remaining).toInt()
+                    val bytesRead = raf.read(buffer, 0, toRead)
+                    if (bytesRead == -1) break
                     output.write(buffer, 0, bytesRead)
+                    remaining -= bytesRead
                 }
             }
             output.flush()
-            Logger.info(TAG, "File ${file.name} streamed successfully from disk")
+            Logger.info(TAG, "File ${file.name} streamed successfully from disk (partial=$isPartial, range=$start-$end)")
         } catch (e: Exception) {
             Logger.warn(TAG, "Error streaming file ${file.name}: ${e.message}")
         }
@@ -308,14 +368,23 @@ object MediaProxyService {
         val lines = mutableListOf<String>()
         val builder = java.lang.StringBuilder()
         var c: Int
+        var totalBytes = 0
+        val maxHeaderBytes = 16 * 1024 // 16 KB header limit (F16)
         try {
             while (input.read().also { c = it } != -1) {
                 builder.append(c.toChar())
+                totalBytes++
+                if (totalBytes >= maxHeaderBytes) {
+                    Logger.warn(TAG, "Header limit exceeded ($maxHeaderBytes bytes) — terminating request")
+                    return emptyList()
+                }
                 if (builder.endsWith("\r\n\r\n")) {
                     break
                 }
             }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            Logger.debug(TAG, "readHttpHeaders interrupted/timeout: ${e.message}")
+        }
         val raw = builder.toString().trimEnd()
         return if (raw.isEmpty()) emptyList() else raw.split("\r\n")
     }

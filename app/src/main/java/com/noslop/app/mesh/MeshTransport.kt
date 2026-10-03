@@ -38,7 +38,7 @@ class MeshTransport(
     private val MAX_PACKET_CHARS = 4 * 1024 * 1024
 
     fun startListening() {
-        if (isRunning) return
+        if (isRunning && listening) return
         isRunning = true
         scope.launch {
             try {
@@ -48,7 +48,7 @@ class MeshTransport(
                     bind(InetSocketAddress(java.net.InetAddress.getByName("127.0.0.1"), listenPort), 50)
                 }
                 listening = true
-                Logger.info(TAG, "TCP listener bound — 127.0.0.1:$listenPort (hidden service only)")
+                Logger.info(TAG, "TCP listener bound to 127.0.0.1:$listenPort (hidden service only)")
                 while (isActive && isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
                     scope.launch {
@@ -57,12 +57,18 @@ class MeshTransport(
                 }
             } catch (e: Exception) {
                 listening = false
+                isRunning = false
                 Logger.error(TAG, "ServerSocket error: ${e.message}")
             }
         }
     }
 
-
+    fun stopListening() {
+        isRunning = false
+        listening = false
+        try { serverSocket?.close() } catch (_: Exception) {}
+        serverSocket = null
+    }
 
     private suspend fun handleIncomingConnection(socket: Socket) = withContext(Dispatchers.IO) {
         val clientIp = socket.remoteSocketAddress?.toString() ?: "unknown"
@@ -249,9 +255,10 @@ class MeshTransport(
                     Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms (attempt $attempt/$maxAttempts)")
                     socket.setSoLinger(true, 5)
                     socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), connectTimeout) 
-                    val writer = PrintWriter(socket.getOutputStream(), true)
-                    writer.print(packet.toJson() + "\n")
-                    writer.flush()
+                    val out = socket.getOutputStream()
+                    val bytes = (packet.toJson() + "\n").toByteArray(Charsets.UTF_8)
+                    out.write(bytes)
+                    out.flush()
                     delay(300) // Allow OS and Tor SOCKS proxy to transmit packet frame
                     Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt/$maxAttempts)")
                     GossipService.recordSendSuccess(onionAddress)

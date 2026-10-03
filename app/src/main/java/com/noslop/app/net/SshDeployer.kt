@@ -280,6 +280,9 @@ object SshDeployer {
                 rm -f "${'$'}HOME/.cargo/bin/sudo"
                 
                 # Setup transient askpass helper
+                # F19: Restrictive default umask for secret creation
+                umask 077
+
                 cat << 'EOF_ASKPASS' > "${'$'}HOME/.hainet_askpass"
 #!/bin/bash
 echo "${'$'}SUDO_PASS"
@@ -303,6 +306,7 @@ EOF_SHIM
                 cleanup() {
                     rm -f "${'$'}HOME/.hainet_askpass"
                     rm -rf "${'$'}HOME/.hainet_deploy_tmp"
+                    rm -f gen_tor.py reset_ident.py hai/hub_config.json
                     unset SUDO_PASS
                     unset SUDO_ASKPASS
                 }
@@ -314,7 +318,8 @@ EOF_SHIM
 
                 setup_tor_hidden_service() {
                     cat << 'PYEOF' > gen_tor.py
-import base64, sys
+import base64, sys, os
+os.umask(0o077)
 b64_str = "$expandedSeedB64"
 if not b64_str:
     sys.exit(0)
@@ -359,6 +364,7 @@ PYEOF
                     run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" ~/.hainet 2>/dev/null || true
                     cat << EOF > reset_ident.py
 import json, base64, os, sys
+os.umask(0o077)
 try:
     config_b64 = "$configB64"
     config_json = json.loads(base64.b64decode(config_b64).decode('utf-8'))
@@ -553,7 +559,7 @@ EOF
                 # Pre-create /etc/hainet and /var/lib/hainet so the installer doesn't fail with permissions errors
                 run_sudo mkdir -p /etc/hainet /var/lib/hainet
                 run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" /etc/hainet /var/lib/hainet
-                run_sudo chmod 777 /var/lib/hainet
+                run_sudo chmod 700 /var/lib/hainet
                 echo ""
                 
                 # Step 4: Run the seed installer
