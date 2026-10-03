@@ -20,11 +20,13 @@ import java.util.concurrent.LinkedBlockingQueue
 object MediaManager {
     private const val TAG = "MEDIA_MANAGER"
 
+    private val MEDIA_ID_REGEX = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
+
     fun isValidMediaId(mediaId: String?): Boolean {
         if (mediaId.isNullOrBlank()) return false
         if (mediaId.length > 128) return false
-        if (mediaId.contains("..") || mediaId.contains("/") || mediaId.contains("\\")) return false
-        return mediaId.matches(Regex("^[A-Za-z0-9._-]+$"))
+        if (mediaId.contains("..") || mediaId.contains("/") || mediaId.contains("\")) return false
+        return mediaId.matches(MEDIA_ID_REGEX)
     }
 
     private fun isPathInDirectory(file: File, directory: File): Boolean {
@@ -1001,8 +1003,8 @@ object MediaManager {
 
     fun exportToPublicDownloads(context: Context, mediaId: String, fileName: String): Boolean {
         if (!isValidMediaId(mediaId)) return false
-        val cleanName = fileName.replace("..", "").replace("/", "").replace("\\", "").trim()
-        val effectiveName = if (cleanName.isBlank()) mediaId else cleanName
+        val baseFileName = File(fileName).name.replace(Regex("[^A-Za-z0-9._-]"), "_").trimStart('.')
+        val effectiveName = if (baseFileName.isBlank() || baseFileName.contains("..")) mediaId else baseFileName
         return try {
             val srcFile = getLocalFile(mediaId) ?: return false
             var safeName = effectiveName

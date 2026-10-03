@@ -93,6 +93,8 @@ object TorService {
 
     private var bootstrapJob: kotlinx.coroutines.Job? = null
     private var networkCallbackRegistered = false
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private var appContext: Context? = null
     private var currentPrivateKeyB64: String? = null
     private var currentBurnablePrivateKeyB64: String? = null
     var currentBurnableOnionAddress: String? = null
@@ -159,6 +161,17 @@ object TorService {
             context.unregisterReceiver(torStatusReceiver)
         } catch (e: Exception) {
             Logger.debug(TAG, "torStatusReceiver unregister notice: ${e.message}")
+        }
+
+        if (networkCallbackRegistered) {
+            try {
+                val cm = (appContext ?: context).getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                networkCallback?.let { cm?.unregisterNetworkCallback(it) }
+                networkCallback = null
+                networkCallbackRegistered = false
+            } catch (e: Exception) {
+                Logger.debug(TAG, "networkCallback unregister notice: ${e.message}")
+            }
         }
     }
 
@@ -230,24 +243,31 @@ object TorService {
         
         bootstrapJob?.cancel()
 
+        appContext = context.applicationContext
         writeTorrc(context)
 
         // Register network callback once to automatically restart Tor when network connectivity returns
         if (!networkCallbackRegistered) {
             try {
-                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-                cm?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                val cm = (appContext ?: context).getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: android.net.Network) {
                         val state = _torState.value
-                        if (state == TorState.FAILED || state == TorState.IDLE) {
+                        if ((state == TorState.FAILED || state == TorState.IDLE) && bootstrapJob?.isActive != true) {
                             Logger.info(TAG, "Network became available while Tor was in state $state. Triggering auto-recovery...")
                             scope.launch {
                                 delay(1000L)
-                                startTor(context, currentPrivateKeyB64, currentBurnablePrivateKeyB64, forceRestart = false)
+                                val curState = _torState.value
+                                val targetCtx = appContext ?: context
+                                if ((curState == TorState.FAILED || curState == TorState.IDLE) && bootstrapJob?.isActive != true) {
+                                    startTor(targetCtx, currentPrivateKeyB64, currentBurnablePrivateKeyB64, forceRestart = false)
+                                }
                             }
                         }
                     }
-                })
+                }
+                cm?.registerDefaultNetworkCallback(callback)
+                networkCallback = callback
                 networkCallbackRegistered = true
             } catch (e: Exception) {
                 Logger.warn(TAG, "Failed to register network callback: ${e.message}")

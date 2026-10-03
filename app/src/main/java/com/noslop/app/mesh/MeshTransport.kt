@@ -179,11 +179,11 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
-        // Only unsolicited background presence announcements respect peer cooldown.
-        // User DMs, DM sync, inventory sync, posts, comments, and media chunk transfers must never be blocked by cooldown.
-        val isBackgroundAnnounce = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE"
-        if (isBackgroundAnnounce && GossipService.isPeerInCooldown(onionAddress)) {
-            Logger.debug(TAG, "Skipping background ${packet.type} to $onionAddress: peer in cooldown")
+        // User DMs and handshakes bypass cooldown so active user actions are not locked out.
+        // General broadcasts, forwards, sync, and background presence respect cooldown.
+        val bypassCooldown = isHandshake || isDmHighPriority
+        if (!bypassCooldown && GossipService.isPeerInCooldown(onionAddress)) {
+            Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub
         }
 
@@ -227,7 +227,6 @@ class MeshTransport(
         }
 
         try {
-            val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
             val maxAttempts = when {
                 isHandshake -> 2 // 2 attempts allows fast-fail to background persistent outbox
                 isDmHighPriority -> 2
@@ -284,9 +283,8 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            // Only background presence announcements should penalize peer failure tracking.
-            // DMs, handshakes, user posts, media, and interactive packets should never trigger cooldown lockout.
-            if (isBackgroundAnnounce) {
+            // Record failure for all traffic except transient interactive signals (typing, read receipts)
+            if (!isInteractive) {
                 GossipService.recordSendFailure(onionAddress)
             }
             return@withContext pushedToHub

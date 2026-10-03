@@ -32,7 +32,7 @@ class SettingsRepositoryTest {
 
     @Test
     fun mediaSettings_roundTrip_andFlowStaysInSync() = runBlocking {
-        val custom = MediaSettings(enabled = false, maxFileSizeMB = 50,)
+        val custom = MediaSettings(enabled = false, maxFileSizeMB = 50)
         repo.updateMediaSettings(custom)
         // Flow is pushed on write...
         assertEquals(custom, repo.mediaSettingsFlow.value)

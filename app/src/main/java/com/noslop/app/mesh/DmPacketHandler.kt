@@ -21,6 +21,7 @@ class DmPacketHandler(
     private val peerDao = db.peerDao()
     private val messageDao = db.messageDao()
     private val notificationDao = db.notificationDao()
+    private val lastAutoConnRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val burnableKeys = repo.getBurnableIdentity()
@@ -34,22 +35,12 @@ class DmPacketHandler(
             return false
         }
 
-        // If this DM hit our burnable identity, strictly associate this peer with the burnable identity 
-        // so our replies don't leak our main identity!
-        if (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64) {
-            db.appSettingDao().insertSetting(AppSetting("contact_identity_${packet.senderId}", "burnable"))
-        }
-
         val msgPay = packet.getMessagePayload() ?: return false
 
         // Deduplication: if message already exists locally, do not re-notify or re-download media
         val existingMsg = messageDao.getMessageById(msgPay.id)
         if (existingMsg != null) {
             Logger.debug(TAG, "Dropping duplicate DM ${msgPay.id}: already delivered")
-            peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
-                GossipService.recordSendSuccess(it)
-            }
-            repo.updatePeerTypingState(packet.senderId, false)
             return true
         }
 
@@ -57,17 +48,24 @@ class DmPacketHandler(
         val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
         
         if (opponentEncPub == null) {
-            Logger.warn(TAG, "Missing X25519 key for DM sender ${packet.senderId}. Triggering connection request.")
-            try {
-                repo.sendConnectionRequest(
-                    handle = peer?.handle ?: "Unknown",
-                    publicKeyB64 = packet.senderId,
-                    onionAddress = peer?.onionAddress ?: "",
-                    encPublicKeyB64 = "",
-                    useBurnableIdentity = (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64)
-                )
-            } catch (e: Exception) {
-                Logger.error(TAG, "Failed to send connection request to ${packet.senderId}")
+            val now = System.currentTimeMillis()
+            val lastReq = lastAutoConnRequests[packet.senderId] ?: 0L
+            if (now - lastReq > 60_000L && !peer?.onionAddress.isNullOrBlank()) {
+                lastAutoConnRequests[packet.senderId] = now
+                Logger.warn(TAG, "Missing X25519 key for DM sender ${packet.senderId}. Triggering rate-limited connection request.")
+                try {
+                    repo.sendConnectionRequest(
+                        handle = peer?.handle ?: "Unknown",
+                        publicKeyB64 = packet.senderId,
+                        onionAddress = peer?.onionAddress ?: "",
+                        encPublicKeyB64 = "",
+                        useBurnableIdentity = (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64)
+                    )
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Failed to send connection request to ${packet.senderId}")
+                }
+            } else {
+                Logger.warn(TAG, "Missing X25519 key for DM sender ${packet.senderId}. Skipping connection request (rate-limited or missing onion).")
             }
             return false
         }
@@ -87,6 +85,11 @@ class DmPacketHandler(
             return false
         }
         if (plaintext != null) {
+            // Once cryptographically authenticated: associate peer with burnable identity if reached via burnable
+            if (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64) {
+                db.appSettingDao().insertSetting(AppSetting("contact_identity_${packet.senderId}", "burnable"))
+            }
+
             var finalContent = plaintext
             var mediaId: String? = null
             var mediaType: String? = null

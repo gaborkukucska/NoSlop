@@ -33,21 +33,21 @@ object GossipService {
 
     private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
     
-    // Track persistent send failures to avoid spamming unreachable peers
-    suspend fun isFriendsOnlyPacket(packet: NetworkPacket): Boolean {
+    data class PostContext(val isFriendsOnly: Boolean, val targetPostAuthor: String?)
+
+    suspend fun resolvePostContext(packet: NetworkPacket): PostContext {
         if (packet.type == "POST") {
             val postPay = packet.getPostPayload()
-            return postPay != null && postPay.privacy == "friends"
+            return PostContext(postPay?.privacy == "friends", postPay?.authorId)
         }
         if (packet.type == "EDIT_POST") {
             val editPay = packet.getEditPostPayload()
-            return editPay != null && editPay.privacy == "friends"
+            return PostContext(editPay?.privacy == "friends", editPay?.authorId)
         }
         if (packet.type == "GROUP_MESSAGE") {
             val groupPay = packet.getGroupMessagePayload()
-            return groupPay != null && groupPay.privacy == "friends"
+            return PostContext(groupPay?.privacy == "friends", null)
         }
-        // For engagement/actions on posts: check target post's privacy in local database
         val targetPostId = when (packet.type) {
             "DELETE_POST" -> packet.getDeletePostPayload()?.postId
             "COMMENT" -> packet.getCommentPayload()?.postId
@@ -71,54 +71,21 @@ object GossipService {
             }
             val targetPost = postDao?.getPostById(targetPostId)
             if (targetPost != null) {
-                return targetPost.privacy == "friends"
+                return PostContext(targetPost.privacy == "friends", targetPost.authorPublicKeyB64)
             }
         }
-        // Fallback for originated broadcasts where hops is explicitly 1 for friends-only engagement
-        if (packet.hops == 1) {
-            val socialTypes = setOf(
-                "DELETE_POST", "COMMENT", "EDIT_COMMENT", "DELETE_COMMENT",
-                "REACTION", "VOTE", "COMMENT_REACTION", "COMMENT_VOTE"
-            )
-            if (packet.type in socialTypes) {
-                return true
-            }
-        }
-        return false
+        return PostContext(isFriendsOnly = false, targetPostAuthor = null)
+    }
+
+    suspend fun isFriendsOnlyPacket(packet: NetworkPacket): Boolean {
+        return resolvePostContext(packet).isFriendsOnly
     }
 
     private suspend fun getTargetPostAuthor(packet: NetworkPacket): String? {
-        val targetPostId = when (packet.type) {
-            "DELETE_POST" -> packet.getDeletePostPayload()?.postId
-            "COMMENT" -> packet.getCommentPayload()?.postId
-            "EDIT_COMMENT" -> packet.getEditCommentPayload()?.postId
-            "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.postId
-            "REACTION" -> packet.getReactionPayload()?.postId
-            "VOTE" -> packet.getVotePayload()?.postId
-            "COMMENT_REACTION" -> {
-                val commId = packet.getCommentReactionPayload()?.commentId
-                commId?.let { transport?.repository?.context?.let { ctx -> com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).commentDao().getCommentById(it)?.postId } }
-            }
-            "COMMENT_VOTE" -> {
-                val commId = packet.getCommentVotePayload()?.commentId
-                commId?.let { transport?.repository?.context?.let { ctx -> com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).commentDao().getCommentById(it)?.postId } }
-            }
-            "POST" -> packet.getPostPayload()?.authorId
-            "EDIT_POST" -> packet.getEditPostPayload()?.authorId
-            else -> null
-        }
-        if (packet.type == "POST" || packet.type == "EDIT_POST") {
-            return targetPostId
-        }
-        if (!targetPostId.isNullOrBlank()) {
-            val postDao = transport?.repository?.context?.let { ctx ->
-                com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).postDao()
-            }
-            return postDao?.getPostById(targetPostId)?.authorPublicKeyB64
-        }
-        return null
+        return resolvePostContext(packet).targetPostAuthor
     }
 
+    // Track persistent send failures to avoid spamming unreachable peers
     private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
     private val PEER_FAILURE_THRESHOLD = 3
     private val PEER_COOLDOWN_MS = 30 * 1000L // 30 seconds cooldown
@@ -482,6 +449,23 @@ object GossipService {
         val isDirectedMessageForUs = packet.type == "MESSAGE" && !packet.targetUserId.isNullOrBlank() && 
             (checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64))
 
+        // Dedicated rate limit for untrusted incoming directed DMs (max 10 per 60s per sender)
+        if (isDirectedMessageForUs) {
+            val isTrusted = peerDao?.getPeerByPublicKey(senderId)?.isTrusted == true
+            if (!isTrusted) {
+                val now = System.currentTimeMillis()
+                val limitList = announcementRateLimits.getOrPut(senderId) { ArrayList() }
+                val limited = synchronized(limitList) {
+                    limitList.removeAll { now - it > 60_000L }
+                    if (limitList.size >= 10) true else { limitList.add(now); false }
+                }
+                if (limited) {
+                    Logger.warn("FIREWALL", "Rate limit (10/60s) exceeded for untrusted DM sender $senderId. Dropping MESSAGE $packetId.")
+                    return false
+                }
+            }
+        }
+
         // Dedicated rate limit for unauthenticated announcements, follows, & identity updates (5 per 60s per sender)
         if (isDiscoverable || isIdentityUpdate || isFollowPacket || isInvidiousAnnounce) {
             val now = System.currentTimeMillis()
@@ -525,14 +509,14 @@ object GossipService {
             } catch (_: Exception) { false }
         } else false
 
-        if (isFriendsOnlyPacket(packet)) {
+        val postContext = resolvePostContext(packet)
+        if (postContext.isFriendsOnly) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 val contactSetting = transport?.repository?.getAppSetting("contact_identity_${senderId}")
                 val isSeverableOrTemporary = peer == null || !peer.isTrusted || peer.isTemporary || contactSetting == "burnable"
-                val targetPostAuthor = getTargetPostAuthor(packet)
-                val isPostAuthor = targetPostAuthor != null && senderId == targetPostAuthor
+                val isPostAuthor = postContext.targetPostAuthor != null && senderId == postContext.targetPostAuthor
                 if (isSeverableOrTemporary && !isPostAuthor) {
                     Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/burnable)")
                     return false
@@ -754,10 +738,8 @@ object GossipService {
         }
 
         // 1. Do we have it?
-        val mediaDir = File(transport?.repository?.context?.filesDir, "media")
-        val localMedia = File(mediaDir, mediaId)
-        val isContained = try { localMedia.canonicalPath.startsWith(mediaDir.canonicalPath + File.separator) } catch (_: Exception) { false }
-        if (isContained && localMedia.exists()) {
+        val localMedia = MediaManager.getLocalFile(mediaId)
+        if (localMedia != null && localMedia.exists()) {
             Logger.info(TAG, "Relay: We have media $mediaId. Responding to $senderId")
             scope.launch {
                 val isTargetTemp = peerDao?.getPeerByPublicKey(senderId)?.isTemporary == true
@@ -946,8 +928,9 @@ object GossipService {
             } catch (_: Exception) { emptySet() }
         } else emptySet()
 
-        val isFriendsOnly = isFriendsOnlyPacket(packet)
-        val targetPostAuthor = getTargetPostAuthor(packet)
+        val postContext = resolvePostContext(packet)
+        val isFriendsOnly = postContext.isFriendsOnly
+        val targetPostAuthor = postContext.targetPostAuthor
         val activePeers = dao.getAllPeersList()
         val targetPeers = if (isFriendsOnly) {
             activePeers.filter { peer ->

@@ -59,19 +59,26 @@ object JamendoApiClient {
             }
             val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&$queryParam&include=musicinfo" 
             
-            val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
-            val reqBuilder = Request.Builder().url(proxiedUrl)
-            ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
-            val request = reqBuilder.build()
-
             var response: okhttp3.Response? = null
-            try {
-                response = client.newCall(request).execute()
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Jamendo proxy request threw exception: ${e.message}")
+
+            if (ProxyAuth.isConfigured) {
+                val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
+                val reqBuilder = Request.Builder().url(proxiedUrl)
+                ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
+                try {
+                    response = client.newCall(reqBuilder.build()).execute()
+                    if (!response.isSuccessful) {
+                        response.close()
+                        response = null
+                    }
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Jamendo proxy request threw exception: ${e.message}")
+                    response?.close()
+                    response = null
+                }
             }
 
-            if (response == null || !response.isSuccessful) {
+            if (response == null) {
                 val directReq = Request.Builder().url(url).build()
                 try {
                     response = client.newCall(directReq).execute()

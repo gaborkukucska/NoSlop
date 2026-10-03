@@ -242,6 +242,49 @@ class GossipServiceTest {
     }
 
     @Test
+    fun firewall_rateLimitsUntrustedDirectedMessages() = runBlocking {
+        val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+        io.mockk.coEvery { mockDao.getPeerByPublicKey("untrusted-spammer") } returns null
+
+        val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
+        GossipService.initialize(
+            peerDao = mockDao,
+            transport = mockTx,
+            localPublicKeyB64 = "local-key",
+            checkIsLocalUser = { it == "local-key" }
+        )
+
+        // 10 packets within 60s are allowed
+        for (i in 0 until 10) {
+            val dmPacket = NetworkPacket(
+                id = "dm-ok-$i", hops = 1, senderId = "untrusted-spammer", targetUserId = "local-key",
+                type = "MESSAGE", payload = com.google.gson.JsonObject()
+            )
+            assertTrue("DM $i within rate limit", GossipService.processIncoming(dmPacket))
+        }
+
+        // 11th packet from untrusted sender should be blocked by dedicated DM rate limit
+        val dmExcess = NetworkPacket(
+            id = "dm-excess", hops = 1, senderId = "untrusted-spammer", targetUserId = "local-key",
+            type = "MESSAGE", payload = com.google.gson.JsonObject()
+        )
+        assertFalse("11th unauthenticated DM dropped by firewall rate limit", GossipService.processIncoming(dmExcess))
+    }
+
+    @Test
+    fun mediaManager_isValidMediaId_validatesCharactersAndNoLeadingDot() {
+        assertTrue(MediaManager.isValidMediaId("valid_media-123.mp4"))
+        assertTrue(MediaManager.isValidMediaId("abc123XYZ_photo.jpg"))
+        assertFalse("Lone dot rejected", MediaManager.isValidMediaId("."))
+        assertFalse("Double dot rejected", MediaManager.isValidMediaId(".."))
+        assertFalse("Leading dot rejected", MediaManager.isValidMediaId(".hidden"))
+        assertFalse("Path traversal rejected", MediaManager.isValidMediaId("../secret"))
+        assertFalse("Path traversal backslash rejected", MediaManager.isValidMediaId("..\secret"))
+        assertFalse("Slash rejected", MediaManager.isValidMediaId("folder/file.mp4"))
+        assertFalse("Empty string rejected", MediaManager.isValidMediaId(""))
+    }
+
+    @Test
     fun firewall_respectsMeshFilters() = runBlocking {
         val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
         io.mockk.coEvery { mockDao.getPeerByPublicKey("trusted") } returns com.noslop.app.data.Peer("trusted", "", "", "", isTrusted = true)

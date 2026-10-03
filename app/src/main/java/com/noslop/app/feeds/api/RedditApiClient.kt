@@ -66,23 +66,28 @@ object RedditApiClient {
 
     private fun fetchAndParse(url: String, sourceId: String): List<FeedItem> {
         return try {
-            val proxiedUrl = url.replace("https://www.reddit.com", "${ProxyAuth.PROXY_URL}/reddit")
-            val reqBuilder = Request.Builder()
-                .url(proxiedUrl)
-                .header("User-Agent", "android:${com.noslop.app.BuildConfig.APPLICATION_ID}:${com.noslop.app.BuildConfig.VERSION_NAME} (by /u/NoSlopApp)")
-            
-            ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
-            val request = reqBuilder.build()
-
             var response: okhttp3.Response? = null
-            try {
-                response = client.newCall(request).execute()
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Reddit proxy request threw exception: ${e.message}")
+
+            if (ProxyAuth.isConfigured) {
+                val proxiedUrl = url.replace("https://www.reddit.com", "${ProxyAuth.PROXY_URL}/reddit")
+                val reqBuilder = Request.Builder()
+                    .url(proxiedUrl)
+                    .header("User-Agent", "android:${com.noslop.app.BuildConfig.APPLICATION_ID}:${com.noslop.app.BuildConfig.VERSION_NAME} (by /u/NoSlopApp)")
+                ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
+                try {
+                    response = client.newCall(reqBuilder.build()).execute()
+                    if (response.code == 403 || response.code == 429 || !response.isSuccessful) {
+                        response.close()
+                        response = null
+                    }
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Reddit proxy request threw exception: ${e.message}")
+                    response?.close()
+                    response = null
+                }
             }
 
-            if (response == null || !response.isSuccessful || response.code == 403 || response.code == 429) {
-                response?.close()
+            if (response == null) {
                 val directReq = Request.Builder()
                     .url(url)
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")

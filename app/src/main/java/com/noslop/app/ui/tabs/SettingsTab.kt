@@ -1905,16 +1905,21 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
             if (uri != null && advisoryMnemonicInput.isNotBlank()) {
                 val mediaOpt = advisoryOption
                 val mnemonic = advisoryMnemonicInput.trim()
-                advisoryScope.launch {
-                    viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
-                        if (success) {
-                            android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.LENGTH_SHORT).show()
+                val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
+                if (activeMnemonic.isNullOrBlank() || mnemonic.equals(activeMnemonic, ignoreCase = true)) {
+                    advisoryScope.launch {
+                        viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
+                            if (success) {
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
+                    advisoryMnemonicInput = ""
+                    showAdvisoryMnemonicPrompt = false
+                    viewModel.dismissBackupPrompt()
+                } else {
+                    android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic does not match your active Word Cloud!"), android.widget.Toast.LENGTH_LONG).show()
                 }
-                advisoryMnemonicInput = ""
-                showAdvisoryMnemonicPrompt = false
-                viewModel.dismissBackupPrompt()
             }
         }
 
@@ -2006,9 +2011,14 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         if (!showAdvisoryMnemonicPrompt) {
                             showAdvisoryMnemonicPrompt = true
                         } else if (advisoryMnemonicInput.isNotBlank()) {
-                            val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
-                            val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                            advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                            val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
+                            if (!activeMnemonic.isNullOrBlank() && !advisoryMnemonicInput.trim().equals(activeMnemonic, ignoreCase = true)) {
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic does not match your active Word Cloud!"), android.widget.Toast.LENGTH_LONG).show()
+                            } else {
+                                val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                                val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                                advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
