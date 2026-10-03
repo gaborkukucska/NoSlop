@@ -48,16 +48,18 @@ class SyncPacketHandler(
         signature = signature
     )
 
-    private fun canSharePost(
-        post: MeshPost,
-        isTrustedDirectPeer: Boolean,
-        myPub: String,
-        peerPub: String
-    ): Boolean {
-        if (post.privacy == "friends") {
-            return isTrustedDirectPeer && (post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == peerPub)
+    companion object {
+        fun canSharePost(
+            post: MeshPost,
+            isTrustedDirectPeer: Boolean,
+            myPub: String,
+            peerPub: String
+        ): Boolean {
+            if (post.privacy == "friends") {
+                return isTrustedDirectPeer && (post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == peerPub)
+            }
+            return true
         }
-        return true
     }
 
     suspend fun handleSyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
@@ -104,13 +106,21 @@ class SyncPacketHandler(
 
         // Also include comments and reactions for full sync (strictly exclude friends-only for non-direct peers)
         val recentComments = commentDao.getCommentsSince(syncPay.since).filter { comment ->
-            val post = postCache.getOrPut(comment.postId) { postDao.getPostById(comment.postId) }
+            val post = if (postCache.containsKey(comment.postId)) postCache[comment.postId] else {
+                val p = postDao.getPostById(comment.postId)
+                postCache[comment.postId] = p
+                p
+            }
             post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
         val recentReactions = reactionDao.getReactionsSince(syncPay.since).filter { reaction ->
-            val post = postCache.getOrPut(reaction.postId) { postDao.getPostById(reaction.postId) }
+            val post = if (postCache.containsKey(reaction.postId)) postCache[reaction.postId] else {
+                val p = postDao.getPostById(reaction.postId)
+                postCache[reaction.postId] = p
+                p
+            }
             post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
@@ -236,13 +246,21 @@ class SyncPacketHandler(
         }
 
         val recentComments = commentDao.getCommentsSince(syncCutoff).filter { comment ->
-            val post = postCache.getOrPut(comment.postId) { postDao.getPostById(comment.postId) }
+            val post = if (postCache.containsKey(comment.postId)) postCache[comment.postId] else {
+                val p = postDao.getPostById(comment.postId)
+                postCache[comment.postId] = p
+                p
+            }
             post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
         val recentReactions = reactionDao.getReactionsSince(syncCutoff).filter { reaction ->
-            val post = postCache.getOrPut(reaction.postId) { postDao.getPostById(reaction.postId) }
+            val post = if (postCache.containsKey(reaction.postId)) postCache[reaction.postId] else {
+                val p = postDao.getPostById(reaction.postId)
+                postCache[reaction.postId] = p
+                p
+            }
             post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }

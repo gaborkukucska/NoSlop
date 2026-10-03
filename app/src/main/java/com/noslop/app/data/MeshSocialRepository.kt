@@ -862,15 +862,11 @@ class MeshSocialRepository(
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = myKeys.publicKeyB64
         val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
-            if (post.privacy == "friends") {
-                isTrustedDirectPeer && (post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == peer.publicKeyB64)
-            } else {
-                true
-            }
+            com.noslop.app.mesh.SyncPacketHandler.canSharePost(post, isTrustedDirectPeer, myPub, peer.publicKeyB64)
         }.toMutableList()
         val olderOwnPosts = postDao.getPostsSince(0L).filter { post ->
             post.timestamp <= syncCutoff && post.authorPublicKeyB64 == myPub &&
-            (post.privacy != "friends" || isTrustedDirectPeer)
+            com.noslop.app.mesh.SyncPacketHandler.canSharePost(post, isTrustedDirectPeer, myPub, peer.publicKeyB64)
         }
         candidatePosts.addAll(olderOwnPosts)
         val inventory = candidatePosts.map { post ->

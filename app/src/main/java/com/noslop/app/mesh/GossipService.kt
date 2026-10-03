@@ -16,6 +16,10 @@ object GossipService {
     private val senderRateLimits = ConcurrentHashMap<String, MutableList<Long>>()
     // P1-6: Dedicated rate limits for unauthenticated/untrusted lifecycle announcements (max 5 per 60s)
     private val announcementRateLimits = ConcurrentHashMap<String, MutableList<Long>>()
+    // Dedicated rate limits for unauthenticated directed DMs (max 10 per 60s per sender, 30 per 60s globally)
+    private val dmRateLimits = ConcurrentHashMap<String, MutableList<Long>>()
+    @Volatile private var globalUntrustedDmCount = 0
+    @Volatile private var globalUntrustedDmWindowStart = 0L
 
     private val relayStates = ConcurrentHashMap<String, RelayState>()
 
@@ -79,10 +83,6 @@ object GossipService {
 
     suspend fun isFriendsOnlyPacket(packet: NetworkPacket): Boolean {
         return resolvePostContext(packet).isFriendsOnly
-    }
-
-    private suspend fun getTargetPostAuthor(packet: NetworkPacket): String? {
-        return resolvePostContext(packet).targetPostAuthor
     }
 
     // Track persistent send failures to avoid spamming unreachable peers
@@ -183,6 +183,9 @@ object GossipService {
         processedPacketIds.clear()
         senderRateLimits.clear()
         announcementRateLimits.clear()
+        dmRateLimits.clear()
+        globalUntrustedDmCount = 0
+        globalUntrustedDmWindowStart = 0L
         relayStates.clear()
         firewallBuffer.clear()
         senderMediaBytes.clear()
@@ -301,6 +304,15 @@ object GossipService {
             entry.value.removeAll { now - it > 60_000L }
             if (entry.value.isEmpty()) {
                 announceIter.remove()
+            }
+        }
+
+        val dmIter = dmRateLimits.entries.iterator()
+        while (dmIter.hasNext()) {
+            val entry = dmIter.next()
+            entry.value.removeAll { now - it > 60_000L }
+            if (entry.value.isEmpty()) {
+                dmIter.remove()
             }
         }
         senderMediaBytes.clear()
@@ -449,12 +461,24 @@ object GossipService {
         val isDirectedMessageForUs = packet.type == "MESSAGE" && !packet.targetUserId.isNullOrBlank() && 
             (checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64))
 
-        // Dedicated rate limit for untrusted incoming directed DMs (max 10 per 60s per sender)
+        // Dedicated rate limit for untrusted incoming directed DMs (max 10 per 60s per sender, 30 per 60s globally)
         if (isDirectedMessageForUs) {
             val isTrusted = peerDao?.getPeerByPublicKey(senderId)?.isTrusted == true
             if (!isTrusted) {
                 val now = System.currentTimeMillis()
-                val limitList = announcementRateLimits.getOrPut(senderId) { ArrayList() }
+                synchronized(this) {
+                    if (now - globalUntrustedDmWindowStart > 60_000L) {
+                        globalUntrustedDmWindowStart = now
+                        globalUntrustedDmCount = 0
+                    }
+                    if (globalUntrustedDmCount >= 30) {
+                        Logger.warn("FIREWALL", "Global untrusted DM rate limit (30/60s) exceeded. Dropping MESSAGE $packetId.")
+                        return false
+                    }
+                    globalUntrustedDmCount++
+                }
+
+                val limitList = dmRateLimits.getOrPut(senderId) { ArrayList() }
                 val limited = synchronized(limitList) {
                     limitList.removeAll { now - it > 60_000L }
                     if (limitList.size >= 10) true else { limitList.add(now); false }
@@ -693,18 +717,18 @@ object GossipService {
                 // Directed at someone else, just forward it if hops > 1
                 Logger.info(TAG, "Directed ${packet.type} packet ${packetId} is not for us (target=${packet.targetUserId?.take(20)}...) — forwarding")
                 pushToHubIfLinked(packet)
-                forwardPacket(packet)
+                forwardPacket(packet, postContext.isFriendsOnly)
                 return false
             } else if (!isForUs && isGroupPacketForUs) {
                 // Group reaction or delete targeting a local group: forward and also process locally!
                 Logger.info(TAG, "Group ${packet.type} packet $packetId for local group — forwarding and processing locally")
                 pushToHubIfLinked(packet)
-                forwardPacket(packet)
+                forwardPacket(packet, postContext.isFriendsOnly)
             }
         } else if (packet.type == "MEDIA_RELAY_REQUEST") {
             handleRelayRequest(senderId, packet)
             pushToHubIfLinked(packet) // Also forward to others
-            forwardPacket(packet)
+            forwardPacket(packet, postContext.isFriendsOnly)
             return false
         } else if (packet.type == "MEDIA_RECOVERY_FOUND") {
             handleRecoveryFound(senderId, packet)
@@ -716,13 +740,13 @@ object GossipService {
             pushToHubIfLinked(packet)
             
             var shouldForward = true
-            if (isFriendsOnlyPacket(packet)) {
+            if (postContext.isFriendsOnly) {
                 shouldForward = false
                 Logger.info(TAG, "Not forwarding ${packet.type} ${packet.id} because privacy is friends-only")
             }
             
             if (shouldForward) {
-                forwardPacket(packet)
+                forwardPacket(packet, postContext.isFriendsOnly)
             }
         }
 
@@ -833,7 +857,7 @@ object GossipService {
      * Forward to all connected peers except sender, with hops decremented by 1
      * Re-stamp sender_id to local node ID on forward (privacy preservation)
      */
-    private suspend fun forwardPacket(packet: NetworkPacket) {
+    private suspend fun forwardPacket(packet: NetworkPacket, isFriendsOnly: Boolean = false) {
         val tx = transport ?: return
         val dao = peerDao ?: return
         
@@ -843,7 +867,7 @@ object GossipService {
         val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) return
         
-        if (isFriendsOnlyPacket(packet)) {
+        if (isFriendsOnly) {
             return
         }
 

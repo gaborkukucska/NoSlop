@@ -141,7 +141,7 @@ object YouTubeInternalClient {
 
     private fun executeSearchRequest(payloadStr: String): okhttp3.Response? {
         val requestBody = payloadStr.toRequestBody(jsonMediaType)
-        val hasProxySecret = ProxyAuth.PROXY_SECRET.isNotBlank()
+        val hasProxySecret = ProxyAuth.isConfigured
 
         if (hasProxySecret) {
             val reqBuilder = Request.Builder()

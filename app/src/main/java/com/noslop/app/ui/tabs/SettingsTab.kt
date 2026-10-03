@@ -1550,13 +1550,22 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     confirmButton = {
                                         Button(
                                             onClick = {
-                                                showMnemonicDialog = false
-                                                if (isExporting) {
-                                                    val prefix = if (selectedMediaOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
-                                                    val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                                                    exportLauncher.launch("$prefix$exportTimestamp.zip")
-                                                } else {
-                                                    importLauncher.launch(arrayOf("application/zip"))
+                                                val mnemonicToVerify = mnemonicInput.trim()
+                                                val mediaOpt = selectedMediaOption
+                                                scope.launch {
+                                                    val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
+                                                    if (isExporting && !activeMnemonic.isNullOrBlank() && !mnemonicToVerify.equals(activeMnemonic, ignoreCase = true)) {
+                                                        android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic does not match your active Word Cloud!"), android.widget.Toast.LENGTH_LONG).show()
+                                                    } else {
+                                                        showMnemonicDialog = false
+                                                        if (isExporting) {
+                                                            val prefix = if (mediaOpt == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                                                            val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                                                            exportLauncher.launch("$prefix$exportTimestamp.zip")
+                                                        } else {
+                                                            importLauncher.launch(arrayOf("application/zip"))
+                                                        }
+                                                    }
                                                 }
                                             },
                                             enabled = mnemonicInput.isNotBlank(),
@@ -2011,9 +2020,17 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         if (!showAdvisoryMnemonicPrompt) {
                             showAdvisoryMnemonicPrompt = true
                         } else if (advisoryMnemonicInput.isNotBlank()) {
-                            val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
-                            val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
-                            advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                            val mnemonicToVerify = advisoryMnemonicInput.trim()
+                            advisoryScope.launch {
+                                val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
+                                if (!activeMnemonic.isNullOrBlank() && !mnemonicToVerify.equals(activeMnemonic, ignoreCase = true)) {
+                                    android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic does not match your active Word Cloud!"), android.widget.Toast.LENGTH_LONG).show()
+                                } else {
+                                    val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                                    val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                                    advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                                }
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)

@@ -179,9 +179,9 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
-        // User DMs and handshakes bypass cooldown so active user actions are not locked out.
+        // User DMs, handshakes, and active media transfers bypass cooldown.
         // General broadcasts, forwards, sync, and background presence respect cooldown.
-        val bypassCooldown = isHandshake || isDmHighPriority
+        val bypassCooldown = isHandshake || isDmHighPriority || isMediaPacket
         if (!bypassCooldown && GossipService.isPeerInCooldown(onionAddress)) {
             Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub
