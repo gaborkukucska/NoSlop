@@ -117,6 +117,12 @@ private fun CachedSource.stalenessReason(): String? {
 
 private val sourceCache = ConcurrentHashMap<String, CachedSource>(64)
 
+fun invalidateAllOnRouteTransition() {
+    sourceCache.clear()
+    PreloadManager.evictAll()
+    Logger.info("VIDEO_ROUTE", "Invalidated all cached sources and preloaded players on network route transition")
+}
+
 // Re-resolve this far BEFORE the stated expiry, so a slow handshake or a
 // mid-playback range request can't land on the far side of the deadline.
 internal const val URL_EXPIRY_GUARD_MS = 45_000L
@@ -342,13 +348,8 @@ private suspend fun doResolve(rawUrl: String, quality: String, isPreload: Boolea
             return@withContext VideoSource.Unavailable
         }
         if (!com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.enableWebViewEmbeds) {
-            val embedUrl = (result as VideoSource.Embed).url
-            val isYouTubeEmbed = embedUrl.contains("youtube") || embedUrl.contains("youtu.be")
-            val isVimeoEmbed = embedUrl.contains("vimeo.com")
-            if (!isYouTubeEmbed && !isVimeoEmbed) {
-                Logger.info("VIDEO_RESOLVE", "WebView Embeds disabled, marking $rawUrl as Unavailable")
-                return@withContext VideoSource.Unavailable
-            }
+            Logger.info("VIDEO_RESOLVE", "WebView Embeds disabled by user setting, marking $rawUrl as Unavailable")
+            return@withContext VideoSource.Unavailable
         }
     }
     
@@ -616,6 +617,7 @@ fun VideoPlayer(
     // and its auto-retry budget already spent.
     var retryTrigger by remember(url) { mutableStateOf(0) }
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
+    val isTorRouting by com.noslop.app.NoSlopApp.repository.useTorForClearnet.collectAsState()
     val initialSource = remember(url, mediaSettings.videoQuality) {
         val q = mediaSettings.videoQuality.ifBlank { "medium" }
         val exactKey = "$url||$q"
@@ -657,7 +659,7 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible, activeVisible) {
+    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible, activeVisible, isTorRouting) {
         // Offscreen next slide is warmed by PreloadManager; VideoPlayer only resolves for the visible slide
         if (!isVisible && !activeVisible) return@LaunchedEffect
         // If retryTrigger was reset to 0 after stable playback, do NOT re-resolve or kill the player

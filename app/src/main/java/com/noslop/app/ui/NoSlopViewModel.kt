@@ -445,7 +445,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     fun setUseTorForClearnet(enabled: Boolean) {
-        viewModelScope.launch { repository.setUseTorForClearnet(enabled) }
+        viewModelScope.launch {
+            repository.setUseTorForClearnet(enabled)
+            com.noslop.app.ui.components.invalidateAllOnRouteTransition()
+        }
     }
 
     val isAutoUpdateEnabled: StateFlow<Boolean> = repository.isAutoUpdateEnabled
