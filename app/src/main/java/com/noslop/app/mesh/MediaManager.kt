@@ -53,8 +53,14 @@ object MediaManager {
     private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
     val downloadProgress = _downloadProgress.asStateFlow()
 
+    fun resetForTesting() {
+        repository = null
+        activeDownloads.clear()
+        _downloadProgress.value = emptyMap()
+    }
+
     fun initialize(repo: NoSlopRepository) {
-        if (this.repository != null) return // Already initialized
+        if (this.repository != null && this.repository === repo) return // Already initialized
         this.repository = repo
         
         val powerManager = repo.context.getSystemService(Context.POWER_SERVICE) as PowerManager

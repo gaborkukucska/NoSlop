@@ -36,6 +36,8 @@ class PostPacketHandlerTest {
 
     @Before
     fun setup() {
+        com.noslop.app.mesh.GossipService.resetForTesting()
+        com.noslop.app.mesh.MediaManager.resetForTesting()
         postDao = FakePostDao()
         peerDao = FakePeerDao()
         val db = mockk<NoSlopDatabase>(relaxed = true)

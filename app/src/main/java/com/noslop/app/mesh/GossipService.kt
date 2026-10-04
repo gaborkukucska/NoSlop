@@ -179,6 +179,19 @@ object GossipService {
         return true
     }
 
+    fun resetForTesting() {
+        resetAllState()
+        peerDao = null
+        transport = null
+        localPublicKeyB64 = ""
+        getMeshFilterSettings = null
+        checkEntityExists = null
+        checkIsLocalUser = null
+        pushPacketToHub = null
+        cleanupJob?.cancel()
+        cleanupJob = null
+    }
+
     fun resetAllState() {
         processedPacketIds.clear()
         senderRateLimits.clear()

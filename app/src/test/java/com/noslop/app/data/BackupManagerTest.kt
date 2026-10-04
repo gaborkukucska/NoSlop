@@ -1,7 +1,6 @@
 package com.noslop.app.data
 
 import android.content.Context
-import androidx.test.core.app.ApplicationProvider
 import com.noslop.app.crypto.MnemonicGenerator
 import org.junit.Assert.*
 import org.junit.Test
@@ -21,6 +20,23 @@ import javax.crypto.spec.SecretKeySpec
 class BackupManagerTest {
 
     private val testMnemonic = "apple banana cherry dragon elephant falcon grape honey island jungle kiwi lemon"
+    private lateinit var testGroupKey: javax.crypto.SecretKey
+
+    @org.junit.Before
+    fun setUp() {
+        val kg = javax.crypto.KeyGenerator.getInstance("AES")
+        kg.init(256)
+        testGroupKey = kg.generateKey()
+        com.noslop.app.crypto.GroupMessageCrypto.testKeyProviderOverride = { testGroupKey }
+    }
+
+    @org.junit.After
+    fun tearDown() {
+        com.noslop.app.crypto.GroupMessageCrypto.testKeyProviderOverride = null
+        com.noslop.app.mesh.GossipService.resetForTesting()
+        com.noslop.app.mesh.MediaManager.resetForTesting()
+        NoSlopDatabase.closeInstance()
+    }
 
     @Test
     fun testAesGcmEncryptionDecryptionHeader() {
@@ -92,9 +108,14 @@ class BackupManagerTest {
     }
 
     @Test
-    fun testExportAndImport_withRealDatabase_preservesGroupMessagesAndIsRead() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
+    fun testExportAndImport_withRealDatabase_preservesGroupMessagesAndIsRead() = kotlinx.coroutines.runBlocking {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
         val db = NoSlopDatabase.getDatabase(context)
+
+        // Seed identity
+        val idRepo = IdentityRepository(context, db.appSettingDao())
+        val keys = com.noslop.app.crypto.CryptoService.generateIdentity("Alice")
+        idRepo.saveIdentity("Alice", keys, testMnemonic)
 
         // Seed group message with isRead = true
         val msgId = "msg-restore-test-1"
@@ -104,7 +125,7 @@ class BackupManagerTest {
 
         db.openHelper.writableDatabase.execSQL(
             "INSERT INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, isRead) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            arrayOf<Any>(msgId, groupId, "sender-123", encCiphertext, ivB64, now, 1L)
+            arrayOf<Any?>(msgId, groupId, "sender-123", encCiphertext, ivB64, now, 1L)
         )
 
         val outStream = ByteArrayOutputStream()
@@ -115,8 +136,9 @@ class BackupManagerTest {
             BackupManager.importData(context, testMnemonic, inStream, allowLegacyUnauthenticated = false))
 
         // Verify message was restored with isRead preserved
-        db.openHelper.readableDatabase.query(
-            "SELECT isRead FROM chat_messages WHERE id = ?", arrayOf(msgId)
+        val restoredDb = NoSlopDatabase.getDatabase(context)
+        restoredDb.openHelper.readableDatabase.query(
+            "SELECT isRead FROM chat_messages WHERE id = '$msgId'"
         ).use { cursor ->
             assertTrue("Restored message must exist in database", cursor.moveToFirst())
             assertEquals(1, cursor.getInt(0))
@@ -125,16 +147,17 @@ class BackupManagerTest {
 
     @Test
     fun testImport_withCorruptIdentityJson_abortsBeforeDatabaseReplacement() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
         val tempDir = context.cacheDir
         val testZip = File(tempDir, "test_malformed_identity.zip")
 
-        // Build a zip containing database.db and an invalid identity_backup.json missing required fields
+        // Build a zip containing an invalid identity_backup.json missing required fields
         val zos = java.util.zip.ZipOutputStream(java.io.FileOutputStream(testZip))
         val dbFile = context.getDatabasePath("mesh.db")
         if (dbFile.exists()) {
             zos.putNextEntry(java.util.zip.ZipEntry("database.db"))
-            dbFile.inputStream().use { it.copyTo(zos) }
+            val fis = java.io.FileInputStream(dbFile)
+            fis.use { input -> input.copyTo(zos) }
             zos.closeEntry()
         }
         val badIdJson = "{\"publicKeyB64\":\"abc\"}".toByteArray(Charsets.UTF_8)
@@ -149,7 +172,8 @@ class BackupManagerTest {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
         cipher.init(Cipher.ENCRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
-        val encZipBytes = cipher.doFinal(testZip.readBytes())
+        val rawZipBytes = testZip.readBytes()
+        val encZipBytes = cipher.doFinal(rawZipBytes)
         testZip.delete()
 
         val fullEncStream = ByteArrayInputStream("NSG1".toByteArray(Charsets.UTF_8) + iv + encZipBytes)
@@ -159,7 +183,7 @@ class BackupManagerTest {
 
     @Test
     fun testExportAndImport_withZeroApiKeys_exportsManifestAndClearsDestination() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
         val apiRepo = ApiKeyRepository(context)
 
         // Clear all keys before export

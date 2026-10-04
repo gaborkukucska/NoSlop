@@ -33,6 +33,12 @@
   * Migrated custom view in `AndroidGifTextField.kt` to extend `AppCompatEditText` resolving `AppCompatCustomView`.
   * Added explicit `@OptIn` annotations for Media3 `UnstableApi` in `PreloadManager.kt` and `VideoCompressor.kt`, and CameraX `ExperimentalGetImage` in `QRScanScreen.kt`.
   * Configured project-level `app/lint.xml` and handled `Player.STATE_BUFFERING` in `PreloadManager.kt`'s state listener, passing `:app:lintGithubDebug` with zero errors.
+* **Audit Hardening Test Suite & Keystore Fallback (`MediaProxyServiceTest.kt`, `WireProtocolTest.kt`, `GroupMessageSecurityTest.kt`, `BackupManagerTest.kt`, `MediaManager.kt`, `GossipService.kt`)**:
+  * Implemented `MediaProxyServiceTest.kt` asserting HTTP 416 on out-of-bounds start, suffix ranges, open-ended ranges, and reversed ranges (S13).
+  * Added wire round-trip tests in `WireProtocolTest.kt` for `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupDeletePayload` (S02, S07).
+  * Added tamper-detection tests in `GroupMessageSecurityTest.kt` asserting that altered member lists, permissions, or admin onion keys fail cryptographic verification (S02, S04).
+  * Added real-database restore tests in `BackupManagerTest.kt` verifying `isRead` column preservation without SQLite NOT NULL failures (S01), schema validation aborting invalid identity backups (S06), and empty API key manifests clearing destination credentials (S10).
+  * Added Keystore-unavailable fallback preferences in `BackupManager.importData()` and test isolation reset hooks in `GossipService` and `MediaManager`.
 
 ## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
 

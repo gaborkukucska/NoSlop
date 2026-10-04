@@ -615,44 +615,60 @@ object BackupManager {
                     val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                     if (secureFile.exists()) secureFile.delete()
 
-                    val masterKey = androidx.security.crypto.MasterKey.Builder(context)
-                        .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-                        .build()
-                    val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
-                        context,
-                        PREFS_NAME,
-                        masterKey,
-                        androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                    )
-                    val edit = freshPrefs.edit().clear() // R12: Clear existing destination keys first!
-                    edit.putString("ed25519_private_key", obj.getString("privateKeyB64"))
-                        .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
-                        .putString("pub_ed25519", obj.getString("publicKeyB64"))
-                        .putString("pub_enc", obj.getString("encPublicKeyB64"))
-                        .putString("handle", obj.getString("handle"))
-                        .putString("tripcode", obj.getString("tripcode"))
-                        .putString("onion", obj.getString("onionAddress"))
-                        .putString("display_name", obj.getString("displayName"))
-                        .putString("mnemonic", obj.optString("mnemonic", mnemonic))
-                        .putString("onboarding_complete", "true")
-                        .putString("identity_version", obj.optString("identity_version", "2"))
-                    if (obj.has("burnable")) {
-                        val bObj = obj.getJSONObject("burnable")
-                        edit.putString("burnable_ed25519_private_key", bObj.getString("privateKeyB64"))
-                            .putString("burnable_enc_private_key", bObj.getString("encPrivateKeyB64"))
-                            .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
-                            .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
-                            .putString("burnable_tripcode", bObj.getString("tripcode"))
-                            .putString("burnable_onion", bObj.getString("onionAddress"))
-                            .putString("burnable_display_name", bObj.getString("displayName"))
-                    }
-                    val committed = edit.commit() // R12: Synchronous verified commit
-                    if (!committed) {
-                        Logger.error(TAG, "Failed committing restored identity into EncryptedSharedPreferences")
-                    } else {
-                        restoredKeystoreSealedIdentity = true
-                        Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
+                    try {
+                        val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+                            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                            .build()
+                        val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                            context,
+                            PREFS_NAME,
+                            masterKey,
+                            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                        )
+                        val edit = freshPrefs.edit().clear() // R12: Clear existing destination keys first!
+                        edit.putString("ed25519_private_key", obj.getString("privateKeyB64"))
+                            .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
+                            .putString("pub_ed25519", obj.getString("publicKeyB64"))
+                            .putString("pub_enc", obj.getString("encPublicKeyB64"))
+                            .putString("handle", obj.getString("handle"))
+                            .putString("tripcode", obj.getString("tripcode"))
+                            .putString("onion", obj.getString("onionAddress"))
+                            .putString("display_name", obj.getString("displayName"))
+                            .putString("mnemonic", obj.optString("mnemonic", mnemonic))
+                            .putString("onboarding_complete", "true")
+                            .putString("identity_version", obj.optString("identity_version", "2"))
+                        if (obj.has("burnable")) {
+                            val bObj = obj.getJSONObject("burnable")
+                            edit.putString("burnable_ed25519_private_key", bObj.getString("privateKeyB64"))
+                                .putString("burnable_enc_private_key", bObj.getString("encPrivateKeyB64"))
+                                .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
+                                .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
+                                .putString("burnable_tripcode", bObj.getString("tripcode"))
+                                .putString("burnable_onion", bObj.getString("onionAddress"))
+                                .putString("burnable_display_name", bObj.getString("displayName"))
+                        }
+                        val committed = edit.commit() // R12: Synchronous verified commit
+                        if (!committed) {
+                            Logger.error(TAG, "Failed committing restored identity into EncryptedSharedPreferences")
+                        } else {
+                            restoredKeystoreSealedIdentity = true
+                            Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
+                        }
+                    } catch (secEx: Exception) {
+                        Logger.warn(TAG, "Hardware Keystore EncryptedSharedPreferences unavailable on restore, falling back to secure storage preferences: ${secEx.message}")
+                        val fallbackPrefs = context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+                        val edit = fallbackPrefs.edit().clear()
+                        edit.putString("pub_ed25519", obj.getString("publicKeyB64"))
+                            .putString("pub_enc", obj.getString("encPublicKeyB64"))
+                            .putString("handle", obj.getString("handle"))
+                            .putString("tripcode", obj.getString("tripcode"))
+                            .putString("onion", obj.getString("onionAddress"))
+                            .putString("display_name", obj.getString("displayName"))
+                            .putString("onboarding_complete", "true")
+                            .putString("identity_version", obj.optString("identity_version", "2"))
+                        edit.commit()
+                        restoredFallbackIdentity = true
                     }
                 } else {
                     // Legacy archive: Restore raw preferences

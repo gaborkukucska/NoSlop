@@ -45,6 +45,8 @@ class MeshSocialRepositoryTest {
 
     @Before
     fun setup() {
+        com.noslop.app.mesh.GossipService.resetForTesting()
+        com.noslop.app.mesh.GossipService.resetForTesting()
         reactionDao = FakeReactionDao()
         voteDao = FakeVoteDao()
         peerDao = FakePeerDao()
