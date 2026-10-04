@@ -198,9 +198,10 @@ class MeshPacketVerifierTest {
     @Test
     fun groupInvite_canonicalSignature_verified() {
         val members = listOf(alice.publicKeyB64, mallory.publicKeyB64).sorted()
-        val s = CryptoService.encodeForSigning(
-            "grp-1", "My Group", alice.publicKeyB64, "1700000000",
-            members.joinToString(","), "true", "true"
+        val s = canonicalGroupInvitePayload(
+            "grp-1", "My Group", alice.publicKeyB64, alice.publicKeyB64, 1700000000L,
+            members.joinToString(","), true, true,
+            null, null, null, null
         )
         val p = GroupInvitePayload(
             groupId = "grp-1",
@@ -213,6 +214,17 @@ class MeshPacketVerifierTest {
             signature = sign(s)
         )
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("GROUP_INVITE", p)))
+    }
+
+    @Test
+    fun post_mismatchedMediaMetadataId_returnsInvalid() {
+        val goodSig = sign(CryptoService.encodeForSigning("p-mismatch", alice.publicKeyB64, "content", "1700000000", null, "public", "id-1", null))
+        val payload = PostPayload(
+            id = "p-mismatch", authorId = alice.publicKeyB64, authorName = "alice", authorPublicKey = alice.publicKeyB64,
+            originNode = null, content = "content", timestamp = 1700000000L, privacy = "public", signature = goodSig,
+            mediaId = "id-1", mediaMetadata = MediaMetadata(id = "DIFFERENT-id", type = "image", mimeType = "image/jpeg", size = 100, chunkCount = 1)
+        )
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("POST", payload)))
     }
 
     @Test

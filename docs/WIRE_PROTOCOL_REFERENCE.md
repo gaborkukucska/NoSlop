@@ -774,7 +774,7 @@ and still accurate.
 
 | Packet type | Signed string |
 |---|---|
-| `POST` / `SYNC_RESPONSE.posts[i]` | `id\|authorId\|content\|timestamp` (+`\|authorAvatarB64` if set on `POST`) |
+| `POST` / `SYNC_RESPONSE.posts[i]` | Canonical 8-field `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy unauthenticated fallback restricted strictly to public posts without attachments (`id\|authorId\|content\|timestamp` + optional avatar). |
 | `COMMENT` / `SYNC_RESPONSE.comments[i]` | `postId\|commentId\|content\|timestamp` |
 | `REACTION` / `SYNC_RESPONSE.reactions[i]` | `postId\|reactionType\|authorId\|timestamp` |
 | `CHAT_REACTION` | `messageId\|reactionType\|authorId\|timestamp` |
@@ -785,12 +785,12 @@ and still accurate.
 | `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
 | `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
-| `EDIT_POST` | `postId\|authorId\|content\|timestamp` |
+| `EDIT_POST` | Canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Complete signed state is atomically persisted to database. |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) (supporting encodeForSigning and pipe) |
-| `GROUP_INVITE` | `groupId\|title\|adminPublicKeyB64\|timestamp` |
-| `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
+| `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey)` |
+| `GROUP_UPDATE` | Canonical 11-field `encodeForSigning(groupId, wireTitle, signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, sortedBanned, wireDesc, wireAvatar, wireAllowInvites, wireAllowSelfRemove)` — signer recovered by trial verification against group members |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |

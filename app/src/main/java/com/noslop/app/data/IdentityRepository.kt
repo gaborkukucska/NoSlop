@@ -22,6 +22,13 @@ class IdentityRepository(private val context: Context, private val appSettingDao
     private val TAG = "IDENTITY_REPO"
 
     val isUsingInsecureStorage = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isQuarantined = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+    fun hasQuarantinedIdentity(): Boolean {
+        if (isQuarantined.value) return true
+        val prefsDir = java.io.File(context.filesDir.parentFile, "shared_prefs")
+        return prefsDir.listFiles()?.any { it.name.startsWith("noslop_identity_secure.xml.corrupt_") } == true
+    }
 
     private fun buildMasterKey(ctx: Context): MasterKey {
         return MasterKey.Builder(ctx)
@@ -54,7 +61,8 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 val quarantine = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml.corrupt_${System.currentTimeMillis()}")
                 val renamed = secureFile.renameTo(quarantine)
                 if (renamed) {
-                    Logger.info(TAG, "Secure file quarantined to ${quarantine.name}. Attempting to re-initialize clean hardware Keystore preferences...")
+                    Logger.warn(TAG, "Secure file quarantined to ${quarantine.name}. Storing quarantine recovery state...")
+                    isQuarantined.value = true
                     recovered = try {
                         createEncryptedPrefs(context).also {
                             Logger.info(TAG, "Successfully re-initialized hardware Keystore preferences after quarantine")
@@ -146,6 +154,8 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             .apply()
 
         // Identity version 2 indicates deterministic HKDF derivation from Word Cloud mnemonic
+        isQuarantined.value = false
+        appSettingDao.removeSetting("identity_quarantined")
         appSettingDao.insertSetting(AppSetting("identity_version", "2"))
         prefs.edit().putString("identity_version", "2").apply()
 
@@ -260,6 +270,10 @@ class IdentityRepository(private val context: Context, private val appSettingDao
     suspend fun getHandle(): String = appSettingDao.getSetting("local_handle") ?: "Anonymous"
     suspend fun isOnboardingComplete(): Boolean {
         // Check Room first, then fall back to ESP (survives destructive DB migration)
+        if (hasQuarantinedIdentity() || appSettingDao.getSetting("identity_quarantined") == "true") {
+            // S11: Preserve quarantined identity continuity without silently treating as un-onboarded
+            return true
+        }
         val roomVal = appSettingDao.getSetting("onboarding_complete")
         if (roomVal == "true") return true
         

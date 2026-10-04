@@ -179,7 +179,7 @@ object BackupManager {
                     jsonWriter.beginArray()
 
                     db.openHelper.readableDatabase.query(
-                        "SELECT id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId FROM chat_messages WHERE chatWithPeerPub LIKE '%-%' OR chatWithPeerPub IN (SELECT groupId FROM group_chats)"
+                        "SELECT id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId, isRead FROM chat_messages WHERE chatWithPeerPub LIKE '%-%' OR chatWithPeerPub IN (SELECT groupId FROM group_chats)"
                     ).use { cursor ->
                         while (cursor.moveToNext()) {
                             val id = cursor.getString(0) ?: ""
@@ -191,6 +191,7 @@ object BackupManager {
                             val mediaId = cursor.getString(6)
                             val mediaType = cursor.getString(7)
                             val replyTo = cursor.getString(8)
+                            val isRead = cursor.getInt(9)
 
                             val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decryptOrNull(ciphertext, nonce, groupId, id)
                             if (plaintext != null) {
@@ -203,6 +204,7 @@ object BackupManager {
                                 if (!mediaId.isNullOrBlank()) jsonWriter.name("mediaId").value(mediaId)
                                 if (!mediaType.isNullOrBlank()) jsonWriter.name("mediaType").value(mediaType)
                                 if (!replyTo.isNullOrBlank()) jsonWriter.name("replyToMessageId").value(replyTo)
+                                jsonWriter.name("isRead").value(isRead != 0)
                                 jsonWriter.endObject()
                                 exportedCount++
                             } else {
@@ -227,7 +229,8 @@ object BackupManager {
                     tempGroupMsgsFile?.delete()
                 }
 
-                // Add API keys as JSON for cross-device portability
+                // Add API keys as JSON for cross-device portability (S10: always export manifest even if empty)
+                var tempApiFile: File? = null
                 try {
                     val apiRepo = ApiKeyRepository(context)
                     val apiObj = org.json.JSONObject()
@@ -235,14 +238,13 @@ object BackupManager {
                         val k = apiRepo.getKey(srv.id)
                         if (!k.isNullOrBlank()) apiObj.put(srv.id, k)
                     }
-                    if (apiObj.length() > 0) {
-                        val tempApiFile = File(context.cacheDir, "api_keys_backup.json")
-                        tempApiFile.writeText(apiObj.toString(), Charsets.UTF_8)
-                        addToZip(zos, tempApiFile, "api_keys_backup.json")
-                        tempApiFile.delete()
-                    }
+                    tempApiFile = File(tempDir, "api_keys_backup_${System.currentTimeMillis()}.json")
+                    tempApiFile.writeText(apiObj.toString(), Charsets.UTF_8)
+                    addToZip(zos, tempApiFile, "api_keys_backup.json")
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Failed to export API keys JSON: ${e.message}")
+                } finally {
+                    tempApiFile?.delete()
                 }
 
                 val prefsFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
@@ -527,16 +529,29 @@ object BackupManager {
                     }
                 }
 
-                // 2. Validate staged identity JSON (if present) BEFORE touching live target
+                // 2. Validate staged identity JSON (if present) BEFORE touching live target (S06)
                 var parsedIdentityObj: org.json.JSONObject? = null
                 if (hasPortableIdentity) {
                     val stagedIdFile = File(stageDir, "identity_backup.json")
                     try {
                         val jsonStr = stagedIdFile.readText(Charsets.UTF_8)
                         val obj = org.json.JSONObject(jsonStr)
-                        if (!obj.has("publicKeyB64") || !obj.has("privateKeyB64") ||
-                            !obj.has("encPublicKeyB64") || !obj.has("encPrivateKeyB64")) {
-                            Logger.error(TAG, "Staged identity JSON is missing required key material")
+                        val requiredFields = listOf(
+                            "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+                            "handle", "tripcode", "onionAddress", "displayName"
+                        )
+                        for (rf in requiredFields) {
+                            if (!obj.has(rf) || obj.getString(rf).isBlank()) {
+                                Logger.error(TAG, "Staged identity JSON is missing required key: $rf")
+                                return false
+                            }
+                        }
+                        val pubEd = obj.getString("publicKeyB64")
+                        val privEd = obj.getString("privateKeyB64")
+                        val probePayload = "noslop_identity_probe_${System.currentTimeMillis()}"
+                        val probeSig = com.noslop.app.crypto.CryptoService.sign(probePayload, privEd)
+                        if (!com.noslop.app.crypto.CryptoService.verify(probePayload, probeSig, pubEd)) {
+                            Logger.error(TAG, "Staged identity keys failed Ed25519 signature consistency validation")
                             return false
                         }
                         parsedIdentityObj = obj
@@ -546,22 +561,31 @@ object BackupManager {
                     }
                 }
 
-                // 3. Validate staged API keys JSON (if present)
+                // 3. Validate staged API keys JSON (if present) (S06, S10)
                 var parsedApiObj: org.json.JSONObject? = null
                 val stagedApi = File(stageDir, "api_keys_backup.json")
                 if (stagedApi.exists()) {
                     try {
                         parsedApiObj = org.json.JSONObject(stagedApi.readText(Charsets.UTF_8))
                     } catch (apiEx: Exception) {
-                        Logger.warn(TAG, "Staged api_keys_backup.json is malformed: ${apiEx.message}")
+                        Logger.error(TAG, "Staged api_keys_backup.json is malformed: ${apiEx.message}")
+                        return false
                     }
                 }
 
-                // 4. Validate staged group messages JSON (if present)
+                // 4. Validate staged group messages JSON (if present) (S06)
                 var parsedGroupMsgsArray: org.json.JSONArray? = null
                 if (!stagedGroupMessagesJson.isNullOrBlank()) {
                     try {
-                        parsedGroupMsgsArray = org.json.JSONArray(stagedGroupMessagesJson)
+                        val arr = org.json.JSONArray(stagedGroupMessagesJson)
+                        for (idx in 0 until arr.length()) {
+                            val row = arr.getJSONObject(idx)
+                            if (!row.has("id") || !row.has("groupId") || !row.has("plaintext")) {
+                                Logger.error(TAG, "Staged group message at index $idx is missing required columns")
+                                return false
+                            }
+                        }
+                        parsedGroupMsgsArray = arr
                     } catch (gmEx: Exception) {
                         Logger.error(TAG, "Staged group_messages_backup.json is malformed: ${gmEx.message}")
                         return false
@@ -570,10 +594,15 @@ object BackupManager {
 
                 // --- COMMIT PHASE (All validations passed) ---
 
-                // Commit 1: Safely close active Room database only right before replacing files (F13 / R09)
+                // Commit 1: Safely close active Room database only right before replacing files, creating rollback snapshot (F13 / S06)
+                var dbBackupFile: File? = null
                 if (hasStagedDb) {
                     NoSlopDatabase.closeInstance()
                     val targetDb = context.getDatabasePath(DB_NAME)
+                    if (targetDb.exists()) {
+                        dbBackupFile = File(targetDb.parentFile, "$DB_NAME.bak_${System.currentTimeMillis()}")
+                        targetDb.copyTo(dbBackupFile, overwrite = true)
+                    }
                     File(targetDb.path + "-wal").delete()
                     File(targetDb.path + "-shm").delete()
                     File(stageDir, "database.db").copyTo(targetDb, overwrite = true)
@@ -639,7 +668,7 @@ object BackupManager {
                     }
                 }
 
-                // Commit 3: Restore API keys, clearing destination keys (R12)
+                // Commit 3: Restore API keys, clearing destination keys (R12 / S10)
                 val apiRepo = ApiKeyRepository(context)
                 if (parsedApiObj != null) {
                     val obj = parsedApiObj
@@ -650,6 +679,11 @@ object BackupManager {
                             apiRepo.setKey(srv.id, "") // Clear destination-only API key
                         }
                     }
+                } else if (hasPortableIdentity) {
+                    // S10: Portable backup without API keys clears all destination keys
+                    for (srv in ApiKeyRepository.SERVICES) {
+                        apiRepo.setKey(srv.id, "")
+                    }
                 } else {
                     val stagedApiDir = File(stageDir, "api_keys")
                     if (stagedApiDir.exists()) {
@@ -659,37 +693,51 @@ object BackupManager {
                     }
                 }
 
-                // Commit 4: Re-encrypt portable group chat messages using destination Keystore (R11)
+                // Commit 4: Re-encrypt portable group chat messages using destination Keystore (S01, S06, R11)
                 if (parsedGroupMsgsArray != null) {
                     try {
                         val groupMsgsArray = parsedGroupMsgsArray
                         val db = NoSlopDatabase.getDatabase(context)
                         var reEncryptedCount = 0
-                        for (idx in 0 until groupMsgsArray.length()) {
-                            val item = groupMsgsArray.getJSONObject(idx)
-                            val id = item.getString("id")
-                            val groupId = item.getString("groupId")
-                            val senderPub = item.optString("senderPub", "")
-                            val plaintext = item.getString("plaintext")
-                            val ts = item.optLong("timestamp", System.currentTimeMillis())
-                            val mediaId = item.optString("mediaId").takeIf { it.isNotBlank() }
-                            val mediaType = item.optString("mediaType").takeIf { it.isNotBlank() }
-                            val replyTo = item.optString("replyToMessageId").takeIf { it.isNotBlank() }
+                        db.openHelper.writableDatabase.beginTransaction()
+                        try {
+                            for (idx in 0 until groupMsgsArray.length()) {
+                                val item = groupMsgsArray.getJSONObject(idx)
+                                val id = item.getString("id")
+                                val groupId = item.getString("groupId")
+                                val senderPub = item.optString("senderPub", "")
+                                val plaintext = item.getString("plaintext")
+                                val ts = item.optLong("timestamp", System.currentTimeMillis())
+                                val isReadVal = if (item.has("isRead")) (if (item.getBoolean("isRead")) 1L else 0L) else 1L
+                                val mediaId = item.optString("mediaId").takeIf { it.isNotBlank() }
+                                val mediaType = item.optString("mediaType").takeIf { it.isNotBlank() }
+                                val replyTo = item.optString("replyToMessageId").takeIf { it.isNotBlank() }
 
-                            val (encCiphertext, ivB64) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext, groupId, id)
+                                val (encCiphertext, ivB64) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext, groupId, id)
 
-                            // Use INSERT OR REPLACE so messages in logical backup are preserved even if raw DB lacked the row
-                            db.openHelper.writableDatabase.execSQL(
-                                "INSERT OR REPLACE INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                arrayOf(id, groupId, senderPub, encCiphertext, ivB64, ts, mediaId, mediaType, replyTo)
-                            )
-                            reEncryptedCount++
+                                db.openHelper.writableDatabase.execSQL(
+                                    "INSERT OR REPLACE INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, isRead, mediaId, mediaType, replyToMessageId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    arrayOf<Any?>(id, groupId, senderPub, encCiphertext, ivB64, ts, isReadVal, mediaId, mediaType, replyTo)
+                                )
+                                reEncryptedCount++
+                            }
+                            db.openHelper.writableDatabase.setTransactionSuccessful()
+                        } finally {
+                            db.openHelper.writableDatabase.endTransaction()
                         }
                         Logger.info(TAG, "Re-encrypted $reEncryptedCount group message(s) under destination device Keystore key")
                     } catch (e: Exception) {
                         Logger.error(TAG, "Failed re-encrypting portable group messages: ${e.message}")
+                        if (dbBackupFile != null && dbBackupFile.exists()) {
+                            NoSlopDatabase.closeInstance()
+                            val targetDb = context.getDatabasePath(DB_NAME)
+                            dbBackupFile.copyTo(targetDb, overwrite = true)
+                            dbBackupFile.delete()
+                        }
+                        return false
                     }
                 }
+                dbBackupFile?.delete()
 
                 // Restore media files
                 val stagedMediaDir = File(stageDir, "media")

@@ -179,4 +179,65 @@ class PostPacketHandlerTest {
         assertTrue(handler.handleEditPost(editPacket))
         org.junit.Assert.assertEquals("new content", postDao.posts["post-1"]?.content)
     }
+
+    @Test
+    fun deleteBeforeCreate_leavesDurableTombstone_andDropsSubsequentPost() = runBlocking {
+        val id = "post-out-of-order"
+        val delTs = 1_700_000_005_000L
+        val delSig = CryptoService.sign(
+            CryptoService.encodeForSigning(id, identity.publicKeyB64, delTs.toString()),
+            identity.privateKeyB64
+        )
+        val delPayload = DeletePostPayload(postId = id, authorId = identity.publicKeyB64, timestamp = delTs, signature = delSig)
+        val delPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "DELETE_POST", payload = Gson().toJsonTree(delPayload))
+
+        // DELETE arrives before post exists
+        assertTrue("Delete-before-create succeeds", handler.handleDeletePost(delPacket))
+        assertTrue("Tombstone exists in database", postDao.posts.containsKey(id))
+        assertTrue("Tombstone is marked orphaned", postDao.posts[id]?.isOrphaned == true)
+
+        // Delayed POST arrives later
+        val postTs = 1_700_000_004_000L // older than delete
+        val postSig = CryptoService.sign(
+            CryptoService.encodeForSigning(id, identity.publicKeyB64, "content", postTs.toString(), null, "public", null, null),
+            identity.privateKeyB64
+        )
+        val postPayload = PostPayload(
+            id = id, authorId = identity.publicKeyB64, authorName = "alice", authorPublicKey = identity.publicKeyB64,
+            originNode = null, content = "content", timestamp = postTs, privacy = "public", signature = postSig
+        )
+        val postPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(postPayload))
+
+        // Must be dropped and not overwrite tombstone
+        assertTrue("handlePost returns true for dropped duplicate/orphaned", handler.handlePost(postPacket))
+        org.junit.Assert.assertEquals("[Deleted]", postDao.posts[id]?.content)
+        assertTrue(postDao.posts[id]?.isOrphaned == true)
+    }
+
+    @Test
+    fun handleEditPost_persistsExactCompleteSignedState_includingClearnetUrl() = runBlocking {
+        val origPacket = postPacket("original content")
+        assertTrue(handler.handlePost(origPacket))
+
+        val editTs = 1_700_000_002_000L
+        val editSig = CryptoService.sign(
+            CryptoService.encodeForSigning("post-1", identity.publicKeyB64, "new content", editTs.toString(), null, "friends", null, "https://example.com/story"),
+            identity.privateKeyB64
+        )
+        val editPayload = EditPostPayload(
+            postId = "post-1",
+            authorId = identity.publicKeyB64,
+            content = "new content",
+            timestamp = editTs,
+            signature = editSig,
+            privacy = "friends",
+            clearnetUrl = "https://example.com/story"
+        )
+        val editPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "EDIT_POST", payload = Gson().toJsonTree(editPayload))
+        assertTrue(handler.handleEditPost(editPacket))
+        val stored = postDao.posts["post-1"]
+        org.junit.Assert.assertEquals("new content", stored?.content)
+        org.junit.Assert.assertEquals("friends", stored?.privacy)
+        org.junit.Assert.assertEquals("https://example.com/story", stored?.clearnetUrl)
+    }
 }

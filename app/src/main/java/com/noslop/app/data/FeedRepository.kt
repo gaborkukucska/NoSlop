@@ -253,14 +253,15 @@ class FeedRepository(
         }
     }
 
-    private suspend fun executeSyncPass(): FeedSyncResult {
+    private suspend fun executeSyncPass(): FeedSyncResult = kotlinx.coroutines.coroutineScope {
+        val currentDeferred = activeSyncDeferred
         try {
             ensureDefaultApiSourcesExist()
 
             // --- NOSLOP_TOR_GATE_UI_V1 ---
             if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
                 Logger.warn(TAG, "Tor not ready — skipping feed sync rather than fetching outside Tor")
-                return FeedSyncResult.RetryableFailure("Tor not ready")
+                return@coroutineScope FeedSyncResult.RetryableFailure("Tor not ready")
             }
 
             Logger.info(TAG, "Starting feed synchronization...")
@@ -269,7 +270,7 @@ class FeedRepository(
 
             if (activeSources.isEmpty() && userCategories.isEmpty()) {
                 Logger.warn(TAG, "No active feed sources or categories found to sync")
-                return FeedSyncResult.Success
+                return@coroutineScope FeedSyncResult.Success
             }
 
             val hasExistingItems = feedDao.getItemCount() > 0
@@ -311,14 +312,14 @@ class FeedRepository(
                 val firstRss = rssSources.firstOrNull()
                 if (firstRss != null) {
                     rssSources.remove(firstRss)
-                    rampUpJobs.add(syncScope.async(dispatcher) {
+                    rampUpJobs.add(async(dispatcher) {
                         _feedBuildStatus.value = "Preparing your feed..."
                         fetchRssSource(firstRss, allNegative)
                     })
                 }
 
                 for (creator in rampUpCreators) {
-                    rampUpJobs.add(syncScope.async(dispatcher) {
+                    rampUpJobs.add(async(dispatcher) {
                         _feedBuildStatus.value = "Preparing your feed..."
                         fetchCreatorVideos(creator)
                     })
@@ -327,7 +328,7 @@ class FeedRepository(
                 val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
                 for (cat in priorityCats) {
                     activeCategories.remove(cat)
-                    rampUpJobs.add(syncScope.async(dispatcher) {
+                    rampUpJobs.add(async(dispatcher) {
                         _feedBuildStatus.value = "Preparing your feed..."
                         fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
                     })
@@ -385,15 +386,17 @@ class FeedRepository(
             }
 
             Logger.info(TAG, "Feed background synchronization completed.")
-            return FeedSyncResult.Success
+            return@coroutineScope FeedSyncResult.Success
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.error(TAG, "Feed sync setup/execution failed: ${e.message}")
-            return FeedSyncResult.RetryableFailure(e.message ?: "Sync failed")
+            return@coroutineScope FeedSyncResult.RetryableFailure(e.message ?: "Sync failed")
         } finally {
             _feedBuildStatus.value = ""
             syncMutex.withLock {
-                activeSyncDeferred = null
+                if (activeSyncDeferred === currentDeferred) {
+                    activeSyncDeferred = null
+                }
             }
         }
     }

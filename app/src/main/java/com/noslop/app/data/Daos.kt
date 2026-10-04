@@ -170,8 +170,8 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
-    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, authorAvatarB64 = :authorAvatarB64, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy WHERE id = :id")
-    suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, authorAvatarB64: String?, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String)
+    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, authorAvatarB64 = :authorAvatarB64, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy, clearnetUrl = :clearnetUrl WHERE id = :id")
+    suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, authorAvatarB64: String?, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String, clearnetUrl: String?)
 
     @Transaction
     suspend fun insertPostSafely(post: MeshPost): Boolean {
@@ -197,24 +197,42 @@ interface PostDao {
         mediaType: String?,
         thumbnailB64: String?,
         mediaSize: Long,
-        privacy: String
+        privacy: String,
+        clearnetUrl: String?
     ): Boolean {
         val existing = getPostById(id) ?: return false
         if (existing.authorPublicKeyB64 != authorId) return false
         if (existing.isOrphaned) return false
         if (existing.timestamp > newTimestamp) return false
-        updatePostDetails(id, newContent, newTimestamp, newSignature, authorAvatarB64, mediaUrl, mediaType, thumbnailB64, mediaSize, privacy)
+        updatePostDetails(id, newContent, newTimestamp, newSignature, authorAvatarB64, mediaUrl, mediaType, thumbnailB64, mediaSize, privacy, clearnetUrl)
         return true
     }
 
     @Transaction
     suspend fun deletePostSafely(id: String, authorId: String, timestamp: Long): Boolean {
-        val existing = getPostById(id) ?: return false
-        if (existing.authorPublicKeyB64 != authorId) return false
-        if (existing.isOrphaned) return true
-        if (existing.timestamp > timestamp) return false
-        markPostOrphaned(id)
-        return true
+        val existing = getPostById(id)
+        if (existing != null) {
+            if (existing.authorPublicKeyB64 != authorId) return false
+            if (existing.isOrphaned) return true
+            if (existing.timestamp > timestamp) return false
+            markPostOrphaned(id)
+            return true
+        } else {
+            // S09: Durable tombstone for out-of-order delete-before-create delivery
+            insertPost(
+                MeshPost(
+                    id = id,
+                    authorPublicKeyB64 = authorId,
+                    authorHandle = "",
+                    authorTripcode = "",
+                    content = "[Deleted]",
+                    timestamp = timestamp,
+                    signature = "",
+                    isOrphaned = true
+                )
+            )
+            return true
+        }
     }
 }
 

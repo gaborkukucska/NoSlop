@@ -17,11 +17,10 @@
   * Coalesced setup, ramp-up, and background passes into a unified `activeSyncDeferred: Deferred<FeedSyncResult>` guarded by `syncMutex`, preventing workers from returning early before sync completes (R08).
   * Propagated typed `FeedSyncResult` to `FeedSyncWorker`, returning `Result.retry()` on Tor unreadiness or setup failures.
 * **Safe Backup Validation, Staging Commit, Destination Secret Cleansing & Identity Recovery (`BackupManager.kt`, `IdentityRepository.kt`)**:
-  * Validated staged SQLite database integrity (`PRAGMA quick_check == "ok"`) and verified identity, API key, and group message schemas before committing live file replacements (R09).
-  * Marked legacy Keystore-sealed preference restores as `restoredKeystoreSealedIdentity = true`, restoring automatic cross-device deterministic recovery from mnemonics (R10).
-  * Streamed group message export via `JsonWriter` and restored messages with `INSERT OR REPLACE` to prevent history omission and RAM exhaustion (R11).
-  * Cleared destination preferences (`freshPrefs.edit().clear()`) before writing restored keys, preventing destination-only secrets from surviving restores (R12).
-  * Checked `renameTo` boolean result and attempted fresh hardware Keystore re-initialization when quarantining corrupted preference stores (R13).
+  * Fixed group message restore SQL column omission (`isRead`) preventing SQLite constraint crashes on portable restore (S01).
+  * Enforced complete identity schema, cryptographic keypair consistency, and transactional DB replacement with `.bak` rollback on restore failures (S06).
+  * Always export `api_keys_backup.json` manifest so empty API key backups clear destination credentials (S10).
+  * Added quarantine state retention in `IdentityRepository` protecting identity continuity on storage faults (S11).
 * **Active Player Teardown on Route Change, MediaProxy Range Support & Deployer Path Hygiene (`VideoPlayer.kt`, `MediaProxyService.kt`, `GossipService.kt`, `SshDeployer.kt`)**:
   * Tracked `lastTorRouting` in `VideoPlayer.kt` and tore down active players on route transitions rather than early-returning, eliminating direct clearnet streaming leaks when enabling Tor (R14).
   * Stripped `Range:` prefixes before evaluating `bytes=`, added support for prefix, suffix, and standard byte ranges with HTTP 416 responses for unsatisfiable ranges (R15).

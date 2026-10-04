@@ -298,6 +298,35 @@ data class GroupMemberInfo(
 )
 
 @Keep
+fun canonicalGroupInvitePayload(
+    groupId: String,
+    title: String,
+    adminPublicKeyB64: String,
+    signerPublicKeyB64: String,
+    timestamp: Long,
+    sortedMembers: String,
+    allowMemberInvites: Boolean,
+    allowMemberSelfRemove: Boolean,
+    description: String? = null,
+    avatarB64: String? = null,
+    adminOnion: String? = null,
+    adminEncPublicKey: String? = null
+): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
+    groupId,
+    title,
+    adminPublicKeyB64,
+    signerPublicKeyB64,
+    timestamp.toString(),
+    sortedMembers,
+    allowMemberInvites.toString(),
+    allowMemberSelfRemove.toString(),
+    description ?: "",
+    avatarB64 ?: "",
+    adminOnion ?: "",
+    adminEncPublicKey ?: ""
+)
+
+@Keep
 data class GroupInvitePayload(
     @SerializedName("group_id") val groupId: String,
     val title: String,

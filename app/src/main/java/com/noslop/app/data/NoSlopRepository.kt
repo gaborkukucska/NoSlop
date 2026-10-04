@@ -737,9 +737,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.groupChatDao().insertGroupChat(group)
 
         val sortedMembers = allMembers.sorted().joinToString(",")
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            groupId, title, adminKeys.publicKeyB64, timestamp.toString(),
-            sortedMembers, allowMemberInvites.toString(), allowMemberSelfRemove.toString()
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+            groupId, title, adminKeys.publicKeyB64, adminKeys.publicKeyB64, timestamp,
+            sortedMembers, allowMemberInvites, allowMemberSelfRemove,
+            description, avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64
         )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val memberDetailsMap = allMembers.mapNotNull { pub ->
@@ -833,11 +834,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
             } else {
                 var updated = existing
-                if (existing.encPublicKeyB64.isBlank() && !info.encPublicKey.isNullOrBlank()) {
-                    updated = updated.copy(encPublicKeyB64 = info.encPublicKey)
-                }
-                if (existing.onionAddress.isBlank() && !info.onionAddress.isNullOrBlank()) {
-                    updated = updated.copy(onionAddress = info.onionAddress)
+                // S02: Never overwrite a trusted contact's keys from unauthenticated directory hints
+                if (!existing.isTrusted) {
+                    if (existing.encPublicKeyB64.isBlank() && !info.encPublicKey.isNullOrBlank()) {
+                        updated = updated.copy(encPublicKeyB64 = info.encPublicKey)
+                    }
+                    if (existing.onionAddress.isBlank() && !info.onionAddress.isNullOrBlank()) {
+                        updated = updated.copy(onionAddress = info.onionAddress)
+                    }
                 }
                 if ((existing.handle.startsWith("Member") || existing.handle == "Peer") && !info.handle.isNullOrBlank() && info.handle != "Member") {
                     updated = updated.copy(handle = info.handle)
@@ -1191,11 +1195,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         if (addedMembers.isNotEmpty()) {
             val inviteTimestamp = System.currentTimeMillis()
             val sortedNewMembers = newMembers.sorted().joinToString(",")
-            val invitePayloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                groupId, effectiveTitle, adminKeys.publicKeyB64, inviteTimestamp.toString(),
-                sortedNewMembers, existing.allowMemberInvites.toString(), existing.allowMemberSelfRemove.toString()
+            val inviterSigningKey = if (isAdmin) adminKeys else myKeys
+            val storedAdminPeer = db.peerDao().getPeerByPublicKey(existing.adminPublicKeyB64)
+            val effectiveAdminOnion = if (isAdmin) adminKeys.onionAddress else (storedAdminPeer?.onionAddress ?: "")
+            val effectiveAdminEncPub = if (isAdmin) adminKeys.encPublicKeyB64 else (storedAdminPeer?.encPublicKeyB64 ?: "")
+
+            val invitePayloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+                groupId, effectiveTitle, existing.adminPublicKeyB64, inviterSigningKey.publicKeyB64, inviteTimestamp,
+                sortedNewMembers, effectiveAllowInvites, effectiveAllowSelfRemove,
+                effectiveDescription, effectiveAvatarB64, effectiveAdminOnion, effectiveAdminEncPub
             )
-            val inviteSig = com.noslop.app.crypto.CryptoService.sign(invitePayloadToSign, adminKeys.privateKeyB64)
+            val inviteSig = com.noslop.app.crypto.CryptoService.sign(invitePayloadToSign, inviterSigningKey.privateKeyB64)
 
             val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
                 groupId = groupId,
@@ -1206,12 +1216,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 description = effectiveDescription,
                 memberHandles = memberHandlesMap,
                 memberDetails = memberDetailsMap,
-                allowMemberInvites = existing.allowMemberInvites,
-                allowMemberSelfRemove = existing.allowMemberSelfRemove,
+                allowMemberInvites = effectiveAllowInvites,
+                allowMemberSelfRemove = effectiveAllowSelfRemove,
                 timestamp = inviteTimestamp,
                 signature = inviteSig,
-                adminOnion = adminKeys.onionAddress,
-                adminEncPublicKey = adminKeys.encPublicKeyB64
+                adminOnion = effectiveAdminOnion,
+                adminEncPublicKey = effectiveAdminEncPub
             )
             for (addedPub in addedMembers) {
                 if (addedPub == myKeys.publicKeyB64) continue
@@ -1422,9 +1432,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val timestamp = group.createdAt
         val sortedMembers = members.sorted().joinToString(",")
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString(),
-            sortedMembers, group.allowMemberInvites.toString(), group.allowMemberSelfRemove.toString()
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+            group.groupId, group.title, group.adminPublicKeyB64, adminKeys.publicKeyB64, timestamp,
+            sortedMembers, group.allowMemberInvites, group.allowMemberSelfRemove,
+            group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64
         )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(

@@ -175,7 +175,8 @@ class FakePostDao : PostDao {
         mediaType: String?,
         thumbnailB64: String?,
         mediaSize: Long,
-        privacy: String
+        privacy: String,
+        clearnetUrl: String?
     ) {
         val existing = posts[id]
         if (existing != null) {
@@ -188,7 +189,8 @@ class FakePostDao : PostDao {
                 mediaType = mediaType,
                 thumbnailB64 = thumbnailB64,
                 mediaSize = mediaSize,
-                privacy = privacy
+                privacy = privacy,
+                clearnetUrl = clearnetUrl
             )
         }
     }

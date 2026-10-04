@@ -294,47 +294,52 @@ object MediaProxyService {
         }
     }
 
+    sealed class RangeResult {
+        data class Satisfiable(val start: Long, val end: Long) : RangeResult()
+        object Unsatisfiable : RangeResult()
+        object None : RangeResult()
+    }
+
+    private fun parseRange(rangeHeader: String?, totalLength: Long): RangeResult {
+        if (rangeHeader.isNullOrBlank()) return RangeResult.None
+        val headerVal = if (rangeHeader.startsWith("Range:", ignoreCase = true)) {
+            rangeHeader.substringAfter(":").trim()
+        } else {
+            rangeHeader.trim()
+        }
+        if (!headerVal.startsWith("bytes=", ignoreCase = true)) return RangeResult.None
+        if (totalLength <= 0L) return RangeResult.Unsatisfiable
+
+        val spec = headerVal.substringAfter("=").trim()
+        if (spec.startsWith("-")) {
+            val suffix = spec.removePrefix("-").toLongOrNull()
+            if (suffix == null || suffix <= 0) return RangeResult.Unsatisfiable
+            val s = maxOf(0L, totalLength - suffix)
+            val e = totalLength - 1
+            return RangeResult.Satisfiable(s, e)
+        }
+
+        val parts = spec.split("-")
+        val s = parts.getOrNull(0)?.toLongOrNull() ?: return RangeResult.Unsatisfiable
+        if (s < 0 || s >= totalLength) return RangeResult.Unsatisfiable // S13: bytes=100- on 100-byte file returns 416
+
+        val eStr = parts.getOrNull(1)?.trim()
+        val e = if (!eStr.isNullOrBlank()) {
+            val endParsed = eStr.toLongOrNull() ?: return RangeResult.Unsatisfiable
+            if (endParsed < s) return RangeResult.Unsatisfiable // reversed range
+            minOf(endParsed, totalLength - 1)
+        } else {
+            totalLength - 1
+        }
+        return RangeResult.Satisfiable(s, e)
+    }
+
     private fun streamFile(file: File, contentType: String, output: OutputStream, rangeHeader: String? = null) {
         try {
             val totalLength = file.length()
-            var start = 0L
-            var end = totalLength - 1
+            val rangeResult = parseRange(rangeHeader, totalLength)
 
-            var isPartial = false
-            if (!rangeHeader.isNullOrBlank()) {
-                val headerValue = if (rangeHeader.startsWith("Range:", ignoreCase = true)) {
-                    rangeHeader.substringAfter(":").trim()
-                } else {
-                    rangeHeader.trim()
-                }
-
-                if (headerValue.startsWith("bytes=", ignoreCase = true)) {
-                    val rangeSpec = headerValue.substringAfter("=").trim()
-                    if (rangeSpec.startsWith("-")) {
-                        // Suffix range: -N (last N bytes)
-                        val suffixLen = rangeSpec.removePrefix("-").toLongOrNull()
-                        if (suffixLen != null && suffixLen > 0) {
-                            start = maxOf(0L, totalLength - suffixLen)
-                            end = totalLength - 1
-                            isPartial = true
-                        }
-                    } else {
-                        val parts = rangeSpec.split("-")
-                        val startParsed = parts.getOrNull(0)?.toLongOrNull()
-                        val endParsed = parts.getOrNull(1)?.takeIf { it.isNotBlank() }?.toLongOrNull()
-
-                        if (startParsed != null && startParsed in 0 until totalLength) {
-                            start = startParsed
-                            if (endParsed != null && endParsed in start until totalLength) {
-                                end = endParsed
-                            }
-                            isPartial = true
-                        }
-                    }
-                }
-            }
-
-            if (start > end || start >= totalLength || (totalLength == 0L && isPartial)) {
+            if (rangeResult is RangeResult.Unsatisfiable) {
                 val errorHeaders = """
                     HTTP/1.1 416 Range Not Satisfiable
                     Content-Range: bytes */$totalLength
@@ -347,7 +352,12 @@ object MediaProxyService {
                 return
             }
 
-            val contentLength = end - start + 1
+            val (start, end, isPartial) = when (rangeResult) {
+                is RangeResult.Satisfiable -> Triple(rangeResult.start, rangeResult.end, true)
+                else -> Triple(0L, maxOf(0L, totalLength - 1), false)
+            }
+
+            val contentLength = if (totalLength == 0L) 0L else (end - start + 1)
             val headers = if (isPartial) {
                 """
                 HTTP/1.1 206 Partial Content
@@ -372,19 +382,21 @@ object MediaProxyService {
             output.write(headers.toByteArray(Charsets.UTF_8))
             output.flush()
 
-            java.io.RandomAccessFile(file, "r").use { raf ->
-                raf.seek(start)
-                val buffer = ByteArray(32 * 1024)
-                var remaining = contentLength
-                while (remaining > 0) {
-                    val toRead = Math.min(buffer.size.toLong(), remaining).toInt()
-                    val bytesRead = raf.read(buffer, 0, toRead)
-                    if (bytesRead == -1) break
-                    output.write(buffer, 0, bytesRead)
-                    remaining -= bytesRead
+            if (contentLength > 0L) {
+                java.io.RandomAccessFile(file, "r").use { raf ->
+                    raf.seek(start)
+                    val buffer = ByteArray(32 * 1024)
+                    var remaining = contentLength
+                    while (remaining > 0) {
+                        val toRead = Math.min(buffer.size.toLong(), remaining).toInt()
+                        val bytesRead = raf.read(buffer, 0, toRead)
+                        if (bytesRead == -1) break
+                        output.write(buffer, 0, bytesRead)
+                        remaining -= bytesRead
+                    }
                 }
+                output.flush()
             }
-            output.flush()
             Logger.info(TAG, "File ${file.name} streamed successfully from disk (partial=$isPartial, range=$start-$end)")
         } catch (e: Exception) {
             Logger.warn(TAG, "Error streaming file ${file.name}: ${e.message}")
@@ -396,13 +408,20 @@ object MediaProxyService {
         var c: Int
         var totalBytes = 0
         val maxHeaderBytes = 16 * 1024 // 16 KB header limit (F16)
-        val deadline = System.currentTimeMillis() + 5000L // 5-second total header deadline (R16)
+        val deadline = System.currentTimeMillis() + 5000L
         try {
-            while (input.read().also { c = it } != -1) {
+            while (true) {
+                val remaining = deadline - System.currentTimeMillis()
+                if (remaining <= 0L) {
+                    Logger.warn(TAG, "Header deadline exceeded ($totalBytes bytes) — terminating request")
+                    return emptyList()
+                }
+                c = input.read()
+                if (c == -1) break
                 builder.append(c.toChar())
                 totalBytes++
-                if (totalBytes >= maxHeaderBytes || System.currentTimeMillis() > deadline) {
-                    Logger.warn(TAG, "Header limit or deadline exceeded ($totalBytes bytes) — terminating request")
+                if (totalBytes >= maxHeaderBytes) {
+                    Logger.warn(TAG, "Header byte limit exceeded ($totalBytes bytes) — terminating request")
                     return emptyList()
                 }
                 if (builder.endsWith("\r\n\r\n")) {

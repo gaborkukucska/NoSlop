@@ -72,6 +72,29 @@ object MeshPacketVerifier {
     private data class Signed(val payload: String, val signature: String?, val signerPublicKeyB64: String?)
 
     fun verify(packet: NetworkPacket): Verdict {
+        // S14: Check for known structural violations before describe to prevent relay bypass
+        if (packet.type == "POST") {
+            val p = packet.getPostPayload()
+            if (p != null) {
+                if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) {
+                    Logger.warn(TAG, "POST packet ${packet.id} has mismatched mediaId and mediaMetadata.id — INVALID")
+                    return Verdict.INVALID
+                }
+                if (p.mediaId != null && p.mediaMetadata == null) {
+                    Logger.warn(TAG, "POST packet ${packet.id} has mediaId without mediaMetadata — INVALID")
+                    return Verdict.INVALID
+                }
+            }
+        } else if (packet.type == "EDIT_POST") {
+            val p = packet.getEditPostPayload()
+            if (p != null) {
+                if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) {
+                    Logger.warn(TAG, "EDIT_POST packet ${packet.id} has mismatched mediaId and mediaMetadata.id — INVALID")
+                    return Verdict.INVALID
+                }
+            }
+        }
+
         // Any malformed field from a hostile peer must produce UNVERIFIABLE, not
         // an exception that kills the receive loop. Gson will happily leave a
         // non-null Kotlin field null when the wire key does not match.
@@ -349,28 +372,31 @@ object MeshPacketVerifier {
             val sortedMembers = p.members.sorted().joinToString(",")
             for (candidate in candidates) {
                 if (candidate.isBlank()) continue
-                val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                val encCanonical = canonicalGroupInvitePayload(
+                    p.groupId, p.title, p.adminPublicKeyB64, candidate, p.timestamp,
+                    sortedMembers, p.allowMemberInvites, p.allowMemberSelfRemove,
+                    p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey
+                )
+                val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
                     p.groupId, p.title, candidate, p.timestamp.toString(),
                     sortedMembers, p.allowMemberInvites.toString(), p.allowMemberSelfRemove.toString()
                 )
-                val encCand = com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, candidate, p.timestamp.toString())
-                val encAdmin = com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, p.adminPublicKeyB64, p.timestamp.toString())
-                val pipeCand = "${p.groupId}|${p.title}|$candidate|${p.timestamp}"
-                val pipeAdmin = "${p.groupId}|${p.title}|${p.adminPublicKeyB64}|${p.timestamp}"
 
                 val matched = when {
                     CryptoService.verify(encCanonical, p.signature, candidate) -> encCanonical
-                    CryptoService.verify(encCand, p.signature, candidate) -> encCand
-                    CryptoService.verify(encAdmin, p.signature, candidate) -> encAdmin
-                    CryptoService.verify(pipeCand, p.signature, candidate) -> pipeCand
-                    CryptoService.verify(pipeAdmin, p.signature, candidate) -> pipeAdmin
+                    CryptoService.verify(enc7Field, p.signature, candidate) -> enc7Field
                     else -> null
                 }
                 if (matched != null) {
                     return@let Signed(matched, p.signature, candidate)
                 }
             }
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, p.adminPublicKeyB64, p.timestamp.toString()), p.signature, p.adminPublicKeyB64)
+            val fallbackCanonical = canonicalGroupInvitePayload(
+                p.groupId, p.title, p.adminPublicKeyB64, p.adminPublicKeyB64, p.timestamp,
+                sortedMembers, p.allowMemberInvites, p.allowMemberSelfRemove,
+                p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey
+            )
+            Signed(fallbackCanonical, p.signature, p.adminPublicKeyB64)
         }
 
         // The handler additionally requires the admin key to match the STORED

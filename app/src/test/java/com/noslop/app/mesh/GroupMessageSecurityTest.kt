@@ -165,6 +165,17 @@ class GroupMessageSecurityTest {
     }
 
     @Test
+    fun groupInvite_canonicalSigning_verified() {
+        val members = listOf(admin.publicKeyB64, alice.publicKeyB64).sorted()
+        val s = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), true, true, null, null, null, null
+        )
+        val sig = CryptoService.sign(s, admin.privateKeyB64)
+        assertTrue(CryptoService.verify(s, sig, admin.publicKeyB64))
+    }
+
+    @Test
     fun storeAndForward_queue_enqueue_flush_delete_cycle() = kotlinx.coroutines.runBlocking {
         val pendingMsg = PendingGroupMessage(
             groupId = groupId,

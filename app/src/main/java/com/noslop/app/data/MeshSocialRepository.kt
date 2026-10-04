@@ -560,7 +560,8 @@ class MeshSocialRepository(
             mediaType = newMediaType,
             thumbnailB64 = newThumb,
             mediaSize = newSize,
-            privacy = privacy
+            privacy = privacy,
+            clearnetUrl = effectiveClearnetUrl
         )
 
         val packet = com.noslop.app.mesh.NetworkPacket(

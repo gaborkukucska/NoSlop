@@ -121,9 +121,15 @@ fun invalidateAllOnRouteTransition() {
     sourceCache.clear()
     PreloadManager.evictAll()
     try {
-        coil.Coil.imageLoader(com.noslop.app.NoSlopApp.repository.context).memoryCache?.clear()
+        val appContext = com.noslop.app.NoSlopApp.repository.context
+        val loader = coil.Coil.imageLoader(appContext)
+        loader.memoryCache?.clear()
+        loader.diskCache?.clear()
+        if (appContext is com.noslop.app.NoSlopApp) {
+            coil.Coil.setImageLoader(appContext.newImageLoader())
+        }
     } catch (_: Exception) {}
-    Logger.info("VIDEO_ROUTE", "Invalidated all cached sources, preloaded players, and image memory caches on network route transition")
+    Logger.info("VIDEO_ROUTE", "Invalidated all cached sources, preloaded players, and rebuilt image loader on network route transition")
 }
 
 // Re-resolve this far BEFORE the stated expiry, so a slow handshake or a

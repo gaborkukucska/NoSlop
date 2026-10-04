@@ -208,11 +208,11 @@ class PostPacketHandler(
         if (existingPost != null) {
             val peer = peerDao.getPeerByPublicKey(editPay.authorId)
             val resolvedOnion = editPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
-            val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" } ?: existingPost.mediaUrl
-            val newMediaType = editPay.mediaMetadata?.type ?: existingPost.mediaType
-            val newThumb = editPay.mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
-            val newSize = editPay.mediaMetadata?.size ?: existingPost.mediaSize
-            val newPrivacy = editPay.privacy ?: existingPost.privacy
+            // S08: Complete signed state semantics: if mediaId is null, media is cleared; if set, updated.
+            val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" }
+            val newMediaType = if (editPay.mediaId != null) editPay.mediaMetadata?.type else null
+            val newThumb = if (editPay.mediaId != null) editPay.mediaMetadata?.thumbnailB64 else null
+            val newSize = if (editPay.mediaId != null) (editPay.mediaMetadata?.size ?: 0L) else 0L
 
             val success = postDao.editPostSafely(
                 id = editPay.postId,
@@ -225,7 +225,8 @@ class PostPacketHandler(
                 mediaType = newMediaType,
                 thumbnailB64 = newThumb,
                 mediaSize = newSize,
-                privacy = newPrivacy
+                privacy = effectivePrivacy, // S08: exact signed privacy
+                clearnetUrl = editPay.clearnetUrl
             )
             if (success) {
                 Logger.info(TAG, "Applied EDIT_POST for ${editPay.postId}")

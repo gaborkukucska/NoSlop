@@ -13,6 +13,13 @@ base {
     archivesName.set("NoSlop")
 }
 
+configurations.all {
+    resolutionStrategy {
+        force("androidx.concurrent:concurrent-futures:1.2.0")
+        force("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+    }
+}
+
 android {
     namespace = "com.noslop.app"
     compileSdk = 36
@@ -21,8 +28,8 @@ android {
         applicationId = "com.noslop.me.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 65
-        versionName = "0.6.5-alpha"
+        versionCode = 69
+        versionName = "0.6.9-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
