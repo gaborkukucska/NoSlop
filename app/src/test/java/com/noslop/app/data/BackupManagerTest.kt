@@ -275,8 +275,8 @@ class BackupManagerTest {
 
         val (encMsg, ivMsg) = com.noslop.app.crypto.GroupMessageCrypto.encrypt("Hello from B", "grp-b", "msg-b-1")
         db.openHelper.writableDatabase.execSQL(
-            "INSERT INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, isRead) VALUES ('msg-b-1', 'grp-b', 'sender-b', ?, ?, ?, 1L)",
-            arrayOf<Any?>(encMsg, ivMsg, System.currentTimeMillis())
+            "INSERT INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, isRead) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            arrayOf<Any?>("msg-b-1", "grp-b", "sender-b", encMsg, ivMsg, System.currentTimeMillis(), 1L)
         )
 
         val outStreamB = ByteArrayOutputStream()

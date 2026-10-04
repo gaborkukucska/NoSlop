@@ -515,17 +515,6 @@ class HandshakePacketHandler(
                     )
                     val signature = CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
 
-                    val allMembers = (members + group.adminPublicKeyB64).distinct()
-                    val myHandle = repo.getLocalHandle()
-                    val memberDetailsMap = allMembers.mapNotNull { pub ->
-                        val p = peerDao.getPeerByPublicKey(pub)
-                        if (p != null) {
-                            pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
-                        } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
-                            pub to GroupMemberInfo(myHandle, adminKeys.encPublicKeyB64, adminKeys.onionAddress)
-                        } else null
-                    }.toMap()
-
                     val invitePayload = GroupInvitePayload(
                         groupId = group.groupId,
                         title = group.title,

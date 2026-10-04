@@ -554,8 +554,18 @@ object BackupManager {
                 var securePrefsBackup: File? = null
                 var fallbackPrefsBackup: File? = null
 
+                // In-memory snapshots of preference stores to guarantee cache invalidation on rollback
+                val secureSnapshot: Map<String, *>? = try {
+                    if (securePrefsFile.exists()) context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).all.toMap() else null
+                } catch (_: Exception) { null }
+
+                val fallbackSnapshot: Map<String, *>? = try {
+                    if (fallbackPrefsFile.exists()) context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE).all.toMap() else null
+                } catch (_: Exception) { null }
+
                 val apiBackupFiles = mutableMapOf<File, File>()
                 val apiFiles = listOf("noslop_api_keys.xml", "noslop_api_keys_fallback.xml")
+                val apiSnapshots = mutableMapOf<String, Map<String, *>>()
 
                 // Snapshot DB
                 if (targetDb.exists()) {
@@ -571,7 +581,7 @@ object BackupManager {
                     }
                 }
 
-                // Snapshot Identity preferences
+                // Snapshot Identity preferences on disk
                 if (securePrefsFile.exists()) {
                     securePrefsBackup = File(prefsDir, "$PREFS_NAME.xml.bak_${System.currentTimeMillis()}")
                     securePrefsFile.copyTo(securePrefsBackup, overwrite = true)
@@ -581,13 +591,41 @@ object BackupManager {
                     fallbackPrefsFile.copyTo(fallbackPrefsBackup, overwrite = true)
                 }
 
-                // Snapshot API keys preferences
+                // Snapshot API keys preferences on disk and in memory
                 for (apiName in apiFiles) {
                     val apiFile = File(prefsDir, apiName)
-                    if (apiFile.exists()) {
-                        val apiBak = File(prefsDir, "$apiName.bak_${System.currentTimeMillis()}")
-                        apiFile.copyTo(apiBak, overwrite = true)
-                        apiBackupFiles[apiFile] = apiBak
+                    val prefKeyName = apiName.removeSuffix(".xml")
+                    try {
+                        if (apiFile.exists()) {
+                            apiSnapshots[prefKeyName] = context.getSharedPreferences(prefKeyName, Context.MODE_PRIVATE).all.toMap()
+                            val apiBak = File(prefsDir, "$apiName.bak_${System.currentTimeMillis()}")
+                            apiFile.copyTo(apiBak, overwrite = true)
+                            apiBackupFiles[apiFile] = apiBak
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                fun restorePrefsFromSnapshot(prefName: String, snapshot: Map<String, *>?, diskFile: File, backupFile: File?) {
+                    val sp = context.getSharedPreferences(prefName, Context.MODE_PRIVATE)
+                    val editor = sp.edit().clear()
+                    if (snapshot != null) {
+                        for ((k, v) in snapshot) {
+                            when (v) {
+                                is String -> editor.putString(k, v)
+                                is Boolean -> editor.putBoolean(k, v)
+                                is Int -> editor.putInt(k, v)
+                                is Long -> editor.putLong(k, v)
+                                is Float -> editor.putFloat(k, v)
+                                is Set<*> -> @Suppress("UNCHECKED_CAST") editor.putStringSet(k, v as Set<String>)
+                            }
+                        }
+                        editor.commit()
+                    } else {
+                        editor.commit()
+                        diskFile.delete()
+                    }
+                    if (backupFile != null && backupFile.exists()) {
+                        backupFile.copyTo(diskFile, overwrite = true)
                     }
                 }
 
@@ -607,26 +645,18 @@ object BackupManager {
                             dbShmBackupFile.copyTo(targetShm, overwrite = true)
                         }
 
-                        if (securePrefsBackup != null && securePrefsBackup.exists()) {
-                            securePrefsBackup.copyTo(securePrefsFile, overwrite = true)
-                        } else {
-                            securePrefsFile.delete()
+                        // Restore preferences both in SharedPreferencesImpl in-memory cache and on disk
+                        restorePrefsFromSnapshot(PREFS_NAME, secureSnapshot, securePrefsFile, securePrefsBackup)
+                        restorePrefsFromSnapshot("noslop_identity_fallback", fallbackSnapshot, fallbackPrefsFile, fallbackPrefsBackup)
+
+                        for (apiName in apiFiles) {
+                            val prefKeyName = apiName.removeSuffix(".xml")
+                            val apiFile = File(prefsDir, apiName)
+                            val apiBak = apiBackupFiles[apiFile]
+                            restorePrefsFromSnapshot(prefKeyName, apiSnapshots[prefKeyName], apiFile, apiBak)
                         }
 
-                        if (fallbackPrefsBackup != null && fallbackPrefsBackup.exists()) {
-                            fallbackPrefsBackup.copyTo(fallbackPrefsFile, overwrite = true)
-                        } else {
-                            fallbackPrefsFile.delete()
-                        }
-
-                        apiBackupFiles.forEach { (destFile, bakFile) ->
-                            if (bakFile.exists()) {
-                                bakFile.copyTo(destFile, overwrite = true)
-                            } else {
-                                destFile.delete()
-                            }
-                        }
-                        Logger.info(TAG, "Full rollback completed successfully")
+                        Logger.info(TAG, "Full rollback completed successfully across database, identity, and API keys")
                     } catch (rbEx: Exception) {
                         Logger.error(TAG, "Error during full rollback: ${rbEx.message}")
                     }
@@ -646,7 +676,9 @@ object BackupManager {
                     if (hasPortableIdentity && parsedIdentityObj != null) {
                         val db = NoSlopDatabase.getDatabase(context)
                         val idRepo = IdentityRepository(context, db.appSettingDao())
-                        val restoreResult = idRepo.restoreAuthoritativeIdentity(parsedIdentityObj, mnemonic)
+                        val restoreResult = kotlinx.coroutines.runBlocking {
+                            idRepo.restoreAuthoritativeIdentity(parsedIdentityObj, mnemonic)
+                        }
                         if (restoreResult !is IdentityRestoreResult.Success) {
                             throw IllegalStateException("Identity restore rejected: $restoreResult")
                         }

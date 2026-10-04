@@ -45,9 +45,11 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         return false
     }
 
-    fun resolveQuarantine() {
+    suspend fun resolveQuarantine() {
         isQuarantined.value = false
-        appSettingDao.removeSetting("identity_quarantined")
+        try {
+            appSettingDao.removeSetting("identity_quarantined")
+        } catch (_: Exception) {}
         try {
             val prefsDir = File(context.filesDir.parentFile, "shared_prefs")
             prefsDir.listFiles()?.filter { it.name.startsWith("noslop_identity_secure.xml.corrupt_") }?.forEach { corruptFile ->
@@ -94,7 +96,11 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 if (renamed) {
                     Logger.warn(TAG, "Secure file quarantined to ${quarantine.name}. Storing quarantine recovery state...")
                     isQuarantined.value = true
-                    appSettingDao.insertSetting(AppSetting("identity_quarantined", "true"))
+                    kotlinx.coroutines.runBlocking {
+                        try {
+                            appSettingDao.insertSetting(AppSetting("identity_quarantined", "true"))
+                        } catch (_: Exception) {}
+                    }
                     recovered = try {
                         createEncryptedPrefs(context).also {
                             Logger.info(TAG, "Successfully re-initialized hardware Keystore preferences after quarantine")
@@ -183,7 +189,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             .remove("burnable_tripcode")
             .remove("burnable_onion")
             .remove("burnable_display_name")
-            .apply()
+            .commit()
 
         // Identity version 2 indicates deterministic HKDF derivation from Word Cloud mnemonic
         resolveQuarantine()

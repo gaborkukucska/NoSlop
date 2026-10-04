@@ -188,7 +188,9 @@ class PostPacketHandler(
         )
         val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
         val isCanonical = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId)
-        if (!isCanonical) {
+        val isLegacySafe = effectivePrivacy == "public" && editPay.mediaId == null && editPay.mediaMetadata == null && editPay.clearnetUrl == null
+        val isValid = isCanonical || (isLegacySafe && CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId))
+        if (!isValid) {
             Logger.warn(TAG, "Rejected EDIT_POST ${editPay.postId}: Canonical signature verification failed")
             return false
         }

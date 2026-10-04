@@ -149,7 +149,16 @@ object MeshPacketVerifier {
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 effectivePrivacy, p.mediaId, p.clearnetUrl
             )
-            Signed(encCanonical, p.signature, p.authorId)
+            val pipe = "${p.postId}|${p.authorId}|${p.content}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val isLegacySafe = effectivePrivacy == "public" && p.mediaId == null && p.mediaMetadata == null && p.clearnetUrl == null
+            val matched = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encCanonical, sig, signer) -> encCanonical
+                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer) -> pipe
+                else -> encCanonical
+            }
+            Signed(matched, sig, signer)
         }
 
         "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
