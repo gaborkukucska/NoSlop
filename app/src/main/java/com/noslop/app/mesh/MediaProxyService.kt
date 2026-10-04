@@ -300,7 +300,7 @@ object MediaProxyService {
         object None : RangeResult()
     }
 
-    private fun parseRange(rangeHeader: String?, totalLength: Long): RangeResult {
+    internal fun parseRange(rangeHeader: String?, totalLength: Long): RangeResult {
         if (rangeHeader.isNullOrBlank()) return RangeResult.None
         val headerVal = if (rangeHeader.startsWith("Range:", ignoreCase = true)) {
             rangeHeader.substringAfter(":").trim()

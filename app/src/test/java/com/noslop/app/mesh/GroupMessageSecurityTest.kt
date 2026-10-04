@@ -176,6 +176,55 @@ class GroupMessageSecurityTest {
     }
 
     @Test
+    fun groupInvite_withTamperedMembershipOrPermissions_failsVerification() {
+        val members = listOf(admin.publicKeyB64, alice.publicKeyB64).sorted()
+        val originalPayload = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), true, true, null, null, null, null
+        )
+        val sig = CryptoService.sign(originalPayload, admin.privateKeyB64)
+
+        // Altering members list invalidates signature (S02)
+        val tamperedMembers = listOf(admin.publicKeyB64, alice.publicKeyB64, mallory.publicKeyB64).sorted()
+        val tamperedPayload1 = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            tamperedMembers.joinToString(","), true, true, null, null, null, null
+        )
+        assertFalse(CryptoService.verify(tamperedPayload1, sig, admin.publicKeyB64))
+
+        // Altering permission invalidates signature (S02)
+        val tamperedPayload2 = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), false, true, null, null, null, null
+        )
+        assertFalse(CryptoService.verify(tamperedPayload2, sig, admin.publicKeyB64))
+
+        // Altering admin contact keys invalidates signature (S07)
+        val tamperedPayload3 = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), true, true, null, null, "attacker.onion", null
+        )
+        assertFalse(CryptoService.verify(tamperedPayload3, sig, admin.publicKeyB64))
+    }
+
+    @Test
+    fun groupUpdate_withAlteredBannedMembers_failsVerification() {
+        val timestamp = 1700000000L
+        val updatePayloadToSign = CryptoService.encodeForSigning(
+            groupId, "Updated Title", admin.publicKeyB64, timestamp.toString(),
+            alice.publicKeyB64, "", "", "New Desc", "avatarB64", "true", "true"
+        )
+        val sig = CryptoService.sign(updatePayloadToSign, admin.privateKeyB64)
+
+        // Altering banned list without updating signature fails (S04)
+        val tamperedPayload = CryptoService.encodeForSigning(
+            groupId, "Updated Title", admin.publicKeyB64, timestamp.toString(),
+            alice.publicKeyB64, "", mallory.publicKeyB64, "New Desc", "avatarB64", "true", "true"
+        )
+        assertFalse(CryptoService.verify(tamperedPayload, sig, admin.publicKeyB64))
+    }
+
+    @Test
     fun storeAndForward_queue_enqueue_flush_delete_cycle() = kotlinx.coroutines.runBlocking {
         val pendingMsg = PendingGroupMessage(
             groupId = groupId,
