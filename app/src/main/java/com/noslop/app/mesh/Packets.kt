@@ -298,6 +298,22 @@ data class GroupMemberInfo(
 )
 
 @Keep
+fun canonicalMemberDetailsString(memberDetails: Map<String, GroupMemberInfo>?): String {
+    if (memberDetails.isNullOrEmpty()) return ""
+    return memberDetails.toSortedMap().entries.joinToString(";") { (pub, info) ->
+        "$pub:${info.encPublicKey ?: ""}:${info.onionAddress ?: ""}:${info.handle ?: ""}"
+    }
+}
+
+@Keep
+fun canonicalMemberHandlesString(memberHandles: Map<String, String>?): String {
+    if (memberHandles.isNullOrEmpty()) return ""
+    return memberHandles.toSortedMap().entries.joinToString(";") { (pub, handle) ->
+        "$pub:$handle"
+    }
+}
+
+@Keep
 fun canonicalGroupInvitePayload(
     groupId: String,
     title: String,
@@ -310,7 +326,9 @@ fun canonicalGroupInvitePayload(
     description: String? = null,
     avatarB64: String? = null,
     adminOnion: String? = null,
-    adminEncPublicKey: String? = null
+    adminEncPublicKey: String? = null,
+    sortedMemberDetails: String = "",
+    sortedMemberHandles: String = ""
 ): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
     groupId,
     title,
@@ -323,7 +341,9 @@ fun canonicalGroupInvitePayload(
     description ?: "",
     avatarB64 ?: "",
     adminOnion ?: "",
-    adminEncPublicKey ?: ""
+    adminEncPublicKey ?: "",
+    sortedMemberDetails,
+    sortedMemberHandles
 )
 
 @Keep

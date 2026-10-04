@@ -18,7 +18,8 @@ data class GroupChat(
     val allowMemberSelfRemove: Boolean = true,
     val avatarB64: String? = null,
     @ColumnInfo(defaultValue = "{}") val memberHandlesJson: String? = "{}",
-    @ColumnInfo(defaultValue = "[]") val bannedMembersJson: String? = "[]"
+    @ColumnInfo(defaultValue = "[]") val bannedMembersJson: String? = "[]",
+    @ColumnInfo(defaultValue = "0") val revision: Long = 0L
 ) {
     fun getMemberHandles(): Map<String, String> = try {
         if (memberHandlesJson.isNullOrBlank()) emptyMap()

@@ -101,7 +101,7 @@ object MediaProxyService {
             val input = clientSocket.getInputStream()
             val output = clientSocket.getOutputStream()
             
-            val requestLines = readHttpHeaders(input)
+            val requestLines = readHttpHeaders(input, clientSocket)
             if (requestLines.isEmpty()) {
                 Logger.warn(TAG, "Empty request from client")
                 return@withContext
@@ -311,20 +311,24 @@ object MediaProxyService {
         if (totalLength <= 0L) return RangeResult.Unsatisfiable
 
         val spec = headerVal.substringAfter("=").trim()
+        // U11: Strict range syntax check — require hyphen and at most 2 parts
+        if (!spec.contains("-")) return RangeResult.Unsatisfiable
+        val parts = spec.split("-")
+        if (parts.size != 2) return RangeResult.Unsatisfiable
+
         if (spec.startsWith("-")) {
-            val suffix = spec.removePrefix("-").toLongOrNull()
+            val suffix = parts[1].trim().toLongOrNull()
             if (suffix == null || suffix <= 0) return RangeResult.Unsatisfiable
             val s = maxOf(0L, totalLength - suffix)
             val e = totalLength - 1
             return RangeResult.Satisfiable(s, e)
         }
 
-        val parts = spec.split("-")
-        val s = parts.getOrNull(0)?.toLongOrNull() ?: return RangeResult.Unsatisfiable
-        if (s < 0 || s >= totalLength) return RangeResult.Unsatisfiable // S13: bytes=100- on 100-byte file returns 416
+        val s = parts[0].trim().toLongOrNull() ?: return RangeResult.Unsatisfiable
+        if (s < 0 || s >= totalLength) return RangeResult.Unsatisfiable
 
-        val eStr = parts.getOrNull(1)?.trim()
-        val e = if (!eStr.isNullOrBlank()) {
+        val eStr = parts[1].trim()
+        val e = if (eStr.isNotEmpty()) {
             val endParsed = eStr.toLongOrNull() ?: return RangeResult.Unsatisfiable
             if (endParsed < s) return RangeResult.Unsatisfiable // reversed range
             minOf(endParsed, totalLength - 1)
@@ -403,7 +407,7 @@ object MediaProxyService {
         }
     }
 
-    private fun readHttpHeaders(input: InputStream): List<String> {
+    private fun readHttpHeaders(input: InputStream, clientSocket: Socket? = null): List<String> {
         val builder = java.lang.StringBuilder()
         var c: Int
         var totalBytes = 0
@@ -411,13 +415,18 @@ object MediaProxyService {
         val deadline = System.currentTimeMillis() + 5000L
         try {
             while (true) {
-                val remaining = deadline - System.currentTimeMillis()
-                if (remaining <= 0L) {
+                val remaining = (deadline - System.currentTimeMillis()).toInt()
+                if (remaining <= 0) {
                     Logger.warn(TAG, "Header deadline exceeded ($totalBytes bytes) — terminating request")
                     return emptyList()
                 }
+                try { clientSocket?.soTimeout = remaining } catch (_: Exception) {}
                 c = input.read()
                 if (c == -1) break
+                if (System.currentTimeMillis() > deadline) {
+                    Logger.warn(TAG, "Header deadline exceeded after read ($totalBytes bytes) — terminating request")
+                    return emptyList()
+                }
                 builder.append(c.toChar())
                 totalBytes++
                 if (totalBytes >= maxHeaderBytes) {

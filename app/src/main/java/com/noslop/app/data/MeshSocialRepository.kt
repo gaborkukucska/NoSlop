@@ -525,6 +525,19 @@ class MeshSocialRepository(
         val effectiveMediaId = mediaMetadata?.id ?: existingPost.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
         val effectiveClearnetUrl = existingPost.clearnetUrl
 
+        // U06: Emit complete authenticated descriptor for retained attachments on text-only edits
+        val effectiveMediaMetadata = mediaMetadata ?: if (effectiveMediaId != null) {
+            com.noslop.app.mesh.MediaMetadata(
+                id = effectiveMediaId,
+                type = existingPost.mediaType ?: "image",
+                mimeType = "application/octet-stream",
+                size = existingPost.mediaSize,
+                chunkCount = 0,
+                thumbnailB64 = existingPost.thumbnailB64,
+                originNode = signingKey.onionAddress
+            )
+        } else null
+
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
             postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64,
             privacy, effectiveMediaId, effectiveClearnetUrl
@@ -539,15 +552,15 @@ class MeshSocialRepository(
             timestamp = timestamp,
             signature = signature,
             mediaId = effectiveMediaId,
-            mediaMetadata = mediaMetadata,
+            mediaMetadata = effectiveMediaMetadata,
             privacy = privacy,
             clearnetUrl = effectiveClearnetUrl
         )
 
-        val newMediaUrl = mediaMetadata?.id?.let { "noslop://${signingKey.onionAddress}/$it" } ?: existingPost.mediaUrl
-        val newMediaType = mediaMetadata?.type ?: existingPost.mediaType
-        val newThumb = mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
-        val newSize = mediaMetadata?.size ?: existingPost.mediaSize
+        val newMediaUrl = effectiveMediaId?.let { "noslop://${signingKey.onionAddress}/$it" }
+        val newMediaType = effectiveMediaMetadata?.type
+        val newThumb = effectiveMediaMetadata?.thumbnailB64
+        val newSize = effectiveMediaMetadata?.size ?: 0L
 
         postDao.editPostSafely(
             id = postId,

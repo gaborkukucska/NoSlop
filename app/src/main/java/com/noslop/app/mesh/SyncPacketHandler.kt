@@ -348,16 +348,8 @@ class SyncPacketHandler(
             }
 
             val isCanonical = CryptoService.verify(payloadCanonical, sig, postPay.authorId)
-            val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.mediaMetadata == null && postPay.clearnetUrl == null
-            val isValid = isCanonical ||
-                (isLegacySafe && (
-                    CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
-                    CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
-                    CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
-                    CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
-                ))
-            if (!isValid) {
-                Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
+            if (!isCanonical) {
+                Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — canonical signature verification failed")
                 continue
             }
             val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)

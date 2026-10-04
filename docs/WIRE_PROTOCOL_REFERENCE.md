@@ -789,7 +789,7 @@ and still accurate.
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) (supporting encodeForSigning and pipe) |
-| `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey)` |
+| `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey, sortedMemberDetails, sortedMemberHandles)`. Legacy 7-field fallback strictly restricted to admin self-signed payloads with empty unsigned fields. |
 | `GROUP_UPDATE` | Canonical 11-field `encodeForSigning(groupId, wireTitle, signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, sortedBanned, wireDesc, wireAvatar, wireAllowInvites, wireAllowSelfRemove)` — signer recovered by trial verification against group members |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |

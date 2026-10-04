@@ -184,7 +184,7 @@ class FakePostDao : PostDao {
                 content = newContent,
                 timestamp = newTimestamp,
                 signature = newSignature,
-                authorAvatarB64 = authorAvatarB64 ?: existing.authorAvatarB64,
+                authorAvatarB64 = authorAvatarB64,
                 mediaUrl = mediaUrl,
                 mediaType = mediaType,
                 thumbnailB64 = thumbnailB64,

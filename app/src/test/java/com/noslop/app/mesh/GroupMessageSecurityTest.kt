@@ -262,4 +262,52 @@ class GroupMessageSecurityTest {
         fakePendingDao.deleteExpired(cutoff)
         assertTrue(fakePendingDao.getPendingForMember(alice.publicKeyB64).isEmpty())
     }
+
+    @Test
+    fun groupInvite_withAlteredMemberDetails_failsVerification() {
+        val members = listOf(admin.publicKeyB64, alice.publicKeyB64).sorted()
+        val originalDetails = mapOf(
+            alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = alice.encPublicKeyB64, onionAddress = "alice.onion")
+        )
+        val sortedDetails = canonicalMemberDetailsString(originalDetails)
+        val payloadToSign = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), true, true, null, null, null, null,
+            sortedDetails, ""
+        )
+        val sig = CryptoService.sign(payloadToSign, admin.privateKeyB64)
+
+        // U03: Mallory modifies Alice's encryption public key in directory
+        val tamperedDetails = mapOf(
+            alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = mallory.encPublicKeyB64, onionAddress = "alice.onion")
+        )
+        val tamperedDetailsStr = canonicalMemberDetailsString(tamperedDetails)
+        val tamperedPayload = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), true, true, null, null, null, null,
+            tamperedDetailsStr, ""
+        )
+        assertFalse("Tampered member encryption keys must fail verification", CryptoService.verify(tamperedPayload, sig, admin.publicKeyB64))
+    }
+
+    @Test
+    fun groupInvite_7fieldLegacyWithUnsignedFields_isRejected() {
+        // U03: 7-field signature only covered members and basic permissions
+        val members = listOf(admin.publicKeyB64, alice.publicKeyB64).sorted()
+        val enc7Field = CryptoService.encodeForSigning(
+            groupId, "Test Group", admin.publicKeyB64, "1000",
+            members.joinToString(","), "true", "true"
+        )
+        val sig = CryptoService.sign(enc7Field, admin.privateKeyB64)
+
+        // Verifies against 7-field
+        assertTrue(CryptoService.verify(enc7Field, sig, admin.publicKeyB64))
+
+        // But fails canonical 12-field verification when attacker injects admin onion / keys
+        val canonicalWithInjectedFields = canonicalGroupInvitePayload(
+            groupId, "Test Group", admin.publicKeyB64, admin.publicKeyB64, 1000L,
+            members.joinToString(","), true, true, "Fake Description", null, "attacker.onion", "attacker-enc-pub"
+        )
+        assertFalse(CryptoService.verify(canonicalWithInjectedFields, sig, admin.publicKeyB64))
+    }
 }

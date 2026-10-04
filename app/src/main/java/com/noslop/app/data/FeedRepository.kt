@@ -70,13 +70,19 @@ class FeedRepository(
 
     private val syncMutex = kotlinx.coroutines.sync.Mutex()
     @Volatile private var activeSyncDeferred: kotlinx.coroutines.Deferred<FeedSyncResult>? = null
+    private var currentGeneration = 0L
     private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     fun cancelSync() {
-        val deferred = activeSyncDeferred
-        activeSyncDeferred = null
-        deferred?.cancel()
-        _feedBuildStatus.value = ""
+        syncScope.launch(kotlinx.coroutines.NonCancellable) {
+            syncMutex.withLock {
+                val deferred = activeSyncDeferred
+                activeSyncDeferred = null
+                ++currentGeneration
+                deferred?.cancel()
+                _feedBuildStatus.value = ""
+            }
+        }
     }
 
     // --- Observable feed state ---
@@ -222,23 +228,25 @@ class FeedRepository(
             return@withContext FeedSyncResult.Disabled
         }
 
-        val deferred = syncMutex.withLock {
+        val (deferred, _) = syncMutex.withLock {
             val existing = activeSyncDeferred
             if (existing != null && existing.isActive) {
                 if (awaitCompletion) {
-                    existing
+                    existing to currentGeneration
                 } else {
                     Logger.info(TAG, "Feed sync is already in progress. Skipping redundant request.")
-                    null
+                    null to currentGeneration
                 }
             } else {
+                val nextGen = ++currentGeneration
                 val newDeferred = syncScope.async(Dispatchers.IO) {
-                    executeSyncPass()
+                    executeSyncPass(nextGen)
                 }
                 activeSyncDeferred = newDeferred
-                newDeferred
+                newDeferred to nextGen
             }
-        } ?: return@withContext FeedSyncResult.AlreadyRunning
+        }
+        if (deferred == null) return@withContext FeedSyncResult.AlreadyRunning
 
         return@withContext if (awaitCompletion) {
             try {
@@ -253,8 +261,9 @@ class FeedRepository(
         }
     }
 
-    private suspend fun executeSyncPass(): FeedSyncResult = kotlinx.coroutines.coroutineScope {
-        val currentDeferred = activeSyncDeferred
+    private suspend fun executeSyncPass(generation: Long): FeedSyncResult = kotlinx.coroutines.coroutineScope {
+        var sourcesAttempted = 0
+        var sourcesSucceeded = 0
         try {
             ensureDefaultApiSourcesExist()
 
@@ -348,8 +357,10 @@ class FeedRepository(
                 } else {
                     kotlinx.coroutines.delay(250L)
                 }
+                sourcesAttempted++
                 try {
                     fetchRssSource(source, allNegative)
+                    sourcesSucceeded++
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
@@ -363,8 +374,10 @@ class FeedRepository(
                 if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                     kotlinx.coroutines.delay(1200L)
                 }
+                sourcesAttempted++
                 try {
                     fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                    sourcesSucceeded++
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
@@ -377,25 +390,32 @@ class FeedRepository(
                 } else {
                     kotlinx.coroutines.delay(300L)
                 }
+                sourcesAttempted++
                 try {
                     fetchCreatorVideos(creator)
+                    sourcesSucceeded++
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
                 }
             }
 
-            Logger.info(TAG, "Feed background synchronization completed.")
+            Logger.info(TAG, "Feed background synchronization completed. Succeeded: $sourcesSucceeded/$sourcesAttempted")
+            if (sourcesAttempted > 0 && sourcesSucceeded == 0) {
+                return@coroutineScope FeedSyncResult.RetryableFailure("All attempted feed sources failed to fetch")
+            }
             return@coroutineScope FeedSyncResult.Success
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.error(TAG, "Feed sync setup/execution failed: ${e.message}")
             return@coroutineScope FeedSyncResult.RetryableFailure(e.message ?: "Sync failed")
         } finally {
-            _feedBuildStatus.value = ""
-            syncMutex.withLock {
-                if (activeSyncDeferred === currentDeferred) {
-                    activeSyncDeferred = null
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                _feedBuildStatus.value = ""
+                syncMutex.withLock {
+                    if (currentGeneration == generation) {
+                        activeSyncDeferred = null
+                    }
                 }
             }
         }

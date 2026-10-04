@@ -177,9 +177,16 @@ interface PostDao {
     suspend fun insertPostSafely(post: MeshPost): Boolean {
         val existing = getPostById(post.id)
         if (existing != null) {
-            if (existing.isOrphaned) return false
-            if (existing.authorPublicKeyB64 != post.authorPublicKeyB64) return false
-            if (existing.timestamp >= post.timestamp) return false
+            if (existing.isOrphaned) {
+                // U07: Tombstones only suppress subsequent posts by the SAME author who signed the deletion.
+                // A foreign author cannot reserve another author's post ID with a tombstone.
+                if (existing.authorPublicKeyB64 == post.authorPublicKeyB64) {
+                    return false
+                }
+            } else {
+                if (existing.authorPublicKeyB64 != post.authorPublicKeyB64) return false
+                if (existing.timestamp >= post.timestamp) return false
+            }
         }
         insertPost(post)
         return true

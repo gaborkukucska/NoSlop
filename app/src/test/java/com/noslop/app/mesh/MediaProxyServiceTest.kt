@@ -94,4 +94,14 @@ class MediaProxyServiceTest {
         assertEquals(MediaProxyService.RangeResult.Unsatisfiable, MediaProxyService.parseRange("bytes=abc-def", 100))
         assertEquals(MediaProxyService.RangeResult.Unsatisfiable, MediaProxyService.parseRange("bytes=-0", 100))
     }
+
+    @Test
+    fun parseRange_missingHyphenOrMultipleHyphens_returnsUnsatisfiable() {
+        // U11: Single value without hyphen is malformed
+        assertEquals(MediaProxyService.RangeResult.Unsatisfiable, MediaProxyService.parseRange("bytes=5", 100))
+        // U11: Multiple split components is unsupported / malformed
+        assertEquals(MediaProxyService.RangeResult.Unsatisfiable, MediaProxyService.parseRange("bytes=5-10-20", 100))
+        // Lone hyphen without values
+        assertEquals(MediaProxyService.RangeResult.Unsatisfiable, MediaProxyService.parseRange("bytes=-", 100))
+    }
 }

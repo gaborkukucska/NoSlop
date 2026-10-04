@@ -242,4 +242,96 @@ class PostPacketHandlerTest {
         org.junit.Assert.assertEquals("friends", stored?.privacy)
         org.junit.Assert.assertEquals("https://example.com/story", stored?.clearnetUrl)
     }
+
+    @Test
+    fun textOnlyEditOfMediaPost_retainsExistingAttachmentMetadata() = runBlocking {
+        // Post with image attachment created
+        val origPacket = postPacket(
+            signedContent = "original photo caption",
+            mediaId = "media-photo-1"
+        )
+        assertTrue(handler.handlePost(origPacket))
+        val storedOrig = postDao.posts["post-1"]
+        org.junit.Assert.assertEquals("image", storedOrig?.mediaType)
+        org.junit.Assert.assertEquals(100L, storedOrig?.mediaSize)
+
+        // U06: Author edits text only (mediaMetadata is null on wire)
+        val editTs = 1_700_000_003_000L
+        val editSig = CryptoService.sign(
+            CryptoService.encodeForSigning("post-1", identity.publicKeyB64, "updated photo caption", editTs.toString(), null, "public", "media-photo-1", null),
+            identity.privateKeyB64
+        )
+        val editPayload = EditPostPayload(
+            postId = "post-1",
+            authorId = identity.publicKeyB64,
+            content = "updated photo caption",
+            timestamp = editTs,
+            signature = editSig,
+            mediaId = "media-photo-1",
+            mediaMetadata = null // null on wire for text-only edit
+        )
+        val editPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "EDIT_POST", payload = Gson().toJsonTree(editPayload))
+        assertTrue(handler.handleEditPost(editPacket))
+
+        val storedEdited = postDao.posts["post-1"]
+        org.junit.Assert.assertEquals("updated photo caption", storedEdited?.content)
+        org.junit.Assert.assertEquals("image", storedEdited?.mediaType)
+        org.junit.Assert.assertEquals(100L, storedEdited?.mediaSize)
+        org.junit.Assert.assertTrue(storedEdited?.mediaUrl?.contains("media-photo-1") == true)
+    }
+
+    @Test
+    fun foreignAuthorTombstone_doesNotBlockAuthenticAuthorPost() = runBlocking {
+        val alicePostId = "alice-exclusive-post"
+        val mallory = CryptoService.generateIdentity("mallory")
+        val malloryTs = 1_700_000_010_000L
+
+        // Mallory tries to reserve Alice's post ID by sending a self-signed DELETE
+        val mallorySig = CryptoService.sign(
+            CryptoService.encodeForSigning(alicePostId, mallory.publicKeyB64, malloryTs.toString()),
+            mallory.privateKeyB64
+        )
+        val malloryDel = DeletePostPayload(postId = alicePostId, authorId = mallory.publicKeyB64, timestamp = malloryTs, signature = mallorySig)
+        val malloryPacket = NetworkPacket(senderId = mallory.publicKeyB64, type = "DELETE_POST", payload = Gson().toJsonTree(malloryDel))
+        assertTrue("Mallory tombstone inserted", handler.handleDeletePost(malloryPacket))
+        org.junit.Assert.assertEquals(mallory.publicKeyB64, postDao.posts[alicePostId]?.authorPublicKeyB64)
+
+        // U07: Now Alice's authentic POST arrives
+        val aliceTs = 1_700_000_005_000L
+        val aliceSig = CryptoService.sign(
+            CryptoService.encodeForSigning(alicePostId, identity.publicKeyB64, "Alice authentic content", aliceTs.toString(), null, "public", null, null),
+            identity.privateKeyB64
+        )
+        val alicePost = PostPayload(
+            id = alicePostId, authorId = identity.publicKeyB64, authorName = "alice", authorPublicKey = identity.publicKeyB64,
+            originNode = null, content = "Alice authentic content", timestamp = aliceTs, privacy = "public", signature = aliceSig
+        )
+        val alicePacket = NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(alicePost))
+
+        // Alice's post must overwrite Mallory's foreign tombstone
+        assertTrue("Alice's genuine post is accepted", handler.handlePost(alicePacket))
+        val storedPost = postDao.posts[alicePostId]
+        org.junit.Assert.assertEquals("Alice authentic content", storedPost?.content)
+        org.junit.Assert.assertEquals(identity.publicKeyB64, storedPost?.authorPublicKeyB64)
+        org.junit.Assert.assertFalse("Post is active and not orphaned", storedPost?.isOrphaned == true)
+    }
+
+    @Test
+    fun legacyFriendsPost_relabeledAsPublic_isRejected() = runBlocking {
+        // U04: Legacy 4-field signature covering only (id, author, content, timestamp)
+        val id = "legacy-friends-post"
+        val ts = 1_700_000_000_000L
+        val legacySig = CryptoService.sign(
+            CryptoService.encodeForSigning(id, identity.publicKeyB64, "friends only secret", ts.toString(), null),
+            identity.privateKeyB64
+        )
+        // Mallory relabels wire JSON to "public"
+        val tamperedPayload = PostPayload(
+            id = id, authorId = identity.publicKeyB64, authorName = "alice", authorPublicKey = identity.publicKeyB64,
+            originNode = null, content = "friends only secret", timestamp = ts, privacy = "public", signature = legacySig
+        )
+        val packet = NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(tamperedPayload))
+        assertFalse("Unauthenticated audience downgrade attack must be rejected", handler.handlePost(packet))
+        assertFalse(postDao.posts.containsKey(id))
+    }
 }

@@ -205,4 +205,111 @@ class BackupManagerTest {
         // S10: Destination key must be cleared by empty backup manifest
         assertEquals("", apiRepo.getKey("youtube"))
     }
+
+    @Test
+    fun testExportAndImport_restoresMainAndBurnableIdentities_withUsableKeys() = kotlinx.coroutines.runBlocking {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
+        val db = NoSlopDatabase.getDatabase(context)
+        val idRepo = IdentityRepository(context, db.appSettingDao())
+
+        // 1. Seed main identity
+        val mainKeys = com.noslop.app.crypto.CryptoService.generateIdentity("Alice")
+        idRepo.saveIdentity("Alice", mainKeys, testMnemonic)
+
+        // 2. Seed burnable identity
+        val burnableKeys = idRepo.generateBurnableIdentity()
+        assertNotNull(idRepo.getBurnableIdentity())
+
+        val outStream = ByteArrayOutputStream()
+        assertTrue("Export must succeed", BackupManager.exportData(context, testMnemonic, outStream, BackupMediaOption.NONE))
+
+        // 3. Clear identity on destination
+        idRepo.clearAll()
+        assertNull("Identity must be cleared before restore", idRepo.loadIdentity())
+        assertNull("Burnable identity must be cleared before restore", idRepo.getBurnableIdentity())
+
+        // 4. Import backup
+        val inStream = ByteArrayInputStream(outStream.toByteArray())
+        assertTrue("Import must report success", BackupManager.importData(context, testMnemonic, inStream, allowLegacyUnauthenticated = false))
+
+        // 5. U01: Re-instantiate repository and verify both identities load and function
+        val freshIdRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
+        val restoredMain = freshIdRepo.loadIdentity()
+        val restoredBurnable = freshIdRepo.getBurnableIdentity()
+
+        assertNotNull("Restored main identity must be usable and not null", restoredMain)
+        assertNotNull("Restored burnable identity must be usable and not null", restoredBurnable)
+        assertEquals(mainKeys.publicKeyB64, restoredMain?.publicKeyB64)
+        assertEquals(burnableKeys.publicKeyB64, restoredBurnable?.publicKeyB64)
+
+        // Verify restored keys can sign and verify
+        val probe = "test_signing_probe_123"
+        val mainSig = com.noslop.app.crypto.CryptoService.sign(probe, restoredMain!!.privateKeyB64)
+        assertTrue(com.noslop.app.crypto.CryptoService.verify(probe, mainSig, restoredMain.publicKeyB64))
+
+        val burnableSig = com.noslop.app.crypto.CryptoService.sign(probe, restoredBurnable!!.privateKeyB64)
+        assertTrue(com.noslop.app.crypto.CryptoService.verify(probe, burnableSig, restoredBurnable.publicKeyB64))
+    }
+
+    @Test
+    fun testImport_whenGroupMessageReEncryptionFails_rollsBackDatabaseAndIdentity() = kotlinx.coroutines.runBlocking {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
+        val db = NoSlopDatabase.getDatabase(context)
+        val idRepo = IdentityRepository(context, db.appSettingDao())
+        val apiRepo = ApiKeyRepository(context)
+
+        // Seed initial state for User A
+        val userAKeys = com.noslop.app.crypto.CryptoService.generateIdentity("UserA")
+        idRepo.saveIdentity("UserA", userAKeys, testMnemonic)
+        apiRepo.setKey("youtube", "user-a-key")
+
+        db.openHelper.writableDatabase.execSQL(
+            "INSERT INTO app_settings (`key`, `value`) VALUES ('user_a_marker', 'marker_value_a')"
+        )
+
+        // Create an export of User B with a message
+        val userBKeys = com.noslop.app.crypto.CryptoService.generateIdentity("UserB")
+        val mnemonicB = "banana cherry dragon elephant falcon grape honey island jungle kiwi lemon apple"
+        idRepo.saveIdentity("UserB", userBKeys, mnemonicB)
+        apiRepo.setKey("youtube", "user-b-key")
+
+        val (encMsg, ivMsg) = com.noslop.app.crypto.GroupMessageCrypto.encrypt("Hello from B", "grp-b", "msg-b-1")
+        db.openHelper.writableDatabase.execSQL(
+            "INSERT INTO chat_messages (id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, isRead) VALUES ('msg-b-1', 'grp-b', 'sender-b', ?, ?, ?, 1L)",
+            arrayOf<Any?>(encMsg, ivMsg, System.currentTimeMillis())
+        )
+
+        val outStreamB = ByteArrayOutputStream()
+        assertTrue(BackupManager.exportData(context, mnemonicB, outStreamB, BackupMediaOption.NONE))
+
+        // Restore User A state on device
+        idRepo.saveIdentity("UserA", userAKeys, testMnemonic)
+        apiRepo.setKey("youtube", "user-a-key")
+
+        // Now attempt to restore User B's backup over User A, but inject a failure into GroupMessageCrypto so Commit 4 fails
+        com.noslop.app.crypto.GroupMessageCrypto.testKeyProviderOverride = {
+            throw java.lang.SecurityException("Injected Keystore failure during restore")
+        }
+
+        val inStreamB = ByteArrayInputStream(outStreamB.toByteArray())
+        val importResult = BackupManager.importData(context, mnemonicB, inStreamB, allowLegacyUnauthenticated = false)
+        assertFalse("Import must fail and return false when group message re-encryption fails", importResult)
+
+        // Clear failure override to inspect restored state
+        com.noslop.app.crypto.GroupMessageCrypto.testKeyProviderOverride = null
+
+        // U02: Verify User A's identity, database, and API keys are rolled back completely!
+        val freshIdRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
+        val activeIdentity = freshIdRepo.loadIdentity()
+        assertEquals("Identity must be rolled back to User A", userAKeys.publicKeyB64, activeIdentity?.publicKeyB64)
+        assertEquals("API key must be rolled back to User A", "user-a-key", apiRepo.getKey("youtube"))
+
+        val rolledBackDb = NoSlopDatabase.getDatabase(context)
+        rolledBackDb.openHelper.readableDatabase.query(
+            "SELECT `value` FROM app_settings WHERE `key` = 'user_a_marker'"
+        ).use { cursor ->
+            assertTrue("User A database marker must exist after rollback", cursor.moveToFirst())
+            assertEquals("marker_value_a", cursor.getString(0))
+        }
+    }
 }

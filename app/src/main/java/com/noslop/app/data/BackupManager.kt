@@ -13,42 +13,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * Manages backup and restore of user data.
- * Backups are encrypted with a key derived from the "Word Cloud" mnemonic.
- *
- * --- NOSLOP_BACKUP_STREAMING_V1 ---
- * Three problems this version fixes.
- *
- * 1. OOM ON RESTORE. importData() did `sourceStream.readBytes()` and then
- *    `cipher.doFinal(ciphertext)`, holding the entire archive AND its entire
- *    plaintext in heap simultaneously. Backups include the media directories,
- *    so a user with a few hundred MB of cached mesh video could not restore at
- *    all — the app died before it reached the first zip entry. Both directions
- *    now stream through a fixed 64KB buffer.
- *
- * 2. ZIP SLIP. The media branch built its destination from the zip entry's own
- *    name (`parts[2]`) with no validation, so an entry called
- *    `media/Movies/../../../databases/mesh.db` escaped the target directory. The
- *    archive is normally one we wrote ourselves, but "normally" is doing a lot
- *    of work in a restore path that accepts a file the user picked. Entry names
- *    are now validated and every destination is checked to be inside its
- *    intended parent by canonical path.
- *
- * 3. SILENT CROSS-DEVICE IDENTITY LOSS. `preferences.xml` is the
- *    EncryptedSharedPreferences file, sealed by an AES master key held in the
- *    Android Keystore. That key is hardware-bound and cannot be exported, so
- *    restoring this archive on a NEW device produces a preferences file nothing
- *    can decrypt — the user's data comes back but their identity does not, with
- *    no error anywhere. The restore now detects this and says so, and
- *    [lastRestoreNeedsIdentityRecovery] lets the UI tell the user to re-derive
- *    from their Word Cloud instead of leaving them to discover it later.
- *
- * NOTE ON GCM AND STREAMING: cipher.update() emits plaintext that has not yet
- * been authenticated — the tag is only checked by doFinal(). We therefore write
- * the decrypted zip to a temp file, and unzip ONLY after doFinal() has returned
- * without throwing. A tampered archive is deleted before a single entry is read.
- */
 class LegacyBackupConfirmationRequiredException : Exception("Legacy unauthenticated backup archive detected")
 
 enum class BackupMediaOption {
@@ -60,18 +24,13 @@ enum class BackupMediaOption {
 object BackupManager {
     private const val TAG = "BACKUP_MANAGER"
     private const val DB_NAME = "mesh.db"
-    private const val PREFS_NAME = "noslop_identity_secure" // This might vary if fallback was used
+    private const val PREFS_NAME = "noslop_identity_secure"
 
     private const val BUFFER_BYTES = 64 * 1024
 
     /** 4-byte header identifying an authenticated AES-GCM archive. */
     private val MAGIC_GCM = "NSG1".toByteArray(Charsets.UTF_8)
 
-    /**
-     * Set by [importData]. True when the archive carried a Keystore-sealed
-     * identity file that this device cannot open — i.e. a cross-device restore.
-     * The UI should prompt for Word Cloud recovery when this is true.
-     */
     @Volatile
     var lastRestoreNeedsIdentityRecovery: Boolean = false
         private set
@@ -117,7 +76,6 @@ object BackupManager {
             }
 
             ZipOutputStream(BufferedOutputStream(FileOutputStream(tempZip))).use { zos ->
-                // Add DB (includes hub_deployment_status, peers, feeds, mesh posts, all app_settings)
                 if (dbFile.exists()) {
                     addToZip(zos, dbFile, "database.db")
                 }
@@ -174,7 +132,7 @@ object BackupManager {
                     var exportedCount = 0
                     var failedDecryptCount = 0
                     tempGroupMsgsFile = File(tempDir, "group_msgs_${System.currentTimeMillis()}.json")
-                    val writer = java.io.BufferedWriter(java.io.OutputStreamWriter(java.io.FileOutputStream(tempGroupMsgsFile), Charsets.UTF_8))
+                    val writer = BufferedWriter(OutputStreamWriter(FileOutputStream(tempGroupMsgsFile), Charsets.UTF_8))
                     val jsonWriter = com.google.gson.stream.JsonWriter(writer)
                     jsonWriter.beginArray()
 
@@ -252,13 +210,11 @@ object BackupManager {
                     addToZip(zos, prefsFile, "preferences.xml")
                 }
 
-                // Add fallback identity prefs (used when hardware keystore unavailable)
                 val fallbackPrefsFile = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml")
                 if (fallbackPrefsFile.exists()) {
                     addToZip(zos, fallbackPrefsFile, "preferences_fallback.xml")
                 }
 
-                // Add API keys prefs (encrypted or fallback)
                 val apiKeysFiles = listOf("noslop_api_keys.xml", "noslop_api_keys_fallback.xml")
                 for (apiFileName in apiKeysFiles) {
                     val apiFile = File(context.filesDir.parentFile, "shared_prefs/$apiFileName")
@@ -267,7 +223,6 @@ object BackupManager {
                     }
                 }
 
-                // Add Media Directories if requested
                 if (mediaOption != BackupMediaOption.NONE) {
                     val ownedMediaIds = mutableSetOf<String>()
                     if (mediaOption == BackupMediaOption.OWNED_ONLY) {
@@ -315,7 +270,6 @@ object BackupManager {
                         val noSlopDir = File(baseDir, "NoSlop")
                         if (noSlopDir.exists() && noSlopDir.isDirectory) {
                             noSlopDir.listFiles()?.forEach { file ->
-                                // Only plain files; skip in-progress .part files and unsafe names
                                 if (file.isFile && isSafeEntryName(file.name) && !file.name.endsWith(".part")) {
                                     val shouldInclude = when (mediaOption) {
                                         BackupMediaOption.ALL -> true
@@ -340,11 +294,10 @@ object BackupManager {
                 }
             }
 
-            // Encrypt the zip using authenticated AES-256-GCM, streaming.
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
             val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val iv = ByteArray(12) // Standard 12-byte GCM IV
+            val iv = ByteArray(12)
             SecureRandom().nextBytes(iv)
             cipher.init(Cipher.ENCRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
 
@@ -370,7 +323,6 @@ object BackupManager {
             Logger.error(TAG, "Export failed: ${e.message}")
             false
         } finally {
-            // Plaintext archive must not survive the export, success or failure.
             try {
                 if (tempZip.exists()) tempZip.delete()
             } catch (e: Exception) {
@@ -411,7 +363,6 @@ object BackupManager {
                 cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
             } else {
-                // P1-10: Reject unauthenticated legacy archives unless user explicitly confirmed
                 if (!allowLegacyUnauthenticated) {
                     Logger.warn(TAG, "Legacy unauthenticated archive detected. Raising confirmation required.")
                     throw LegacyBackupConfirmationRequiredException()
@@ -421,8 +372,6 @@ object BackupManager {
                 cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(header))
             }
 
-            // Stream-decrypt to a temp file. For GCM the tag is only verified by
-            // doFinal(), so nothing is unzipped until that has succeeded.
             try {
                 BufferedOutputStream(FileOutputStream(tempZip)).use { out ->
                     val buffer = ByteArray(BUFFER_BYTES)
@@ -435,18 +384,15 @@ object BackupManager {
                     if (final != null && final.isNotEmpty()) out.write(final)
                 }
             } catch (e: Exception) {
-                // AEADBadTagException lands here: wrong mnemonic, or a tampered
-                // or truncated archive. Do not leave the partial plaintext around.
                 try {
                     tempZip.delete()
                 } catch (delEx: Exception) {
                     Logger.debug(TAG, "Failed to clean up temp zip on decryption failure: ${delEx.message}")
                 }
-                Logger.error(TAG, "Import failed during decryption — wrong Word Cloud, or the archive is corrupt or has been modified: ${e.message}")
+                Logger.error(TAG, "Import failed during decryption — wrong Word Cloud, or archive corrupt/modified: ${e.message}")
                 return false
             }
 
-            // F13: Stage and validate unzipped files before modifying live target state
             var restoredKeystoreSealedIdentity = false
             var restoredFallbackIdentity = false
             val stageDir = File(tempDir, "restore_stage_${System.currentTimeMillis()}").apply { mkdirs() }
@@ -508,7 +454,7 @@ object BackupManager {
                     }
                 }
 
-                // 1. Verify database integrity in staging area before committing (F13 / R09)
+                // 1. Verify staged database integrity before committing (F13 / R09)
                 if (hasStagedDb) {
                     val stagedDbFile = File(stageDir, "database.db")
                     try {
@@ -529,7 +475,7 @@ object BackupManager {
                     }
                 }
 
-                // 2. Validate staged identity JSON (if present) BEFORE touching live target (S06)
+                // 2. Validate staged identity JSON before committing (S06 / U01 / U02)
                 var parsedIdentityObj: org.json.JSONObject? = null
                 if (hasPortableIdentity) {
                     val stagedIdFile = File(stageDir, "identity_backup.json")
@@ -561,7 +507,7 @@ object BackupManager {
                     }
                 }
 
-                // 3. Validate staged API keys JSON (if present) (S06, S10)
+                // 3. Validate staged API keys JSON (S06, S10)
                 var parsedApiObj: org.json.JSONObject? = null
                 val stagedApi = File(stageDir, "api_keys_backup.json")
                 if (stagedApi.exists()) {
@@ -573,7 +519,7 @@ object BackupManager {
                     }
                 }
 
-                // 4. Validate staged group messages JSON (if present) (S06)
+                // 4. Validate staged group messages JSON (S06)
                 var parsedGroupMsgsArray: org.json.JSONArray? = null
                 if (!stagedGroupMessagesJson.isNullOrBlank()) {
                     try {
@@ -592,126 +538,159 @@ object BackupManager {
                     }
                 }
 
-                // --- COMMIT PHASE (All validations passed) ---
+                // --- U02: MULTI-STORE SNAPSHOT FOR ATOMIC ROLLBACK ---
+                val targetDb = context.getDatabasePath(DB_NAME)
+                val targetWal = File(targetDb.path + "-wal")
+                val targetShm = File(targetDb.path + "-shm")
 
-                // Commit 1: Safely close active Room database only right before replacing files, creating rollback snapshot (F13 / S06)
                 var dbBackupFile: File? = null
-                if (hasStagedDb) {
-                    NoSlopDatabase.closeInstance()
-                    val targetDb = context.getDatabasePath(DB_NAME)
-                    if (targetDb.exists()) {
-                        dbBackupFile = File(targetDb.parentFile, "$DB_NAME.bak_${System.currentTimeMillis()}")
-                        targetDb.copyTo(dbBackupFile, overwrite = true)
+                var dbWalBackupFile: File? = null
+                var dbShmBackupFile: File? = null
+
+                val prefsDir = File(context.filesDir.parentFile, "shared_prefs")
+                val securePrefsFile = File(prefsDir, "$PREFS_NAME.xml")
+                val fallbackPrefsFile = File(prefsDir, "noslop_identity_fallback.xml")
+
+                var securePrefsBackup: File? = null
+                var fallbackPrefsBackup: File? = null
+
+                val apiBackupFiles = mutableMapOf<File, File>()
+                val apiFiles = listOf("noslop_api_keys.xml", "noslop_api_keys_fallback.xml")
+
+                // Snapshot DB
+                if (targetDb.exists()) {
+                    dbBackupFile = File(targetDb.parentFile, "$DB_NAME.bak_${System.currentTimeMillis()}")
+                    targetDb.copyTo(dbBackupFile, overwrite = true)
+                    if (targetWal.exists()) {
+                        dbWalBackupFile = File(targetDb.parentFile, "$DB_NAME-wal.bak_${System.currentTimeMillis()}")
+                        targetWal.copyTo(dbWalBackupFile, overwrite = true)
                     }
-                    File(targetDb.path + "-wal").delete()
-                    File(targetDb.path + "-shm").delete()
-                    File(stageDir, "database.db").copyTo(targetDb, overwrite = true)
+                    if (targetShm.exists()) {
+                        dbShmBackupFile = File(targetDb.parentFile, "$DB_NAME-shm.bak_${System.currentTimeMillis()}")
+                        targetShm.copyTo(dbShmBackupFile, overwrite = true)
+                    }
                 }
 
-                // Commit 2: F11 / R12: Restore portable credentials, clearing destination-only secrets
-                if (hasPortableIdentity && parsedIdentityObj != null) {
-                    val obj = parsedIdentityObj
+                // Snapshot Identity preferences
+                if (securePrefsFile.exists()) {
+                    securePrefsBackup = File(prefsDir, "$PREFS_NAME.xml.bak_${System.currentTimeMillis()}")
+                    securePrefsFile.copyTo(securePrefsBackup, overwrite = true)
+                }
+                if (fallbackPrefsFile.exists()) {
+                    fallbackPrefsBackup = File(prefsDir, "noslop_identity_fallback.xml.bak_${System.currentTimeMillis()}")
+                    fallbackPrefsFile.copyTo(fallbackPrefsBackup, overwrite = true)
+                }
 
-                    val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
-                    if (secureFile.exists()) secureFile.delete()
+                // Snapshot API keys preferences
+                for (apiName in apiFiles) {
+                    val apiFile = File(prefsDir, apiName)
+                    if (apiFile.exists()) {
+                        val apiBak = File(prefsDir, "$apiName.bak_${System.currentTimeMillis()}")
+                        apiFile.copyTo(apiBak, overwrite = true)
+                        apiBackupFiles[apiFile] = apiBak
+                    }
+                }
 
+                fun performFullRollback() {
+                    Logger.warn(TAG, "Executing full restore rollback across all mutated stores...")
                     try {
-                        val masterKey = androidx.security.crypto.MasterKey.Builder(context)
-                            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-                            .build()
-                        val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
-                            context,
-                            PREFS_NAME,
-                            masterKey,
-                            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                        )
-                        val edit = freshPrefs.edit().clear() // R12: Clear existing destination keys first!
-                        edit.putString("ed25519_private_key", obj.getString("privateKeyB64"))
-                            .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
-                            .putString("pub_ed25519", obj.getString("publicKeyB64"))
-                            .putString("pub_enc", obj.getString("encPublicKeyB64"))
-                            .putString("handle", obj.getString("handle"))
-                            .putString("tripcode", obj.getString("tripcode"))
-                            .putString("onion", obj.getString("onionAddress"))
-                            .putString("display_name", obj.getString("displayName"))
-                            .putString("mnemonic", obj.optString("mnemonic", mnemonic))
-                            .putString("onboarding_complete", "true")
-                            .putString("identity_version", obj.optString("identity_version", "2"))
-                        if (obj.has("burnable")) {
-                            val bObj = obj.getJSONObject("burnable")
-                            edit.putString("burnable_ed25519_private_key", bObj.getString("privateKeyB64"))
-                                .putString("burnable_enc_private_key", bObj.getString("encPrivateKeyB64"))
-                                .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
-                                .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
-                                .putString("burnable_tripcode", bObj.getString("tripcode"))
-                                .putString("burnable_onion", bObj.getString("onionAddress"))
-                                .putString("burnable_display_name", bObj.getString("displayName"))
+                        NoSlopDatabase.closeInstance()
+                        if (dbBackupFile != null && dbBackupFile.exists()) {
+                            dbBackupFile.copyTo(targetDb, overwrite = true)
                         }
-                        val committed = edit.commit() // R12: Synchronous verified commit
-                        if (!committed) {
-                            Logger.error(TAG, "Failed committing restored identity into EncryptedSharedPreferences")
+                        targetWal.delete()
+                        targetShm.delete()
+                        if (dbWalBackupFile != null && dbWalBackupFile.exists()) {
+                            dbWalBackupFile.copyTo(targetWal, overwrite = true)
+                        }
+                        if (dbShmBackupFile != null && dbShmBackupFile.exists()) {
+                            dbShmBackupFile.copyTo(targetShm, overwrite = true)
+                        }
+
+                        if (securePrefsBackup != null && securePrefsBackup.exists()) {
+                            securePrefsBackup.copyTo(securePrefsFile, overwrite = true)
                         } else {
+                            securePrefsFile.delete()
+                        }
+
+                        if (fallbackPrefsBackup != null && fallbackPrefsBackup.exists()) {
+                            fallbackPrefsBackup.copyTo(fallbackPrefsFile, overwrite = true)
+                        } else {
+                            fallbackPrefsFile.delete()
+                        }
+
+                        apiBackupFiles.forEach { (destFile, bakFile) ->
+                            if (bakFile.exists()) {
+                                bakFile.copyTo(destFile, overwrite = true)
+                            } else {
+                                destFile.delete()
+                            }
+                        }
+                        Logger.info(TAG, "Full rollback completed successfully")
+                    } catch (rbEx: Exception) {
+                        Logger.error(TAG, "Error during full rollback: ${rbEx.message}")
+                    }
+                }
+
+                // --- COMMIT PHASE (guarded by atomic multi-store rollback) ---
+                try {
+                    // Commit 1: Replace Room database
+                    if (hasStagedDb) {
+                        NoSlopDatabase.closeInstance()
+                        targetWal.delete()
+                        targetShm.delete()
+                        File(stageDir, "database.db").copyTo(targetDb, overwrite = true)
+                    }
+
+                    // Commit 2: U01 - Restore authoritative identity via IdentityRepository API
+                    if (hasPortableIdentity && parsedIdentityObj != null) {
+                        val db = NoSlopDatabase.getDatabase(context)
+                        val idRepo = IdentityRepository(context, db.appSettingDao())
+                        val restoreResult = idRepo.restoreAuthoritativeIdentity(parsedIdentityObj, mnemonic)
+                        if (restoreResult !is IdentityRestoreResult.Success) {
+                            throw IllegalStateException("Identity restore rejected: $restoreResult")
+                        }
+                        restoredKeystoreSealedIdentity = true
+                    } else {
+                        // Legacy archive: Restore raw preferences
+                        val rawPrefs = File(stageDir, "preferences.xml")
+                        if (rawPrefs.exists()) {
+                            rawPrefs.copyTo(File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml"), overwrite = true)
                             restoredKeystoreSealedIdentity = true
-                            Logger.info(TAG, "Restored sovereign identity authoritative keys directly into hardware Keystore")
                         }
-                    } catch (secEx: Exception) {
-                        Logger.warn(TAG, "Hardware Keystore EncryptedSharedPreferences unavailable on restore, falling back to secure storage preferences: ${secEx.message}")
-                        val fallbackPrefs = context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
-                        val edit = fallbackPrefs.edit().clear()
-                        edit.putString("pub_ed25519", obj.getString("publicKeyB64"))
-                            .putString("pub_enc", obj.getString("encPublicKeyB64"))
-                            .putString("handle", obj.getString("handle"))
-                            .putString("tripcode", obj.getString("tripcode"))
-                            .putString("onion", obj.getString("onionAddress"))
-                            .putString("display_name", obj.getString("displayName"))
-                            .putString("onboarding_complete", "true")
-                            .putString("identity_version", obj.optString("identity_version", "2"))
-                        edit.commit()
-                        restoredFallbackIdentity = true
+                        val rawFallback = File(stageDir, "preferences_fallback.xml")
+                        if (rawFallback.exists()) {
+                            rawFallback.copyTo(File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml"), overwrite = true)
+                            restoredFallbackIdentity = true
+                        }
                     }
-                } else {
-                    // Legacy archive: Restore raw preferences
-                    val rawPrefs = File(stageDir, "preferences.xml")
-                    if (rawPrefs.exists()) {
-                        rawPrefs.copyTo(File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml"), overwrite = true)
-                        restoredKeystoreSealedIdentity = true // R10: Mark legacy Keystore-sealed preference as restored!
-                    }
-                    val rawFallback = File(stageDir, "preferences_fallback.xml")
-                    if (rawFallback.exists()) {
-                        rawFallback.copyTo(File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml"), overwrite = true)
-                        restoredFallbackIdentity = true // R10: Mark fallback preference as restored!
-                    }
-                }
 
-                // Commit 3: Restore API keys, clearing destination keys (R12 / S10)
-                val apiRepo = ApiKeyRepository(context)
-                if (parsedApiObj != null) {
-                    val obj = parsedApiObj
-                    for (srv in ApiKeyRepository.SERVICES) {
-                        if (obj.has(srv.id)) {
-                            apiRepo.setKey(srv.id, obj.getString(srv.id))
-                        } else {
-                            apiRepo.setKey(srv.id, "") // Clear destination-only API key
+                    // Commit 3: Restore API keys
+                    val apiRepo = ApiKeyRepository(context)
+                    if (parsedApiObj != null) {
+                        val obj = parsedApiObj
+                        for (srv in ApiKeyRepository.SERVICES) {
+                            if (obj.has(srv.id)) {
+                                apiRepo.setKey(srv.id, obj.getString(srv.id))
+                            } else {
+                                apiRepo.setKey(srv.id, "")
+                            }
+                        }
+                    } else if (hasPortableIdentity) {
+                        for (srv in ApiKeyRepository.SERVICES) {
+                            apiRepo.setKey(srv.id, "")
+                        }
+                    } else {
+                        val stagedApiDir = File(stageDir, "api_keys")
+                        if (stagedApiDir.exists()) {
+                            stagedApiDir.listFiles()?.forEach { file ->
+                                file.copyTo(File(context.filesDir.parentFile, "shared_prefs/${file.name}"), overwrite = true)
+                            }
                         }
                     }
-                } else if (hasPortableIdentity) {
-                    // S10: Portable backup without API keys clears all destination keys
-                    for (srv in ApiKeyRepository.SERVICES) {
-                        apiRepo.setKey(srv.id, "")
-                    }
-                } else {
-                    val stagedApiDir = File(stageDir, "api_keys")
-                    if (stagedApiDir.exists()) {
-                        stagedApiDir.listFiles()?.forEach { file ->
-                            file.copyTo(File(context.filesDir.parentFile, "shared_prefs/${file.name}"), overwrite = true)
-                        }
-                    }
-                }
 
-                // Commit 4: Re-encrypt portable group chat messages using destination Keystore (S01, S06, R11)
-                if (parsedGroupMsgsArray != null) {
-                    try {
+                    // Commit 4: Re-encrypt portable group chat messages using destination Keystore (S01, S06, R11)
+                    if (parsedGroupMsgsArray != null) {
                         val groupMsgsArray = parsedGroupMsgsArray
                         val db = NoSlopDatabase.getDatabase(context)
                         var reEncryptedCount = 0
@@ -742,40 +721,40 @@ object BackupManager {
                             db.openHelper.writableDatabase.endTransaction()
                         }
                         Logger.info(TAG, "Re-encrypted $reEncryptedCount group message(s) under destination device Keystore key")
-                    } catch (e: Exception) {
-                        Logger.error(TAG, "Failed re-encrypting portable group messages: ${e.message}")
-                        if (dbBackupFile != null && dbBackupFile.exists()) {
-                            NoSlopDatabase.closeInstance()
-                            val targetDb = context.getDatabasePath(DB_NAME)
-                            dbBackupFile.copyTo(targetDb, overwrite = true)
-                            dbBackupFile.delete()
-                        }
-                        return false
                     }
-                }
-                dbBackupFile?.delete()
 
-                // Restore media files
-                val stagedMediaDir = File(stageDir, "media")
-                if (stagedMediaDir.exists()) {
-                    stagedMediaDir.listFiles()?.forEach { dirTypeFile ->
-                        if (dirTypeFile.isDirectory) {
-                            val dirType = dirTypeFile.name
-                            val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
-                            val targetNoSlopDir = File(baseDir, "NoSlop").apply { mkdirs() }
-                            dirTypeFile.listFiles()?.forEach { file ->
-                                file.copyTo(File(targetNoSlopDir, file.name), overwrite = true)
+                    // Commit 5: Restore media files
+                    val stagedMediaDir = File(stageDir, "media")
+                    if (stagedMediaDir.exists()) {
+                        stagedMediaDir.listFiles()?.forEach { dirTypeFile ->
+                            if (dirTypeFile.isDirectory) {
+                                val dirType = dirTypeFile.name
+                                val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                                val targetNoSlopDir = File(baseDir, "NoSlop").apply { mkdirs() }
+                                dirTypeFile.listFiles()?.forEach { file ->
+                                    file.copyTo(File(targetNoSlopDir, file.name), overwrite = true)
+                                }
                             }
                         }
                     }
+                } catch (commitEx: Exception) {
+                    Logger.error(TAG, "Commit phase failed — initiating full state rollback: ${commitEx.message}")
+                    performFullRollback()
+                    return false
+                } finally {
+                    // Clean up snapshots on successful commit or after rollback
+                    dbBackupFile?.delete()
+                    dbWalBackupFile?.delete()
+                    dbShmBackupFile?.delete()
+                    securePrefsBackup?.delete()
+                    fallbackPrefsBackup?.delete()
+                    apiBackupFiles.values.forEach { it.delete() }
                 }
             } finally {
                 stageDir.deleteRecursively()
             }
 
-            // Cross-device detection: a Keystore-sealed identity file was restored
-            // but this device has no matching master key, and no fallback store
-            // came along with it.
+            // Cross-device detection for legacy archives without portable identity
             if (!hasPortableIdentity && restoredKeystoreSealedIdentity && !restoredFallbackIdentity && !canOpenRestoredIdentity(context)) {
                 Logger.info(TAG, "Cross-device restore detected: re-deriving identity deterministically from mnemonic using local hardware Keystore...")
                 val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
@@ -806,7 +785,7 @@ object BackupManager {
                         androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                         androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                     )
-                    freshPrefs.edit().clear() // R12: Clear existing destination keys first!
+                    freshPrefs.edit().clear()
                         .putString("ed25519_private_key", derivedKeys.privateKeyB64)
                         .putString("enc_private_key", derivedKeys.encPrivateKeyB64)
                         .putString("mnemonic", cleanMnemonic)
@@ -843,10 +822,6 @@ object BackupManager {
         }
     }
 
-    /**
-     * Cheap probe: can this device's Keystore master key still open the restored
-     * preferences file? A failure here is the cross-device case, not a bug.
-     */
     private fun canOpenRestoredIdentity(context: Context): Boolean {
         return try {
             val prefs = androidx.security.crypto.EncryptedSharedPreferences.create(
@@ -865,10 +840,6 @@ object BackupManager {
         }
     }
 
-    /**
-     * A zip entry name component is safe only if it is a plain file name: no
-     * separators, no parent references, not empty, not a dot entry.
-     */
     private fun isSafeEntryName(name: String): Boolean {
         if (name.isEmpty()) return false
         if (name == "." || name == "..") return false
@@ -877,7 +848,6 @@ object BackupManager {
         return true
     }
 
-    /** Belt and braces: confirm by canonical path that [child] really sits under [parent]. */
     private fun isInside(parent: File, child: File): Boolean {
         return try {
             val parentPath = parent.canonicalPath + File.separator
@@ -888,7 +858,6 @@ object BackupManager {
         }
     }
 
-    /** Reads exactly [buf].size bytes, or returns false if the stream ends early. */
     private fun readFully(input: InputStream, buf: ByteArray): Boolean {
         var offset = 0
         while (offset < buf.size) {

@@ -495,10 +495,23 @@ class HandshakePacketHandler(
                     val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
                     val timestamp = group.createdAt
                     val sortedMembers = members.sorted().joinToString(",")
+                    val allMembers = (members + group.adminPublicKeyB64).distinct()
+                    val myHandle = repo.getLocalHandle()
+                    val memberDetailsMap = allMembers.mapNotNull { pub ->
+                        val p = peerDao.getPeerByPublicKey(pub)
+                        if (p != null) {
+                            pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
+                        } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
+                            pub to GroupMemberInfo(myHandle, adminKeys.encPublicKeyB64, adminKeys.onionAddress)
+                        } else null
+                    }.toMap()
+                    val sortedDetails = canonicalMemberDetailsString(memberDetailsMap)
+                    val sortedHandles = canonicalMemberHandlesString(group.getMemberHandles())
                     val payloadToSign = canonicalGroupInvitePayload(
                         group.groupId, group.title, group.adminPublicKeyB64, adminKeys.publicKeyB64, timestamp,
                         sortedMembers, group.allowMemberInvites, group.allowMemberSelfRemove,
-                        group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64
+                        group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64,
+                        sortedDetails, sortedHandles
                     )
                     val signature = CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
 
@@ -748,22 +761,35 @@ class HandshakePacketHandler(
             (listOf(invite.adminPublicKeyB64) + invite.members).distinct()
         }
         val sortedMembers = invite.members.sorted().joinToString(",")
+        val sortedDetails = canonicalMemberDetailsString(invite.memberDetails)
+        val sortedHandles = canonicalMemberHandlesString(invite.memberHandles)
         var verifiedSigner: String? = null
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
             val canonicalPayload = canonicalGroupInvitePayload(
                 invite.groupId, invite.title, invite.adminPublicKeyB64, candidate, invite.timestamp,
                 sortedMembers, invite.allowMemberInvites, invite.allowMemberSelfRemove,
-                invite.description, invite.avatarB64, invite.adminOnion, invite.adminEncPublicKey
+                invite.description, invite.avatarB64, invite.adminOnion, invite.adminEncPublicKey,
+                sortedDetails, sortedHandles
             )
-            val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                invite.groupId, invite.title, candidate, invite.timestamp.toString(),
-                sortedMembers, invite.allowMemberInvites.toString(), invite.allowMemberSelfRemove.toString()
-            )
-            if (CryptoService.verify(canonicalPayload, invite.signature, candidate) ||
-                CryptoService.verify(enc7Field, invite.signature, candidate)) {
+            if (CryptoService.verify(canonicalPayload, invite.signature, candidate)) {
                 verifiedSigner = candidate
                 break
+            }
+
+            // U03: 7-field legacy invite ONLY permitted if admin self-signed AND all unsigned fields are empty
+            val unsignedFieldsEmpty = invite.description.isNullOrEmpty() && invite.avatarB64.isNullOrEmpty() &&
+                invite.adminOnion.isNullOrEmpty() && invite.adminEncPublicKey.isNullOrEmpty() &&
+                invite.memberDetails.isNullOrEmpty()
+            if (candidate == invite.adminPublicKeyB64 && unsignedFieldsEmpty) {
+                val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    invite.groupId, invite.title, candidate, invite.timestamp.toString(),
+                    sortedMembers, invite.allowMemberInvites.toString(), invite.allowMemberSelfRemove.toString()
+                )
+                if (CryptoService.verify(enc7Field, invite.signature, candidate)) {
+                    verifiedSigner = candidate
+                    break
+                }
             }
         }
         if (verifiedSigner == null) {
@@ -855,6 +881,12 @@ class HandshakePacketHandler(
 
         val currentMembers = parseMembers(existing.membersJson)
 
+        // U05: Enforce revision freshness for GROUP_UPDATE
+        if (update.timestamp <= existing.revision) {
+            Logger.debug(TAG, "Ignoring stale GROUP_UPDATE for ${update.groupId} (update ts ${update.timestamp} <= existing revision ${existing.revision})")
+            return true
+        }
+
         val signer = resolveUpdateSigner(update, existing, currentMembers)
         if (signer == null) {
             Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: signature matches no current member")
@@ -916,7 +948,8 @@ class HandshakePacketHandler(
             allowMemberSelfRemove = allowSelfRemove,
             membersJson = com.google.gson.Gson().toJson(currentMembers.distinct()),
             memberHandlesJson = com.google.gson.Gson().toJson(handlesMap),
-            bannedMembersJson = if (isAdmin && update.bannedMembers != null) com.google.gson.Gson().toJson(bannedSet.toList()) else existing.bannedMembersJson
+            bannedMembersJson = if (isAdmin && update.bannedMembers != null) com.google.gson.Gson().toJson(bannedSet.toList()) else existing.bannedMembersJson,
+            revision = maxOf(existing.revision, update.timestamp)
         )
         // --- NOSLOP_GROUP_DELTA_V1 ---
         // If this update removed us, drop the group locally rather than leaving
@@ -1085,13 +1118,35 @@ class HandshakePacketHandler(
             return false
         }
 
-        // F04: Gate peer synchronization strictly on recipient membership validation
         val myKeys = repo.getLocalIdentity()
         val burnable = repo.getBurnableIdentity()
         val incomingMembersList = parseMembers(group.membersJson)
         val meInGroup = incomingMembersList.any {
             it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
         } || group.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && group.adminPublicKeyB64 == burnable.publicKeyB64)
+
+        // F04/R06: Check whether the SIGNER is the admin
+        val signerIsAdmin = if (existing != null) {
+            CryptoService.verify(encPayload, sync.signature, existing.adminPublicKeyB64) ||
+            CryptoService.verify(pipePayload, sync.signature, existing.adminPublicKeyB64)
+        } else {
+            CryptoService.verify(encPayload, sync.signature, group.adminPublicKeyB64) ||
+            CryptoService.verify(pipePayload, sync.signature, group.adminPublicKeyB64)
+        }
+
+        // U05: Enforce state revision freshness (distinct from immutable creation time)
+        if (existing != null && sync.timestamp <= existing.revision) {
+            Logger.debug(TAG, "Ignoring stale GROUP_SYNC for ${group.groupId} (sync ts ${sync.timestamp} <= existing revision ${existing.revision})")
+            return true
+        }
+
+        // U05: If admin authoritatively removed us, process removal before the membership gate!
+        if (existing != null && signerIsAdmin && !meInGroup) {
+            Logger.info(TAG, "Authoritative admin GROUP_SYNC for ${group.groupId} excluded us — applying removal and deleting group locally")
+            repo.deleteGroupChat(group.groupId)
+            return true
+        }
+
         if (!meInGroup) {
             Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: our identity is not in the group members list")
             return false
@@ -1102,7 +1157,7 @@ class HandshakePacketHandler(
             val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${group.groupId}") != null
             if (isMyGroup) {
                 syncMemberPeers(sync.memberDetails)
-                db.groupChatDao().insertGroupChat(group)
+                db.groupChatDao().insertGroupChat(group.copy(revision = sync.timestamp))
                 Logger.info(TAG, "Received own group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
                 return true
             } else if (hasPendingInvite) {
@@ -1115,31 +1170,13 @@ class HandshakePacketHandler(
             }
         }
 
-        // F04/R06: Check whether the SIGNER is the admin
-        val signerIsAdmin = CryptoService.verify(encPayload, sync.signature, existing.adminPublicKeyB64) ||
-            CryptoService.verify(pipePayload, sync.signature, existing.adminPublicKeyB64)
-
-        // S04: Check freshness against existing group state
-        if (sync.timestamp <= existing.createdAt) {
-            Logger.debug(TAG, "Ignoring stale GROUP_SYNC for ${group.groupId} (sync ts ${sync.timestamp} <= existing ${existing.createdAt})")
-            return true
-        }
-
-        // S04: If admin authoritatively removed us, apply removal and delete group locally
-        if (signerIsAdmin && !meInGroup) {
-            Logger.info(TAG, "Authoritative admin GROUP_SYNC for ${group.groupId} excluded us — applying removal and deleting group locally")
-            repo.deleteGroupChat(group.groupId)
-            return true
-        }
-
         syncMemberPeers(sync.memberDetails)
 
-        val bannedSet = (existing.getBannedMembers() + (if (signerIsAdmin) group.getBannedMembers() else emptyList())).toSet()
+        // U05: Admin state is authoritative for bans and membership (do not union bans or resurrect removed members)
+        val bannedSet = if (signerIsAdmin) group.getBannedMembers().toSet() else existing.getBannedMembers().toSet()
         val existingMembers = parseMembers(existing.membersJson)
         val incomingFiltered = incomingMembersList.filter { it !in bannedSet }
 
-        // R06: If signer is admin, admin snapshot is authoritative for membership.
-        // If signer is ordinary member, only add members if member invites are allowed; never overwrite admin state.
         val mergedMembers = if (signerIsAdmin) {
             incomingFiltered.distinct()
         } else if (existing.allowMemberInvites) {
@@ -1154,20 +1191,21 @@ class HandshakePacketHandler(
         val mergedGroup = if (signerIsAdmin) {
             existing.copy(
                 title = group.title,
-                description = group.description ?: existing.description,
-                avatarB64 = group.avatarB64 ?: existing.avatarB64,
+                description = group.description, // U05: Authoritatively apply nullable fields allowing clearing
+                avatarB64 = group.avatarB64,       // U05: Authoritatively apply nullable fields allowing clearing
                 allowMemberInvites = group.allowMemberInvites,
                 allowMemberSelfRemove = group.allowMemberSelfRemove,
                 membersJson = com.google.gson.Gson().toJson(mergedMembers),
                 memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles),
                 bannedMembersJson = com.google.gson.Gson().toJson(bannedSet.toList()),
-                createdAt = maxOf(existing.createdAt, sync.timestamp)
+                revision = maxOf(existing.revision, sync.timestamp)
             )
         } else {
             // Non-admin signer cannot modify title, description, avatar, or permissions!
             existing.copy(
                 membersJson = com.google.gson.Gson().toJson(mergedMembers),
-                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles)
+                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles),
+                revision = maxOf(existing.revision, sync.timestamp)
             )
         }
 

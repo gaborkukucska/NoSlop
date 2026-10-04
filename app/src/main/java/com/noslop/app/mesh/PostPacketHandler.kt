@@ -59,16 +59,8 @@ class PostPacketHandler(
         }
 
         val isCanonical = CryptoService.verify(payloadCanonical, sig, postPay.authorId)
-        val isLegacySafe = postPay.privacy == "public" && postPay.mediaId == null && postPay.mediaMetadata == null && postPay.clearnetUrl == null
-        val isValid = isCanonical ||
-            (isLegacySafe && (
-                CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
-                CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
-                CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
-                CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
-            ))
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
+        if (!isCanonical) {
+            Logger.warn(TAG, "Rejected POST ${postPay.id}: Canonical 8-field signature verification failed")
             return false
         }
 
@@ -195,24 +187,21 @@ class PostPacketHandler(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString()
         )
         val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
-        val isLegacySafe = effectivePrivacy == "public" && editPay.mediaId == null && editPay.mediaMetadata == null && editPay.clearnetUrl == null
-        val isValid = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId) ||
-            (isLegacySafe && (
-                CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId) ||
-                CryptoService.verify(payloadNoAvatar, editPay.signature, editPay.authorId) ||
-                CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId)
-            ))
-        if (!isValid) return false
+        val isCanonical = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId)
+        if (!isCanonical) {
+            Logger.warn(TAG, "Rejected EDIT_POST ${editPay.postId}: Canonical signature verification failed")
+            return false
+        }
 
         val existingPost = postDao.getPostById(editPay.postId)
         if (existingPost != null) {
             val peer = peerDao.getPeerByPublicKey(editPay.authorId)
             val resolvedOnion = editPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
-            // S08: Complete signed state semantics: if mediaId is null, media is cleared; if set, updated.
+            // S08/U06: Retain existing descriptor when media is retained without replacement
             val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" }
-            val newMediaType = if (editPay.mediaId != null) editPay.mediaMetadata?.type else null
-            val newThumb = if (editPay.mediaId != null) editPay.mediaMetadata?.thumbnailB64 else null
-            val newSize = if (editPay.mediaId != null) (editPay.mediaMetadata?.size ?: 0L) else 0L
+            val newMediaType = if (editPay.mediaId != null) (editPay.mediaMetadata?.type ?: existingPost.mediaType) else null
+            val newThumb = if (editPay.mediaId != null) (editPay.mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64) else null
+            val newSize = if (editPay.mediaId != null) (editPay.mediaMetadata?.size ?: existingPost.mediaSize) else 0L
 
             val success = postDao.editPostSafely(
                 id = editPay.postId,

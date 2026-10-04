@@ -732,17 +732,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             allowMemberInvites = allowMemberInvites,
             allowMemberSelfRemove = allowMemberSelfRemove,
             avatarB64 = avatarB64,
-            memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap)
+            memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap),
+            revision = timestamp
         )
         db.groupChatDao().insertGroupChat(group)
 
         val sortedMembers = allMembers.sorted().joinToString(",")
-        val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
-            groupId, title, adminKeys.publicKeyB64, adminKeys.publicKeyB64, timestamp,
-            sortedMembers, allowMemberInvites, allowMemberSelfRemove,
-            description, avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64
-        )
-        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val memberDetailsMap = allMembers.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
             if (peer != null) {
@@ -759,6 +754,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
             } else null
         }.toMap()
+
+        val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+        val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+            groupId, title, adminKeys.publicKeyB64, adminKeys.publicKeyB64, timestamp,
+            sortedMembers, allowMemberInvites, allowMemberSelfRemove,
+            description, avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64,
+            sortedDetails, sortedHandles
+        )
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
 
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = groupId,
@@ -1106,7 +1111,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             allowMemberSelfRemove = effectiveAllowSelfRemove,
             membersJson = membersJson,
             memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap),
-            bannedMembersJson = com.google.gson.Gson().toJson(effectiveBannedList)
+            bannedMembersJson = com.google.gson.Gson().toJson(effectiveBannedList),
+            revision = timestamp
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
@@ -1200,10 +1206,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val effectiveAdminOnion = if (isAdmin) adminKeys.onionAddress else (storedAdminPeer?.onionAddress ?: "")
             val effectiveAdminEncPub = if (isAdmin) adminKeys.encPublicKeyB64 else (storedAdminPeer?.encPublicKeyB64 ?: "")
 
+            val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+            val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
             val invitePayloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
                 groupId, effectiveTitle, existing.adminPublicKeyB64, inviterSigningKey.publicKeyB64, inviteTimestamp,
                 sortedNewMembers, effectiveAllowInvites, effectiveAllowSelfRemove,
-                effectiveDescription, effectiveAvatarB64, effectiveAdminOnion, effectiveAdminEncPub
+                effectiveDescription, effectiveAvatarB64, effectiveAdminOnion, effectiveAdminEncPub,
+                sortedDetails, sortedHandles
             )
             val inviteSig = com.noslop.app.crypto.CryptoService.sign(invitePayloadToSign, inviterSigningKey.privateKeyB64)
 
@@ -1432,10 +1441,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val timestamp = group.createdAt
         val sortedMembers = members.sorted().joinToString(",")
+        val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+        val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
         val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
             group.groupId, group.title, group.adminPublicKeyB64, adminKeys.publicKeyB64, timestamp,
             sortedMembers, group.allowMemberInvites, group.allowMemberSelfRemove,
-            group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64
+            group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64,
+            sortedDetails, sortedHandles
         )
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
@@ -2129,8 +2141,45 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun requestAllPeersDmSync() = meshSocialRepository.requestAllPeersDmSync()
     fun flushOutboxForPeer(peerPub: String, onionAddress: String) = meshSocialRepository.flushOutboxForPeer(peerPub, onionAddress)
 
+    suspend fun reissueLocalPostsWithCanonicalSignatures() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val burnableKeys = getBurnableIdentity()
+        val allLocalPosts = postDao.getAllPostsList()
+        for (post in allLocalPosts) {
+            val signingKey = when (post.authorPublicKeyB64) {
+                myKeys.publicKeyB64 -> myKeys
+                burnableKeys?.publicKeyB64 -> burnableKeys
+                else -> null
+            } ?: continue
+
+            val rawMediaId = post.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
+            val canonicalPayload = CryptoService.encodeForSigning(
+                post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
+                post.privacy, rawMediaId, post.clearnetUrl
+            )
+            if (!CryptoService.verify(canonicalPayload, post.signature, post.authorPublicKeyB64)) {
+                val newSig = CryptoService.sign(canonicalPayload, signingKey.privateKeyB64)
+                postDao.updatePostDetails(
+                    id = post.id,
+                    newContent = post.content,
+                    newTimestamp = post.timestamp,
+                    newSignature = newSig,
+                    authorAvatarB64 = post.authorAvatarB64,
+                    mediaUrl = post.mediaUrl,
+                    mediaType = post.mediaType,
+                    thumbnailB64 = post.thumbnailB64,
+                    mediaSize = post.mediaSize,
+                    privacy = post.privacy,
+                    clearnetUrl = post.clearnetUrl
+                )
+                Logger.info("REPOSITORY", "Re-issued canonical signature for local authored post ${post.id}")
+            }
+        }
+    }
+
     suspend fun onTorReady() = withContext(Dispatchers.IO) {
         Logger.info("REPOSITORY", "Tor is READY: Triggering high-priority DM catchup and peer heartbeat")
+        reissueLocalPostsWithCanonicalSignatures()
         meshSocialRepository.requestAllPeersDmSync()
         startPresenceHeartbeat()
     }

@@ -138,26 +138,7 @@ object MeshPacketVerifier {
                 p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 p.privacy, p.mediaId, p.clearnetUrl
             )
-            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
-            )
-            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                p.id, p.authorId, p.content, p.timestamp.toString()
-            )
-            val pipeNoAvatar = "${p.id}|${p.authorId}|${p.content}|${p.timestamp}"
-            val pipeWithAvatar = "${p.id}|${p.authorId}|${p.content}|${p.timestamp}|${p.authorAvatarB64}"
-            val sig = p.signature
-            val signer = p.authorId
-            val isLegacySafe = p.privacy == "public" && p.mediaId == null && p.mediaMetadata == null && p.clearnetUrl == null
-            val matchedPayload = when {
-                sig != null && com.noslop.app.crypto.CryptoService.verify(encCanonical, sig, signer) -> encCanonical
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(pipeWithAvatar, sig, signer) -> pipeWithAvatar
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(pipeNoAvatar, sig, signer) -> pipeNoAvatar
-                else -> encCanonical
-            }
-            Signed(matchedPayload, sig, signer)
+            Signed(encCanonical, p.signature, p.authorId)
         }
 
         "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
@@ -168,24 +149,7 @@ object MeshPacketVerifier {
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 effectivePrivacy, p.mediaId, p.clearnetUrl
             )
-            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
-            )
-            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                p.postId, p.authorId, p.content, p.timestamp.toString()
-            )
-            val pipe = "${p.postId}|${p.authorId}|${p.content}|${p.timestamp}"
-            val sig = p.signature
-            val signer = p.authorId
-            val isLegacySafe = effectivePrivacy == "public" && p.mediaId == null && p.mediaMetadata == null && p.clearnetUrl == null
-            val matched = when {
-                sig != null && com.noslop.app.crypto.CryptoService.verify(encCanonical, sig, signer) -> encCanonical
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer) -> pipe
-                else -> encCanonical
-            }
-            Signed(matched, sig, signer)
+            Signed(encCanonical, p.signature, p.authorId)
         }
 
         "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
@@ -370,31 +334,40 @@ object MeshPacketVerifier {
         "GROUP_INVITE" -> packet.getGroupInvitePayload()?.let { p ->
             val candidates = (listOf(p.adminPublicKeyB64) + p.members).distinct()
             val sortedMembers = p.members.sorted().joinToString(",")
+            val sortedDetails = canonicalMemberDetailsString(p.memberDetails)
+            val sortedHandles = canonicalMemberHandlesString(p.memberHandles)
+
             for (candidate in candidates) {
                 if (candidate.isBlank()) continue
                 val encCanonical = canonicalGroupInvitePayload(
                     p.groupId, p.title, p.adminPublicKeyB64, candidate, p.timestamp,
                     sortedMembers, p.allowMemberInvites, p.allowMemberSelfRemove,
-                    p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey
+                    p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey,
+                    sortedDetails, sortedHandles
                 )
-                val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                    p.groupId, p.title, candidate, p.timestamp.toString(),
-                    sortedMembers, p.allowMemberInvites.toString(), p.allowMemberSelfRemove.toString()
-                )
-
-                val matched = when {
-                    CryptoService.verify(encCanonical, p.signature, candidate) -> encCanonical
-                    CryptoService.verify(enc7Field, p.signature, candidate) -> enc7Field
-                    else -> null
+                if (CryptoService.verify(encCanonical, p.signature, candidate)) {
+                    return@let Signed(encCanonical, p.signature, candidate)
                 }
-                if (matched != null) {
-                    return@let Signed(matched, p.signature, candidate)
+
+                // U03: 7-field legacy invite ONLY permitted if admin self-signed AND all unsigned fields are empty
+                val unsignedFieldsEmpty = p.description.isNullOrEmpty() && p.avatarB64.isNullOrEmpty() &&
+                    p.adminOnion.isNullOrEmpty() && p.adminEncPublicKey.isNullOrEmpty() &&
+                    p.memberDetails.isNullOrEmpty()
+                if (candidate == p.adminPublicKeyB64 && unsignedFieldsEmpty) {
+                    val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                        p.groupId, p.title, candidate, p.timestamp.toString(),
+                        sortedMembers, p.allowMemberInvites.toString(), p.allowMemberSelfRemove.toString()
+                    )
+                    if (CryptoService.verify(enc7Field, p.signature, candidate)) {
+                        return@let Signed(enc7Field, p.signature, candidate)
+                    }
                 }
             }
             val fallbackCanonical = canonicalGroupInvitePayload(
                 p.groupId, p.title, p.adminPublicKeyB64, p.adminPublicKeyB64, p.timestamp,
                 sortedMembers, p.allowMemberInvites, p.allowMemberSelfRemove,
-                p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey
+                p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey,
+                sortedDetails, sortedHandles
             )
             Signed(fallbackCanonical, p.signature, p.adminPublicKeyB64)
         }
