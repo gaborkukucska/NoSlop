@@ -27,6 +27,12 @@
   * Enforced atomic connection admission (`incrementAndGet() > MAX_ACTIVE_CONNECTIONS`) and 5-second total header deadlines with strict CRLF-CRLF termination in `MediaProxyService` (R16).
   * Removed unauthenticated liveness resets in `GossipService.processIncoming` (R17).
   * Used absolute directory paths in SSH deployment cleanup traps and set `chmod 600` on secret files before writing (R18).
+* **Android Lint Gate Compliance & Opt-in API Safety (`TorService.kt`, `ChatThreadScreen.kt`, `AndroidGifTextField.kt`, `PreloadManager.kt`, `QRScanScreen.kt`, `VideoCompressor.kt`, `lint.xml`)**:
+  * Resolved `UnspecifiedRegisterReceiverFlag` in `TorService.kt` using `ContextCompat.registerReceiver(..., RECEIVER_EXPORTED)` for Android 14+ broadcast compliance.
+  * Corrected indentation in `ChatThreadScreen.kt` resolving `SuspiciousIndentation`.
+  * Migrated custom view in `AndroidGifTextField.kt` to extend `AppCompatEditText` resolving `AppCompatCustomView`.
+  * Added explicit `@OptIn` annotations for Media3 `UnstableApi` in `PreloadManager.kt` and `VideoCompressor.kt`, and CameraX `ExperimentalGetImage` in `QRScanScreen.kt`.
+  * Configured project-level `app/lint.xml` and handled `Player.STATE_BUFFERING` in `PreloadManager.kt`'s state listener, passing `:app:lintGithubDebug` with zero errors.
 
 ## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
 
