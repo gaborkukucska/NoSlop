@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object VideoCompressor {
 
     sealed class CompressState {
@@ -27,6 +28,7 @@ object VideoCompressor {
         data class Error(val exception: Exception) : CompressState()
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun compressVideo(context: Context, inputUri: Uri, outputFile: File, quality: String = "medium"): Flow<CompressState> = callbackFlow {
         var transformer: Transformer? = null
 

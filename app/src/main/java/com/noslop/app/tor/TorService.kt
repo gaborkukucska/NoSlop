@@ -277,11 +277,12 @@ object TorService {
         // Register for status broadcasts
         try {
             val filter = android.content.IntentFilter(org.torproject.jni.TorService.ACTION_STATUS)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(torStatusReceiver, filter, Context.RECEIVER_EXPORTED)
-            } else {
-                context.registerReceiver(torStatusReceiver, filter)
-            }
+            androidx.core.content.ContextCompat.registerReceiver(
+                context,
+                torStatusReceiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
         } catch (e: Exception) {
             Logger.warn(TAG, "Failed to register torStatusReceiver: ${e.message}")
         }

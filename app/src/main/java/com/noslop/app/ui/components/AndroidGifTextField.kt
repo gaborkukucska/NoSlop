@@ -3,7 +3,7 @@ package com.noslop.app.ui.components
 
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
-import android.widget.EditText
+import androidx.appcompat.widget.AppCompatEditText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -38,7 +38,7 @@ fun AndroidGifTextField(
             .background(Color(0xFF0F172A)) // SurfaceDark
             .padding(horizontal = 4.dp),
         factory = { context ->
-            object : EditText(context) {
+            object : AppCompatEditText(context) {
                 override fun onCreateInputConnection(editorInfo: EditorInfo): InputConnection? {
                     val ic = super.onCreateInputConnection(editorInfo) ?: return null
                     EditorInfoCompat.setContentMimeTypes(

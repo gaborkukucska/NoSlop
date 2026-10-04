@@ -35,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap
  * to hand back anything stale or mismatched, so the caller falls through to
  * building a fresh player against the fresh URL.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object PreloadManager {
     // 2 items ahead are actively buffered by preWarm(), +1 headroom so the
     // player for the currently-playing item (claimed via claim()) doesn't get
@@ -73,6 +74,7 @@ object PreloadManager {
     @Volatile
     var networkBytesReceivedInSession: Long = 0L
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     val globalTransferListener = object : androidx.media3.datasource.TransferListener {
         override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
         override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
@@ -403,6 +405,7 @@ object PreloadManager {
                         Logger.info("PRELOAD", "ExoPlayer reached ENDED state for $rawUrl")
                     androidx.media3.common.Player.STATE_IDLE ->
                         Logger.warn("PRELOAD", "ExoPlayer in IDLE state for $rawUrl")
+                    androidx.media3.common.Player.STATE_BUFFERING -> {}
                 }
             }
 

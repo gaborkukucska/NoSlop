@@ -173,6 +173,10 @@ android {
         }
     }
 
+    lint {
+        lintConfig = file("lint.xml")
+    }
+
     testOptions {
         unitTests {
             isIncludeAndroidResources = true

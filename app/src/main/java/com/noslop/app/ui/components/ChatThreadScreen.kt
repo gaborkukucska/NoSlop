@@ -149,7 +149,7 @@ fun ChatThreadScreen(
             val tempDir = context.externalCacheDir ?: context.cacheDir
             val compressedFile = java.io.File(tempDir, "compressed_${file.name}")
             val quality = viewModel.mediaSettings.value.videoQuality
-                                com.noslop.app.media.VideoCompressor.compressVideo(context, android.net.Uri.fromFile(file), compressedFile, quality).collect { state ->
+            com.noslop.app.media.VideoCompressor.compressVideo(context, android.net.Uri.fromFile(file), compressedFile, quality).collect { state ->
                 when(state) {
                     is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {

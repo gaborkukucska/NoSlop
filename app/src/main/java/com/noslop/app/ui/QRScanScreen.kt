@@ -469,6 +469,7 @@ private fun tryZxingFallback(bitmap: android.graphics.Bitmap, onResult: (String?
     }
 }
 
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 @SuppressLint("UnrememberedMutableState")
 @Composable
 fun CameraScanPreview(onBarcodeDetected: (String) -> Unit) {
