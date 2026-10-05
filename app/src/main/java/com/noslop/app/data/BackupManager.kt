@@ -475,29 +475,17 @@ object BackupManager {
                     }
                 }
 
-                // 2. Validate staged identity JSON before committing (S06 / U01 / U02)
+                // 2. Validate staged identity JSON before committing (S06 / U01 / U02 / V01)
                 var parsedIdentityObj: org.json.JSONObject? = null
                 if (hasPortableIdentity) {
                     val stagedIdFile = File(stageDir, "identity_backup.json")
                     try {
                         val jsonStr = stagedIdFile.readText(Charsets.UTF_8)
                         val obj = org.json.JSONObject(jsonStr)
-                        val requiredFields = listOf(
-                            "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
-                            "handle", "tripcode", "onionAddress", "displayName"
-                        )
-                        for (rf in requiredFields) {
-                            if (!obj.has(rf) || obj.getString(rf).isBlank()) {
-                                Logger.error(TAG, "Staged identity JSON is missing required key: $rf")
-                                return false
-                            }
-                        }
-                        val pubEd = obj.getString("publicKeyB64")
-                        val privEd = obj.getString("privateKeyB64")
-                        val probePayload = "noslop_identity_probe_${System.currentTimeMillis()}"
-                        val probeSig = com.noslop.app.crypto.CryptoService.sign(probePayload, privEd)
-                        if (!com.noslop.app.crypto.CryptoService.verify(probePayload, probeSig, pubEd)) {
-                            Logger.error(TAG, "Staged identity keys failed Ed25519 signature consistency validation")
+                        val tempIdRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
+                        val valResult = tempIdRepo.validateIdentityObject(obj, mnemonic)
+                        if (valResult !is IdentityRestoreResult.Success) {
+                            Logger.error(TAG, "Staged identity JSON validation failed: $valResult")
                             return false
                         }
                         parsedIdentityObj = obj
@@ -538,10 +526,14 @@ object BackupManager {
                     }
                 }
 
-                // --- U02: MULTI-STORE SNAPSHOT FOR ATOMIC ROLLBACK ---
+                // --- U02 / V02: MULTI-STORE SNAPSHOT FOR ATOMIC ROLLBACK ---
+                // Quiescence: Close active Room instance before snapshotting database files
+                NoSlopDatabase.closeInstance()
+
                 val targetDb = context.getDatabasePath(DB_NAME)
                 val targetWal = File(targetDb.path + "-wal")
                 val targetShm = File(targetDb.path + "-shm")
+                val dbExistedBefore = targetDb.exists()
 
                 var dbBackupFile: File? = null
                 var dbWalBackupFile: File? = null
@@ -568,7 +560,7 @@ object BackupManager {
                 val apiSnapshots = mutableMapOf<String, Map<String, *>>()
 
                 // Snapshot DB
-                if (targetDb.exists()) {
+                if (dbExistedBefore) {
                     dbBackupFile = File(targetDb.parentFile, "$DB_NAME.bak_${System.currentTimeMillis()}")
                     targetDb.copyTo(dbBackupFile, overwrite = true)
                     if (targetWal.exists()) {
@@ -578,6 +570,32 @@ object BackupManager {
                     if (targetShm.exists()) {
                         dbShmBackupFile = File(targetDb.parentFile, "$DB_NAME-shm.bak_${System.currentTimeMillis()}")
                         targetShm.copyTo(dbShmBackupFile, overwrite = true)
+                    }
+                }
+
+                // V02: Media snapshotting
+                val mediaBackupDir = File(tempDir, "media_backup_${System.currentTimeMillis()}").apply { mkdirs() }
+                val mediaOverwrittenBackups = mutableMapOf<File, File>()
+                val mediaCreatedFiles = mutableListOf<File>()
+
+                val stagedMediaDir = File(stageDir, "media")
+                if (stagedMediaDir.exists()) {
+                    stagedMediaDir.listFiles()?.forEach { dirTypeFile ->
+                        if (dirTypeFile.isDirectory) {
+                            val dirType = dirTypeFile.name
+                            val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                            val targetNoSlopDir = File(baseDir, "NoSlop").apply { mkdirs() }
+                            dirTypeFile.listFiles()?.forEach { file ->
+                                val targetMediaFile = File(targetNoSlopDir, file.name)
+                                if (targetMediaFile.exists()) {
+                                    val bak = File(mediaBackupDir, "${dirType}_${file.name}.bak")
+                                    targetMediaFile.copyTo(bak, overwrite = true)
+                                    mediaOverwrittenBackups[targetMediaFile] = bak
+                                } else {
+                                    mediaCreatedFiles.add(targetMediaFile)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -629,20 +647,27 @@ object BackupManager {
                     }
                 }
 
-                fun performFullRollback() {
+                var rollbackCompleted = false
+                fun performFullRollback(): Boolean {
                     Logger.warn(TAG, "Executing full restore rollback across all mutated stores...")
-                    try {
+                    return try {
                         NoSlopDatabase.closeInstance()
-                        if (dbBackupFile != null && dbBackupFile.exists()) {
-                            dbBackupFile.copyTo(targetDb, overwrite = true)
-                        }
-                        targetWal.delete()
-                        targetShm.delete()
-                        if (dbWalBackupFile != null && dbWalBackupFile.exists()) {
-                            dbWalBackupFile.copyTo(targetWal, overwrite = true)
-                        }
-                        if (dbShmBackupFile != null && dbShmBackupFile.exists()) {
-                            dbShmBackupFile.copyTo(targetShm, overwrite = true)
+                        if (dbExistedBefore) {
+                            if (dbBackupFile != null && dbBackupFile.exists()) {
+                                dbBackupFile.copyTo(targetDb, overwrite = true)
+                            }
+                            targetWal.delete()
+                            targetShm.delete()
+                            if (dbWalBackupFile != null && dbWalBackupFile.exists()) {
+                                dbWalBackupFile.copyTo(targetWal, overwrite = true)
+                            }
+                            if (dbShmBackupFile != null && dbShmBackupFile.exists()) {
+                                dbShmBackupFile.copyTo(targetShm, overwrite = true)
+                            }
+                        } else {
+                            targetDb.delete()
+                            targetWal.delete()
+                            targetShm.delete()
                         }
 
                         // Restore preferences both in SharedPreferencesImpl in-memory cache and on disk
@@ -656,9 +681,20 @@ object BackupManager {
                             restorePrefsFromSnapshot(prefKeyName, apiSnapshots[prefKeyName], apiFile, apiBak)
                         }
 
-                        Logger.info(TAG, "Full rollback completed successfully across database, identity, and API keys")
+                        // V02: Rollback media files
+                        mediaCreatedFiles.forEach { it.delete() }
+                        mediaOverwrittenBackups.forEach { (targetFile, bakFile) ->
+                            if (bakFile.exists()) {
+                                bakFile.copyTo(targetFile, overwrite = true)
+                            }
+                        }
+
+                        rollbackCompleted = true
+                        Logger.info(TAG, "Full rollback completed successfully across database, identity, API keys, and media")
+                        true
                     } catch (rbEx: Exception) {
                         Logger.error(TAG, "Error during full rollback: ${rbEx.message}")
+                        false
                     }
                 }
 
@@ -774,13 +810,18 @@ object BackupManager {
                     performFullRollback()
                     return false
                 } finally {
-                    // Clean up snapshots on successful commit or after rollback
-                    dbBackupFile?.delete()
-                    dbWalBackupFile?.delete()
-                    dbShmBackupFile?.delete()
-                    securePrefsBackup?.delete()
-                    fallbackPrefsBackup?.delete()
-                    apiBackupFiles.values.forEach { it.delete() }
+                    // V02: Only clean up snapshots on successful commit or if rollback completed cleanly
+                    if (rollbackCompleted || !targetDb.exists() || (dbBackupFile == null && securePrefsBackup == null)) {
+                        dbBackupFile?.delete()
+                        dbWalBackupFile?.delete()
+                        dbShmBackupFile?.delete()
+                        securePrefsBackup?.delete()
+                        fallbackPrefsBackup?.delete()
+                        apiBackupFiles.values.forEach { it.delete() }
+                        mediaBackupDir.deleteRecursively()
+                    } else {
+                        Logger.warn(TAG, "Rollback could not be verified; preserving snapshot backup files in ${targetDb.parentFile} and $tempDir for recovery")
+                    }
                 }
             } finally {
                 stageDir.deleteRecursively()

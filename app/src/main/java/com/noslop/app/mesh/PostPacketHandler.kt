@@ -186,12 +186,9 @@ class PostPacketHandler(
         val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString()
         )
-        val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
         val isCanonical = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId)
-        val isLegacySafe = effectivePrivacy == "public" && editPay.mediaId == null && editPay.mediaMetadata == null && editPay.clearnetUrl == null
-        val isValid = isCanonical || (isLegacySafe && CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId))
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected EDIT_POST ${editPay.postId}: Canonical signature verification failed")
+        if (!isCanonical) {
+            Logger.warn(TAG, "Rejected EDIT_POST ${editPay.postId}: Canonical 8-field signature verification failed")
             return false
         }
 

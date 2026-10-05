@@ -45,22 +45,31 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         return false
     }
 
-    suspend fun resolveQuarantine() {
-        isQuarantined.value = false
-        try {
-            appSettingDao.removeSetting("identity_quarantined")
-        } catch (_: Exception) {}
+    suspend fun resolveQuarantine(): Boolean {
+        var allRenamed = true
         try {
             val prefsDir = File(context.filesDir.parentFile, "shared_prefs")
             prefsDir.listFiles()?.filter { it.name.startsWith("noslop_identity_secure.xml.corrupt_") }?.forEach { corruptFile ->
                 val resolvedName = corruptFile.name.replace(".corrupt_", ".resolved_")
                 val target = File(corruptFile.parentFile, resolvedName)
-                corruptFile.renameTo(target)
-                Logger.info(TAG, "Archived quarantine marker ${corruptFile.name} -> ${target.name}")
+                if (!corruptFile.renameTo(target)) {
+                    allRenamed = false
+                    Logger.warn(TAG, "Failed archiving quarantine marker ${corruptFile.name} -> ${target.name}")
+                } else {
+                    Logger.info(TAG, "Archived quarantine marker ${corruptFile.name} -> ${target.name}")
+                }
             }
         } catch (e: Exception) {
+            allRenamed = false
             Logger.warn(TAG, "Failed archiving quarantine file: ${e.message}")
         }
+        if (allRenamed) {
+            isQuarantined.value = false
+            try {
+                appSettingDao.removeSetting("identity_quarantined")
+            } catch (_: Exception) {}
+        }
+        return allRenamed
     }
 
     private fun buildMasterKey(ctx: Context): MasterKey {
@@ -169,7 +178,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         // Private keys -> SharedPreferences (encrypted via ESP or fallback AES-GCM)
-        prefs.edit()
+        val commitSuccess = prefs.edit()
             .putString("ed25519_private_key", secureFallbackWrite(keys.privateKeyB64))
             .putString("enc_private_key", secureFallbackWrite(keys.encPrivateKeyB64))
             .putString("mnemonic", secureFallbackWrite(mnemonic))
@@ -191,10 +200,13 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             .remove("burnable_display_name")
             .commit()
 
+        if (!commitSuccess) {
+            throw IllegalStateException("Failed to commit saved identity to preferences")
+        }
+
         // Identity version 2 indicates deterministic HKDF derivation from Word Cloud mnemonic
-        resolveQuarantine()
         appSettingDao.insertSetting(AppSetting("identity_version", "2"))
-        prefs.edit().putString("identity_version", "2").apply()
+        prefs.edit().putString("identity_version", "2").commit()
 
         // Public data -> Room (safe to query, display, share)
         appSettingDao.insertSetting(AppSetting("local_handle", handle))
@@ -204,10 +216,88 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         appSettingDao.insertSetting(AppSetting("local_onion", keys.onionAddress))
         appSettingDao.insertSetting(AppSetting("local_display_name", keys.displayName))
 
+        val reloaded = loadIdentity()
+        if (reloaded == null || reloaded.publicKeyB64 != keys.publicKeyB64) {
+            throw IllegalStateException("Saved identity failed reload verification probe")
+        }
+        resolveQuarantine()
+
         Logger.info(
             TAG, "Identity saved",
             "handle=$handle | tripcode=${keys.tripcode} | onion_prefix=${keys.onionAddress.take(16)}..."
         )
+    }
+
+    fun validateIdentityObject(identityObj: JSONObject, fallbackMnemonic: String): IdentityRestoreResult {
+        return try {
+            val requiredFields = listOf(
+                "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+                "handle", "tripcode", "onionAddress", "displayName"
+            )
+            for (rf in requiredFields) {
+                if (!identityObj.has(rf) || identityObj.getString(rf).isBlank()) {
+                    return IdentityRestoreResult.Failure("Missing required identity field: $rf")
+                }
+            }
+
+            val pubEd = identityObj.getString("publicKeyB64")
+            val privEd = identityObj.getString("privateKeyB64")
+            val pubEnc = identityObj.getString("encPublicKeyB64")
+            val privEnc = identityObj.getString("encPrivateKeyB64")
+            val tripcode = identityObj.getString("tripcode")
+            val onion = identityObj.getString("onionAddress")
+
+            val probePayload = "noslop_probe_${System.currentTimeMillis()}"
+            val probeSig = CryptoService.sign(probePayload, privEd)
+            if (!CryptoService.verify(probePayload, probeSig, pubEd)) {
+                return IdentityRestoreResult.Failure("Main Ed25519 keypair consistency check failed")
+            }
+            if (!CryptoService.verifyX25519Keypair(pubEnc, privEnc)) {
+                return IdentityRestoreResult.Failure("Main X25519 keypair consistency check failed")
+            }
+            val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            if (pubBytes == null || CryptoService.deriveTripcode(pubBytes) != tripcode) {
+                return IdentityRestoreResult.Failure("Main identity tripcode does not match public key")
+            }
+            if (CryptoService.deriveOnionAddress(pubBytes) != onion) {
+                return IdentityRestoreResult.Failure("Main identity onion address does not match public key")
+            }
+
+            if (identityObj.has("burnable")) {
+                val bObj = identityObj.getJSONObject("burnable")
+                val burnableRequired = listOf(
+                    "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+                    "tripcode", "onionAddress", "displayName"
+                )
+                for (brf in burnableRequired) {
+                    if (!bObj.has(brf) || bObj.getString(brf).isBlank()) {
+                        return IdentityRestoreResult.Failure("Burnable identity missing required field: $brf")
+                    }
+                }
+                val bPubEd = bObj.getString("publicKeyB64")
+                val bPrivEd = bObj.getString("privateKeyB64")
+                val bPubEnc = bObj.getString("encPublicKeyB64")
+                val bPrivEnc = bObj.getString("encPrivateKeyB64")
+
+                val bSig = CryptoService.sign(probePayload, bPrivEd)
+                if (!CryptoService.verify(probePayload, bSig, bPubEd)) {
+                    return IdentityRestoreResult.Failure("Burnable Ed25519 keypair consistency check failed")
+                }
+                if (!CryptoService.verifyX25519Keypair(bPubEnc, bPrivEnc)) {
+                    return IdentityRestoreResult.Failure("Burnable X25519 keypair consistency check failed")
+                }
+                val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                if (bPubBytes == null || CryptoService.deriveTripcode(bPubBytes) != bObj.getString("tripcode")) {
+                    return IdentityRestoreResult.Failure("Burnable identity tripcode does not match public key")
+                }
+                if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
+                    return IdentityRestoreResult.Failure("Burnable identity onion address does not match public key")
+                }
+            }
+            IdentityRestoreResult.Success
+        } catch (e: Exception) {
+            IdentityRestoreResult.Failure(e.message ?: "Unknown validation error")
+        }
     }
 
     /**
@@ -229,6 +319,8 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             val privEd = identityObj.getString("privateKeyB64")
             val pubEnc = identityObj.getString("encPublicKeyB64")
             val privEnc = identityObj.getString("encPrivateKeyB64")
+            val tripcode = identityObj.getString("tripcode")
+            val onion = identityObj.getString("onionAddress")
 
             // Validate main Ed25519 signing keypair consistency
             val probePayload = "noslop_probe_${System.currentTimeMillis()}"
@@ -237,11 +329,18 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 return IdentityRestoreResult.Failure("Main Ed25519 keypair consistency check failed")
             }
 
-            // Validate main X25519 encryption keypair consistency
-            val (encProbe, nonceProbe) = CryptoService.encryptDM(probePayload, pubEnc, privEnc)
-            val decProbe = CryptoService.decryptDM(encProbe, nonceProbe, pubEnc, privEnc)
-            if (decProbe != probePayload) {
-                return IdentityRestoreResult.Failure("Main X25519 keypair agreement check failed")
+            // V01: Validate main X25519 encryption keypair consistency with independent ephemeral key agreement
+            if (!CryptoService.verifyX25519Keypair(pubEnc, privEnc)) {
+                return IdentityRestoreResult.Failure("Main X25519 keypair consistency check failed")
+            }
+
+            // V01: Validate tripcode and onion address match public key
+            val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            if (pubBytes == null || CryptoService.deriveTripcode(pubBytes) != tripcode) {
+                return IdentityRestoreResult.Failure("Main identity tripcode does not match public key")
+            }
+            if (CryptoService.deriveOnionAddress(pubBytes) != onion) {
+                return IdentityRestoreResult.Failure("Main identity onion address does not match public key")
             }
 
             // Validate burnable identity if present
@@ -266,17 +365,21 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 if (!CryptoService.verify(probePayload, bSig, bPubEd)) {
                     return IdentityRestoreResult.Failure("Burnable Ed25519 keypair consistency check failed")
                 }
-                val (bEncProbe, bNonceProbe) = CryptoService.encryptDM(probePayload, bPubEnc, bPrivEnc)
-                val bDecProbe = CryptoService.decryptDM(bEncProbe, bNonceProbe, bPubEnc, bPrivEnc)
-                if (bDecProbe != probePayload) {
-                    return IdentityRestoreResult.Failure("Burnable X25519 keypair agreement check failed")
+                // V01: Validate burnable X25519 encryption keypair consistency
+                if (!CryptoService.verifyX25519Keypair(bPubEnc, bPrivEnc)) {
+                    return IdentityRestoreResult.Failure("Burnable X25519 keypair consistency check failed")
+                }
+                val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                if (bPubBytes == null || CryptoService.deriveTripcode(bPubBytes) != bObj.getString("tripcode")) {
+                    return IdentityRestoreResult.Failure("Burnable identity tripcode does not match public key")
+                }
+                if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
+                    return IdentityRestoreResult.Failure("Burnable identity onion address does not match public key")
                 }
                 hasBurnable = true
             }
 
             val handle = identityObj.getString("handle")
-            val tripcode = identityObj.getString("tripcode")
-            val onion = identityObj.getString("onionAddress")
             val displayName = identityObj.getString("displayName")
             val mnemonic = identityObj.optString("mnemonic", fallbackMnemonic)
             val idVersion = identityObj.optString("identity_version", "2")

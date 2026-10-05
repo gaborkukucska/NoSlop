@@ -300,18 +300,71 @@ data class GroupMemberInfo(
 @Keep
 fun canonicalMemberDetailsString(memberDetails: Map<String, GroupMemberInfo>?): String {
     if (memberDetails.isNullOrEmpty()) return ""
-    return memberDetails.toSortedMap().entries.joinToString(";") { (pub, info) ->
-        "$pub:${info.encPublicKey ?: ""}:${info.onionAddress ?: ""}:${info.handle ?: ""}"
+    val sorted = memberDetails.toSortedMap()
+    val entryParts = sorted.entries.map { (pub, info) ->
+        com.noslop.app.crypto.CryptoService.encodeForSigning(
+            pub,
+            info.encPublicKey ?: "",
+            info.onionAddress ?: "",
+            info.handle ?: ""
+        )
     }
+    return com.noslop.app.crypto.CryptoService.encodeForSigning(*entryParts.toTypedArray())
 }
 
 @Keep
 fun canonicalMemberHandlesString(memberHandles: Map<String, String>?): String {
     if (memberHandles.isNullOrEmpty()) return ""
-    return memberHandles.toSortedMap().entries.joinToString(";") { (pub, handle) ->
-        "$pub:$handle"
+    val sorted = memberHandles.toSortedMap()
+    val entryParts = sorted.entries.map { (pub, handle) ->
+        com.noslop.app.crypto.CryptoService.encodeForSigning(pub, handle)
     }
+    return com.noslop.app.crypto.CryptoService.encodeForSigning(*entryParts.toTypedArray())
 }
+
+@Keep
+fun canonicalGroupUpdatePayload(
+    groupId: String,
+    title: String?,
+    signerPublicKeyB64: String,
+    timestamp: Long,
+    sortedAdded: String,
+    sortedRemoved: String,
+    sortedBanned: String,
+    description: String?,
+    avatarB64: String?,
+    allowMemberInvites: Boolean?,
+    allowMemberSelfRemove: Boolean?,
+    sortedMemberDetails: String = "",
+    sortedMemberHandles: String = ""
+): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
+    groupId,
+    title ?: "",
+    signerPublicKeyB64,
+    timestamp.toString(),
+    sortedAdded,
+    sortedRemoved,
+    sortedBanned,
+    description ?: "",
+    avatarB64 ?: "",
+    allowMemberInvites?.toString() ?: "",
+    allowMemberSelfRemove?.toString() ?: "",
+    sortedMemberDetails,
+    sortedMemberHandles
+)
+
+@Keep
+fun canonicalGroupSyncPayload(
+    groupId: String,
+    groupChatJson: String,
+    timestamp: Long,
+    sortedMemberDetails: String = ""
+): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
+    groupId,
+    groupChatJson,
+    timestamp.toString(),
+    sortedMemberDetails
+)
 
 @Keep
 fun canonicalGroupInvitePayload(

@@ -312,4 +312,149 @@ class BackupManagerTest {
             assertEquals("marker_value_a", cursor.getString(0))
         }
     }
+
+    @Test
+    fun testImport_withMismatchedX25519Keypair_isRejectedBeforeCommit() = kotlinx.coroutines.runBlocking {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
+        val db = NoSlopDatabase.getDatabase(context)
+        val idRepo = IdentityRepository(context, db.appSettingDao())
+
+        // Seed initial valid user A
+        val userAKeys = com.noslop.app.crypto.CryptoService.generateIdentity("UserA")
+        idRepo.saveIdentity("UserA", userAKeys, testMnemonic)
+
+        // Generate User B but tamper with X25519 keypair: assign Mallory's public key with B's private key (V01)
+        val userBKeys = com.noslop.app.crypto.CryptoService.generateIdentity("UserB")
+        val malloryKeys = com.noslop.app.crypto.CryptoService.generateIdentity("Mallory")
+
+        val mismatchedIdObj = org.json.JSONObject().apply {
+            put("publicKeyB64", userBKeys.publicKeyB64)
+            put("privateKeyB64", userBKeys.privateKeyB64)
+            put("encPublicKeyB64", malloryKeys.encPublicKeyB64) // Mismatched X25519 public key!
+            put("encPrivateKeyB64", userBKeys.encPrivateKeyB64)
+            put("handle", "UserB")
+            put("tripcode", userBKeys.tripcode)
+            put("onionAddress", userBKeys.onionAddress)
+            put("displayName", userBKeys.displayName)
+            put("mnemonic", testMnemonic)
+            put("identity_version", "2")
+        }
+
+        // Build backup archive with mismatched identity JSON
+        val tempZip = File(context.cacheDir, "test_mismatched_x25519.zip")
+        val zos = java.util.zip.ZipOutputStream(java.io.FileOutputStream(tempZip))
+        zos.putNextEntry(java.util.zip.ZipEntry("identity_backup.json"))
+        zos.write(mismatchedIdObj.toString().toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+        zos.close()
+
+        val seed = MnemonicGenerator.deriveSeed(testMnemonic)
+        val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        cipher.init(Cipher.ENCRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
+        val encZipBytes = cipher.doFinal(tempZip.readBytes())
+        tempZip.delete()
+
+        val fullEncStream = ByteArrayInputStream("NSG1".toByteArray(Charsets.UTF_8) + iv + encZipBytes)
+
+        val importSuccess = BackupManager.importData(context, testMnemonic, fullEncStream, allowLegacyUnauthenticated = false)
+        assertFalse("Import must fail and reject mismatched X25519 keypair (V01)", importSuccess)
+
+        // Verify User A identity is intact
+        val freshRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
+        val activeIdentity = freshRepo.loadIdentity()
+        assertEquals(userAKeys.publicKeyB64, activeIdentity?.publicKeyB64)
+    }
+
+    @Test
+    fun testImport_mediaRollback_restoresOverwrittenMediaAndCleansCreatedMedia() = kotlinx.coroutines.runBlocking {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
+        val db = NoSlopDatabase.getDatabase(context)
+        val idRepo = IdentityRepository(context, db.appSettingDao())
+
+        val userAKeys = com.noslop.app.crypto.CryptoService.generateIdentity("UserA")
+        idRepo.saveIdentity("UserA", userAKeys, testMnemonic)
+
+        // Seed existing media file for User A
+        val picturesDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES) ?: context.filesDir
+        val noSlopPictures = File(picturesDir, "NoSlop").apply { mkdirs() }
+        val existingMediaFile = File(noSlopPictures, "existing_media.jpg")
+        existingMediaFile.writeText("original-a-content", Charsets.UTF_8)
+
+        val createdMediaFile = File(noSlopPictures, "new_incoming_media.jpg")
+        if (createdMediaFile.exists()) createdMediaFile.delete()
+
+        // Create backup of User B with replacement for existing_media.jpg and a new media file
+        val userBKeys = com.noslop.app.crypto.CryptoService.generateIdentity("UserB")
+        val mnemonicB = "banana cherry dragon elephant falcon grape honey island jungle kiwi lemon apple"
+        idRepo.saveIdentity("UserB", userBKeys, mnemonicB)
+
+        val tempZip = File(context.cacheDir, "test_media_backup.zip")
+        val zos = java.util.zip.ZipOutputStream(java.io.FileOutputStream(tempZip))
+        zos.putNextEntry(java.util.zip.ZipEntry("media/${android.os.Environment.DIRECTORY_PICTURES}/existing_media.jpg"))
+        zos.write("overwritten-b-content".toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+        zos.putNextEntry(java.util.zip.ZipEntry("media/${android.os.Environment.DIRECTORY_PICTURES}/new_incoming_media.jpg"))
+        zos.write("fresh-b-content".toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+
+        // Include valid identity for B
+        val bIdObj = org.json.JSONObject().apply {
+            put("publicKeyB64", userBKeys.publicKeyB64)
+            put("privateKeyB64", userBKeys.privateKeyB64)
+            put("encPublicKeyB64", userBKeys.encPublicKeyB64)
+            put("encPrivateKeyB64", userBKeys.encPrivateKeyB64)
+            put("handle", "UserB")
+            put("tripcode", userBKeys.tripcode)
+            put("onionAddress", userBKeys.onionAddress)
+            put("displayName", userBKeys.displayName)
+            put("mnemonic", mnemonicB)
+            put("identity_version", "2")
+        }
+        zos.putNextEntry(java.util.zip.ZipEntry("identity_backup.json"))
+        zos.write(bIdObj.toString().toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+
+        // Include a group message so we can inject a failure into group message re-encryption
+        val (encMsg, ivMsg) = com.noslop.app.crypto.GroupMessageCrypto.encrypt("Test Msg", "grp-x", "msg-1")
+        val groupMsgsArray = org.json.JSONArray().apply {
+            put(org.json.JSONObject().apply {
+                put("id", "msg-1")
+                put("groupId", "grp-x")
+                put("plaintext", "Test Msg")
+            })
+        }
+        zos.putNextEntry(java.util.zip.ZipEntry("group_messages_backup.json"))
+        zos.write(groupMsgsArray.toString().toByteArray(Charsets.UTF_8))
+        zos.closeEntry()
+        zos.close()
+
+        val seed = MnemonicGenerator.deriveSeed(mnemonicB)
+        val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        cipher.init(Cipher.ENCRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
+        val encZipBytes = cipher.doFinal(tempZip.readBytes())
+        tempZip.delete()
+
+        // Restore User A on device
+        idRepo.saveIdentity("UserA", userAKeys, testMnemonic)
+
+        // Inject Keystore failure into group message re-encryption
+        com.noslop.app.crypto.GroupMessageCrypto.testKeyProviderOverride = {
+            throw java.lang.SecurityException("Injected Keystore failure during group re-encryption")
+        }
+
+        val fullEncStream = ByteArrayInputStream("NSG1".toByteArray(Charsets.UTF_8) + iv + encZipBytes)
+        val importSuccess = BackupManager.importData(context, mnemonicB, fullEncStream, allowLegacyUnauthenticated = false)
+        assertFalse("Import must fail when group re-encryption throws", importSuccess)
+
+        com.noslop.app.crypto.GroupMessageCrypto.testKeyProviderOverride = null
+
+        // V02: Verify media rollback!
+        assertTrue("Overwritten media file must be restored to original content", existingMediaFile.exists())
+        assertEquals("original-a-content", existingMediaFile.readText(Charsets.UTF_8))
+        assertFalse("Newly created media file must be deleted on rollback", createdMediaFile.exists())
+    }
 }

@@ -8,6 +8,7 @@ import com.noslop.app.data.NoSlopDatabase
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -57,9 +58,9 @@ class PostPacketHandlerTest {
         bodyContent: String = signedContent,
         privacy: String = "public",
         mediaId: String? = null,
-        clearnetUrl: String? = null
+        clearnetUrl: String? = null,
+        id: String = "post-1"
     ): NetworkPacket {
-        val id = "post-1"
         val ts = 1_700_000_000_000L
         val signature = CryptoService.sign(
             CryptoService.encodeForSigning(
@@ -195,25 +196,16 @@ class PostPacketHandlerTest {
 
         // DELETE arrives before post exists
         assertTrue("Delete-before-create succeeds", handler.handleDeletePost(delPacket))
-        assertTrue("Tombstone exists in database", postDao.posts.containsKey(id))
-        assertTrue("Tombstone is marked orphaned", postDao.posts[id]?.isOrphaned == true)
+        // V06: Tombstone is stored author-scoped in app_settings, not occupying the posts table
+        org.junit.Assert.assertNotNull("Tombstone exists in database", postDao.getTombstone("tombstone_${identity.publicKeyB64}_$id"))
 
         // Delayed POST arrives later
         val postTs = 1_700_000_004_000L // older than delete
-        val postSig = CryptoService.sign(
-            CryptoService.encodeForSigning(id, identity.publicKeyB64, "content", postTs.toString(), null, "public", null, null),
-            identity.privateKeyB64
-        )
-        val postPayload = PostPayload(
-            id = id, authorId = identity.publicKeyB64, authorName = "alice", authorPublicKey = identity.publicKeyB64,
-            originNode = null, content = "content", timestamp = postTs, privacy = "public", signature = postSig
-        )
-        val postPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(postPayload))
+        val postPacket = postPacket("content", id = id)
 
-        // Must be dropped and not overwrite tombstone
+        // Must be dropped and suppressed by author tombstone
         assertTrue("handlePost returns true for dropped duplicate/orphaned", handler.handlePost(postPacket))
-        org.junit.Assert.assertEquals("[Deleted]", postDao.posts[id]?.content)
-        assertTrue(postDao.posts[id]?.isOrphaned == true)
+        assertFalse("Delayed post must be suppressed and not in posts", postDao.posts.containsKey(id))
     }
 
     @Test
@@ -294,7 +286,9 @@ class PostPacketHandlerTest {
         val malloryDel = DeletePostPayload(postId = alicePostId, authorId = mallory.publicKeyB64, timestamp = malloryTs, signature = mallorySig)
         val malloryPacket = NetworkPacket(senderId = mallory.publicKeyB64, type = "DELETE_POST", payload = Gson().toJsonTree(malloryDel))
         assertTrue("Mallory tombstone inserted", handler.handleDeletePost(malloryPacket))
-        org.junit.Assert.assertEquals(mallory.publicKeyB64, postDao.posts[alicePostId]?.authorPublicKeyB64)
+        // V06: Mallory's tombstone is recorded author-scoped, and does NOT occupy Alice's post slot in posts table
+        org.junit.Assert.assertNotNull(postDao.getTombstone("tombstone_${mallory.publicKeyB64}_$alicePostId"))
+        assertFalse(postDao.posts.containsKey(alicePostId))
 
         // U07: Now Alice's authentic POST arrives
         val aliceTs = 1_700_000_005_000L
@@ -333,5 +327,72 @@ class PostPacketHandlerTest {
         val packet = NetworkPacket(senderId = identity.publicKeyB64, type = "POST", payload = Gson().toJsonTree(tamperedPayload))
         assertFalse("Unauthenticated audience downgrade attack must be rejected", handler.handlePost(packet))
         assertFalse(postDao.posts.containsKey(id))
+    }
+
+    @Test
+    fun legacyPipeEditPost_relabeledAsPublic_isRejected() = runBlocking {
+        // First insert genuine post
+        val origPacket = postPacket("original secret", privacy = "friends")
+        assertTrue(handler.handlePost(origPacket))
+
+        // V04: Mallory attempts an edit using legacy 4-field pipe signature, relabeling to public
+        val editTs = 1_700_000_003_000L
+        val pipeSig = CryptoService.sign(
+            "post-1|${identity.publicKeyB64}|tampered content|$editTs",
+            identity.privateKeyB64
+        )
+        val editPayload = EditPostPayload(
+            postId = "post-1",
+            authorId = identity.publicKeyB64,
+            content = "tampered content",
+            timestamp = editTs,
+            signature = pipeSig,
+            privacy = "public"
+        )
+        val editPacket = NetworkPacket(senderId = identity.publicKeyB64, type = "EDIT_POST", payload = Gson().toJsonTree(editPayload))
+        assertFalse("Legacy pipe signature on EDIT_POST must be rejected (V04)", handler.handleEditPost(editPacket))
+        org.junit.Assert.assertEquals("original secret", postDao.posts["post-1"]?.content)
+    }
+
+    @Test
+    fun foreignAuthor_cannotOverwriteExistingAuthorPost_evenAfterDeletion() = runBlocking {
+        val alicePostId = "alice-locked-post"
+        val origPacket = postPacket("Alice content", id = alicePostId)
+        assertTrue("Alice original post inserted", handler.handlePost(origPacket))
+
+        // Alice deletes her post
+        val delTs = 1_700_000_005_000L
+        val delSig = CryptoService.sign(
+            CryptoService.encodeForSigning(alicePostId, identity.publicKeyB64, delTs.toString()),
+            identity.privateKeyB64
+        )
+        val delPacket = NetworkPacket(
+            senderId = identity.publicKeyB64,
+            type = "DELETE_POST",
+            payload = Gson().toJsonTree(DeletePostPayload(alicePostId, identity.publicKeyB64, delTs, delSig))
+        )
+        val delResult = handler.handleDeletePost(delPacket)
+        assertTrue("Alice deleted her post", delResult)
+        assertTrue("Post must be marked orphaned", postDao.posts[alicePostId]?.isOrphaned == true)
+
+        // V06: Mallory attempts to POST using Alice's post ID after deletion
+        val mallory = CryptoService.generateIdentity("mallory")
+        val malloryTs = 1_700_000_010_000L
+        val mallorySig = CryptoService.sign(
+            CryptoService.encodeForSigning(alicePostId, mallory.publicKeyB64, "Mallory hijack", malloryTs.toString(), null, "public", null, null),
+            mallory.privateKeyB64
+        )
+        val malloryPost = PostPayload(
+            id = alicePostId, authorId = mallory.publicKeyB64, authorName = "mallory", authorPublicKey = mallory.publicKeyB64,
+            originNode = null, content = "Mallory hijack", timestamp = malloryTs, privacy = "public", signature = mallorySig
+        )
+        val malloryPacket = NetworkPacket(senderId = mallory.publicKeyB64, type = "POST", payload = Gson().toJsonTree(malloryPost))
+
+        handler.handlePost(malloryPacket)
+
+        // Post must NOT belong to Mallory!
+        val stored = postDao.posts[alicePostId]
+        assertEquals("Post author must remain Alice, not Mallory (V06)", identity.publicKeyB64, stored?.authorPublicKeyB64)
+        assertEquals("[Deleted]", stored?.content)
     }
 }

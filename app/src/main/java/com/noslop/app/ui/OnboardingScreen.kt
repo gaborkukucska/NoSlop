@@ -288,6 +288,10 @@ fun OnboardingScreen(
 
 @Composable
 fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
+    val needsRecovery = remember {
+        val repo = com.noslop.app.NoSlopApp.repository
+        kotlinx.coroutines.runBlocking { repo.getLocalIdentity() == null && repo.getAppSetting("identity_quarantined") == "true" }
+    }
     val context = LocalContext.current
     var showRestoreDialog by remember { mutableStateOf(false) }
     var mnemonicInput by remember { mutableStateOf("") }
@@ -322,6 +326,28 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(24.dp))
         
+        if (needsRecovery) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
+                border = BorderStroke(1.dp, DestructiveRed)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Identity Recovery Required".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "An unreadable or quarantined identity was detected. Restore your existing account from a backup or Word Cloud, or start fresh.".tr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextLight
+                    )
+                }
+            }
+        }
+
         Text(
             text = "Welcome to NoSlop".tr,
             style = MaterialTheme.typography.headlineMedium,

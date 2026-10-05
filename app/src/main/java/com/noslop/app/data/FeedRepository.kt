@@ -73,15 +73,16 @@ class FeedRepository(
     private var currentGeneration = 0L
     private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
-    fun cancelSync() {
-        syncScope.launch(kotlinx.coroutines.NonCancellable) {
-            syncMutex.withLock {
-                val deferred = activeSyncDeferred
-                activeSyncDeferred = null
-                ++currentGeneration
-                deferred?.cancel()
-                _feedBuildStatus.value = ""
-            }
+    suspend fun cancelSync() {
+        syncMutex.withLock {
+            val deferred = activeSyncDeferred
+            activeSyncDeferred = null
+            ++currentGeneration
+            deferred?.cancel()
+            _feedBuildStatus.value = ""
+            try {
+                deferred?.join()
+            } catch (_: Exception) {}
         }
     }
 
@@ -316,7 +317,7 @@ class FeedRepository(
 
             // --- Phase 1: Ramp-Up (Fast initial fetch only needed if database is empty) ---
             if (!hasExistingItems) {
-                val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+                val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Boolean>>()
 
                 val firstRss = rssSources.firstOrNull()
                 if (firstRss != null) {
@@ -343,7 +344,9 @@ class FeedRepository(
                     })
                 }
 
-                kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
+                val rampUpResults = kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
+                sourcesAttempted += rampUpResults.size
+                sourcesSucceeded += rampUpResults.count { it }
                 _feedBuildStatus.value = ""
             }
 
@@ -358,13 +361,8 @@ class FeedRepository(
                     kotlinx.coroutines.delay(250L)
                 }
                 sourcesAttempted++
-                try {
-                    fetchRssSource(source, allNegative)
-                    sourcesSucceeded++
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
-                }
+                val ok = fetchRssSource(source, allNegative)
+                if (ok) sourcesSucceeded++
             }
 
             for (category in activeCategories) {
@@ -375,13 +373,8 @@ class FeedRepository(
                     kotlinx.coroutines.delay(1200L)
                 }
                 sourcesAttempted++
-                try {
-                    fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
-                    sourcesSucceeded++
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
-                }
+                val ok = fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                if (ok) sourcesSucceeded++
             }
 
             for (creator in remainingCreators) {
@@ -391,13 +384,8 @@ class FeedRepository(
                     kotlinx.coroutines.delay(300L)
                 }
                 sourcesAttempted++
-                try {
-                    fetchCreatorVideos(creator)
-                    sourcesSucceeded++
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
-                }
+                val ok = fetchCreatorVideos(creator)
+                if (ok) sourcesSucceeded++
             }
 
             Logger.info(TAG, "Feed background synchronization completed. Succeeded: $sourcesSucceeded/$sourcesAttempted")
@@ -431,11 +419,11 @@ class FeedRepository(
         )
     }
 
-    private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {
+    private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>): Boolean {
         try {
             if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && TOR_BLOCKED_DOMAINS.any { source.url.contains(it) }) {
                 Logger.debug(TAG, "Skipping Tor-blocked RSS source ${source.title} while Route Clearnet via Tor is active")
-                return
+                return true
             }
             Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
             val items = FeedParser.fetchAndParse(source.url, source.id)
@@ -454,12 +442,15 @@ class FeedRepository(
                 feedDao.updateSource(source.copy(lastFetchedAt = System.currentTimeMillis(), unreadCount = unread))
                 Logger.info(TAG, "Fetched ${filteredItems.size} items for ${source.title}")
             }
+            return true
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.error(TAG, "Failed syncing source ${source.title}", e.message)
+            return false
         }
     }
 
-    private suspend fun fetchCreatorVideos(creator: String) {
+    private suspend fun fetchCreatorVideos(creator: String): Boolean {
         try {
             Logger.info(TAG, "Fetching latest videos for creator: $creator")
             var items = com.noslop.app.feeds.api.YouTubeInternalClient.searchVideos(creator, maxResults = 15, recentOnly = true)
@@ -484,8 +475,11 @@ class FeedRepository(
                     Logger.info(TAG, "Fetched ${filteredItems.size} videos for creator: $creator")
                 }
             }
+            return true
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.warn(TAG, "Failed fetching videos for creator $creator: ${e.message}")
+            return false
         }
     }
 
@@ -496,7 +490,7 @@ class FeedRepository(
         langPref: String,
         allNegative: List<String>,
         apiKeyRepo: ApiKeyRepository
-    ) {
+    ): Boolean {
         try {
             val keywords = preferencesRepository.getUserKeywordsForCategory(category).toMutableList()
 
@@ -539,8 +533,11 @@ class FeedRepository(
                     Logger.info(TAG, "API pipeline: fetched ${filteredApiItems.size} items for $category")
                 }
             }
+            return true
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.error(TAG, "API pipeline failed for $category", e.message)
+            return false
         }
     }
 

@@ -875,7 +875,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     allowMemberInvites = invite.allowMemberInvites,
                     allowMemberSelfRemove = invite.allowMemberSelfRemove,
                     avatarB64 = invite.avatarB64,
-                    memberHandlesJson = memberHandlesJson
+                    memberHandlesJson = memberHandlesJson,
+                    revision = invite.timestamp
                 )
                 db.groupChatDao().insertGroupChat(group)
                 db.appSettingDao().removeSetting("pending_group_invite_$groupId")
@@ -1127,20 +1128,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val wireAllowInvites = if (isAdmin) effectiveAllowInvites else null
         val wireAllowSelfRemove = if (isAdmin) effectiveAllowSelfRemove else null
 
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            groupId,
-            wireTitle ?: "",
-            signingKey.publicKeyB64,
-            timestamp.toString(),
-            sortedAdded,
-            sortedRemoved,
-            sortedBanned,
-            wireDesc ?: "",
-            wireAvatar ?: "",
-            wireAllowInvites?.toString() ?: "",
-            wireAllowSelfRemove?.toString() ?: ""
-        )
-        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         val allMembersForDetails = (newMembers + existing.adminPublicKeyB64).distinct()
         val memberDetailsMap = allMembersForDetails.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
@@ -1158,6 +1145,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
             } else null
         }.toMap()
+
+        val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+        val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
+
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupUpdatePayload(
+            groupId,
+            wireTitle,
+            signingKey.publicKeyB64,
+            timestamp,
+            sortedAdded,
+            sortedRemoved,
+            sortedBanned,
+            wireDesc,
+            wireAvatar,
+            wireAllowInvites,
+            wireAllowSelfRemove,
+            sortedDetails,
+            sortedHandles
+        )
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
 
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
@@ -2146,6 +2153,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val burnableKeys = getBurnableIdentity()
         val allLocalPosts = postDao.getAllPostsList()
         for (post in allLocalPosts) {
+            if (post.isOrphaned) continue // V08: Never reissue or overwrite tombstones
             val signingKey = when (post.authorPublicKeyB64) {
                 myKeys.publicKeyB64 -> myKeys
                 burnableKeys?.publicKeyB64 -> burnableKeys
@@ -2159,20 +2167,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             )
             if (!CryptoService.verify(canonicalPayload, post.signature, post.authorPublicKeyB64)) {
                 val newSig = CryptoService.sign(canonicalPayload, signingKey.privateKeyB64)
-                postDao.updatePostDetails(
+                // V08: Transactional compare-and-update on exact signature and timestamp read
+                val rows = postDao.updateSignatureIfUnchanged(
                     id = post.id,
-                    newContent = post.content,
-                    newTimestamp = post.timestamp,
-                    newSignature = newSig,
-                    authorAvatarB64 = post.authorAvatarB64,
-                    mediaUrl = post.mediaUrl,
-                    mediaType = post.mediaType,
-                    thumbnailB64 = post.thumbnailB64,
-                    mediaSize = post.mediaSize,
-                    privacy = post.privacy,
-                    clearnetUrl = post.clearnetUrl
+                    authorId = post.authorPublicKeyB64,
+                    oldSignature = post.signature,
+                    expectedTimestamp = post.timestamp,
+                    newSignature = newSig
                 )
-                Logger.info("REPOSITORY", "Re-issued canonical signature for local authored post ${post.id}")
+                if (rows > 0) {
+                    Logger.info("REPOSITORY", "Re-issued canonical signature for local authored post ${post.id}")
+                }
             }
         }
     }

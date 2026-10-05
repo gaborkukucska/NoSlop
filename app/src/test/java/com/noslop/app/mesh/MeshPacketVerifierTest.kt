@@ -98,7 +98,8 @@ class MeshPacketVerifierTest {
 
         val sPipe = "post-1|${alice.publicKeyB64}|edited|1700000000"
         val pPipe = EditPostPayload("post-1", alice.publicKeyB64, null, "edited", 1700000000L, sign(sPipe), privacy = "public")
-        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_POST", pPipe)))
+        // V04: Legacy pipe signatures on EDIT_POST are strictly rejected as INVALID
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("EDIT_POST", pPipe)))
     }
 
     @Test

@@ -310,4 +310,68 @@ class GroupMessageSecurityTest {
         )
         assertFalse(CryptoService.verify(canonicalWithInjectedFields, sig, admin.publicKeyB64))
     }
+
+    @Test
+    fun canonicalDirectoryStrings_injectiveEncoding_preventsDelimiterInjection() {
+        // V03: Test that delimiter characters in handles cannot trigger map structural collisions
+        val pubA = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        val pubB = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+        val map1 = mapOf(
+            pubA to GroupMemberInfo(handle = "x;${pubB}:E2:O2:y", encPublicKey = "E1", onionAddress = "O1")
+        )
+        val map2 = mapOf(
+            pubA to GroupMemberInfo(handle = "x", encPublicKey = "E1", onionAddress = "O1"),
+            pubB to GroupMemberInfo(handle = "y", encPublicKey = "E2", onionAddress = "O2")
+        )
+
+        val s1 = canonicalMemberDetailsString(map1)
+        val s2 = canonicalMemberDetailsString(map2)
+        assertNotEquals("Injective directory encoding must never collide on delimiter characters (V03)", s1, s2)
+    }
+
+    @Test
+    fun groupUpdate_withAlteredMemberDetails_failsVerification() {
+        val details = mapOf(
+            alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = alice.encPublicKeyB64, onionAddress = "alice.onion")
+        )
+        val sortedDetails = canonicalMemberDetailsString(details)
+        val payloadToSign = canonicalGroupUpdatePayload(
+            groupId, "Updated Title", admin.publicKeyB64, 1000L,
+            "", "", "", "Desc", "avatar", true, true,
+            sortedDetails, ""
+        )
+        val sig = CryptoService.sign(payloadToSign, admin.privateKeyB64)
+
+        // V03: Mallory tampers with Alice's encryption key in GROUP_UPDATE directory
+        val tamperedDetails = mapOf(
+            alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = mallory.encPublicKeyB64, onionAddress = "alice.onion")
+        )
+        val tamperedDetailsStr = canonicalMemberDetailsString(tamperedDetails)
+        val tamperedPayload = canonicalGroupUpdatePayload(
+            groupId, "Updated Title", admin.publicKeyB64, 1000L,
+            "", "", "", "Desc", "avatar", true, true,
+            tamperedDetailsStr, ""
+        )
+        assertFalse("Tampered member details in GROUP_UPDATE must fail signature verification (V03)", CryptoService.verify(tamperedPayload, sig, admin.publicKeyB64))
+    }
+
+    @Test
+    fun groupSync_withAlteredMemberDetails_failsVerification() {
+        val details = mapOf(
+            alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = alice.encPublicKeyB64, onionAddress = "alice.onion")
+        )
+        val sortedDetails = canonicalMemberDetailsString(details)
+        val groupJson = gson.toJson(mapOf("groupId" to groupId))
+        val payloadToSign = canonicalGroupSyncPayload(groupId, groupJson, 1000L, sortedDetails)
+        val sig = CryptoService.sign(payloadToSign, admin.privateKeyB64)
+
+        // V03: Mallory tampers with member details in GROUP_SYNC
+        val tamperedDetails = mapOf(
+            alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = mallory.encPublicKeyB64, onionAddress = "alice.onion")
+        )
+        val tamperedDetailsStr = canonicalMemberDetailsString(tamperedDetails)
+        val tamperedPayload = canonicalGroupSyncPayload(groupId, groupJson, 1000L, tamperedDetailsStr)
+        assertFalse("Tampered member details in GROUP_SYNC must fail signature verification (V03)", CryptoService.verify(tamperedPayload, sig, admin.publicKeyB64))
+    }
 }

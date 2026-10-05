@@ -124,7 +124,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | `groupId|id|content|timestamp|senderId` | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage` (Keystore encrypted at rest); legacy receive-only wire support with strict signature and group membership verification |
 | 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
 | 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Replies with `GROUP_SYNC` containing full group schema and `memberDetails` |
-| 30 | `GROUP_SYNC` | `GroupSyncPayload` | `groupId|groupChatJson|timestamp` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
+| 30 | `GROUP_SYNC` | `GroupSyncPayload` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
 | 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) (dual-mode: encodeForSigning & pipe in verifier & handler) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
 | 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` (dual-mode: encodeForSigning & pipe) | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
 | 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
@@ -502,7 +502,7 @@ signer is recovered and what each role is permitted to change.
 | `group_chat_json` | String | Serialized GroupChat JSON |
 | `member_details`? | Map<String, GroupMemberInfo> | Directory of member handles, onion addresses, and X25519 encryption keys |
 | `timestamp` | Long | Epoch milliseconds |
-| `signature` | String | Signature over `groupId|groupChatJson|timestamp` |
+| `signature` | String | Signature over `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` |
 
 ### EDIT_COMMENT
 **Type:** `EDIT_COMMENT` · class `EditCommentPayload`
@@ -785,12 +785,13 @@ and still accurate.
 | `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
 | `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
-| `EDIT_POST` | Canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Complete signed state is atomically persisted to database. |
+| `EDIT_POST` | Canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy fallbacks strictly eliminated; complete signed state is atomically persisted to database. |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) (supporting encodeForSigning and pipe) |
 | `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey, sortedMemberDetails, sortedMemberHandles)`. Legacy 7-field fallback strictly restricted to admin self-signed payloads with empty unsigned fields. |
-| `GROUP_UPDATE` | Canonical 11-field `encodeForSigning(groupId, wireTitle, signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, sortedBanned, wireDesc, wireAvatar, wireAllowInvites, wireAllowSelfRemove)` — signer recovered by trial verification against group members |
+| `GROUP_UPDATE` | Canonical 13-field `canonicalGroupUpdatePayload(groupId, wireTitle, signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, sortedBanned, wireDesc, wireAvatar, wireAllowInvites, wireAllowSelfRemove, sortedMemberDetails, sortedMemberHandles)` — signer recovered by trial verification against group members |
+| `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |

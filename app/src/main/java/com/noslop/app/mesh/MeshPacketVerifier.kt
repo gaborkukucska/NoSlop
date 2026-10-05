@@ -149,16 +149,7 @@ object MeshPacketVerifier {
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 effectivePrivacy, p.mediaId, p.clearnetUrl
             )
-            val pipe = "${p.postId}|${p.authorId}|${p.content}|${p.timestamp}"
-            val sig = p.signature
-            val signer = p.authorId
-            val isLegacySafe = effectivePrivacy == "public" && p.mediaId == null && p.mediaMetadata == null && p.clearnetUrl == null
-            val matched = when {
-                sig != null && com.noslop.app.crypto.CryptoService.verify(encCanonical, sig, signer) -> encCanonical
-                isLegacySafe && sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer) -> pipe
-                else -> encCanonical
-            }
-            Signed(matched, sig, signer)
+            Signed(encCanonical, p.signature, p.authorId)
         }
 
         "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
@@ -361,7 +352,7 @@ object MeshPacketVerifier {
                 // U03: 7-field legacy invite ONLY permitted if admin self-signed AND all unsigned fields are empty
                 val unsignedFieldsEmpty = p.description.isNullOrEmpty() && p.avatarB64.isNullOrEmpty() &&
                     p.adminOnion.isNullOrEmpty() && p.adminEncPublicKey.isNullOrEmpty() &&
-                    p.memberDetails.isNullOrEmpty()
+                    p.memberDetails.isNullOrEmpty() && p.memberHandles.isNullOrEmpty()
                 if (candidate == p.adminPublicKeyB64 && unsignedFieldsEmpty) {
                     val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
                         p.groupId, p.title, candidate, p.timestamp.toString(),

@@ -351,6 +351,19 @@ object CryptoService {
         }
     }
 
+    fun verifyX25519Keypair(publicB64: String, privateB64: String): Boolean {
+        return try {
+            val (ephPub, ephPriv) = generateX25519Keypair()
+            val probePayload = "noslop_x25519_probe_${System.currentTimeMillis()}"
+            val (ciphertext, nonce) = encryptDM(probePayload, publicB64, ephPriv)
+            val decrypted = decryptDM(ciphertext, nonce, ephPub, privateB64)
+            decrypted == probePayload
+        } catch (e: Exception) {
+            Logger.warn(TAG, "X25519 keypair verification failed: ${e.message}")
+            false
+        }
+    }
+
     fun getRawEd25519Seed(privKeyB64: String?): String? {
         if (privKeyB64 == null) return null
         return try {

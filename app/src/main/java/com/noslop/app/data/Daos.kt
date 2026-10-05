@@ -170,6 +170,15 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
+    @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
+    suspend fun getTombstone(key: String): String?
+
+    @Query("INSERT OR REPLACE INTO app_settings (`key`, `value`) VALUES (:key, :value)")
+    suspend fun setTombstone(key: String, value: String)
+
+    @Query("UPDATE mesh_posts SET signature = :newSignature WHERE id = :id AND authorPublicKeyB64 = :authorId AND isOrphaned = 0 AND signature = :oldSignature AND timestamp = :expectedTimestamp")
+    suspend fun updateSignatureIfUnchanged(id: String, authorId: String, oldSignature: String, expectedTimestamp: Long, newSignature: String): Int
+
     @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, authorAvatarB64 = :authorAvatarB64, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy, clearnetUrl = :clearnetUrl WHERE id = :id")
     suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, authorAvatarB64: String?, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String, clearnetUrl: String?)
 
@@ -177,15 +186,20 @@ interface PostDao {
     suspend fun insertPostSafely(post: MeshPost): Boolean {
         val existing = getPostById(post.id)
         if (existing != null) {
-            if (existing.isOrphaned) {
-                // U07: Tombstones only suppress subsequent posts by the SAME author who signed the deletion.
-                // A foreign author cannot reserve another author's post ID with a tombstone.
-                if (existing.authorPublicKeyB64 == post.authorPublicKeyB64) {
-                    return false
-                }
-            } else {
-                if (existing.authorPublicKeyB64 != post.authorPublicKeyB64) return false
-                if (existing.timestamp >= post.timestamp) return false
+            // V06: Post IDs belong to their authentic author; foreign authors can never overwrite a known post, active or orphaned!
+            if (existing.authorPublicKeyB64 != post.authorPublicKeyB64) return false
+            if (existing.isOrphaned) return false
+            if (existing.timestamp > post.timestamp) return false
+            if (existing.timestamp == post.timestamp) {
+                // V08: Allow signature-only upgrade for historical canonical reissue on identical timestamp
+                if (existing.signature == post.signature) return false
+            }
+        } else {
+            // V06: Check author-scoped tombstone for delete-before-create delivery
+            val tombstoneKey = "tombstone_${post.authorPublicKeyB64}_${post.id}"
+            val tombstoneTs = getTombstone(tombstoneKey)?.toLongOrNull()
+            if (tombstoneTs != null && tombstoneTs >= post.timestamp) {
+                return false
             }
         }
         insertPost(post)
@@ -217,6 +231,9 @@ interface PostDao {
 
     @Transaction
     suspend fun deletePostSafely(id: String, authorId: String, timestamp: Long): Boolean {
+        // V06: Author-scoped tombstone stored durably in app_settings
+        val tombstoneKey = "tombstone_${authorId}_${id}"
+        setTombstone(tombstoneKey, timestamp.toString())
         val existing = getPostById(id)
         if (existing != null) {
             if (existing.authorPublicKeyB64 != authorId) return false
@@ -224,22 +241,8 @@ interface PostDao {
             if (existing.timestamp > timestamp) return false
             markPostOrphaned(id)
             return true
-        } else {
-            // S09: Durable tombstone for out-of-order delete-before-create delivery
-            insertPost(
-                MeshPost(
-                    id = id,
-                    authorPublicKeyB64 = authorId,
-                    authorHandle = "",
-                    authorTripcode = "",
-                    content = "[Deleted]",
-                    timestamp = timestamp,
-                    signature = "",
-                    isOrphaned = true
-                )
-            )
-            return true
         }
+        return true
     }
 }
 

@@ -164,7 +164,43 @@ class FakePostDao : PostDao {
         posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId }
             .forEach { posts[it.id] = it.copy(deletionBroadcasts = 0) }
     }
-    override suspend fun markPostOrphaned(id: String) {}
+    override suspend fun markPostOrphaned(id: String) {
+        posts[id]?.let {
+            posts[id] = it.copy(
+                isOrphaned = true,
+                content = "[Deleted]",
+                mediaUrl = null,
+                thumbnailB64 = null
+            )
+        }
+    }
+    val tombstones = mutableMapOf<String, String>()
+
+    override suspend fun getTombstone(key: String): String? = tombstones[key]
+
+    override suspend fun setTombstone(key: String, value: String) {
+        tombstones[key] = value
+    }
+
+    override suspend fun updateSignatureIfUnchanged(
+        id: String,
+        authorId: String,
+        oldSignature: String,
+        expectedTimestamp: Long,
+        newSignature: String
+    ): Int {
+        val existing = posts[id] ?: return 0
+        if (existing.authorPublicKeyB64 == authorId &&
+            !existing.isOrphaned &&
+            existing.signature == oldSignature &&
+            existing.timestamp == expectedTimestamp
+        ) {
+            posts[id] = existing.copy(signature = newSignature)
+            return 1
+        }
+        return 0
+    }
+
     override suspend fun updatePostDetails(
         id: String,
         newContent: String,
