@@ -124,7 +124,11 @@ data class PeerHandshakePayload(
     @SerializedName("from_home_node") val fromHomeNode: String,
     @SerializedName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
     val timestamp: Long,
-    val signature: String? = null
+    val signature: String? = null,
+    @SerializedName("request_nonce") val requestNonce: String? = null,
+    @SerializedName("in_reply_to_nonce") val inReplyToNonce: String? = null,
+    @SerializedName("target_user_id") val targetUserId: String? = null,
+    val version: Int = 1
 )
 
 @Keep
@@ -149,11 +153,6 @@ data class AnnounceDiscoverablePayload(
     val signature: String
 )
 
-@Keep
-data class AnnounceInvidiousInstancePayload(
-    @SerializedName("instance_url") val instanceUrl: String,
-    val timestamp: Long
-)
 
 @Keep
 data class ReactionPayload(
@@ -638,9 +637,6 @@ data class NetworkPacket(
         Gson().fromJson(payload, AnnounceDiscoverablePayload::class.java)
     } else null
 
-    fun getAnnounceInvidiousInstancePayload(): AnnounceInvidiousInstancePayload? = if (type == "ANNOUNCE_INVIDIOUS_INSTANCE" && payload != null) {
-        Gson().fromJson(payload, AnnounceInvidiousInstancePayload::class.java)
-    } else null
 
     fun getFollowPayload(): FollowPayload? = if ((type == "FOLLOW" || type == "UNFOLLOW") && payload != null) {
         Gson().fromJson(payload, FollowPayload::class.java)

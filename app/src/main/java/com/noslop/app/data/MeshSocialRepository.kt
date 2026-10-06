@@ -701,6 +701,7 @@ class MeshSocialRepository(
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         
+        val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
         val newPeer = Peer(
             publicKeyB64 = publicKeyB64,
             handle = cleanHandle,
@@ -709,7 +710,9 @@ class MeshSocialRepository(
             encPublicKeyB64 = encPublicKeyB64,
             isTrusted = false, // We requested them, they are pending until they accept
             isTemporary = useBurnableIdentity,
-            lastSeenAt = System.currentTimeMillis()
+            lastSeenAt = System.currentTimeMillis(),
+            relationship = "OUTGOING_PENDING",
+            pendingNonce = nonce
         )
         peerDao.insertPeer(newPeer)
 
@@ -723,6 +726,7 @@ class MeshSocialRepository(
             }
             val userProfile = getUserProfile()
             val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
+            val now = System.currentTimeMillis()
 
             val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
@@ -733,12 +737,22 @@ class MeshSocialRepository(
                 bio = userProfile.bio.takeIf { it.isNotBlank() },
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                timestamp = System.currentTimeMillis(),
-                signature = null
+                timestamp = now,
+                signature = null,
+                requestNonce = nonce,
+                targetUserId = publicKeyB64,
+                version = 2
             )
-            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                myKeys.publicKeyB64, reqPay.fromUsername, myKeys.onionAddress, reqPay.timestamp.toString(),
-                avatarB64, reqPay.bio.takeIf { !it.isNullOrBlank() }
+            val payloadToSign = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
+                fromUserId = myKeys.publicKeyB64,
+                fromUsername = reqPay.fromUsername,
+                fromHomeNode = myKeys.onionAddress,
+                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                targetUserId = publicKeyB64,
+                nonce = nonce,
+                timestamp = now,
+                authorAvatarB64 = avatarB64,
+                bio = reqPay.bio
             )
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
@@ -759,7 +773,8 @@ class MeshSocialRepository(
     suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
         val isTemp = peer.isTemporary || contactIdentity == "burnable"
-        peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = isTemp))
+        val replyNonce = peer.pendingNonce ?: ""
+        peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = isTemp, relationship = "ACCEPTED", pendingNonce = null))
         com.noslop.app.mesh.GossipService.recordSendSuccess(peer.onionAddress)
         _incomingRequestFlow.value = null
         
@@ -769,6 +784,7 @@ class MeshSocialRepository(
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
+        val now = System.currentTimeMillis()
         if (myKeys != null) {
             val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
@@ -779,12 +795,22 @@ class MeshSocialRepository(
                 bio = userProfile.bio.takeIf { it.isNotBlank() },
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                timestamp = System.currentTimeMillis(),
-                signature = null
+                timestamp = now,
+                signature = null,
+                inReplyToNonce = replyNonce,
+                targetUserId = peer.publicKeyB64,
+                version = 2
             )
-            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                myKeys.publicKeyB64, handshakePay.fromUsername, myKeys.onionAddress, handshakePay.timestamp.toString(),
-                avatarB64, handshakePay.bio.takeIf { !it.isNullOrBlank() }
+            val payloadToSign = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
+                fromUserId = myKeys.publicKeyB64,
+                fromUsername = handshakePay.fromUsername,
+                fromHomeNode = myKeys.onionAddress,
+                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                targetUserId = peer.publicKeyB64,
+                nonce = replyNonce,
+                timestamp = now,
+                authorAvatarB64 = avatarB64,
+                bio = handshakePay.bio
             )
             val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()

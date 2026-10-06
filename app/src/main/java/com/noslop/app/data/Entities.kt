@@ -64,7 +64,10 @@ data class Peer(
     val isCreator: Boolean = false,
     val fundMeLink: String? = null,
     val bio: String? = null,
-    val isFollowing: Boolean = false
+    val isFollowing: Boolean = false,
+    val relationship: String = "NONE", // NONE, OUTGOING_PENDING, INCOMING_PENDING, ACCEPTED, BLOCKED
+    val pendingNonce: String? = null,
+    val pendingEncKey: String? = null
 )
 
 @Entity(tableName = "mesh_posts")

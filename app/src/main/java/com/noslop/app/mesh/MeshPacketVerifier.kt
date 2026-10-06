@@ -242,6 +242,24 @@ object MeshPacketVerifier {
                 packet.getUserHandshakePayload()
             }
             p?.let {
+                val sig = packet.signature ?: it.signature
+                val signer = it.fromUserId
+                val nonce = it.requestNonce ?: it.inReplyToNonce ?: ""
+                val targetUser = it.targetUserId ?: packet.targetUserId ?: ""
+                val encPub = it.fromEncryptionPublicKey ?: ""
+
+                val v2Payload = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
+                    fromUserId = it.fromUserId,
+                    fromUsername = it.fromUsername,
+                    fromHomeNode = it.fromHomeNode,
+                    fromEncryptionPublicKey = encPub,
+                    targetUserId = targetUser,
+                    nonce = nonce,
+                    timestamp = it.timestamp,
+                    authorAvatarB64 = it.authorAvatarB64,
+                    bio = it.bio
+                )
+
                 val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
                     it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString(),
                     it.authorAvatarB64, it.bio.takeIf { b -> !b.isNullOrBlank() }
@@ -253,9 +271,9 @@ object MeshPacketVerifier {
                 if (it.authorAvatarB64 != null) pipePayload += "|${it.authorAvatarB64}"
                 if (!it.bio.isNullOrBlank()) pipePayload += "|${it.bio}"
 
-                val sig = packet.signature ?: it.signature
-                val signer = it.fromUserId
-                if (sig != null && CryptoService.verify(pipePayload, sig, signer)) {
+                if (sig != null && CryptoService.verify(v2Payload, sig, signer)) {
+                    Signed(v2Payload, sig, signer)
+                } else if (sig != null && CryptoService.verify(pipePayload, sig, signer)) {
                     Signed(pipePayload, sig, signer)
                 } else if (sig != null && CryptoService.verify(encPayload4, sig, signer)) {
                     Signed(encPayload4, sig, signer)

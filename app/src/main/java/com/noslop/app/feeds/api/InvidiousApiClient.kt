@@ -68,14 +68,6 @@ object InvidiousApiClient {
         "https://pipedapi.drgns.space"
     )
 
-    private val gossipedInstances = ConcurrentHashMap.newKeySet<String>()
-
-    fun addGossipedInstance(url: String) {
-        if (gossipedInstances.add(url)) {
-            Logger.info(TAG, "Added new gossiped instance: $url")
-        }
-    }
-
     private val instanceFailureTime = ConcurrentHashMap<String, Long>()
     private const val INSTANCE_COOLDOWN_MS = 5 * 60_000L
 
@@ -207,7 +199,7 @@ object InvidiousApiClient {
     }
 
     private suspend fun healthyInvidiousInstances(): List<String> = withContext(Dispatchers.IO) {
-        val all = (INVIDIOUS_INSTANCES + gossipedInstances).distinct()
+        val all = INVIDIOUS_INSTANCES.distinct()
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         val usable = if (isTor) {
             all.filter { it.contains(".onion") } + all.filter { !it.contains(".onion") }

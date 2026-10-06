@@ -239,7 +239,10 @@ object GossipService {
     private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
     private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
     var pushPacketToHub: (suspend (NetworkPacket) -> Boolean)? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Logger.error(TAG, "Uncaught coroutine exception in GossipService: ${throwable.message}", throwable.stackTraceToString())
+    }
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + coroutineExceptionHandler)
 
     private var checkIsLocalUser: (suspend (String) -> Boolean)? = null
 
@@ -399,8 +402,8 @@ object GossipService {
 
         Logger.debug(TAG, "processIncoming: Analyzing ${packet.type} packet $packetId from ${senderId.take(16)}... (hops=${packet.hops ?: DEFAULT_MAX_HOPS})")
 
-        // 1. TTL Check — drop if expired
-        val hops = packet.hops ?: DEFAULT_MAX_HOPS
+        // 1. TTL Check — drop if expired; cap incoming hops to DEFAULT_MAX_HOPS (C09)
+        val hops = (packet.hops ?: DEFAULT_MAX_HOPS).coerceIn(0, DEFAULT_MAX_HOPS)
         if (hops <= 0) {
             Logger.warn(TAG, "Dropping packet $packetId — TTL expired (hops == 0)")
             return false
@@ -465,7 +468,6 @@ object GossipService {
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT" || packet.type == "PEER_REMOVED"
         val isDeletePacket = packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
         val isFollowPacket = packet.type == "FOLLOW" || packet.type == "UNFOLLOW"
-        val isInvidiousAnnounce = packet.type == "ANNOUNCE_INVIDIOUS_INSTANCE"
         val isDirectedMessageForUs = packet.type == "MESSAGE" && !packet.targetUserId.isNullOrBlank() && 
             (checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64))
 
@@ -499,7 +501,7 @@ object GossipService {
         }
 
         // Dedicated rate limit for unauthenticated announcements, follows, & identity updates (5 per 60s per sender)
-        if (isDiscoverable || isIdentityUpdate || isFollowPacket || isInvidiousAnnounce) {
+        if (isDiscoverable || isIdentityUpdate || isFollowPacket) {
             val now = System.currentTimeMillis()
             val limitList = announcementRateLimits.getOrPut(senderId) { ArrayList() }
             synchronized(limitList) {
@@ -531,10 +533,13 @@ object GossipService {
                     true
                 } else {
                     groupDao?.getAllGroupChatsList()?.any { group ->
+                        val members: List<String> = try {
+                            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+                        } catch (_: Exception) { emptyList() }
                         group.adminPublicKeyB64 == senderId || 
-                        group.membersJson.contains(senderId) ||
+                        senderId in members ||
                         pDao?.getPeerByPublicKey(senderId)?.let { p ->
-                            group.membersJson.contains(p.publicKeyB64) || group.adminPublicKeyB64 == p.publicKeyB64
+                            p.publicKeyB64 in members || group.adminPublicKeyB64 == p.publicKeyB64
                         } == true
                     } == true
                 }
@@ -556,7 +561,7 @@ object GossipService {
             }
         }
 
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isInvidiousAnnounce && !isDirectedMessageForUs) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isDirectedMessageForUs) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
@@ -879,7 +884,7 @@ object GossipService {
             return
         }
 
-        val currentHops = packet.hops ?: DEFAULT_MAX_HOPS
+        val currentHops = (packet.hops ?: DEFAULT_MAX_HOPS).coerceIn(0, DEFAULT_MAX_HOPS)
         if (currentHops <= 1) {
             return // Will expire on next hop
         }

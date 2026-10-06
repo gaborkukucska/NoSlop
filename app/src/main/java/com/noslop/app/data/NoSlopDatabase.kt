@@ -28,7 +28,7 @@ import androidx.room.RoomDatabase
         GroupChat::class,
         PendingGroupMessage::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = true
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -223,6 +223,15 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_16_17 = object : androidx.room.migration.Migration(16, 17) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE peers ADD COLUMN relationship TEXT NOT NULL DEFAULT 'NONE'")
+                database.execSQL("ALTER TABLE peers ADD COLUMN pendingNonce TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE peers ADD COLUMN pendingEncKey TEXT DEFAULT NULL")
+                database.execSQL("UPDATE peers SET relationship = 'ACCEPTED' WHERE isTrusted = 1")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -231,7 +240,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
                 .build()
                 .also { INSTANCE = it }
             }

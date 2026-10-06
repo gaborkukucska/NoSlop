@@ -1,6 +1,8 @@
+// FILE: app/src/test/java/com/noslop/app/mesh/GossipServiceTest.kt
 package com.noslop.app.mesh
 
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -8,23 +10,7 @@ import org.junit.Test
 
 /**
  * Behavior-locking tests for the gossip firewall pipeline in [GossipService.processIncoming]:
- * TTL (hops) expiry, duplicate suppression (bounded LRU), and per-sender rate limiting.
- *
- * WHY THIS FILE EXISTS:
- * These three guards are what stop the mesh from looping packets forever, reprocessing duplicates,
- * and being flooded by a single peer. They are protocol-defining behavior — a cross-platform node
- * MUST enforce the same drops or it will either melt the network or diverge from peers. We pin the
- * exact thresholds (DEFAULT_MAX_HOPS=6, dedup cap 1000 / evict 100, 20 packets / 10s / sender) here.
- *
- * WHY no Robolectric: `processIncoming` touches no `android.util.Base64`; its only Android dependency
- * is `Logger` -> `android.util.Log`, which is neutralized by `unitTests.isReturnDefaultValues`.
- *
- * WHY null deps: with `peerDao`/`transport` never initialized, the firewall step (needs `peerDao`)
- * and the forwarding step (needs `transport`) short-circuit harmlessly, so each call exercises ONLY
- * the TTL -> dedup -> rate-limit pipeline we want to assert.
- *
- * WHY reflection reset: [GossipService] is a singleton `object` with process-wide mutable state
- * (`processedPacketIds`, `senderRateLimits`). We clear it before each test for isolation.
+ * TTL (hops) expiry and capping, duplicate suppression (bounded LRU), and per-sender rate limiting.
  */
 class GossipServiceTest {
 
@@ -73,9 +59,43 @@ class GossipServiceTest {
 
     @Test
     fun ttl_nullHopsDefaultsToMaxAndSurvives() = runBlocking {
-        // WHY: a missing `hops` field defaults to DEFAULT_MAX_HOPS (6), so it is NOT treated as expired.
         assertTrue("null hops defaults to max and survives",
             GossipService.processIncoming(post("ttl-null", "s-ttl-null", hops = null)))
+    }
+
+    @Test
+    fun ttl_excessiveHopsAreCappedToMaxOnForwarding() = runBlocking {
+        val prevEnforce = MeshPacketVerifier.enforce
+        MeshPacketVerifier.enforce = false
+        try {
+            val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+            val friendPeer = com.noslop.app.data.Peer("friend-key", "", "", "friend.onion", isTrusted = true)
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("trusted-sender") } returns friendPeer
+            io.mockk.coEvery { mockDao.getAllPeersList() } returns listOf(friendPeer)
+
+            val mockRepo = io.mockk.mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
+            io.mockk.coEvery { mockRepo.getAppSetting("hub_deployment_status") } returns null
+
+            val forwardedPackets = mutableListOf<NetworkPacket>()
+            val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
+            io.mockk.every { mockTx.repository } returns mockRepo
+            io.mockk.coEvery { mockTx.sendPacket(any(), any(), capture(forwardedPackets)) } returns true
+
+            GossipService.initialize(mockDao, mockTx, "local-key")
+
+            // Packet arrives with excessive hops (2,000,000,000)
+            val excessiveHopsPacket = post("excessive-hops", "trusted-sender", hops = 2_000_000_000)
+            GossipService.processIncoming(excessiveHopsPacket)
+
+            // Let background forward run
+            kotlinx.coroutines.delay(100)
+
+            assertTrue("Packet should have been forwarded", forwardedPackets.isNotEmpty())
+            val forwarded = forwardedPackets.first()
+            assertEquals("Forwarded hops must be capped at DEFAULT_MAX_HOPS - 1 (5)", 5, forwarded.hops)
+        } finally {
+            MeshPacketVerifier.enforce = prevEnforce
+        }
     }
 
     // --- Dedup ---
@@ -96,17 +116,12 @@ class GossipServiceTest {
 
     @Test
     fun dedup_evictsOldestWhenSetIsFull() = runBlocking {
-        // Fill the dedup set to its 1000-id cap, each from a UNIQUE sender so rate limiting never fires.
         for (i in 0 until 1000) {
             assertTrue(GossipService.processIncoming(post("p$i", "sender-$i")))
         }
-        // The 1001st distinct packet trips the cap and evicts the oldest 100 ids (p0..p99).
         assertTrue(GossipService.processIncoming(post("trigger", "sender-trigger")))
-
-        // p0 was evicted -> it is no longer "seen" and processes again.
         assertTrue("evicted oldest id is reprocessable",
             GossipService.processIncoming(post("p0", "sender-0")))
-        // p500 is still within the retained window -> still suppressed as a duplicate.
         assertFalse("a still-retained id stays deduped",
             GossipService.processIncoming(post("p500", "sender-500")))
     }
@@ -116,12 +131,10 @@ class GossipServiceTest {
     @Test
     fun rateLimit_blocks21stPacketFromSameSenderInWindow() = runBlocking {
         val sender = "flooder"
-        // 20 distinct-id packets from one sender are allowed within the 10s window.
         for (i in 0 until 20) {
             assertTrue("packet $i within limit",
                 GossipService.processIncoming(post("rl-$i", sender)))
         }
-        // The 21st (distinct id, so not a dedup drop) exceeds 20/10s and is dropped.
         assertFalse("21st packet from same sender is rate-limited",
             GossipService.processIncoming(post("rl-20", sender)))
     }
@@ -134,7 +147,6 @@ class GossipServiceTest {
         }
         assertFalse("noisy sender is now limited",
             GossipService.processIncoming(post("n-20", noisy)))
-        // A different sender is unaffected by the noisy peer's limit.
         assertTrue("a quiet sender still passes",
             GossipService.processIncoming(post("q-0", "quiet")))
     }
@@ -155,7 +167,6 @@ class GossipServiceTest {
         assertFalse("Untrusted sender dropped for POST", GossipService.processIncoming(post("fw-2", "untrusted")))
         assertFalse("Unknown sender dropped for POST", GossipService.processIncoming(post("fw-3", "unknown")))
 
-        // Connection packets should bypass trust check
         val connReq = NetworkPacket(id = "fw-4", hops = 6, senderId = "unknown", type = "CONNECTION_REQUEST")
         assertTrue("CONNECTION_REQUEST allowed from unknown sender", GossipService.processIncoming(connReq))
     }
@@ -166,11 +177,8 @@ class GossipServiceTest {
         MeshPacketVerifier.enforce = false
         try {
             val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
-            // Trusted direct friend
             io.mockk.coEvery { mockDao.getPeerByPublicKey("direct-friend") } returns com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, isTemporary = false, isCreator = false)
-            // Temporary contact
             io.mockk.coEvery { mockDao.getPeerByPublicKey("temp-contact") } returns com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, isTemporary = true, isCreator = false)
-            // Creator node
             io.mockk.coEvery { mockDao.getPeerByPublicKey("creator-node") } returns com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, isTemporary = false, isCreator = true)
 
             val mockRepo = io.mockk.mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
@@ -233,7 +241,6 @@ class GossipServiceTest {
 
         GossipService.broadcast(friendsPacket)
 
-        // Allow launched coroutines on Dispatchers.IO to complete
         var waited = 0
         while (!sentOnions.contains("friend.onion") && waited < 1500) {
             kotlinx.coroutines.delay(25)
@@ -258,7 +265,6 @@ class GossipServiceTest {
             checkIsLocalUser = { it == "local-key" }
         )
 
-        // 10 packets within 60s are allowed
         for (i in 0 until 10) {
             val dmPacket = NetworkPacket(
                 id = "dm-ok-$i", hops = 1, senderId = "untrusted-spammer", targetUserId = "local-key",
@@ -267,7 +273,6 @@ class GossipServiceTest {
             assertTrue("DM $i within rate limit", GossipService.processIncoming(dmPacket))
         }
 
-        // 11th packet from untrusted sender should be blocked by dedicated DM rate limit
         val dmExcess = NetworkPacket(
             id = "dm-excess", hops = 1, senderId = "untrusted-spammer", targetUserId = "local-key",
             type = "MESSAGE", payload = com.google.gson.JsonObject()
@@ -294,8 +299,6 @@ class GossipServiceTest {
         io.mockk.coEvery { mockDao.getPeerByPublicKey("trusted") } returns com.noslop.app.data.Peer("trusted", "", "", "", isTrusted = true)
         
         val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
-        
-        // Setup strict filters
         val strictFilters = com.noslop.app.data.MeshFilterSettings(
             allowIncomingTextPosts = false,
             allowIncomingClearnetShares = false,
@@ -308,7 +311,7 @@ class GossipServiceTest {
             transport = mockTx,
             localPublicKeyB64 = "local-key",
             getMeshFilterSettings = { strictFilters },
-            checkEntityExists = { _, _ -> false } // No anchors exist
+            checkEntityExists = { _, _ -> false }
         )
 
         val reactionPacket = NetworkPacket(

@@ -1,3 +1,4 @@
+// FILE: app/src/androidTest/java/com/noslop/app/data/MigrationTest.kt
 package com.noslop.app.data
 
 import android.content.ContentValues
@@ -101,5 +102,69 @@ class MigrationTest {
         } finally {
             GroupMessageCrypto.testKeyProviderOverride = null
         }
+    }
+
+    @Test
+    fun migrate16To17_addsRelationshipAndNonces() {
+        // Create database at version 16
+        var db = helper.createDatabase(TEST_DB, 16)
+
+        // Seed peer rows: one trusted contact, one untrusted contact
+        val trustedPeer = ContentValues().apply {
+            put("publicKeyB64", "trusted_pub_key_123")
+            put("handle", "Alice")
+            put("tripcode", "alice1")
+            put("onionAddress", "alice.onion")
+            put("encPublicKeyB64", "alice_enc_pub")
+            put("isTrusted", 1)
+            put("isOnline", 0)
+            put("lastSeenAt", 1700000000L)
+            put("isTemporary", 0)
+            put("isDiscoverable", 0)
+            put("isCreator", 0)
+            put("isFollowing", 0)
+        }
+        val untrustedPeer = ContentValues().apply {
+            put("publicKeyB64", "untrusted_pub_key_456")
+            put("handle", "Bob")
+            put("tripcode", "bob123")
+            put("onionAddress", "bob.onion")
+            put("encPublicKeyB64", "bob_enc_pub")
+            put("isTrusted", 0)
+            put("isOnline", 0)
+            put("lastSeenAt", 1700000000L)
+            put("isTemporary", 0)
+            put("isDiscoverable", 0)
+            put("isCreator", 0)
+            put("isFollowing", 0)
+        }
+        db.insert("peers", SQLiteDatabase.CONFLICT_REPLACE, trustedPeer)
+        db.insert("peers", SQLiteDatabase.CONFLICT_REPLACE, untrustedPeer)
+        db.close()
+
+        // Run migration 16 -> 17
+        db = helper.runMigrationsAndValidate(TEST_DB, 17, true, NoSlopDatabase.MIGRATION_16_17)
+
+        // Verify trusted peer has relationship = 'ACCEPTED'
+        val cursorTrusted = db.query(
+            "SELECT relationship, pendingNonce, pendingEncKey FROM peers WHERE publicKeyB64 = ?",
+            arrayOf("trusted_pub_key_123")
+        )
+        assertTrue(cursorTrusted.moveToFirst())
+        assertEquals("ACCEPTED", cursorTrusted.getString(0))
+        assertNull(cursorTrusted.getString(1))
+        assertNull(cursorTrusted.getString(2))
+        cursorTrusted.close()
+
+        // Verify untrusted peer has relationship = 'NONE'
+        val cursorUntrusted = db.query(
+            "SELECT relationship, pendingNonce, pendingEncKey FROM peers WHERE publicKeyB64 = ?",
+            arrayOf("untrusted_pub_key_456")
+        )
+        assertTrue(cursorUntrusted.moveToFirst())
+        assertEquals("NONE", cursorUntrusted.getString(0))
+        assertNull(cursorUntrusted.getString(1))
+        assertNull(cursorUntrusted.getString(2))
+        cursorUntrusted.close()
     }
 }

@@ -258,6 +258,32 @@ object CryptoService {
         }
     }
 
+    /**
+     * C02: Canonical v2 handshake signing encoder binding encryption keys, recipient, and nonce.
+     */
+    fun canonicalHandshakePayloadV2(
+        fromUserId: String,
+        fromUsername: String,
+        fromHomeNode: String,
+        fromEncryptionPublicKey: String,
+        targetUserId: String,
+        nonce: String,
+        timestamp: Long,
+        authorAvatarB64: String? = null,
+        bio: String? = null
+    ): String = encodeForSigning(
+        "noslop-hs-v2",
+        fromUserId,
+        fromUsername,
+        fromHomeNode,
+        fromEncryptionPublicKey,
+        targetUserId,
+        nonce,
+        timestamp.toString(),
+        authorAvatarB64,
+        bio
+    )
+
     fun sign(payload: String, privateKeyB64: String): String {
         val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
         val privKeyParams = getEd25519PrivateKeyParams(bytes)

@@ -21,7 +21,10 @@ class MeshTransport(
 ) {
     private val TAG = "MESH_TRANSPORT"
     private var serverSocket: ServerSocket? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Logger.error(TAG, "Uncaught coroutine exception in MeshTransport: ${throwable.message}", throwable.stackTraceToString())
+    }
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + coroutineExceptionHandler)
     private var isRunning = false
 
     @Volatile private var listening = false

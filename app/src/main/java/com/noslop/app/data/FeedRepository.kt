@@ -74,16 +74,17 @@ class FeedRepository(
     private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     suspend fun cancelSync() {
-        syncMutex.withLock {
-            val deferred = activeSyncDeferred
+        val deferred = syncMutex.withLock {
+            val d = activeSyncDeferred
             activeSyncDeferred = null
             ++currentGeneration
-            deferred?.cancel()
+            d?.cancel()
             _feedBuildStatus.value = ""
-            try {
-                deferred?.join()
-            } catch (_: Exception) {}
+            d
         }
+        try {
+            deferred?.join()
+        } catch (_: Exception) {}
     }
 
     // --- Observable feed state ---
