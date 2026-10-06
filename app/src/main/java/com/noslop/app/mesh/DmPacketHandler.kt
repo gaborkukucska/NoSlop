@@ -4,6 +4,7 @@ package com.noslop.app.mesh
 import com.noslop.app.data.*
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
+import com.noslop.app.util.Constants
 import java.util.*
 
 /**
@@ -53,7 +54,10 @@ class DmPacketHandler(
         // Deduplication: if message already exists locally, do not re-notify or re-download media
         val existingMsg = messageDao.getMessageById(msgPay.id)
         if (existingMsg != null) {
-            Logger.debug(TAG, "Dropping duplicate DM ${msgPay.id}: already delivered")
+            Logger.debug(TAG, "Dropping duplicate DM ${msgPay.id}: already delivered, echoing ACK")
+            if (msgPay.groupId.isNullOrBlank()) {
+                sendDmAck(msgPay.id, packet.senderId, myKeys)
+            }
             return true
         }
 
@@ -256,10 +260,16 @@ class DmPacketHandler(
                 mediaId = mediaId,
                 mediaType = mediaType,
                 replyToMessageId = replyToMessageId,
-                isLegacy = isLegacy
+                isLegacy = isLegacy,
+                deliveryStatus = "DELIVERED"
             )
             messageDao.insertMessage(msg)
             repo.triggerDmSync()
+
+            // C18: Send AEAD-authenticated DM_ACK for direct messages
+            if (msgPay.groupId.isNullOrBlank()) {
+                sendDmAck(msgPay.id, packet.senderId, myKeys)
+            }
             
             val group = if (groupId != null) db.groupChatDao().getGroupChatById(groupId) else null
             val anon = com.noslop.app.util.LanguageManager.translate("Anonymous")
@@ -413,6 +423,117 @@ class DmPacketHandler(
             repo.meshTransport.sendPacket(peer.onionAddress, packet = packetToSend)
             kotlinx.coroutines.delay(100L)
         }
+        return true
+    }
+
+    suspend fun sendDmAck(
+        msgId: String,
+        recipientPub: String,
+        myKeys: CryptoService.IdentityKeys
+    ) {
+        val peer = peerDao.getPeerByPublicKey(recipientPub) ?: return
+        val recipientEncPub = peer.encPublicKeyB64.takeIf { it.isNotBlank() } ?: return
+        val onion = peer.onionAddress.takeIf { it.isNotBlank() } ?: return
+        val now = System.currentTimeMillis()
+
+        val (ciphertext, nonce) = CryptoService.encryptDMV2(
+            plaintext = "ACK",
+            theirEncPubB64 = recipientEncPub,
+            myEncPrivB64 = myKeys.encPrivateKeyB64,
+            senderEdPub = myKeys.publicKeyB64,
+            recipientEdPub = recipientPub,
+            msgId = msgId,
+            groupId = null,
+            timestamp = now
+        )
+
+        if (ciphertext.isBlank() || nonce.isBlank()) {
+            Logger.error(TAG, "Failed to encrypt DM_ACK for $msgId")
+            return
+        }
+
+        val ackPayload = DmAckPayload(
+            msgId = msgId,
+            nonce = nonce,
+            ciphertext = ciphertext,
+            timestamp = now,
+            v = 2
+        )
+
+        val packet = NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 3,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = recipientPub,
+            type = "DM_ACK",
+            payload = com.google.gson.Gson().toJsonTree(ackPayload)
+        )
+
+        val success = repo.meshTransport.sendPacket(onion, Constants.MESH_PORT, packet)
+        if (!success) {
+            val gossipPacket = packet.copy(
+                id = UUID.randomUUID().toString(),
+                hops = 6
+            )
+            GossipService.broadcast(gossipPacket)
+        }
+        Logger.info(TAG, "Sent DM_ACK for message $msgId to $recipientPub")
+    }
+
+    suspend fun handleDmAck(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
+        val ackPay = packet.getDmAckPayload() ?: return false
+        val burnableKeys = repo.getBurnableIdentity()
+        var myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
+            localKeys
+        } else if (burnableKeys != null && packet.targetUserId == burnableKeys.publicKeyB64) {
+            burnableKeys
+        } else if (packet.targetUserId.isNullOrBlank()) {
+            localKeys
+        } else {
+            return false
+        }
+
+        val peer = peerDao.getPeerByPublicKey(packet.senderId)
+        val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: return false
+        val effectiveTimestamp = ackPay.timestamp ?: System.currentTimeMillis()
+
+        var plaintext = CryptoService.decryptDMV2(
+            ciphertextB64 = ackPay.ciphertext,
+            nonceB64 = ackPay.nonce,
+            theirEncPubB64 = opponentEncPub,
+            myEncPrivB64 = myKeys.encPrivateKeyB64,
+            senderEdPub = packet.senderId,
+            recipientEdPub = myKeys.publicKeyB64,
+            msgId = ackPay.msgId,
+            groupId = null,
+            timestamp = effectiveTimestamp
+        )
+
+        if (plaintext == null && burnableKeys != null) {
+            val altKeys = if (myKeys.publicKeyB64 == localKeys.publicKeyB64) burnableKeys else localKeys
+            plaintext = CryptoService.decryptDMV2(
+                ciphertextB64 = ackPay.ciphertext,
+                nonceB64 = ackPay.nonce,
+                theirEncPubB64 = opponentEncPub,
+                myEncPrivB64 = altKeys.encPrivateKeyB64,
+                senderEdPub = packet.senderId,
+                recipientEdPub = altKeys.publicKeyB64,
+                msgId = ackPay.msgId,
+                groupId = null,
+                timestamp = effectiveTimestamp
+            )
+            if (plaintext != null) {
+                myKeys = altKeys
+            }
+        }
+
+        if (plaintext == null) {
+            Logger.warn(TAG, "Rejected DM_ACK for ${ackPay.msgId}: authentication failed")
+            return false
+        }
+
+        Logger.info(TAG, "Authenticated DM_ACK received for ${ackPay.msgId} from ${packet.senderId}")
+        repo.onDmAckReceived(ackPay.msgId, packet.senderId)
         return true
     }
 }

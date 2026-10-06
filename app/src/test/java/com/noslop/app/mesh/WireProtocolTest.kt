@@ -380,6 +380,37 @@ class WireProtocolTest {
     }
 
     @Test
+    fun dmAckPayload_roundTrips() {
+        val ack = DmAckPayload(
+            msgId = "msg-ack-test-1",
+            nonce = "dGVzdC1ub25jZQ==",
+            ciphertext = "dGVzdC1jaXBoZXJ0ZXh0",
+            timestamp = 1700000000000L,
+            v = 2
+        )
+        val packet = NetworkPacket(
+            id = "packet-ack-1",
+            hops = 3,
+            senderId = "sender-pub-key",
+            targetUserId = "target-pub-key",
+            type = "DM_ACK",
+            payload = gson.toJsonTree(ack)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getDmAckPayload()
+        assertNotNull(extracted)
+        assertEquals("msg-ack-test-1", extracted?.msgId)
+        assertEquals("dGVzdC1ub25jZQ==", extracted?.nonce)
+        assertEquals("dGVzdC1jaXBoZXJ0ZXh0", extracted?.ciphertext)
+        assertEquals(2, extracted?.v)
+
+        val json = gson.toJson(ack)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("msg_id"))
+        assertTrue(obj.has("nonce"))
+        assertTrue(obj.has("ciphertext"))
+    }
+
+    @Test
     fun groupDeletePayload_roundTrips() {
         val delete = GroupDeletePayload(
             groupId = "grp-123",

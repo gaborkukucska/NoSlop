@@ -679,6 +679,35 @@ fun ChatThreadScreen(
                                             color = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
                                             fontSize = 9.sp,
                                         )
+                                        if (isSelf) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            when (msg.deliveryStatus) {
+                                                "SENDING" -> {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Schedule,
+                                                        contentDescription = "Sending...".tr,
+                                                        tint = PrimaryBlack.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(10.dp)
+                                                    )
+                                                }
+                                                "SENT" -> {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Sent".tr,
+                                                        tint = PrimaryBlack.copy(alpha = 0.6f),
+                                                        modifier = Modifier.size(11.dp)
+                                                    )
+                                                }
+                                                "DELIVERED" -> {
+                                                    Icon(
+                                                        imageVector = Icons.Default.DoneAll,
+                                                        contentDescription = "Delivered".tr,
+                                                        tint = PrimaryBlack.copy(alpha = 0.8f),
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Icon(Icons.Default.AddReaction, contentDescription = "React".tr, tint = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted, modifier = Modifier.size(12.dp).clickable { showReactionPicker = true })
                                         Spacer(modifier = Modifier.width(4.dp))

@@ -75,6 +75,8 @@ class MeshSocialRepository(
     // Persistent DM outbox: queued packets waiting for peer connection
     private val pendingOutboxMessages = java.util.concurrent.ConcurrentHashMap<String, MutableList<com.noslop.app.mesh.NetworkPacket>>()
     private val inFlightFlushes = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val packetRetryAttempts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val packetLastAttemptTime = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var outboxWorkerJob: kotlinx.coroutines.Job? = null
 
     init {
@@ -141,14 +143,6 @@ class MeshSocialRepository(
         }
         savePersistedOutbox()
         Logger.info(TAG, "Enqueued message ${packet.id} for $recipientPub in persistent outbox (pending: ${list.size})")
-
-        // Immediately trigger an outbox flush attempt for this peer rather than waiting 10s
-        repositoryScope.launch(Dispatchers.IO) {
-            val peer = peerDao.getPeerByPublicKey(recipientPub)
-            if (peer != null && peer.onionAddress.isNotBlank()) {
-                flushOutboxForPeer(recipientPub, peer.onionAddress)
-            }
-        }
     }
 
     fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
@@ -166,13 +160,37 @@ class MeshSocialRepository(
             if (toSend.isNotEmpty()) {
                 repositoryScope.launch(Dispatchers.IO) {
                     try {
+                        val now = System.currentTimeMillis()
                         Logger.info(TAG, "Flushing ${toSend.size} pending DM(s) to $onionAddress")
                         for (packet in toSend) {
+                            val msgId = packet.getMessagePayload()?.id ?: packet.id ?: ""
+                            val attempts = packetRetryAttempts.getOrDefault(msgId, 0)
+                            val lastAttempt = packetLastAttemptTime.getOrDefault(msgId, 0L)
+                            // C18: Exponential backoff retry: 10s * 2^attempts, capped at 5 minutes
+                            val backoffMs = if (attempts <= 0) 0L else (10_000L * (1L shl (attempts - 1).coerceAtMost(5))).coerceAtMost(300_000L)
+                            if (attempts > 0 && now - lastAttempt < backoffMs) {
+                                continue
+                            }
+
+                            packetLastAttemptTime[msgId] = now
+                            packetRetryAttempts[msgId] = attempts + 1
+
                             val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                             if (success) {
-                                list.remove(packet)
-                                savePersistedOutbox()
-                                Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
+                                if (packet.type == "MESSAGE") {
+                                    if (msgId.isNotBlank()) {
+                                        val current = messageDao.getMessageById(msgId)
+                                        if (current != null && current.deliveryStatus != "DELIVERED") {
+                                            messageDao.updateDeliveryStatus(msgId, "SENT")
+                                            meshTransport.repository.triggerDmSync()
+                                        }
+                                    }
+                                    Logger.info(TAG, "Sent outbox DM $msgId to $onionAddress (awaiting ACK)")
+                                } else {
+                                    list.remove(packet)
+                                    savePersistedOutbox()
+                                    Logger.info(TAG, "Delivered outbox packet ${packet.id} to $onionAddress")
+                                }
                             } else {
                                 break
                             }
@@ -270,8 +288,20 @@ class MeshSocialRepository(
             val isDirected = !packet.targetUserId.isNullOrBlank()
             if (isDirected || !hasHub) {
                 if (onionAddress.isNotBlank()) {
+                    val msgId = packet.getMessagePayload()?.id ?: packet.id ?: ""
+                    packetLastAttemptTime[msgId] = System.currentTimeMillis()
+                    packetRetryAttempts[msgId] = 1
+
                     val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
-                    if (!success && isDirected) {
+                    if (success) {
+                        if (packet.type == "MESSAGE" && msgId.isNotBlank()) {
+                            val current = messageDao.getMessageById(msgId)
+                            if (current != null && current.deliveryStatus != "DELIVERED") {
+                                messageDao.updateDeliveryStatus(msgId, "SENT")
+                                meshTransport.repository.triggerDmSync()
+                            }
+                        }
+                    } else if (isDirected) {
                         Logger.warn(TAG, "Direct send to $onionAddress failed. Enqueueing in persistent outbox and gossip relaying ${packet.type} ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
@@ -1120,6 +1150,21 @@ class MeshSocialRepository(
         savePersistedOutbox()
     }
 
+    suspend fun onDmAckReceived(msgId: String, senderPub: String) = withContext(Dispatchers.IO) {
+        messageDao.updateDeliveryStatus(msgId, "DELIVERED")
+        val list = pendingOutboxMessages[senderPub]
+        if (list != null) {
+            synchronized(list) {
+                list.removeAll { it.id == msgId || it.getMessagePayload()?.id == msgId }
+            }
+            savePersistedOutbox()
+        }
+        packetRetryAttempts.remove(msgId)
+        packetLastAttemptTime.remove(msgId)
+        meshTransport.repository.triggerDmSync()
+        Logger.info(TAG, "DM_ACK processed for msgId $msgId from $senderPub. Marked DELIVERED and removed from outbox.")
+    }
+
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
@@ -1160,7 +1205,7 @@ class MeshSocialRepository(
             return@withContext false
         }
 
-        // Store locally
+        // Store locally with initial SENDING status
         val localMsg = ChatMessage(
             id = msgId,
             chatWithPeerPub = recipientPubB64,
@@ -1171,7 +1216,8 @@ class MeshSocialRepository(
             mediaId = mediaMetadata?.id,
             mediaType = mediaMetadata?.type,
             replyToMessageId = replyToMessageId,
-            isLegacy = false
+            isLegacy = false,
+            deliveryStatus = "SENDING"
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM (v2) locally stored", "msgId=${localMsg.id}")
@@ -1188,13 +1234,16 @@ class MeshSocialRepository(
         val gson = com.google.gson.Gson()
         val payloadJson = gson.toJsonTree(msgPay)
         val packet = com.noslop.app.mesh.NetworkPacket(
-            id = UUID.randomUUID().toString(),
+            id = localMsg.id,
             hops = 3,
             senderId = myKeys.publicKeyB64,
             targetUserId = recipientPubB64,
             type = "MESSAGE",
             payload = payloadJson
         )
+
+        // C18: Enqueue in persistent outbox until DM_ACK arrives
+        enqueuePendingDm(recipientPubB64, packet)
 
         dispatchPacket(peer.onionAddress, packet)
 

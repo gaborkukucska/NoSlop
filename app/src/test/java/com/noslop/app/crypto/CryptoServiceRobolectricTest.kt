@@ -282,6 +282,41 @@ class CryptoServiceRobolectricTest {
     }
 
     @Test
+    fun dmAck_v2_encryptAndDecrypt_roundTrips() {
+        val alice = CryptoService.generateIdentity("alice")
+        val bob = CryptoService.generateIdentity("bob")
+        val msgId = "test-msg-ack-123"
+        val timestamp = 1700000000L
+
+        // Bob encrypts DM_ACK to Alice
+        val (ciphertextB64, nonceB64) = CryptoService.encryptDMV2(
+            plaintext = "ACK",
+            theirEncPubB64 = alice.encPublicKeyB64,
+            myEncPrivB64 = bob.encPrivateKeyB64,
+            senderEdPub = bob.publicKeyB64,
+            recipientEdPub = alice.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        // Alice decrypts DM_ACK from Bob
+        val decrypted = CryptoService.decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            senderEdPub = bob.publicKeyB64,
+            recipientEdPub = alice.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        assertEquals("ACK", decrypted)
+    }
+
+    @Test
     fun deriveSeedB64_matchesGoldenSeed() {
         // Same golden seed as MnemonicGeneratorTest, here through the Base64 wrapper.
         val mnemonic =

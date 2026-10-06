@@ -258,6 +258,13 @@ class FakeMessageDao : MessageDao {
             messages[index] = messages[index].copy(isRead = true)
         }
     }
+
+    override suspend fun updateDeliveryStatus(messageId: String, status: String) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index] = messages[index].copy(deliveryStatus = status)
+        }
+    }
     override suspend fun getLatestReceivedTimestamp(peerPub: String): Long? =
         messages.filter { it.chatWithPeerPub == peerPub && it.senderPub == peerPub }
             .maxOfOrNull { it.timestamp }

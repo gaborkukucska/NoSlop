@@ -496,6 +496,15 @@ data class GroupMessagePayload(
 )
 
 @Keep
+data class DmAckPayload(
+    @SerializedName("msg_id") val msgId: String,
+    val nonce: String,
+    val ciphertext: String,
+    val timestamp: Long? = null,
+    @SerializedName("v") val v: Int = 2
+)
+
+@Keep
 data class TypingPayload(
     @SerializedName("chat_with_peer_pub") val chatWithPeerPub: String,
     @SerializedName("is_typing") val isTyping: Boolean,
@@ -687,6 +696,10 @@ data class NetworkPacket(
 
     fun getGroupMessagePayload(): GroupMessagePayload? = if (type == "GROUP_MESSAGE" && payload != null) {
         Gson().fromJson(payload, GroupMessagePayload::class.java)
+    } else null
+
+    fun getDmAckPayload(): DmAckPayload? = if (type == "DM_ACK" && payload != null) {
+        Gson().fromJson(payload, DmAckPayload::class.java)
     } else null
 
     fun getTypingPayload(): TypingPayload? = if (type == "TYPING" && payload != null) {
