@@ -395,8 +395,29 @@ fun ChatThreadScreen(
                     var meta: MediaMetadata? = null
                     if (localKeys != null) {
                         val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
-                        val plaintext = CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) 
-                            ?: burnableKeys?.let { CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, it.encPrivateKeyB64) }
+                        val plaintext = CryptoService.decryptDMForDisplay(
+                            ciphertextB64 = msg.ciphertext,
+                            nonceB64 = msg.nonce,
+                            theirEncPubB64 = opponentEncPub,
+                            myEncPrivB64 = localKeys.encPrivateKeyB64,
+                            myEdPub = localKeys.publicKeyB64,
+                            senderEdPub = msg.senderPub,
+                            peerEdPub = peer.publicKeyB64,
+                            msgId = msg.id,
+                            timestamp = msg.timestamp
+                        ) ?: burnableKeys?.let { bKeys ->
+                            CryptoService.decryptDMForDisplay(
+                                ciphertextB64 = msg.ciphertext,
+                                nonceB64 = msg.nonce,
+                                theirEncPubB64 = opponentEncPub,
+                                myEncPrivB64 = bKeys.encPrivateKeyB64,
+                                myEdPub = bKeys.publicKeyB64,
+                                senderEdPub = msg.senderPub,
+                                peerEdPub = peer.publicKeyB64,
+                                msgId = msg.id,
+                                timestamp = msg.timestamp
+                            )
+                        }
                             ?: msg.ciphertext
                         try {
                             val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
@@ -457,8 +478,29 @@ fun ChatThreadScreen(
                                         if (replyMsg != null) {
                                             val replyTextRaw = if (localKeys != null) {
                                                 val oppPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
-                                                CryptoService.decryptDM(replyMsg.ciphertext, replyMsg.nonce, oppPub, localKeys.encPrivateKeyB64)
-                                                    ?: burnableKeys?.let { CryptoService.decryptDM(replyMsg.ciphertext, replyMsg.nonce, oppPub, it.encPrivateKeyB64) }
+                                                CryptoService.decryptDMForDisplay(
+                                                    ciphertextB64 = replyMsg.ciphertext,
+                                                    nonceB64 = replyMsg.nonce,
+                                                    theirEncPubB64 = oppPub,
+                                                    myEncPrivB64 = localKeys.encPrivateKeyB64,
+                                                    myEdPub = localKeys.publicKeyB64,
+                                                    senderEdPub = replyMsg.senderPub,
+                                                    peerEdPub = peer.publicKeyB64,
+                                                    msgId = replyMsg.id,
+                                                    timestamp = replyMsg.timestamp
+                                                ) ?: burnableKeys?.let { bKeys ->
+                                                    CryptoService.decryptDMForDisplay(
+                                                        ciphertextB64 = replyMsg.ciphertext,
+                                                        nonceB64 = replyMsg.nonce,
+                                                        theirEncPubB64 = oppPub,
+                                                        myEncPrivB64 = bKeys.encPrivateKeyB64,
+                                                        myEdPub = bKeys.publicKeyB64,
+                                                        senderEdPub = replyMsg.senderPub,
+                                                        peerEdPub = peer.publicKeyB64,
+                                                        msgId = replyMsg.id,
+                                                        timestamp = replyMsg.timestamp
+                                                    )
+                                                }
                                             } else null
                                             var replyText = replyTextRaw
                                             if (replyTextRaw != null) {

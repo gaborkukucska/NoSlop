@@ -23,6 +23,19 @@ class DmPacketHandler(
     private val notificationDao = db.notificationDao()
     private val lastAutoConnRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    companion object {
+        private const val MAX_SEEN_CACHE = 5000
+        private val seenV2Messages: MutableSet<String> = java.util.Collections.synchronizedSet(
+            java.util.Collections.newSetFromMap(
+                object : java.util.LinkedHashMap<String, Boolean>(100, 0.75f, true) {
+                    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                        return size > MAX_SEEN_CACHE
+                    }
+                }
+            )
+        )
+    }
+
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val burnableKeys = repo.getBurnableIdentity()
         var myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
@@ -70,19 +83,80 @@ class DmPacketHandler(
             return false
         }
 
-        var plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
+        val effectiveTimestamp = msgPay.timestamp ?: packet.timestamp ?: System.currentTimeMillis()
+        val seenKey = "${packet.senderId}:${msgPay.id}"
+
+        // C08: Replay attack prevention under protocol v2
+        if (msgPay.v == 2 && seenV2Messages.contains(seenKey)) {
+            Logger.warn(TAG, "Rejected replayed v2 message: $seenKey")
+            return false
+        }
+
+        var plaintext: String? = null
+        var isLegacy = false
+
+        // C08: Receivers try v2 directional AAD decryption first
+        plaintext = CryptoService.decryptDMV2(
+            ciphertextB64 = msgPay.ciphertext,
+            nonceB64 = msgPay.nonce,
+            theirEncPubB64 = opponentEncPub,
+            myEncPrivB64 = myKeys.encPrivateKeyB64,
+            senderEdPub = packet.senderId,
+            recipientEdPub = myKeys.publicKeyB64,
+            msgId = msgPay.id,
+            groupId = msgPay.groupId,
+            timestamp = effectiveTimestamp
+        )
         if (plaintext == null && burnableKeys != null) {
             val altKeys = if (myKeys.publicKeyB64 == localKeys.publicKeyB64) burnableKeys else localKeys
-            val altPlaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, altKeys.encPrivateKeyB64)
+            val altPlaintext = CryptoService.decryptDMV2(
+                ciphertextB64 = msgPay.ciphertext,
+                nonceB64 = msgPay.nonce,
+                theirEncPubB64 = opponentEncPub,
+                myEncPrivB64 = altKeys.encPrivateKeyB64,
+                senderEdPub = packet.senderId,
+                recipientEdPub = altKeys.publicKeyB64,
+                msgId = msgPay.id,
+                groupId = msgPay.groupId,
+                timestamp = effectiveTimestamp
+            )
             if (altPlaintext != null) {
                 plaintext = altPlaintext
                 myKeys = altKeys
-                Logger.info(TAG, "Decrypted follower DM using burnable identity keys")
+                Logger.info(TAG, "Decrypted follower DM (v2) using burnable identity keys")
             }
         }
+
+        // C08: Accept v1 only when groupId is null; reject legacy v1 group messages
+        if (plaintext == null) {
+            if (msgPay.groupId.isNullOrBlank()) {
+                plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
+                if (plaintext == null && burnableKeys != null) {
+                    val altKeys = if (myKeys.publicKeyB64 == localKeys.publicKeyB64) burnableKeys else localKeys
+                    val altPlaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, altKeys.encPrivateKeyB64)
+                    if (altPlaintext != null) {
+                        plaintext = altPlaintext
+                        myKeys = altKeys
+                        Logger.info(TAG, "Decrypted follower DM (v1) using burnable identity keys")
+                    }
+                }
+                if (plaintext != null) {
+                    isLegacy = true
+                    Logger.warn(TAG, "Received legacy v1 unauthenticated DM ${msgPay.id} from ${packet.senderId.take(8)}...; flagged as legacy")
+                }
+            } else {
+                Logger.error(TAG, "FATAL: Group message ${msgPay.id} failed v2 authenticated decryption or has invalid AAD. Legacy v1 group messages rejected.")
+                return false
+            }
+        }
+
         if (plaintext == null) {
             Logger.error(TAG, "FATAL: DM Decryption failed for sender ${packet.senderId}.")
             return false
+        }
+
+        if (!isLegacy) {
+            seenV2Messages.add(seenKey)
         }
         if (plaintext != null) {
             // Once cryptographically authenticated: associate peer with burnable identity if reached via burnable
@@ -181,7 +255,8 @@ class DmPacketHandler(
                 timestamp = msgPay.timestamp ?: System.currentTimeMillis(),
                 mediaId = mediaId,
                 mediaType = mediaType,
-                replyToMessageId = replyToMessageId
+                replyToMessageId = replyToMessageId,
+                isLegacy = isLegacy
             )
             messageDao.insertMessage(msg)
             repo.triggerDmSync()
@@ -324,7 +399,8 @@ class DmPacketHandler(
                 id = msg.id,
                 nonce = msg.nonce,
                 ciphertext = msg.ciphertext,
-                timestamp = msg.timestamp
+                timestamp = msg.timestamp,
+                v = if (msg.isLegacy) 1 else 2
             )
             val packetToSend = NetworkPacket(
                 id = UUID.randomUUID().toString(),

@@ -297,6 +297,168 @@ object CryptoService {
         }
     }
 
+    /**
+     * C08: Authenticated Additional Data (AAD) binding sender, recipient, message ID, group ID, and timestamp.
+     */
+    fun canonicalDmAadV2(
+        senderEdPub: String,
+        recipientEdPub: String,
+        msgId: String,
+        groupId: String?,
+        timestamp: Long
+    ): ByteArray {
+        val aadStr = encodeForSigning(
+            "noslop-dm-v2",
+            senderEdPub,
+            recipientEdPub,
+            msgId,
+            groupId ?: "",
+            timestamp.toString()
+        )
+        return aadStr.toByteArray(Charsets.UTF_8)
+    }
+
+    /**
+     * C08: Derives a directional 32-byte ChaCha20-Poly1305 key via HKDF-SHA256 from X25519 shared secret.
+     */
+    fun deriveDirectionalKeyV2(
+        sharedSecret: ByteArray,
+        senderEdPub: String,
+        recipientEdPub: String
+    ): ByteArray {
+        val sorted = if (senderEdPub <= recipientEdPub) {
+            Pair(senderEdPub, recipientEdPub)
+        } else {
+            Pair(recipientEdPub, senderEdPub)
+        }
+        val digest = org.bouncycastle.crypto.digests.SHA256Digest()
+        val b1 = sorted.first.toByteArray(Charsets.UTF_8)
+        val b2 = sorted.second.toByteArray(Charsets.UTF_8)
+        digest.update(b1, 0, b1.size)
+        digest.update(b2, 0, b2.size)
+        val salt = ByteArray(digest.digestSize)
+        digest.doFinal(salt, 0)
+
+        val info = "noslop-dm-v2|$senderEdPub->$recipientEdPub".toByteArray(Charsets.UTF_8)
+        val hkdf = org.bouncycastle.crypto.generators.HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA256Digest())
+        hkdf.init(org.bouncycastle.crypto.params.HKDFParameters(sharedSecret, salt, info))
+        val kDir = ByteArray(32)
+        hkdf.generateBytes(kDir, 0, 32)
+        return kDir
+    }
+
+    /**
+     * C08: DM v2 Directional encryption with AAD binding.
+     */
+    fun encryptDMV2(
+        plaintext: String,
+        theirEncPubB64: String,
+        myEncPrivB64: String,
+        senderEdPub: String,
+        recipientEdPub: String,
+        msgId: String,
+        groupId: String? = null,
+        timestamp: Long = System.currentTimeMillis()
+    ): Pair<String, String> {
+        val myPriv = decodeX25519PrivateKey(myEncPrivB64)
+        val theirPub = decodeX25519PublicKey(theirEncPubB64)
+
+        val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
+        ka.init(myPriv)
+        ka.doPhase(theirPub, true)
+        val sharedSecret = ka.generateSecret()
+
+        val chachaKey = deriveDirectionalKeyV2(sharedSecret, senderEdPub, recipientEdPub)
+        val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
+
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
+        val ivSpec = IvParameterSpec(iv)
+        cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
+
+        val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp)
+        cipher.updateAAD(aad)
+        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+
+        return Pair(
+            Base64.encodeToString(ciphertext, Base64.NO_WRAP),
+            Base64.encodeToString(iv, Base64.NO_WRAP)
+        )
+    }
+
+    /**
+     * C08: DM v2 Directional decryption with AAD authentication.
+     */
+    fun decryptDMV2(
+        ciphertextB64: String,
+        nonceB64: String,
+        theirEncPubB64: String,
+        myEncPrivB64: String,
+        senderEdPub: String,
+        recipientEdPub: String,
+        msgId: String,
+        groupId: String? = null,
+        timestamp: Long
+    ): String? {
+        return try {
+            val myPriv = decodeX25519PrivateKey(myEncPrivB64)
+            val theirPub = decodeX25519PublicKey(theirEncPubB64)
+
+            val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
+            ka.init(myPriv)
+            ka.doPhase(theirPub, true)
+            val sharedSecret = ka.generateSecret()
+
+            val chachaKey = deriveDirectionalKeyV2(sharedSecret, senderEdPub, recipientEdPub)
+            val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
+
+            val iv = Base64.decode(nonceB64, Base64.DEFAULT)
+            val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
+            val ivSpec = IvParameterSpec(iv)
+            cipher.init(Cipher.DECRYPT_MODE, secureKey, ivSpec)
+
+            val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp)
+            cipher.updateAAD(aad)
+            val decrypted = cipher.doFinal(Base64.decode(ciphertextB64, Base64.DEFAULT))
+            String(decrypted, Charsets.UTF_8)
+        } catch (e: Exception) {
+            Logger.debug(TAG, "DM v2 decryption failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * C08: Helper to decrypt a direct message for UI rendering, supporting both v2 directional keys
+     * and fallback v1 legacy messages.
+     */
+    fun decryptDMForDisplay(
+        ciphertextB64: String,
+        nonceB64: String,
+        theirEncPubB64: String,
+        myEncPrivB64: String,
+        myEdPub: String,
+        senderEdPub: String,
+        peerEdPub: String,
+        msgId: String,
+        timestamp: Long
+    ): String? {
+        val actualSender = if (senderEdPub == myEdPub) myEdPub else senderEdPub
+        val actualRecipient = if (senderEdPub == myEdPub) peerEdPub else myEdPub
+        val v2 = decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = theirEncPubB64,
+            myEncPrivB64 = myEncPrivB64,
+            senderEdPub = actualSender,
+            recipientEdPub = actualRecipient,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+        if (v2 != null) return v2
+        return decryptDM(ciphertextB64, nonceB64, theirEncPubB64, myEncPrivB64)
+    }
+
     fun encryptDM(plaintext: String, theirEncPubB64: String, myEncPrivB64: String): Pair<String, String> {
         val myPriv = decodeX25519PrivateKey(myEncPrivB64)
         val theirPub = decodeX25519PublicKey(theirEncPubB64)

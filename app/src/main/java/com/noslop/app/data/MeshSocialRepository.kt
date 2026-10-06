@@ -1124,7 +1124,20 @@ class MeshSocialRepository(
         }
         val contentToSend = com.google.gson.Gson().toJson(map)
 
-        val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, recipientEncPub, myKeys.encPrivateKeyB64)
+        val msgId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+
+        // C08: DM v2 Directional AAD encryption
+        val (ciphertext, nonce) = CryptoService.encryptDMV2(
+            plaintext = contentToSend,
+            theirEncPubB64 = recipientEncPub,
+            myEncPrivB64 = myKeys.encPrivateKeyB64,
+            senderEdPub = myKeys.publicKeyB64,
+            recipientEdPub = recipientPubB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = now
+        )
 
         if (ciphertext.isEmpty() || nonce.isEmpty()) {
             Logger.error(TAG, "X25519 + ChaCha20 direct message encryption failed")
@@ -1133,18 +1146,19 @@ class MeshSocialRepository(
 
         // Store locally
         val localMsg = ChatMessage(
-            id = UUID.randomUUID().toString(),
+            id = msgId,
             chatWithPeerPub = recipientPubB64,
             senderPub = myKeys.publicKeyB64,
             ciphertext = ciphertext,
             nonce = nonce,
-            timestamp = System.currentTimeMillis(),
+            timestamp = now,
             mediaId = mediaMetadata?.id,
             mediaType = mediaMetadata?.type,
-            replyToMessageId = replyToMessageId
+            replyToMessageId = replyToMessageId,
+            isLegacy = false
         )
         messageDao.insertMessage(localMsg)
-        Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")
+        Logger.info(TAG, "Sent E2EE DM (v2) locally stored", "msgId=${localMsg.id}")
         meshTransport.repository.triggerDmSync()
 
         // Send to peer onion address if we have it
@@ -1152,7 +1166,8 @@ class MeshSocialRepository(
             id = localMsg.id,
             nonce = nonce,
             ciphertext = ciphertext,
-            timestamp = localMsg.timestamp
+            timestamp = localMsg.timestamp,
+            v = 2
         )
         val gson = com.google.gson.Gson()
         val payloadJson = gson.toJsonTree(msgPay)

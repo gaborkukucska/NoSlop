@@ -12,7 +12,8 @@ data class EncryptedPayload(
     val nonce: String,
     val ciphertext: String,
     @SerializedName("group_id") val groupId: String? = null,
-    val timestamp: Long? = null
+    val timestamp: Long? = null,
+    @SerializedName("v") val v: Int = 1
 )
 
 @Keep

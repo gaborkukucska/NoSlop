@@ -99,6 +99,189 @@ class CryptoServiceRobolectricTest {
     }
 
     @Test
+    fun encryptDMV2_thenDecryptDMV2_roundTrips_betweenTwoParties() {
+        val alice = CryptoService.generateIdentity("alice")
+        val bob = CryptoService.generateIdentity("bob")
+        val message = "meet at the secret onion node v2"
+        val timestamp = 1700000000L
+        val msgId = "msg-v2-1"
+
+        // Alice encrypts directional message to Bob
+        val (ciphertextB64, nonceB64) = CryptoService.encryptDMV2(
+            plaintext = message,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        // Bob decrypts with directional key and authentic AAD
+        val decrypted = CryptoService.decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = alice.encPublicKeyB64,
+            myEncPrivB64 = bob.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        assertEquals("DM v2 round-trips correctly", message, decrypted)
+    }
+
+    @Test
+    fun encryptDMV2_reflectionAttack_failsDecryption() {
+        val alice = CryptoService.generateIdentity("alice")
+        val bob = CryptoService.generateIdentity("bob")
+        val message = "hello Bob from Alice"
+        val timestamp = 1700000000L
+        val msgId = "msg-refl-1"
+
+        // Alice encrypts to Bob
+        val (ciphertextB64, nonceB64) = CryptoService.encryptDMV2(
+            plaintext = message,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        // Attacker reflects the ciphertext back to Alice claiming Bob is sender and Alice is recipient
+        val reflectedDecrypted = CryptoService.decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            senderEdPub = bob.publicKeyB64,
+            recipientEdPub = alice.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        assertNull("Reflected DM ciphertext must fail directional decryption (C08)", reflectedDecrypted)
+    }
+
+    @Test
+    fun encryptDMV2_tamperedAad_failsDecryption() {
+        val alice = CryptoService.generateIdentity("alice")
+        val bob = CryptoService.generateIdentity("bob")
+        val message = "sensitive message"
+        val timestamp = 1700000000L
+        val msgId = "msg-aad-1"
+
+        val (ciphertextB64, nonceB64) = CryptoService.encryptDMV2(
+            plaintext = message,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        // Tampering msgId in AAD must fail
+        val badMsgId = CryptoService.decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = alice.encPublicKeyB64,
+            myEncPrivB64 = bob.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = "tampered-msg-id",
+            groupId = null,
+            timestamp = timestamp
+        )
+        assertNull("Tampered msgId must fail AAD verification (C08)", badMsgId)
+
+        // Re-labeling 1:1 message as group message must fail
+        val badGroupId = CryptoService.decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = alice.encPublicKeyB64,
+            myEncPrivB64 = bob.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = "forged-group-id",
+            timestamp = timestamp
+        )
+        assertNull("Forged groupId must fail AAD verification (C08)", badGroupId)
+
+        // Altering timestamp must fail
+        val badTs = CryptoService.decryptDMV2(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = alice.encPublicKeyB64,
+            myEncPrivB64 = bob.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = 999999L
+        )
+        assertNull("Altered timestamp must fail AAD verification (C08)", badTs)
+    }
+
+    @Test
+    fun decryptDMForDisplay_decryptsBothSentAndReceivedV2Messages() {
+        val alice = CryptoService.generateIdentity("alice")
+        val bob = CryptoService.generateIdentity("bob")
+        val message = "bidirectional display test"
+        val timestamp = 1700000000L
+        val msgId = "msg-disp-1"
+
+        // Alice encrypts to Bob
+        val (ciphertextB64, nonceB64) = CryptoService.encryptDMV2(
+            plaintext = message,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            recipientEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+
+        // Bob decrypts received message for display
+        val bobDisplay = CryptoService.decryptDMForDisplay(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = alice.encPublicKeyB64,
+            myEncPrivB64 = bob.encPrivateKeyB64,
+            myEdPub = bob.publicKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            peerEdPub = alice.publicKeyB64,
+            msgId = msgId,
+            timestamp = timestamp
+        )
+        assertEquals("Bob can display received message", message, bobDisplay)
+
+        // Alice decrypts her own sent message for display
+        val aliceDisplay = CryptoService.decryptDMForDisplay(
+            ciphertextB64 = ciphertextB64,
+            nonceB64 = nonceB64,
+            theirEncPubB64 = bob.encPublicKeyB64,
+            myEncPrivB64 = alice.encPrivateKeyB64,
+            myEdPub = alice.publicKeyB64,
+            senderEdPub = alice.publicKeyB64,
+            peerEdPub = bob.publicKeyB64,
+            msgId = msgId,
+            timestamp = timestamp
+        )
+        assertEquals("Alice can display her own sent message", message, aliceDisplay)
+    }
+
+    @Test
     fun deriveSeedB64_matchesGoldenSeed() {
         // Same golden seed as MnemonicGeneratorTest, here through the Base64 wrapper.
         val mnemonic =

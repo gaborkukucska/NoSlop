@@ -283,8 +283,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     messageDao.getMessagesWithPeer(peer.publicKeyB64).first()
                 }?.takeLast(30) ?: emptyList()
                 messages.forEach { msg ->
-                    val plaintext = com.noslop.app.crypto.CryptoService.decryptDM(
-                        msg.ciphertext, msg.nonce, peer.encPublicKeyB64, identity.encPrivateKeyB64
+                    val plaintext = com.noslop.app.crypto.CryptoService.decryptDMForDisplay(
+                        ciphertextB64 = msg.ciphertext,
+                        nonceB64 = msg.nonce,
+                        theirEncPubB64 = peer.encPublicKeyB64,
+                        myEncPrivB64 = identity.encPrivateKeyB64,
+                        myEdPub = identity.publicKeyB64,
+                        senderEdPub = msg.senderPub,
+                        peerEdPub = peer.publicKeyB64,
+                        msgId = msg.id,
+                        timestamp = msg.timestamp
                     )
                     var contentStr = plaintext ?: "..."
                     val obj = JSONObject()
@@ -1015,13 +1023,30 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 continue
             }
 
-            val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, senderKeys.encPrivateKeyB64)
+            // C08: Group messages ride on pairwise v2 directional AAD encryption binding groupId and memberPub
+            val (ciphertext, nonce) = CryptoService.encryptDMV2(
+                plaintext = jsonPayload,
+                theirEncPubB64 = encPub,
+                myEncPrivB64 = senderKeys.encPrivateKeyB64,
+                senderEdPub = senderKeys.publicKeyB64,
+                recipientEdPub = memberPub,
+                msgId = msgId,
+                groupId = groupId,
+                timestamp = timestamp
+            )
             if (ciphertext.isBlank() || nonce.isBlank()) {
                 Logger.error("REPOSITORY", "sendGroupMessage: encryption FAILED for member ${memberPub.take(12)}... -- not sending")
                 continue
             }
 
-            val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, groupId = groupId, timestamp = timestamp)
+            val msgPayload = com.noslop.app.mesh.EncryptedPayload(
+                id = msgId,
+                ciphertext = ciphertext,
+                nonce = nonce,
+                groupId = groupId,
+                timestamp = timestamp,
+                v = 2
+            )
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = java.util.UUID.randomUUID().toString(),
                 senderId = senderKeys.publicKeyB64,

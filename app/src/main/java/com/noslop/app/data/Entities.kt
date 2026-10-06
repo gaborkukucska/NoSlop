@@ -119,7 +119,8 @@ data class ChatMessage(
     val isRead: Boolean = false,
     val mediaId: String? = null,
     val mediaType: String? = null,
-    val replyToMessageId: String? = null
+    val replyToMessageId: String? = null,
+    val isLegacy: Boolean = false
 )
 
 @Entity(
