@@ -468,7 +468,7 @@ object GossipService {
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT" || packet.type == "PEER_REMOVED"
         val isDeletePacket = packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
         val isFollowPacket = packet.type == "FOLLOW" || packet.type == "UNFOLLOW"
-        val isDirectedMessageForUs = packet.type == "MESSAGE" && !packet.targetUserId.isNullOrBlank() && 
+        val isDirectedMessageForUs = (packet.type == "MESSAGE" || packet.type == "DM_ACK") && !packet.targetUserId.isNullOrBlank() && 
             (checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64))
 
         // Dedicated rate limit for untrusted incoming directed DMs (max 10 per 60s per sender, 30 per 60s globally)

@@ -235,6 +235,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
         val MIGRATION_17_18 = object : androidx.room.migration.Migration(17, 18) {
             override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE chat_messages ADD COLUMN isLegacy INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE chat_messages ADD COLUMN deliveryStatus TEXT NOT NULL DEFAULT 'DELIVERED'")
             }
         }
 

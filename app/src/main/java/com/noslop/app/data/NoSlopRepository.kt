@@ -2240,6 +2240,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.notificationDao().deleteGroupInviteNotifications(groupId)
     }
 
+    suspend fun onDmAckReceived(msgId: String, senderPub: String) =
+        meshSocialRepository.onDmAckReceived(msgId, senderPub)
+
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,

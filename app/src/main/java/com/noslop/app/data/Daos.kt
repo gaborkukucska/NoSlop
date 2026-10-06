@@ -291,6 +291,9 @@ interface MessageDao {
     @Query("UPDATE chat_messages SET isRead = 1 WHERE id = :messageId")
     suspend fun markAsReadById(messageId: String)
 
+    @Query("UPDATE chat_messages SET deliveryStatus = :status WHERE id = :messageId")
+    suspend fun updateDeliveryStatus(messageId: String, status: String)
+
     @Query("SELECT MAX(timestamp) FROM chat_messages WHERE chatWithPeerPub = :peerPub AND senderPub = :peerPub")
     suspend fun getLatestReceivedTimestamp(peerPub: String): Long?
 

@@ -164,7 +164,7 @@ class MeshTransport(
             packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
             packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
             packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC" ||
-            packet.type == "CHAT_REACTION"
+            packet.type == "CHAT_REACTION" || packet.type == "DM_ACK"
 
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isInteractive = packet.type == "TYPING" || packet.type == "READ_RECEIPT"
