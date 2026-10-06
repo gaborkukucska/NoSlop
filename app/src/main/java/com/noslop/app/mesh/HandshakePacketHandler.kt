@@ -763,13 +763,7 @@ class HandshakePacketHandler(
         val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
         val sortedAdded = update.addedMembers?.sorted()?.joinToString(",") ?: ""
         val sortedRemoved = update.removedMembers?.sorted()?.joinToString(",") ?: ""
-        val sortedBanned = update.bannedMembers?.sorted()?.joinToString(",") ?: ""
-        val allowInvites = update.allowMemberInvites?.toString() ?: ""
-        val allowSelfRemove = update.allowMemberSelfRemove?.toString() ?: ""
-        val desc = update.description ?: ""
-        val avatar = update.avatarB64 ?: ""
-        val title = update.title ?: ""
-
+        val sortedBanned = encodeOptBanned(update.bannedMembers)
         val sortedDetails = canonicalMemberDetailsString(update.memberDetails)
         val sortedHandles = canonicalMemberHandlesString(update.memberHandles)
         for (candidate in candidates) {

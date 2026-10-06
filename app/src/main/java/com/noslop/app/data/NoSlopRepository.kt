@@ -1113,14 +1113,15 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             membersJson = membersJson,
             memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap),
             bannedMembersJson = com.google.gson.Gson().toJson(effectiveBannedList),
-            revision = timestamp
+            // W04: Only admin updates advance revision to prevent member clock skew rejecting admin updates
+            revision = if (isAdmin) timestamp else existing.revision
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
         val signingKey = if (isAdmin) adminKeys else myKeys
         val sortedAdded = addedMembers.sorted().joinToString(",")
         val sortedRemoved = removedMembers.sorted().joinToString(",")
-        val sortedBanned = if (isAdmin) effectiveBannedList.sorted().joinToString(",") else ""
+        val sortedBanned = com.noslop.app.mesh.encodeOptBanned(if (isAdmin) effectiveBannedList else null)
 
         val wireTitle = if (isAdmin) effectiveTitle else null
         val wireDesc = if (isAdmin) effectiveDescription else null
@@ -1173,7 +1174,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             description = wireDesc,
             addedMembers = addedMembers.takeIf { it.isNotEmpty() },
             removedMembers = removedMembers.takeIf { it.isNotEmpty() },
-            bannedMembers = if (isAdmin && effectiveBannedList.isNotEmpty()) effectiveBannedList else null,
+            // W04: Pass empty list when admin clears bans so receivers clear rather than keep bans
+            bannedMembers = if (isAdmin) effectiveBannedList else null,
             memberHandles = memberHandlesMap,
             memberDetails = memberDetailsMap,
             allowMemberInvites = wireAllowInvites,

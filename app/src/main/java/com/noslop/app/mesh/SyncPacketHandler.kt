@@ -151,13 +151,13 @@ class SyncPacketHandler(
                 delay(500)
             }
             
-            // Send comments in batches
+            // C10: Send comments in batches using effectiveSenderId to prevent identity leak to creator followers
             for (commentBatch in commentSyncList.chunked(maxBatchSize)) {
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = localKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
                     payload = com.google.gson.Gson().toJsonTree(syncResp)
@@ -166,13 +166,13 @@ class SyncPacketHandler(
                 delay(500)
             }
             
-            // Send reactions in batches
+            // C10: Send reactions in batches using effectiveSenderId
             for (reactionBatch in reactionSyncList.chunked(maxBatchSize)) {
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = localKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
                     payload = com.google.gson.Gson().toJsonTree(syncResp)
@@ -264,13 +264,13 @@ class SyncPacketHandler(
                 delay(500)
             }
 
-            // Send comments in batches
+            // C10: Send comments in batches using effectiveSenderId
             for (commentBatch in commentSyncList.chunked(maxBatchSize)) {
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = localKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
                     payload = com.google.gson.Gson().toJsonTree(syncResp)
@@ -279,13 +279,13 @@ class SyncPacketHandler(
                 delay(500)
             }
 
-            // Send reactions in batches
+            // C10: Send reactions in batches using effectiveSenderId
             for (reactionBatch in reactionSyncList.chunked(maxBatchSize)) {
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = localKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
                     payload = com.google.gson.Gson().toJsonTree(syncResp)

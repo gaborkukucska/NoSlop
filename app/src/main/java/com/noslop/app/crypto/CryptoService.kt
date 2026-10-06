@@ -4,8 +4,6 @@ package com.noslop.app.crypto
 import android.os.Build
 import android.util.Base64
 import com.noslop.app.debug.Logger
-import com.goterl.lazysodium.LazySodiumAndroid
-import com.goterl.lazysodium.SodiumAndroid
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
@@ -28,16 +26,6 @@ object CryptoService {
 
     private const val TAG = "CRYPTO"
     private val BC_PROVIDER = org.bouncycastle.jce.provider.BouncyCastleProvider()
-
-    // Safely load Lazysodium. If JNA fails on an obscure ABI, this gracefully falls back.
-    private val lazySodium: LazySodiumAndroid? by lazy {
-        try {
-            LazySodiumAndroid(SodiumAndroid())
-        } catch (e: Throwable) {
-            Logger.error(TAG, "Lazysodium initialization failed, falling back to pure BouncyCastle: ${e.message}")
-            null
-        }
-    }
 
     // Standard ASN.1 headers for 100% legacy mesh compatibility
     private val ED25519_PKCS8_HEADER = byteArrayOf(
@@ -152,22 +140,12 @@ object CryptoService {
     fun generateIdentity(handle: String): IdentityKeys {
         Logger.info(TAG, "Generating Ed25519 and X25519 identity for handle: $handle")
         return try {
-            val ls = lazySodium
-            val rawPub: ByteArray
-            val rawSeed: ByteArray
-
-            if (ls != null) {
-                val lsKp = ls.cryptoSignKeypair()
-                rawPub = lsKp.publicKey.asBytes
-                rawSeed = lsKp.secretKey.asBytes.copyOfRange(0, 32)
-            } else {
-                val kpg = KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER).also {
-                    it.initialize(255, SecureRandom())
-                }
-                val kp = kpg.generateKeyPair()
-                rawPub = getEd25519PublicKeyParams(kp.public.encoded).encoded
-                rawSeed = getEd25519PrivateKeyParams(kp.private.encoded).encoded
+            val kpg = KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER).also {
+                it.initialize(255, SecureRandom())
             }
+            val kp = kpg.generateKeyPair()
+            val rawPub = getEd25519PublicKeyParams(kp.public.encoded).encoded
+            val rawSeed = getEd25519PrivateKeyParams(kp.private.encoded).encoded
 
             // GUARANTEE BACKWARDS COMPATIBILITY: Wrap raw keys in ASN.1 headers before Base64 encoding.
             val pubB64 = Base64.encodeToString(ED25519_X509_HEADER + rawPub, Base64.NO_WRAP)
@@ -374,6 +352,24 @@ object CryptoService {
         } catch (e: Exception) {
             Logger.warn(TAG, "DM decryption failed: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * C11: Derive 20-character Base32 visual safety fingerprint from SHA3-256(edPub || encPub).
+     */
+    fun deriveSafetyFingerprint(edPublicKeyB64: String, encPublicKeyB64: String): String {
+        return try {
+            val edBytes = Base64.decode(edPublicKeyB64, Base64.DEFAULT)
+            val encBytes = Base64.decode(encPublicKeyB64, Base64.DEFAULT)
+            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+            digest.update(edBytes, 0, edBytes.size)
+            digest.update(encBytes, 0, encBytes.size)
+            val hash = ByteArray(digest.digestSize)
+            digest.doFinal(hash, 0)
+            base32(hash).take(20).chunked(4).joinToString("-")
+        } catch (_: Exception) {
+            "0000-0000-0000-0000-0000"
         }
     }
 

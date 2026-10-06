@@ -191,8 +191,15 @@ interface PostDao {
             if (existing.isOrphaned) return false
             if (existing.timestamp > post.timestamp) return false
             if (existing.timestamp == post.timestamp) {
-                // V08: Allow signature-only upgrade for historical canonical reissue on identical timestamp
+                // W07: Allow signature-only upgrade strictly if canonical content matches, and update signature only
                 if (existing.signature == post.signature) return false
+                val isContentMatch = existing.content == post.content &&
+                    existing.privacy == post.privacy &&
+                    existing.mediaUrl == post.mediaUrl &&
+                    existing.clearnetUrl == post.clearnetUrl
+                if (!isContentMatch) return false
+                updateSignatureIfUnchanged(post.id, post.authorPublicKeyB64, existing.signature, existing.timestamp, post.signature)
+                return true
             }
         } else {
             // V06: Check author-scoped tombstone for delete-before-create delivery

@@ -113,18 +113,28 @@ class GroupMessageSecurityTest {
     @Test
     fun groupUpdate_withAlteredBannedMembers_failsVerification() {
         val timestamp = 1700000000L
-        val updatePayloadToSign = CryptoService.encodeForSigning(
-            groupId, "Updated Title", admin.publicKeyB64, timestamp.toString(),
-            alice.publicKeyB64, "", "", "New Desc", "avatarB64", "true", "true"
+        val originalBannedStr = encodeOptBanned(null)
+        val payloadToSign = canonicalGroupUpdatePayload(
+            groupId, "Updated Title", admin.publicKeyB64, timestamp,
+            alice.publicKeyB64, "", originalBannedStr, "New Desc", "avatarB64", true, true
         )
-        val sig = CryptoService.sign(updatePayloadToSign, admin.privateKeyB64)
+        val sig = CryptoService.sign(payloadToSign, admin.privateKeyB64)
 
-        // Altering banned list without updating signature fails (S04)
-        val tamperedPayload = CryptoService.encodeForSigning(
-            groupId, "Updated Title", admin.publicKeyB64, timestamp.toString(),
-            alice.publicKeyB64, "", mallory.publicKeyB64, "New Desc", "avatarB64", "true", "true"
+        // W03: Altering banned list from absent to non-empty fails verification
+        val tamperedBannedStr = encodeOptBanned(listOf(mallory.publicKeyB64))
+        val tamperedPayload = canonicalGroupUpdatePayload(
+            groupId, "Updated Title", admin.publicKeyB64, timestamp,
+            alice.publicKeyB64, "", tamperedBannedStr, "New Desc", "avatarB64", true, true
         )
         assertFalse(CryptoService.verify(tamperedPayload, sig, admin.publicKeyB64))
+
+        // W03: Altering banned list from absent to cleared empty list also fails verification
+        val clearedBannedStr = encodeOptBanned(emptyList())
+        val clearedPayload = canonicalGroupUpdatePayload(
+            groupId, "Updated Title", admin.publicKeyB64, timestamp,
+            alice.publicKeyB64, "", clearedBannedStr, "New Desc", "avatarB64", true, true
+        )
+        assertFalse(CryptoService.verify(clearedPayload, sig, admin.publicKeyB64))
     }
 
     @Test
@@ -239,9 +249,10 @@ class GroupMessageSecurityTest {
             alice.publicKeyB64 to GroupMemberInfo(handle = "Alice", encPublicKey = alice.encPublicKeyB64, onionAddress = "alice.onion")
         )
         val sortedDetails = canonicalMemberDetailsString(details)
+        val bannedStr = encodeOptBanned(null)
         val payloadToSign = canonicalGroupUpdatePayload(
             groupId, "Updated Title", admin.publicKeyB64, 1000L,
-            "", "", "", "Desc", "avatar", true, true,
+            "", "", bannedStr, "Desc", "avatar", true, true,
             sortedDetails, ""
         )
         val sig = CryptoService.sign(payloadToSign, admin.privateKeyB64)
@@ -253,7 +264,7 @@ class GroupMessageSecurityTest {
         val tamperedDetailsStr = canonicalMemberDetailsString(tamperedDetails)
         val tamperedPayload = canonicalGroupUpdatePayload(
             groupId, "Updated Title", admin.publicKeyB64, 1000L,
-            "", "", "", "Desc", "avatar", true, true,
+            "", "", bannedStr, "Desc", "avatar", true, true,
             tamperedDetailsStr, ""
         )
         assertFalse("Tampered member details in GROUP_UPDATE must fail signature verification (V03)", CryptoService.verify(tamperedPayload, sig, admin.publicKeyB64))

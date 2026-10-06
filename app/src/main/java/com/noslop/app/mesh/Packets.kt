@@ -322,6 +322,27 @@ fun canonicalMemberHandlesString(memberHandles: Map<String, String>?): String {
 }
 
 @Keep
+fun encodeOptString(value: String?): String = when {
+    value == null -> "ABSENT"
+    value.isEmpty() -> "CLEAR"
+    else -> "SET:$value"
+}
+
+@Keep
+fun encodeOptBool(value: Boolean?): String = when (value) {
+    null -> "ABSENT"
+    true -> "TRUE"
+    false -> "FALSE"
+}
+
+@Keep
+fun encodeOptBanned(banned: List<String>?): String = when {
+    banned == null -> "ABSENT"
+    banned.isEmpty() -> "CLEAR"
+    else -> "SET:" + banned.sorted().joinToString(",")
+}
+
+@Keep
 fun canonicalGroupUpdatePayload(
     groupId: String,
     title: String?,
@@ -338,16 +359,16 @@ fun canonicalGroupUpdatePayload(
     sortedMemberHandles: String = ""
 ): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
     groupId,
-    title ?: "",
+    encodeOptString(title),
     signerPublicKeyB64,
     timestamp.toString(),
     sortedAdded,
     sortedRemoved,
     sortedBanned,
-    description ?: "",
-    avatarB64 ?: "",
-    allowMemberInvites?.toString() ?: "",
-    allowMemberSelfRemove?.toString() ?: "",
+    encodeOptString(description),
+    encodeOptString(avatarB64),
+    encodeOptBool(allowMemberInvites),
+    encodeOptBool(allowMemberSelfRemove),
     sortedMemberDetails,
     sortedMemberHandles
 )
