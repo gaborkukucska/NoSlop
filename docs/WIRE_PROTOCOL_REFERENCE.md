@@ -121,14 +121,14 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 24 | `TYPING` | `TypingPayload` | **none — unsigned** | `DmPacketHandler.handleTyping` | none; updates the in-memory `peerTypingStates` flow |
 | 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
 | 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
-| 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | `groupId|id|content|timestamp|senderId` | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage` (Keystore encrypted at rest); legacy receive-only wire support with strict signature and group membership verification |
+| 27 | `GROUP_MESSAGE` | *(retired)* | *(retired)* | *(retired — unencrypted cleartext packet eliminated per C22; all group messaging strictly uses pairwise E2EE `MESSAGE` fan-out)* | none |
 | 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
 | 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Replies with `GROUP_SYNC` containing full group schema and `memberDetails` |
 | 30 | `GROUP_SYNC` | `GroupSyncPayload` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
 | 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) (dual-mode: encodeForSigning & pipe in verifier & handler) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
 | 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` (dual-mode: encodeForSigning & pipe) | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
 | 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
-| 34 | `ANNOUNCE_INVIDIOUS_INSTANCE` | `AnnounceInvidiousInstancePayload` | n/a (validated URL & timestamp window) | `HandshakePacketHandler.handleAnnounceInvidiousInstance` | `InvidiousApiClient.addGossipedInstance` |
+| 34 | `ANNOUNCE_INVIDIOUS_INSTANCE` | *(retired)* | *(retired)* | *(retired — unauthenticated video instance gossip eliminated per C05 to prevent SSRF and resolver hijacking)* | none |
 
 Notes:
 
@@ -790,7 +790,7 @@ and still accurate.
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) (supporting encodeForSigning and pipe) |
 | `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey, sortedMemberDetails, sortedMemberHandles)`. Legacy 7-field fallback strictly restricted to admin self-signed payloads with empty unsigned fields. |
-| `GROUP_UPDATE` | Canonical 13-field `canonicalGroupUpdatePayload(groupId, wireTitle, signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, sortedBanned, wireDesc, wireAvatar, wireAllowInvites, wireAllowSelfRemove, sortedMemberDetails, sortedMemberHandles)` — signer recovered by trial verification against group members |
+| `GROUP_UPDATE` | Canonical 13-field presence-encoded `canonicalGroupUpdatePayload(groupId, encodeOptString(wireTitle), signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, encodeOptBanned(banned), encodeOptString(wireDesc), encodeOptString(wireAvatar), encodeOptBool(wireAllowInvites), encodeOptBool(wireAllowSelfRemove), sortedMemberDetails, sortedMemberHandles)`. Distinguishes absent (`ABSENT`) from cleared (`CLEAR`) values per W03. |
 | `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |

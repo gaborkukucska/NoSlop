@@ -155,8 +155,7 @@ com.noslop.app
 
 ### 3.2 Key Generation (`CryptoService.generateIdentity`)
 
-- **Lazysodium Primary Path**: By default, `cryptoSignKeypair()` from Lazysodium (libsodium via JNA) is used to generate the Ed25519 keypair. Libsodium produces high-quality keys consistently across all platforms, returning raw 32-byte seed/public keys. These are manually wrapped in standard ASN.1 PKCS#8 / X.509 headers before saving to ensure backwards compatibility with existing mesh peers.
-- **Bouncy Castle Fallback**: If JNA fails to load or Lazysodium throws an error, generation falls back to Bouncy Castle's lightweight `Ed25519KeyPairGenerator`.
+- **Bouncy Castle Pure Engine**: Keypairs are generated natively using Bouncy Castle's lightweight `Ed25519KeyPairGenerator` (`KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)`). Raw 32-byte public keys and seeds are manually wrapped in standard ASN.1 PKCS#8 / X.509 headers before Base64 encoding to ensure 100% backwards compatibility with historical mesh peers without external native C/JNA dependencies.
 - X25519 keys are always generated via Bouncy Castle
   (`KeyPairGenerator.getInstance("X25519", BC_PROVIDER)`), regardless of API
   level.

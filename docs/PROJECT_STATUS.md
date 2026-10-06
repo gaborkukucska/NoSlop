@@ -1,5 +1,81 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-06) — Trust Boundaries, Tor Leak Elimination, Multi-Store Rollback & Protocol Hardening (v0.6.9-alpha)
+
+* **Explicit Peer Relationship State Machine & Nonce Exchange (C01) — Tested (unit: `HandshakeSecurityTest`)**:
+  * Added Room migration 16→17 (`MIGRATION_16_17`) adding `relationship: String` (`NONE`, `OUTGOING_PENDING`, `INCOMING_PENDING`, `ACCEPTED`, `BLOCKED`) and `pendingNonce: String?`.
+  * `sendConnectionRequest` generates a cryptographic random 128-bit `requestNonce` and sets `relationship = OUTGOING_PENDING`.
+  * `handleConnectionRequest` sets `relationship = INCOMING_PENDING` (exempting creator nodes in auto-accept mode).
+  * `handleUserHandshake` promotes a peer to `isTrusted = true` / `ACCEPTED` strictly when `relationship == OUTGOING_PENDING` and the received `inReplyToNonce` matches the stored `pendingNonce`, eliminating unsolicited trust escalation.
+* **Handshake Encryption Key Binding & Destination Authentication (C02) — Tested (unit: `HandshakeSecurityTest`)**:
+  * Implemented `CryptoService.canonicalHandshakePayloadV2` binding `"noslop-hs-v2"`, `fromUserId`, `fromUsername`, `fromHomeNode`, `fromEncryptionPublicKey`, `targetUserId`, `nonce`, `timestamp`, avatar, and bio.
+  * Packets carrying a new encryption key are rejected if `targetUserId` does not match local node identity or signature verification fails. Key modifications on accepted peers are sequestered into `pendingEncKey`.
+* **Bounded MEDIA_REQUEST, Peer ACL & Coroutine Isolation (C03) — Tested (unit: `MediaManagerSecurityTest`)**:
+  * Bounded `chunkSize` and `byteLength` to `1..MAX_CHUNK_BYTES` (256 KB) and prohibited negative byte offsets/chunk indices, eliminating remote OOM / array allocation crashes.
+  * Strictly route `MEDIA_CHUNK` replies to the requester's stored onion address in `peerDao`, rejecting attacker-supplied `origin_onion` bounce targets.
+  * Enforced `isMediaAuthorizedForSender()` checking post privacy, DM membership, group participation, and constant-time `accessKey` comparison. Attached a long-lived `CoroutineExceptionHandler` to `MediaManager`, `GossipService`, and `MeshTransport`.
+* **Tor Leak Elimination: WebView Gating & Tracker-Free Barcode Scanning (C04, C12) — Tested (unit: `TorLeakArchitectureTest`)**:
+  * `ArticleWebViewDialog` in `MediaComponents.kt` blocks embedded WebView when "Route Clearnet via Tor" is active to prevent clearnet IP leaks, offering direct "Open in Tor Browser" and explicit exit confirmation. When Tor is disabled, WebViews default JavaScript to off with disabled geolocation and file access.
+  * Replaced Google ML Kit barcode scanning with pure `zxing.core` multi-format YUV image analysis in `QRScanScreen.kt`, eliminating closed-source Google DataTransport telemetry. Added `TorLeakArchitectureTest` scanning source files for ungated WebViews.
+* **Unauthenticated Invidious Gossip Elimination (C05) — Tested (unit: `GossipServiceTest`)**:
+  * Deleted `ANNOUNCE_INVIDIOUS_INSTANCE` packet type, handler, and firewall allowlist entry, eliminating SSRF and malicious stream resolver hijacking.
+* **Envelope Hop Capping & Group Membership Parsing (C09) — Tested (unit: `GossipServiceTest`)**:
+  * Clamped incoming and forwarded packet `hops` to `DEFAULT_MAX_HOPS` (6), preventing graph-wide packet looping. Replaced substring checks on `group.membersJson` with parsed JSON list evaluation.
+* **Synchronized Feed Sync Cancellation Deadlock Fix (W01) — Tested (unit: `FeedRepositoryTest`)**:
+  * Detached and cancelled `activeSyncDeferred` under `syncMutex` and awaited pass completion outside the mutex lock, resolving the cancellation deadlock.
+* **Injective Group Update Canonical Encoding & Field Absence Disambiguation (W02, W03) — Tested (unit: `GroupMessageSecurityTest`)**:
+  * Eliminated legacy 4-field `GROUP_UPDATE` fallback in `resolveUpdateSigner`, strictly requiring canonical 13-field signatures.
+  * Introduced `encodeOptString`, `encodeOptBool`, and `encodeOptBanned` into `canonicalGroupUpdatePayload`, encoding absent fields as `"ABSENT"`, cleared values as `"CLEAR"`, and populated values as `"SET:$val"`.
+* **Sender/Receiver Group Revision Alignment & Ban Clearing Propagation (W04) — Tested (unit: `GroupMessageSecurityTest`)**:
+  * Restricted group `revision` advancement in `NoSlopRepository.updateGroupChat` strictly to admin updates (`revision = if (isAdmin) timestamp else existing.revision`), preventing non-admin member clock skew from causing stale update rejections.
+  * Serialized empty ban list `[]` instead of `null` when an admin clears all bans, allowing ban removals to propagate.
+* **Monotonic Author-Scoped Tombstones (W06) — Tested (unit: `PostPacketHandlerTest`)**:
+  * Enforced `timestamp > existingTs` in `PostDao.deletePostSafely`, ensuring older delayed deletes cannot lower an author-scoped tombstone timestamp.
+* **Strict Content-Matching Signature Migration (W07) — Tested (unit: `PostPacketHandlerTest`)**:
+  * In `PostDao.insertPostSafely`, equal-timestamp arrivals require identical content, privacy, and URLs before calling `updateSignatureIfUnchanged`, rejecting conflicting state replacements.
+* **No Plaintext Secrets on External Storage & Streaming ZIP Import (C06) — Tested (unit: `BackupManagerTest`)**:
+  * Staged backup export and import exclusively in internal storage (`context.cacheDir/backup_ops` and `context.noBackupFilesDir/restore_stage`), completely eliminating unencrypted archives from shared `externalCacheDir`.
+  * Streamed `identity_backup.json` and `api_keys_backup.json` directly into ZIP streams.
+  * Added `secureDelete()` overwriting temporary archives and decrypted group message files with zeros before unlinking.
+* **API 24+ Compatible PBKDF2 Seed Derivation (C14) — Tested (unit: `MnemonicGeneratorTest`)**:
+  * Switched `MnemonicGenerator.deriveSeed()` to use Bouncy Castle's `PKCS5S2ParametersGenerator(SHA512Digest())` directly, eliminating platform JCA provider failures on Android 7.0–7.1 (API 24–25).
+* **Cross-Device Key Derivation Verification & Authoritative Derivation (C15) — Tested (unit: `BackupManagerTest`)**:
+  * In `IdentityRepository.loadIdentity()`, reconciled cached public keys against the authoritative key derived from `privEd` via `CryptoService.getPublicKeyFromPrivateKey()`.
+  * In `BackupManager.importData()` legacy cross-device restore, verified that mnemonic-derived public keys match `local_pub_ed25519` in the restored database, setting `identity_quarantined = true` and aborting if an identity v1 mismatch is detected.
+* **Hardware-Backed Fallback Storage Master Key (C16) — Tested (unit: `IdentityRepositoryTest`)**:
+  * Replaced `ANDROID_ID` salt obfuscation in `IdentityRepository` with a dedicated raw AndroidKeyStore AES-256-GCM master key (`"noslop_fallback_hardware_key"`).
+* **Synchronous API Key Commits & Rollback Atomicity (W05) — Tested (unit: `BackupManagerTest`)**:
+  * Switched `ApiKeyRepository.setKey` and `removeKey` to synchronous `commit()`.
+  * Added `commitSucceeded` tracking in `BackupManager.importData` and checked `commit()` outcomes on preference rollback, preserving recovery snapshots whenever rollback cannot be verified.
+* **Asynchronous Recovery State & runBlocking Elimination (W08) — Tested (unit: `OnboardingScreen`)**:
+  * Exposed `needsIdentityRecovery: StateFlow<Boolean>` asynchronously on `NoSlopViewModel`.
+  * Eliminated blocking `runBlocking` in Compose composition inside `OnboardingScreen.kt`.
+* **Creator Identity Linkage Elimination (C10) — Tested (unit: `SyncPacketHandlerTest`)**:
+  * In `SyncPacketHandler.handleSyncRequest` and `handleInventorySyncRequest`, used `effectiveSenderId` for comment and reaction `SYNC_RESPONSE` batches, preventing personal identity public key leaks to creator followers.
+* **20-Character Visual Safety Fingerprint (C11) — Tested (unit: `CryptoServiceTest`)**:
+  * Implemented `CryptoService.deriveSafetyFingerprint(edPub, encPub)` generating formatted Base32 fingerprints from `SHA3-256(edPub || encPub)`.
+* **Pure Bouncy Castle Engine & Dependency Pruning (C13, C20) — Tested (unit: `CryptoServiceTest`, `JamendoApiClientTest`)**:
+  * Removed `com.goterl:lazysodium-android` and `net.java.dev.jna:jna` from `build.gradle.kts` and `CryptoService.kt`, standardizing on pure Bouncy Castle `Ed25519KeyPairGenerator`.
+  * Removed bundled third-party candidate IDs and rotation loops from `JamendoApiClient.kt`.
+* **Log Privacy & Opt-in DoH (C19, C21, C22) — Tested (unit: `LoggerTest`)**:
+  * Sanitized release logs: reduced URLs to origin only (`scheme://host/…`), masked 11-char YouTube IDs, and auto-pruned logs older than 72 hours.
+  * Respected NXDOMAIN in `HttpClientProvider.cascadingDns` and disabled DoH fallback by default.
+  * Embedded click-to-load prompts for remote GIF URLs and retired cleartext `GROUP_MESSAGE` packet handling.
+
+### Remaining Roadmap for Next Session (Batch 5)
+1. **C08 (P1)**: **DM v2 Cryptographic Construction**:
+   - Directional keys via HKDF (`noslop-dm-v2|senderEdPub->recipientEdPub`), eliminating reflection attacks.
+   - Additional Authenticated Data (AAD) binding over `(msgId, senderEdPub, recipientEdPub, groupId, timestamp)`.
+   - Protocol version `v: 2` in `EncryptedPayload`, with seen replay tracking and legacy v1 flagging.
+2. **C17 (P1)**: **Mesh Media Integrity Hash**:
+   - Add `sha256` digest to `MediaMetadata`, bind into post/comment signatures, and verify on download completion.
+3. **C18 (P1)**: **DM Outbox Delivery ACK**:
+   - Implement authenticated `DM_ACK` packet so outbox entries persist until delivery is confirmed by the counterparty.
+4. **C24 (P2)**: **Dependency & ProGuard Shrinking**:
+   - Prune unreferenced Guardian Project artifacts and optimize ProGuard rules.
+5. **C25 (P2)**: **Maintainability Refactoring**:
+   - Standardize on shared `Json.gson`, structured `AppScopes`, and extract `IdentityViewModel` from `NoSlopViewModel`.
+
 ## Completed Changes (2026-10-04) — Protocol Canonicalization, Atomic Post Transactions, Task Ownership & Safe Recovery (v0.6.9-alpha)
 
 * **Post & Edit Canonical Signature Alignment (`MeshSocialRepository.kt`, `Packets.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`, `MeshPacketVerifier.kt`)**:

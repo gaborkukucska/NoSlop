@@ -70,7 +70,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 ### 🔑 Sovereign Cryptographic Identity
 
-* 🔐 **Ed25519 + X25519 Keys** — Generated locally using Lazysodium (libsodium) with Bouncy Castle fallback.
+* 🔐 **Ed25519 + X25519 Keys** — Generated locally using Bouncy Castle pure lightweight cryptographic engine.
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
@@ -123,9 +123,9 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 | **UI** | Jetpack Compose (Material Design 3), Compose Animation, Markdown Spans |
 | **Media** | Media3 / ExoPlayer, Coil, Android System WebView (fallback) |
 | **Networking** | Embedded Tor daemon (`tor-android`), OkHttp, SOCKS5 Stream Isolation |
-| **Cryptography** | Ed25519 (Lazysodium / Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
+| **Cryptography** | Ed25519 (Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
 | **Persistence** | Room (SQLite, Keystore AES-256-GCM message encryption), EncryptedSharedPreferences |
-| **Hardware** | CameraX (QR scanning & media capture), ZXing |
+| **Hardware** | CameraX (QR scanning & media capture), ZXing (tracker-free) |
 | **Background** | Android WorkManager & Foreground Services |
 
 ---
