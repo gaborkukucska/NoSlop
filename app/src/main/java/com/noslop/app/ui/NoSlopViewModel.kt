@@ -509,6 +509,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
     val isUsingInsecureStorage = repository.isUsingInsecureStorage
 
+    private val _needsIdentityRecovery = MutableStateFlow(false)
+    val needsIdentityRecovery: StateFlow<Boolean> = _needsIdentityRecovery.asStateFlow()
+
+    fun checkIdentityRecoveryState() {
+        viewModelScope.launch {
+            _needsIdentityRecovery.value = repository.needsIdentityRecovery()
+        }
+    }
+
     private val _appLanguage = MutableStateFlow("en")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
@@ -563,6 +572,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _dmTutorialStep.value = dStep
         }
         viewModelScope.launch {
+            _needsIdentityRecovery.value = repository.needsIdentityRecovery()
             _isOnboardingComplete.value = repository.isOnboardingComplete()
             repository.ensureDefaultApiSourcesExist()
             repository.ensureDefaultDiscoverableNode()

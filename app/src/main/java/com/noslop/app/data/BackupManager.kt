@@ -55,7 +55,8 @@ object BackupManager {
         mediaOption: BackupMediaOption = BackupMediaOption.OWNED_ONLY
     ): Boolean {
         Logger.info(TAG, "Starting data export...", "mediaOption=$mediaOption")
-        val tempDir = context.externalCacheDir ?: context.cacheDir
+        // C06: Internal storage only; never write plaintext backup archives to shared external storage
+        val tempDir = File(context.cacheDir, "backup_ops").apply { mkdirs() }
         val tempZip = File(tempDir, "noslop_backup_${System.currentTimeMillis()}.zip")
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
@@ -115,10 +116,10 @@ object BackupManager {
                         }
                     }
                     if (idObj != null) {
-                        val tempIdFile = File(context.cacheDir, "identity_backup.json")
-                        tempIdFile.writeText(idObj.toString(), Charsets.UTF_8)
-                        addToZip(zos, tempIdFile, "identity_backup.json")
-                        tempIdFile.delete()
+                        // C06: Stream identity bytes directly to ZIP entry without writing plaintext file to disk
+                        zos.putNextEntry(ZipEntry("identity_backup.json"))
+                        zos.write(idObj.toString().toByteArray(Charsets.UTF_8))
+                        zos.closeEntry()
                         Logger.info(TAG, "Exported sovereign identity JSON to archive")
                     }
                 } catch (e: Exception) {
@@ -188,7 +189,6 @@ object BackupManager {
                 }
 
                 // Add API keys as JSON for cross-device portability (S10: always export manifest even if empty)
-                var tempApiFile: File? = null
                 try {
                     val apiRepo = ApiKeyRepository(context)
                     val apiObj = org.json.JSONObject()
@@ -196,13 +196,12 @@ object BackupManager {
                         val k = apiRepo.getKey(srv.id)
                         if (!k.isNullOrBlank()) apiObj.put(srv.id, k)
                     }
-                    tempApiFile = File(tempDir, "api_keys_backup_${System.currentTimeMillis()}.json")
-                    tempApiFile.writeText(apiObj.toString(), Charsets.UTF_8)
-                    addToZip(zos, tempApiFile, "api_keys_backup.json")
+                    // C06: Stream API keys directly into zip without writing plaintext file to disk
+                    zos.putNextEntry(ZipEntry("api_keys_backup.json"))
+                    zos.write(apiObj.toString().toByteArray(Charsets.UTF_8))
+                    zos.closeEntry()
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Failed to export API keys JSON: ${e.message}")
-                } finally {
-                    tempApiFile?.delete()
                 }
 
                 val prefsFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
@@ -339,7 +338,8 @@ object BackupManager {
     ): Boolean {
         Logger.info(TAG, "Starting data import...")
         lastRestoreNeedsIdentityRecovery = false
-        val tempDir = context.externalCacheDir ?: context.cacheDir
+        // C06: Internal cache only for decrypting restore archive
+        val tempDir = File(context.cacheDir, "backup_ops").apply { mkdirs() }
         val tempZip = File(tempDir, "noslop_restore_${System.currentTimeMillis()}.zip")
         return try {
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
@@ -395,7 +395,8 @@ object BackupManager {
 
             var restoredKeystoreSealedIdentity = false
             var restoredFallbackIdentity = false
-            val stageDir = File(tempDir, "restore_stage_${System.currentTimeMillis()}").apply { mkdirs() }
+            // C06: Stage exclusively in context.noBackupFilesDir
+            val stageDir = File(context.noBackupFilesDir, "restore_stage_${System.currentTimeMillis()}").apply { mkdirs() }
             var hasPortableIdentity = false
             var hasStagedDb = false
             var stagedGroupMessagesJson: String? = null
@@ -699,6 +700,7 @@ object BackupManager {
                 }
 
                 // --- COMMIT PHASE (guarded by atomic multi-store rollback) ---
+                var commitSucceeded = false
                 try {
                     // Commit 1: Replace Room database
                     if (hasStagedDb) {
@@ -805,13 +807,14 @@ object BackupManager {
                             }
                         }
                     }
+                    commitSucceeded = true
                 } catch (commitEx: Exception) {
                     Logger.error(TAG, "Commit phase failed — initiating full state rollback: ${commitEx.message}")
                     performFullRollback()
                     return false
                 } finally {
-                    // V02: Only clean up snapshots on successful commit or if rollback completed cleanly
-                    if (rollbackCompleted || !targetDb.exists() || (dbBackupFile == null && securePrefsBackup == null)) {
+                    // W05: Clean up snapshots ONLY when commit completely succeeded or rollback cleanly verified
+                    if (commitSucceeded || rollbackCompleted) {
                         dbBackupFile?.delete()
                         dbWalBackupFile?.delete()
                         dbShmBackupFile?.delete()
@@ -846,8 +849,29 @@ object BackupManager {
                     } catch (_: Exception) { "Anonymous" }
 
                     val cleanMnemonic = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+                    var expectedPub: String? = null
+                    try {
+                        val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                            context.getDatabasePath(DB_NAME).absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                        )
+                        db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_pub_ed25519' LIMIT 1", null).use {
+                            if (it.moveToFirst()) expectedPub = it.getString(0)
+                        }
+                        db.close()
+                    } catch (_: Exception) {}
+
                     val derivationSeed = MnemonicGenerator.deriveSeed(cleanMnemonic)
                     val derivedKeys = com.noslop.app.crypto.CryptoService.deriveIdentityFromSeed(derivationSeed, handle)
+
+                    // C15: Compare derived public key with database identity to prevent account clobbering on identity v1
+                    if (expectedPub != null && expectedPub != derivedKeys.publicKeyB64) {
+                        Logger.error(TAG, "Mnemonic derived public key ${derivedKeys.publicKeyB64.take(8)}... does not match restored database key ${expectedPub.take(8)}... (Legacy non-deterministic identity). Quarantining identity.")
+                        lastRestoreNeedsIdentityRecovery = true
+                        kotlinx.coroutines.runBlocking {
+                            NoSlopDatabase.getDatabase(context).appSettingDao().insertSetting(AppSetting("identity_quarantined", "true"))
+                        }
+                        return false
+                    }
 
                     val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
                         context,

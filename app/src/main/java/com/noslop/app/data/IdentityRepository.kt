@@ -132,7 +132,34 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         }
     }
 
-    private val fallbackSecretKey: javax.crypto.SecretKey by lazy {
+    // C16: Hardware-backed raw AES-256-GCM master key from AndroidKeyStore without Tink
+    private fun getOrCreateFallbackKeystoreKey(): javax.crypto.SecretKey? {
+        return try {
+            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val alias = "noslop_fallback_hardware_key"
+            if (!keyStore.containsAlias(alias)) {
+                val keyGen = javax.crypto.KeyGenerator.getInstance(
+                    android.security.keystore.KeyProperties.KEY_ALGORITHM_AES,
+                    "AndroidKeyStore"
+                )
+                val spec = android.security.keystore.KeyGenParameterSpec.Builder(
+                    alias,
+                    android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
+                keyGen.init(spec)
+                keyGen.generateKey()
+            }
+            (keyStore.getEntry(alias, null) as? java.security.KeyStore.SecretKeyEntry)?.secretKey
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private val fallbackObfuscationKey: javax.crypto.SecretKey by lazy {
         val deviceId = try {
             android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "noslop_fallback_salt"
         } catch (_: Exception) { "noslop_fallback_salt" }
@@ -143,16 +170,29 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
     private fun secureFallbackWrite(value: String): String {
         return if (isUsingInsecureStorage.value) {
-            try {
-                val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-                val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
-                cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, fallbackSecretKey, javax.crypto.spec.GCMParameterSpec(128, iv))
-                val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-                val payload = iv + encrypted
-                "ENC_GCM:" + android.util.Base64.encodeToString(payload, android.util.Base64.NO_WRAP)
-            } catch (e: Exception) {
-                Logger.error(TAG, "Fallback encryption failed: ${e.message}")
-                throw SecurityException("Failed to encrypt secret into fallback storage", e)
+            val ksKey = getOrCreateFallbackKeystoreKey()
+            if (ksKey != null) {
+                try {
+                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, ksKey)
+                    val iv = cipher.iv
+                    val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                    "ENC_KS:" + android.util.Base64.encodeToString(iv + encrypted, android.util.Base64.NO_WRAP)
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Fallback Keystore encryption failed: ${e.message}")
+                    throw SecurityException("Failed to encrypt secret into fallback storage", e)
+                }
+            } else {
+                try {
+                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                    val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+                    cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, fallbackObfuscationKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+                    val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                    "ENC_GCM:" + android.util.Base64.encodeToString(iv + encrypted, android.util.Base64.NO_WRAP)
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Fallback encryption failed: ${e.message}")
+                    throw SecurityException("Failed to encrypt secret into fallback storage", e)
+                }
             }
         } else {
             value
@@ -161,13 +201,27 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
     private fun secureFallbackRead(stored: String?): String? {
         if (stored == null) return null
+        if (stored.startsWith("ENC_KS:")) {
+            return try {
+                val ksKey = getOrCreateFallbackKeystoreKey() ?: return null
+                val payload = android.util.Base64.decode(stored.removePrefix("ENC_KS:"), android.util.Base64.DEFAULT)
+                val iv = payload.copyOfRange(0, 12)
+                val ciphertext = payload.copyOfRange(12, payload.size)
+                val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(javax.crypto.Cipher.DECRYPT_MODE, ksKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+                String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+            } catch (e: Exception) {
+                Logger.error(TAG, "Fallback Keystore decryption failed: ${e.message}")
+                null
+            }
+        }
         if (!stored.startsWith("ENC_GCM:")) return stored
         return try {
             val payload = android.util.Base64.decode(stored.removePrefix("ENC_GCM:"), android.util.Base64.DEFAULT)
             val iv = payload.copyOfRange(0, 12)
             val ciphertext = payload.copyOfRange(12, payload.size)
             val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, fallbackSecretKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, fallbackObfuscationKey, javax.crypto.spec.GCMParameterSpec(128, iv))
             val decrypted = cipher.doFinal(ciphertext)
             String(decrypted, Charsets.UTF_8)
         } catch (e: Exception) {
@@ -461,11 +515,44 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             return null
         }
 
+        // C15: Reconcile public key with private key to detect and repair cache desync
+        val rawFromPriv = try { CryptoService.getPublicKeyFromPrivateKey(privEd) } catch (_: Exception) { null }
+        val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+        val rawStored = if (pubBytes != null && pubBytes.size == 44) pubBytes.copyOfRange(12, 44) else pubBytes
+
+        val isKeyMatch = rawFromPriv != null && rawStored != null && java.util.Arrays.equals(rawStored, rawFromPriv)
+
+        val finalPubEd = if (rawFromPriv != null && !isKeyMatch) {
+            // Reconstruct standard 44-byte X.509 SubjectPublicKeyInfo from authentic private key
+            val x509Header = byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+            val full44 = x509Header + rawFromPriv
+            val recovered = android.util.Base64.encodeToString(full44, android.util.Base64.NO_WRAP)
+            Logger.warn(TAG, "Cached public identity diverged from private key. Reconciling caches with derived key...")
+            appSettingDao.insertSetting(AppSetting("local_pub_ed25519", recovered))
+            prefs.edit().putString("pub_ed25519", recovered).apply()
+            recovered
+        } else {
+            pubEd
+        }
+
+        val rawForTripcode = if (isKeyMatch) rawStored else (rawFromPriv ?: rawStored ?: ByteArray(0))
+        val derivedTripcode = CryptoService.deriveTripcode(rawForTripcode)
+        val derivedOnion = CryptoService.deriveOnionAddress(rawForTripcode)
+
+        if (tripcode != derivedTripcode || onion != derivedOnion) {
+            appSettingDao.insertSetting(AppSetting("local_tripcode", derivedTripcode))
+            appSettingDao.insertSetting(AppSetting("local_onion", derivedOnion))
+            prefs.edit()
+                .putString("tripcode", derivedTripcode)
+                .putString("onion", derivedOnion)
+                .apply()
+        }
+
         return CryptoService.IdentityKeys(
-            publicKeyB64 = pubEd,
+            publicKeyB64 = finalPubEd,
             privateKeyB64 = privEd,
-            tripcode = tripcode,
-            onionAddress = onion,
+            tripcode = derivedTripcode,
+            onionAddress = derivedOnion,
             displayName = displayName,
             encPublicKeyB64 = pubEnc,
             encPrivateKeyB64 = privEnc

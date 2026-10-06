@@ -61,22 +61,24 @@ class ApiKeyRepository(context: Context) {
 
     fun getKey(service: String): String? = prefs.getString("api_key_$service", null)
 
-    fun setKey(service: String, key: String) {
-        prefs.edit().putString("api_key_$service", key).apply()
+    fun setKey(service: String, key: String): Boolean {
+        val success = prefs.edit().putString("api_key_$service", key).commit()
         if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
             syncRuntimeOverrides()
         }
-        Logger.info(TAG, "API key updated for service: $service")
+        Logger.info(TAG, "API key updated for service: $service (committed=$success)")
+        return success
     }
 
     fun hasKey(service: String): Boolean = !getKey(service).isNullOrBlank()
 
-    fun removeKey(service: String) {
-        prefs.edit().remove("api_key_$service").apply()
+    fun removeKey(service: String): Boolean {
+        val success = prefs.edit().remove("api_key_$service").commit()
         if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
             syncRuntimeOverrides()
         }
         Logger.info(TAG, "API key removed for service: $service")
+        return success
     }
 
     companion object {

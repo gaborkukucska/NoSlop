@@ -258,9 +258,18 @@ object MnemonicGenerator {
         Logger.info(TAG, "Deriving seed from mnemonic...")
         
         val saltBytes = "mnemonic$salt".toByteArray(Charsets.UTF_8)
-        val spec = PBEKeySpec(mnemonic.toCharArray(), saltBytes, 2048, 512)
-        val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512")
-        val seed = skf.generateSecret(spec).encoded
+        // C14: Bouncy Castle lightweight implementation ensures PBKDF2-HMAC-SHA512 works on API 24-25
+        val seed = try {
+            val gen = org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator(
+                org.bouncycastle.crypto.digests.SHA512Digest()
+            )
+            gen.init(mnemonic.toByteArray(Charsets.UTF_8), saltBytes, 2048)
+            (gen.generateDerivedParameters(512) as org.bouncycastle.crypto.params.KeyParameter).key
+        } catch (_: Exception) {
+            val spec = PBEKeySpec(mnemonic.toCharArray(), saltBytes, 2048, 512)
+            val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512")
+            skf.generateSecret(spec).encoded
+        }
         
         Logger.info(TAG, "Seed derivation complete in ${System.currentTimeMillis() - startTime}ms")
         return seed

@@ -288,9 +288,9 @@ fun OnboardingScreen(
 
 @Composable
 fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
-    val needsRecovery = remember {
-        val repo = com.noslop.app.NoSlopApp.repository
-        kotlinx.coroutines.runBlocking { repo.getLocalIdentity() == null && repo.getAppSetting("identity_quarantined") == "true" }
+    val needsRecovery by viewModel.needsIdentityRecovery.collectAsState()
+    LaunchedEffect(Unit) {
+        viewModel.checkIdentityRecoveryState()
     }
     val context = LocalContext.current
     var showRestoreDialog by remember { mutableStateOf(false) }

@@ -1610,6 +1610,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
     suspend fun getIdentityVersion(): Int = identityRepository.getIdentityVersion()
+    suspend fun needsIdentityRecovery(): Boolean = identityRepository.needsIdentityRecovery()
     suspend fun getWordCloudMnemonic(): String = identityRepository.getMnemonic() ?: ""
     suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? = identityRepository.getBurnableIdentity()
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys = identityRepository.generateBurnableIdentity()
