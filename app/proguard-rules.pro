@@ -1,12 +1,9 @@
-# Bouncy Castle — required for Ed25519 signing across all API levels
--keep class org.bouncycastle.** { *; }
+# Bouncy Castle — preserve JCA provider and crypto engine classes used by NoSlop
+-keep class org.bouncycastle.jce.provider.BouncyCastleProvider { *; }
+-keep class org.bouncycastle.jcajce.provider.asymmetric.edec.** { *; }
+-keep class org.bouncycastle.crypto.** { *; }
+-keep class org.bouncycastle.asn1.** { *; }
 -dontwarn org.bouncycastle.**
-
-# Lazysodium + JNA — required for Ed25519 key generation
--keep class com.goterl.lazysodium.** { *; }
--keep class com.sun.jna.** { *; }
--dontwarn com.goterl.lazysodium.**
--dontwarn com.sun.jna.**
 
 # Room — granular entity and DAO keep rules
 -keep class * extends androidx.room.RoomDatabase
@@ -18,18 +15,16 @@
 # OkHttp + Okio
 -dontwarn okhttp3.**
 -dontwarn okio.**
--keep class okhttp3.** { *; }
+-dontwarn javax.annotation.**
+-keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
 
 # Keep source file line numbers and generic signatures for Gson TypeToken reflection
 -keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod,*Annotation*
 
-# tor-android + jtorctl + netcipher — required for embedded Tor daemon
--keep class net.freehaven.tor.control.** { *; }
+# tor-android — embedded Tor daemon native wrapper
 -keep class org.torproject.android.** { *; }
 -keep class org.torproject.jni.** { *; }
--keep class info.guardianproject.** { *; }
--keep class info.guardianproject.netcipher.** { *; }
--dontwarn net.freehaven.tor.control.**
+-keep class info.guardianproject.torservices.** { *; }
 -dontwarn org.torproject.android.**
 -dontwarn info.guardianproject.**
 

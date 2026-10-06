@@ -96,7 +96,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | # | `type` | Payload class | Signed string format | Handler (class.method) | Persistence |
 |---|---|---|---|---|---|
 | 1 | `POST` | `PostPayload` | `id\|authorId\|content\|timestamp` (+`\|authorAvatarB64` if set) | `PostPacketHandler.handlePost` | `postDao.insertPost`; triggers media auto-download |
-| 2 | `MESSAGE` | `EncryptedPayload` | n/a (encryption is the auth) | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; auto-download if media |
+| 2 | `MESSAGE` | `EncryptedPayload` | Pairwise directional ChaCha20-Poly1305 with AAD (`v: 2`); fallback v1 unauthenticated | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; outbox retry until `DM_ACK` |
 | 3 | `CONNECTION_REQUEST` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleConnectionRequest` | inserts untrusted `Peer`, sets `_incomingRequestFlow` |
 | 4 | `USER_HANDSHAKE` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleUserHandshake` | upserts `Peer` with `isTrusted = true` |
 | 5 | `SYNC_REQUEST` | `SyncRequestPayload` | n/a | `SyncPacketHandler.handleSyncRequest` | none — replies `SYNC_RESPONSE` |
@@ -129,6 +129,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` (dual-mode: encodeForSigning & pipe) | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
 | 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
 | 34 | `ANNOUNCE_INVIDIOUS_INSTANCE` | *(retired)* | *(retired)* | *(retired — unauthenticated video instance gossip eliminated per C05 to prevent SSRF and resolver hijacking)* | none |
+| 35 | `DM_ACK` | `DmAckPayload` | AEAD directional ChaCha20-Poly1305 AAD authentication over `(msg_id, senderPub, recipientPub, timestamp)` | `DmPacketHandler.handleDmAck` | `messageDao.updateDeliveryStatus(msgId, 'DELIVERED')`; removes message from persistent outbox |
 
 Notes:
 
@@ -539,6 +540,19 @@ signer is recovered and what each role is permitted to change.
 | `signature` | String | Signature over `followedPublicKeyB64|followerPublicKeyB64|timestamp` |
 | `action` | String | `"follow"` or `"unfollow"` |
 
+### DM_ACK (Direct Message Delivery Acknowledgment)
+**Type:** `DM_ACK` · class `DmAckPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `msg_id` | String | ID of the acknowledged message |
+| `nonce` | String | ChaCha20-Poly1305 initialization vector |
+| `ciphertext` | String | AEAD ciphertext encrypting `"ACK"` |
+| `timestamp`? | Long | Epoch timestamp |
+| `v` | Int | Protocol version (defaults to 2) |
+
+Carries authenticated delivery confirmation from the recipient back to the message author. Keyed using the counterparty's directional key (`k_dir = HKDF-SHA256(X25519, recipient -> sender)`), guaranteeing receipt cannot be forged or reflected by network intermediaries.
+
 ### TYPING
 **Type:** `TYPING` · class `TypingPayload` · **unsigned**
 
@@ -706,7 +720,7 @@ before insertion via `commentDao`/`reactionDao`.
 `MediaMetadata` (embedded in `PostPayload.media_metadata` and
 `MediaRelayRequestPayload.metadata`): `id, type ("audio"|"video"|"file"|
 "image"), mime_type, size, chunk_count, access_key?, filename?, origin_node?,
-owner_id?, thumbnail_b64?`.
+owner_id?, thumbnail_b64?, sha256?` (C17 whole-file SHA-256 integrity digest).
 
 ### 6.1 Relay Routing (`GossipService`)
 
@@ -794,6 +808,7 @@ and still accurate.
 | `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
+| `DM_ACK` | AEAD authenticated with directional key `HKDF-SHA256(sharedSecret, recipientEdPub -> senderEdPub)` and AAD `encodeForSigning("noslop-dm-v2", recipientEdPub, senderEdPub, msgId, "", timestamp)` |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
 | `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
 | `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) (supporting encodeForSigning and pipe) |

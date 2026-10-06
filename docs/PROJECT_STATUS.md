@@ -61,20 +61,27 @@
   * Sanitized release logs: reduced URLs to origin only (`scheme://host/…`), masked 11-char YouTube IDs, and auto-pruned logs older than 72 hours.
   * Respected NXDOMAIN in `HttpClientProvider.cascadingDns` and disabled DoH fallback by default.
   * Embedded click-to-load prompts for remote GIF URLs and retired cleartext `GROUP_MESSAGE` packet handling.
+* **DM v2 Directional AAD Encryption & Replay Prevention (C08) — Tested (unit: `CryptoServiceRobolectricTest`)**:
+  * Implemented `CryptoService.deriveDirectionalKeyV2` generating directional keys via HKDF-SHA256 (`noslop-dm-v2|senderEdPub->recipientEdPub`), eliminating reflection attacks.
+  * Bound sender, recipient, message ID, group ID, and timestamp in Additional Authenticated Data (`canonicalDmAadV2`).
+  * Added `v = 2` to `EncryptedPayload`, bounded replay tracking cache `seenV2Messages`, and migrated Room schema 17→18 (`MIGRATION_17_18`) adding `isLegacy` and `deliveryStatus`.
+* **Mesh Media Integrity Hash Binding & Verification (C17) — Tested (unit: `MediaManagerSecurityTest`)**:
+  * Added `sha256` digest to `MediaMetadata`, computed via `MediaManager.computeSha256()`.
+  * Bound media SHA-256 hash into canonical post and comment signing payloads (`encodeForSigning`).
+  * In `MediaManager.finishDownload()`, verified SHA-256 digest on download completion, deleting corrupt/tampered files and initiating mesh recovery on mismatch.
+* **DM Outbox Delivery ACK & State Machine (C18) — Tested (unit: `CryptoServiceRobolectricTest`, `WireProtocolTest`)**:
+  * Implemented AEAD-authenticated `DM_ACK` packet keyed with directional v2 DM key and authenticated AAD.
+  * Outgoing DMs persist in `pendingOutboxMessages` with exponential backoff retry until `DM_ACK` arrives.
+  * Real-time delivery status indicators in `ChatThreadScreen`: Sending (`Icons.Default.Schedule`) → Sent on socket write (`Icons.Default.Check`) → Delivered on ACK (`Icons.Default.DoneAll`).
+* **Dependency Hygiene & ProGuard Shrinking (C24) — Tested (unit: `testGithubDebugUnitTest`)**:
+  * Removed unreferenced Guardian Project artifacts `info.guardianproject:jtorctl` and `info.guardianproject.netcipher:netcipher` from `build.gradle.kts`.
+  * Removed obsolete Lazysodium and JNA keep rules from `proguard-rules.pro`.
+  * Tightened overbroad Bouncy Castle and OkHttp ProGuard rules to allow R8 optimization and shrinking.
 
 ### Remaining Roadmap for Next Session (Batch 5)
-1. **C08 (P1)**: **DM v2 Cryptographic Construction**:
-   - Directional keys via HKDF (`noslop-dm-v2|senderEdPub->recipientEdPub`), eliminating reflection attacks.
-   - Additional Authenticated Data (AAD) binding over `(msgId, senderEdPub, recipientEdPub, groupId, timestamp)`.
-   - Protocol version `v: 2` in `EncryptedPayload`, with seen replay tracking and legacy v1 flagging.
-2. **C17 (P1)**: **Mesh Media Integrity Hash**:
-   - Add `sha256` digest to `MediaMetadata`, bind into post/comment signatures, and verify on download completion.
-3. **C18 (P1)**: **DM Outbox Delivery ACK**:
-   - Implement authenticated `DM_ACK` packet so outbox entries persist until delivery is confirmed by the counterparty.
-4. **C24 (P2)**: **Dependency & ProGuard Shrinking**:
-   - Prune unreferenced Guardian Project artifacts and optimize ProGuard rules.
-5. **C25 (P2)**: **Maintainability Refactoring**:
+1. **C25 (P2)**: **Maintainability Refactoring**:
    - Standardize on shared `Json.gson`, structured `AppScopes`, and extract `IdentityViewModel` from `NoSlopViewModel`.
+2. **C23 (P2)**: **Translation String Parity & Documentation Sync**.
 
 ## Completed Changes (2026-10-04) — Protocol Canonicalization, Atomic Post Transactions, Task Ownership & Safe Recovery (v0.6.9-alpha)
 
