@@ -7,6 +7,7 @@ import android.os.PowerManager
 import android.util.Base64
 import com.noslop.app.data.NoSlopDatabase
 import com.noslop.app.data.NoSlopRepository
+import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import com.noslop.app.util.Constants
 import kotlinx.coroutines.*

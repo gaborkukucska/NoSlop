@@ -3,7 +3,7 @@ package com.noslop.app.mesh
 
 import android.content.Context
 import androidx.room.Room
-import androidx.test.core.app.ApplicationProvider
+import org.robolectric.RuntimeEnvironment
 import com.google.gson.Gson
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.GroupChat
@@ -35,7 +35,7 @@ class HandshakeSecurityTest {
 
     @Before
     fun setup() = runBlocking {
-        context = ApplicationProvider.getApplicationContext()
+        context = RuntimeEnvironment.getApplication()
         db = Room.inMemoryDatabaseBuilder(context, NoSlopDatabase::class.java)
             .allowMainThreadQueries()
             .build()
