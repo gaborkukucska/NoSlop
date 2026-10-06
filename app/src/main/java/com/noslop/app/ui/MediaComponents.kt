@@ -693,6 +693,26 @@ fun SegmentedArticleReader(
 
 @Composable
 fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val isTorActive = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+    var enableJs by remember { mutableStateOf(false) }
+    var showExternalConfirm by remember { mutableStateOf(false) }
+
+    val host = remember(url) {
+        try { android.net.Uri.parse(url).host ?: "external website" } catch (_: Exception) { "external website" }
+    }
+
+    val isTorBrowserInstalled = remember(context) {
+        val pm = context.packageManager
+        try {
+            pm.getPackageInfo("org.torproject.torbrowser", 0) != null
+        } catch (_: Exception) {
+            try {
+                pm.getPackageInfo("org.torproject.torbrowser_alpha", 0) != null
+            } catch (_: Exception) { false }
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -722,29 +742,156 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
                     )
-                    val context = LocalContext.current
+
+                    if (!isTorActive) {
+                        // Toggle JavaScript when Tor is off
+                        IconButton(onClick = { enableJs = !enableJs }) {
+                            Icon(
+                                Icons.Default.Code,
+                                contentDescription = "Toggle JavaScript",
+                                tint = if (enableJs) AccentGreen else TextMuted
+                            )
+                        }
+                    }
+
                     IconButton(onClick = {
-                        try {
-                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                            context.startActivity(intent)
-                        } catch (_: Exception) {}
+                        if (isTorActive) {
+                            showExternalConfirm = true
+                        } else {
+                            try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
                     }) {
                         Icon(Icons.Default.Public, contentDescription = "Open in Browser".tr, tint = AccentGreen)
                     }
                 }
 
-                // WebView
-                AndroidView(
-                    factory = { context ->
-                        android.webkit.WebView(context).apply {
-                            settings.javaScriptEnabled = true
-                            webViewClient = android.webkit.WebViewClient()
-                            loadUrl(url)
+                if (isTorActive) {
+                    // C04: Block WebView under Tor to prevent IP leak
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = AccentGreen,
+                                modifier = Modifier.size(56.dp)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Tor Leak Protection Active".tr,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextLight,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Android's embedded web engine cannot route traffic through Tor. Opening this webpage in an embedded view would leak your real IP address to $host.".tr,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextMuted,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            if (isTorBrowserInstalled) {
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                                                setPackage("org.torproject.torbrowser")
+                                            }
+                                            context.startActivity(intent)
+                                            onDismiss()
+                                        } catch (_: Exception) {}
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                ) {
+                                    Icon(Icons.Default.Security, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Open in Tor Browser".tr, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+
+                            OutlinedButton(
+                                onClick = { showExternalConfirm = true },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                                border = BorderStroke(1.dp, BorderSubtle)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Open Externally (Leaves Tor)".tr)
+                            }
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                    }
+                } else {
+                    // C04: Hardened WebView when Tor is off: JS off by default, no geolocation, no file access
+                    AndroidView(
+                        factory = { ctx ->
+                            android.webkit.WebView(ctx).apply {
+                                settings.javaScriptEnabled = enableJs
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
+                                settings.setGeolocationEnabled(false)
+                                settings.databaseEnabled = false
+                                try {
+                                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+                                } catch (_: Exception) {}
+                                webViewClient = android.webkit.WebViewClient()
+                                loadUrl(url)
+                            }
+                        },
+                        update = { webView ->
+                            webView.settings.javaScriptEnabled = enableJs
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
+        }
+
+        if (showExternalConfirm) {
+            AlertDialog(
+                onDismissRequest = { showExternalConfirm = false },
+                containerColor = SurfaceDark,
+                title = { Text("Open Outside NoSlop?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "Opening this link in an external browser will route traffic outside NoSlop's Tor connection, exposing your IP address to $host.".tr,
+                        color = TextMuted
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showExternalConfirm = false
+                            try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                context.startActivity(intent)
+                                onDismiss()
+                            } catch (_: Exception) {}
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                    ) {
+                        Text("Open Anyway".tr, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExternalConfirm = false }) {
+                        Text("Cancel".tr, color = TextLight)
+                    }
+                }
+            )
         }
     }
 }

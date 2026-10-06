@@ -535,29 +535,47 @@ fun ChatThreadScreen(
                                             ) {
                                                 val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
                                                 if (isGif) {
-                                                    val gifModel: Any? = if (mid.startsWith("noslop-gif://")) {
-                                                        val url = mid.removePrefix("noslop-gif://")
-                                                        if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
-                                                    } else if (isDownloaded && localFile != null) {
-                                                        localFile
-                                                    } else {
-                                                        val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
-                                                        if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
-                                                    }
+                                                    val rawGifUrl = if (mid.startsWith("noslop-gif://")) mid.removePrefix("noslop-gif://") else ""
+                                                    val isRemoteWeb = rawGifUrl.startsWith("http://") || rawGifUrl.startsWith("https://")
+                                                    var allowRemoteLoad by remember(mid) { mutableStateOf(!isRemoteWeb) }
 
-                                                    val gifImageLoader = remember {
-                                                        coil.ImageLoader.Builder(context)
-                                                            .okHttpClient { com.noslop.app.net.HttpClientProvider.activeClearnetClient }
-                                                            .components {
-                                                                if (android.os.Build.VERSION.SDK_INT >= 28) {
-                                                                    add(coil.decode.ImageDecoderDecoder.Factory())
-                                                                }
-                                                                add(coil.decode.GifDecoder.Factory())
+                                                    if (isRemoteWeb && !allowRemoteLoad) {
+                                                        val host = try { android.net.Uri.parse(rawGifUrl).host ?: "remote host" } catch (_: Exception) { "remote host" }
+                                                        Box(
+                                                            modifier = Modifier.fillMaxWidth().height(80.dp).clip(RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.6f)).clickable { allowRemoteLoad = true },
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
+                                                                Icon(Icons.Default.Image, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                                                                Spacer(modifier = Modifier.height(4.dp))
+                                                                Text("Tap to load GIF from $host".tr, color = TextLight, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                                             }
-                                                            .build()
-                                                    }
+                                                        }
+                                                    } else {
+                                                        val gifModel: Any? = if (mid.startsWith("noslop-gif://")) {
+                                                            val url = mid.removePrefix("noslop-gif://")
+                                                            if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
+                                                        } else if (isDownloaded && localFile != null) {
+                                                            localFile
+                                                        } else {
+                                                            val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
+                                                            if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
+                                                        }
 
-                                                    coil.compose.AsyncImage(model = gifModel, imageLoader = gifImageLoader, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                                                        val gifImageLoader = remember {
+                                                            coil.ImageLoader.Builder(context)
+                                                                .okHttpClient { com.noslop.app.net.HttpClientProvider.activeClearnetClient }
+                                                                .components {
+                                                                    if (android.os.Build.VERSION.SDK_INT >= 28) {
+                                                                        add(coil.decode.ImageDecoderDecoder.Factory())
+                                                                    }
+                                                                    add(coil.decode.GifDecoder.Factory())
+                                                                }
+                                                                .build()
+                                                        }
+
+                                                        coil.compose.AsyncImage(model = gifModel, imageLoader = gifImageLoader, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                                                    }
                                                 } else if (meta?.thumbnailB64 != null && isVideo) {
                                                     val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
                                                     coil.compose.AsyncImage(model = decoded, contentDescription = "Video Thumbnail".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())

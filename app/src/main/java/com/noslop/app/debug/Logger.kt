@@ -103,6 +103,12 @@ object Logger {
     /** 64-character hex — SHA-256 digests, packet IDs derived from them. */
     private val hexDigestRegex = Regex("""\b[0-9a-f]{64}\b""", RegexOption.IGNORE_CASE)
 
+    /** C19: Full URLs with paths/query strings — stripped to origin only. */
+    private val urlRegex = Regex("""(https?://[^/?#\s]+)(?:/[^\s"'\)<>]*)?""")
+
+    /** C19: 11-character YouTube video identifiers. */
+    private val ytIdRegex = Regex("""(?<=[?&]v=|youtu\.be/|/embed/|/v/|\byt_)([A-Za-z0-9_-]{11})\b""")
+
     private fun scrub(text: String?): String? {
         if (text == null) return null
         if (BuildConfig.SHOW_SENSITIVE_LOGS) return text
@@ -117,6 +123,16 @@ object Logger {
         }
         out = hexDigestRegex.replace(out) { m ->
             m.value.take(12) + "…"
+        }
+        // C19: Mask YouTube 11-char video IDs
+        out = ytIdRegex.replace(out) { m ->
+            val id = m.value
+            id.take(3) + "…" + id.takeLast(3)
+        }
+        // C19: Reduce URLs to scheme://host/… to purge browsing history and query parameters
+        out = urlRegex.replace(out) { m ->
+            val origin = m.groupValues[1]
+            "$origin/…"
         }
         return out
     }
@@ -136,7 +152,22 @@ object Logger {
 
     fun initialize(context: Context) {
         logFile = File(context.filesDir, "noslop-debug.log")
+        pruneOldLogs()
         info("LOGGER", "Logging initialised", "path=${logFile?.absolutePath} | minLevel=$minLevel")
+    }
+
+    /** C19: Auto-delete logs older than 72 hours. */
+    private fun pruneOldLogs() {
+        val file = logFile ?: return
+        try {
+            val maxAgeMs = 72L * 3600_000L
+            val now = System.currentTimeMillis()
+            if (file.exists() && (now - file.lastModified() > maxAgeMs)) {
+                file.delete()
+                val prev = File(file.parentFile, file.name + ".1")
+                if (prev.exists()) prev.delete()
+            }
+        } catch (_: Exception) {}
     }
 
     fun getLogFilePath(): String = logFile?.absolutePath ?: "Not initialised"

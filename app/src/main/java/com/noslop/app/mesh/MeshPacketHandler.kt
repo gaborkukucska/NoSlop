@@ -69,7 +69,6 @@ class MeshPacketHandler(
                 true
             }
             "MESSAGE" -> dm.handleDirectMessage(packet, localKeys)
-            "GROUP_MESSAGE" -> dm.handleGroupMessage(packet)
             "DELETE_MESSAGE" -> dm.handleDeleteMessage(packet)
             "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handshake.handleUserHandshake(packet)

@@ -203,6 +203,7 @@ dependencies {
 
     // --- Core Android ---
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -273,8 +274,7 @@ dependencies {
     // --- WebView Proxy Support ---
     implementation("androidx.webkit:webkit:1.11.0")
 
-    // --- QR Scanning and QR Code Generation ---
-    implementation(libs.google.mlkit.barcode.scanning)
+    // --- QR Scanning and QR Code Generation (ZXing only, tracker-free) ---
     implementation(libs.zxing.core)
 
     // --- SSH Client ---

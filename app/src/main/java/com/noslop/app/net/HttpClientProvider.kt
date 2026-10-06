@@ -85,22 +85,22 @@ object HttpClientProvider {
             try {
                 val result = Dns.SYSTEM.lookup(hostname)
                 if (result.isNotEmpty()) return result
+            } catch (e: java.net.UnknownHostException) {
+                // C21: Respect NXDOMAIN. If a domain does not exist or is blocked by Pi-hole / local DNS,
+                // re-throw immediately rather than overriding user blocking and leaking hostnames to DoH.
+                throw e
             } catch (e: Exception) {
-                // NXDOMAIN produces an UnknownHostException whose message ends
-                // with the bare hostname (no ":" suffix).  That means the domain
-                // truly doesn't exist — DoH won't give a different answer, and
-                // hammering DoH servers with NXDOMAIN queries is wasteful.
-                val msg = e.message ?: ""
-                if (msg.endsWith(hostname) && !msg.contains(":")) {
-                    // FIX: Local networks blocks (Pi-hole, ISP) return NXDOMAIN to block.
-                    // By NOT throwing the exception here, we force the fallback to DoH!
-                    Logger.warn(TAG, "System DNS returned NXDOMAIN for $hostname, falling back to DoH to bypass potential local block…")
-                } else {
-                    Logger.warn(TAG, "System DNS failed for $hostname (${e.message}), trying Cloudflare DoH…")
+                if (!enableDohFallback) {
+                    throw e
                 }
+                Logger.warn(TAG, "System DNS transport error for $hostname (${e.message}), trying DoH…")
             }
 
-            // 2. Cloudflare DoH
+            if (!enableDohFallback) {
+                throw java.net.UnknownHostException("DNS resolution failed for $hostname")
+            }
+
+            // 2. Cloudflare DoH (only if enableDohFallback is opt-in and network error occurred)
             try {
                 val result = cloudflareDoh.lookup(hostname)
                 if (result.isNotEmpty()) return result
@@ -108,7 +108,7 @@ object HttpClientProvider {
                 Logger.warn(TAG, "Cloudflare DoH failed for $hostname (${e.message}), trying Google DoH…")
             }
 
-            // 3. Google DoH — last resort
+            // 3. Google DoH — last resort if enabled
             return try {
                 val result = googleDoh.lookup(hostname)
                 if (result.isNotEmpty()) return result
@@ -131,6 +131,9 @@ object HttpClientProvider {
      *   enough to surface failures instead of hanging indefinitely
      */
     
+    @Volatile
+    var enableDohFallback: Boolean = false
+
     @Volatile
     var useTorForClearnet: Boolean = true
 

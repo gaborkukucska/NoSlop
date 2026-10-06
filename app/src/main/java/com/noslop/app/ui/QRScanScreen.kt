@@ -53,9 +53,6 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.gson.Gson
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
 import com.noslop.app.debug.Logger
 import com.noslop.app.ui.theme.*
 import java.util.concurrent.ExecutorService
@@ -428,39 +425,13 @@ private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> U
                 return@launch
             }
 
-            val inputImage = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
-            val scanner = com.google.mlkit.vision.barcode.BarcodeScanning.getClient(
-                com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
-                    .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ALL_FORMATS)
-                    .build()
-            )
-            
-            scanner.process(inputImage)
-                .addOnSuccessListener { barcodes ->
-                    val value = barcodes.firstOrNull()?.rawValue
-                    if (value != null) {
-                        onResult(value)
-                    } else {
-                        tryZxingFallback(bitmap, onResult)
-                    }
-                }
-                .addOnFailureListener {
-                    tryZxingFallback(bitmap, onResult)
-                }
-        } catch (e: Exception) {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
-        }
-    }
-}
-
-private fun tryZxingFallback(bitmap: android.graphics.Bitmap, onResult: (String?) -> Unit) {
-    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-        try {
             val intArray = IntArray(bitmap.width * bitmap.height)
             bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
             val source = com.google.zxing.RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
             val binaryBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
-            val reader = com.google.zxing.MultiFormatReader()
+            val reader = com.google.zxing.MultiFormatReader().apply {
+                setHints(mapOf(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE)))
+            }
             val result = reader.decode(binaryBitmap)
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(result.text) }
         } catch (e: Exception) {
@@ -485,25 +456,33 @@ fun CameraScanPreview(onBarcodeDetected: (String) -> Unit) {
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
             val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
-            val barcodeScanner = BarcodeScanning.getClient()
-            
+            val reader = com.google.zxing.MultiFormatReader().apply {
+                setHints(mapOf(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE)))
+            }
+
             val imageAnalysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
 
             imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                val mediaImage = imageProxy.image
-                if (mediaImage != null) {
-                    val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                    barcodeScanner.process(inputImage)
-                        .addOnSuccessListener { barcodes ->
-                            for (barcode in barcodes) {
-                                barcode.rawValue?.let { value -> onBarcodeDetected(value) }
-                            }
-                        }
-                        .addOnFailureListener { }
-                        .addOnCompleteListener { imageProxy.close() }
-                } else {
+                try {
+                    val buffer = imageProxy.planes[0].buffer
+                    val data = ByteArray(buffer.remaining())
+                    buffer.get(data)
+                    val width = imageProxy.width
+                    val height = imageProxy.height
+                    val source = com.google.zxing.PlanarYUVLuminanceSource(
+                        data, width, height, 0, 0, width, height, false
+                    )
+                    val bBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
+                    val result = reader.decodeWithState(bBitmap)
+                    if (result != null && result.text.isNotBlank()) {
+                        onBarcodeDetected(result.text)
+                    }
+                } catch (_: Exception) {
+                    // Ignore frame misses
+                } finally {
+                    reader.reset()
                     imageProxy.close()
                 }
             }
