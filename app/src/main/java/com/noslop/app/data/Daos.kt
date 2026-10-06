@@ -231,9 +231,12 @@ interface PostDao {
 
     @Transaction
     suspend fun deletePostSafely(id: String, authorId: String, timestamp: Long): Boolean {
-        // V06: Author-scoped tombstone stored durably in app_settings
+        // W06: Monotonic author-scoped tombstone retaining the maximum deletion revision
         val tombstoneKey = "tombstone_${authorId}_${id}"
-        setTombstone(tombstoneKey, timestamp.toString())
+        val existingTs = getTombstone(tombstoneKey)?.toLongOrNull() ?: 0L
+        if (timestamp > existingTs) {
+            setTombstone(tombstoneKey, timestamp.toString())
+        }
         val existing = getPostById(id)
         if (existing != null) {
             if (existing.authorPublicKeyB64 != authorId) return false

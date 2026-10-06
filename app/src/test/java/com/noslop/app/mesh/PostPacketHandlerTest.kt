@@ -395,4 +395,53 @@ class PostPacketHandlerTest {
         assertEquals("Post author must remain Alice, not Mallory (V06)", identity.publicKeyB64, stored?.authorPublicKeyB64)
         assertEquals("[Deleted]", stored?.content)
     }
+
+    @Test
+    fun outOfOrderDeletes_monotonicTombstone_suppressesDelayedPost() = runBlocking {
+        val postId = "reordered-del-post"
+        val authorId = identity.publicKeyB64
+
+        // 1. Delete at revision 100 arrives first
+        val del100Sig = CryptoService.sign(
+            CryptoService.encodeForSigning(postId, authorId, "100"),
+            identity.privateKeyB64
+        )
+        val del100Packet = NetworkPacket(
+            senderId = authorId,
+            type = "DELETE_POST",
+            payload = Gson().toJsonTree(DeletePostPayload(postId, authorId, 100L, del100Sig))
+        )
+        assertTrue(handler.handleDeletePost(del100Packet))
+        assertEquals("100", postDao.getTombstone("tombstone_${authorId}_$postId"))
+
+        // 2. An older out-of-order delete at revision 50 arrives later
+        val del50Sig = CryptoService.sign(
+            CryptoService.encodeForSigning(postId, authorId, "50"),
+            identity.privateKeyB64
+        )
+        val del50Packet = NetworkPacket(
+            senderId = authorId,
+            type = "DELETE_POST",
+            payload = Gson().toJsonTree(DeletePostPayload(postId, authorId, 50L, del50Sig))
+        )
+        assertTrue(handler.handleDeletePost(del50Packet))
+        // Tombstone must NOT be lowered to 50! (W06)
+        assertEquals("100", postDao.getTombstone("tombstone_${authorId}_$postId"))
+
+        // 3. A delayed post at revision 75 arrives
+        val post75Packet = postPacket("Delayed content", id = postId)
+        val rawPayload = post75Packet.getPostPayload()!!.copy(
+            id = postId,
+            timestamp = 75L,
+            signature = CryptoService.sign(
+                CryptoService.encodeForSigning(postId, authorId, "Delayed content", "75", null, "public", null, null),
+                identity.privateKeyB64
+            )
+        )
+        val post75SignedPacket = post75Packet.copy(payload = Gson().toJsonTree(rawPayload))
+
+        // Post must be suppressed because deletion at 100 dominates 75
+        handler.handlePost(post75SignedPacket)
+        assertFalse("Post at ts 75 must be suppressed by tombstone at ts 100", postDao.posts.containsKey(postId))
+    }
 }

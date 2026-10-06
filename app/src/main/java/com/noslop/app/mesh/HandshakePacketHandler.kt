@@ -770,13 +770,11 @@ class HandshakePacketHandler(
         val avatar = update.avatarB64 ?: ""
         val title = update.title ?: ""
 
-        val hasMutations = sortedAdded.isNotEmpty() || sortedRemoved.isNotEmpty() || sortedBanned.isNotEmpty() ||
-            desc.isNotEmpty() || avatar.isNotEmpty() || allowInvites.isNotEmpty() || allowSelfRemove.isNotEmpty()
-
         val sortedDetails = canonicalMemberDetailsString(update.memberDetails)
         val sortedHandles = canonicalMemberHandlesString(update.memberHandles)
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
+            // W02: Strictly require canonical 13-field signature binding directory maps, permissions, and bans
             val canonicalPayload = canonicalGroupUpdatePayload(
                 update.groupId, update.title, candidate, update.timestamp,
                 sortedAdded, sortedRemoved, sortedBanned, update.description, update.avatarB64,
@@ -784,14 +782,6 @@ class HandshakePacketHandler(
                 sortedDetails, sortedHandles
             )
             if (CryptoService.verify(canonicalPayload, update.signature, candidate)) return candidate
-
-            if (!hasMutations) {
-                val effectiveTitle = update.title ?: existing.title
-                val encodePayload = CryptoService.encodeForSigning(update.groupId, effectiveTitle, candidate, update.timestamp.toString())
-                val pipePayload = "${update.groupId}|$effectiveTitle|$candidate|${update.timestamp}"
-                if (CryptoService.verify(encodePayload, update.signature, candidate) ||
-                    CryptoService.verify(pipePayload, update.signature, candidate)) return candidate
-            }
         }
         return null
     }
