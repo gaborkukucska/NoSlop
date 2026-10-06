@@ -69,7 +69,8 @@ data class MediaMetadata(
     val filename: String? = null,
     @SerializedName("origin_node") val originNode: String? = null,
     @SerializedName("owner_id") val ownerId: String? = null,
-    @SerializedName("thumbnail_b64") val thumbnailB64: String? = null
+    @SerializedName("thumbnail_b64") val thumbnailB64: String? = null,
+    @SerializedName("sha256") val sha256: String? = null
 )
 
 @Keep

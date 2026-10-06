@@ -538,10 +538,18 @@ class MeshSocialRepository(
             )
         } else null
 
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64,
-            privacy, effectiveMediaId, effectiveClearnetUrl
-        )
+        val mediaHash = effectiveMediaMetadata?.sha256
+        val payloadToSign = if (mediaHash != null) {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64,
+                privacy, effectiveMediaId, effectiveClearnetUrl, mediaHash
+            )
+        } else {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64,
+                privacy, effectiveMediaId, effectiveClearnetUrl
+            )
+        }
         val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
 
         val editPay = com.noslop.app.mesh.EditPostPayload(
@@ -609,10 +617,18 @@ class MeshSocialRepository(
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
 
-        val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            id, myKeys.publicKeyB64, content, timestamp.toString(), avatarB64,
-            privacy, mediaMetadata?.id, clearnetUrl
-        )
+        val mediaHash = mediaMetadata?.sha256
+        val payload = if (mediaHash != null) {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                id, myKeys.publicKeyB64, content, timestamp.toString(), avatarB64,
+                privacy, mediaMetadata.id, clearnetUrl, mediaHash
+            )
+        } else {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                id, myKeys.publicKeyB64, content, timestamp.toString(), avatarB64,
+                privacy, mediaMetadata?.id, clearnetUrl
+            )
+        }
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
         val postPay = com.noslop.app.mesh.PostPayload(
@@ -1202,9 +1218,16 @@ class MeshSocialRepository(
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
 
-        val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            postId, id, content, timestamp.toString(), avatarB64
-        )
+        val mediaHash = mediaMetadata?.sha256
+        val payload = if (mediaHash != null) {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postId, id, content, timestamp.toString(), avatarB64, mediaHash
+            )
+        } else {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postId, id, content, timestamp.toString(), avatarB64
+            )
+        }
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
         val commentData = com.noslop.app.mesh.CommentData(

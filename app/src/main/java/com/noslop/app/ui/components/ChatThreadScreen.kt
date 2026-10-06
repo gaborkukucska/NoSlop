@@ -179,6 +179,7 @@ fun ChatThreadScreen(
         
         val id = "dm-${finalFile.name}"
         com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, id)
+        val sha256Hex = com.noslop.app.mesh.MediaManager.computeSha256(finalFile)
         return MediaMetadata(
             id = id,
             type = type,
@@ -188,7 +189,8 @@ fun ChatThreadScreen(
             originNode = localKeys?.onionAddress,
             ownerId = localKeys?.publicKeyB64,
             thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(finalFile, type),
-            filename = finalFile.name
+            filename = finalFile.name,
+            sha256 = sha256Hex
         )
     }
 

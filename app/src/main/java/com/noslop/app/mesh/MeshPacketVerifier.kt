@@ -134,22 +134,44 @@ object MeshPacketVerifier {
             if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) return@let null
             if (p.mediaId != null && p.mediaMetadata == null) return@let null
 
+            val mediaHash = p.mediaMetadata?.sha256
+            val encCanonicalV2 = if (mediaHash != null) {
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
+                    p.privacy, p.mediaId, p.clearnetUrl, mediaHash
+                )
+            } else null
             val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 p.privacy, p.mediaId, p.clearnetUrl
             )
-            Signed(encCanonical, p.signature, p.authorId)
+            if (encCanonicalV2 != null && p.signature != null && CryptoService.verify(encCanonicalV2, p.signature, p.authorId)) {
+                Signed(encCanonicalV2, p.signature, p.authorId)
+            } else {
+                Signed(encCanonical, p.signature, p.authorId)
+            }
         }
 
         "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
             if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) return@let null
 
             val effectivePrivacy = p.privacy ?: "public"
+            val mediaHash = p.mediaMetadata?.sha256
+            val encCanonicalV2 = if (mediaHash != null) {
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
+                    effectivePrivacy, p.mediaId, p.clearnetUrl, mediaHash
+                )
+            } else null
             val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
                 effectivePrivacy, p.mediaId, p.clearnetUrl
             )
-            Signed(encCanonical, p.signature, p.authorId)
+            if (encCanonicalV2 != null && p.signature != null && CryptoService.verify(encCanonicalV2, p.signature, p.authorId)) {
+                Signed(encCanonicalV2, p.signature, p.authorId)
+            } else {
+                Signed(encCanonical, p.signature, p.authorId)
+            }
         }
 
         "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
@@ -158,6 +180,12 @@ object MeshPacketVerifier {
 
         // --- CommentPacketHandler ---
         "COMMENT" -> packet.getCommentPayload()?.let { p ->
+            val mediaHash = p.comment.mediaMetadata?.sha256
+            val encV2 = if (mediaHash != null) {
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString(), p.comment.authorAvatarB64, mediaHash
+                )
+            } else null
             val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString(), p.comment.authorAvatarB64
             )
@@ -170,6 +198,7 @@ object MeshPacketVerifier {
             val sig = p.comment.signature
             val signer = p.comment.authorId
             val matchedPayload = when {
+                sig != null && encV2 != null && com.noslop.app.crypto.CryptoService.verify(encV2, sig, signer) -> encV2
                 sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
                 sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
                 sig != null && com.noslop.app.crypto.CryptoService.verify(pipePayload, sig, signer) -> pipePayload

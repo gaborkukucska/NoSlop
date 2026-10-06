@@ -192,6 +192,7 @@ fun GroupChatThreadScreen(
 
         val mediaId = "group_${type}_${System.currentTimeMillis()}_${finalFile.name}"
         com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, mediaId)
+        val sha256Hex = com.noslop.app.mesh.MediaManager.computeSha256(finalFile)
 
         val activeOnion = senderKeys?.onionAddress ?: localKeys?.onionAddress
         val activeOwner = senderKeys?.publicKeyB64 ?: localKeys?.publicKeyB64
@@ -205,7 +206,8 @@ fun GroupChatThreadScreen(
             originNode = activeOnion,
             ownerId = activeOwner,
             thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(finalFile, type),
-            filename = file.name
+            filename = file.name,
+            sha256 = sha256Hex
         )
     }
 

@@ -1917,6 +1917,7 @@ fun UnifiedFeedTab(
                                     val id = "post_${finalFile.name}"
                                     val copiedFile = com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, id) ?: finalFile
                                     val thumbnail = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(copiedFile, type)
+                                    val sha256Hex = com.noslop.app.mesh.MediaManager.computeSha256(copiedFile)
                                     com.noslop.app.mesh.MediaMetadata(
                                         id = id, 
                                         type = type, 
@@ -1926,7 +1927,8 @@ fun UnifiedFeedTab(
                                         originNode = viewModel.localKeys.value?.onionAddress, 
                                         ownerId = viewModel.localKeys.value?.publicKeyB64, 
                                         thumbnailB64 = thumbnail,
-                                        filename = copiedFile.name
+                                        filename = copiedFile.name,
+                                        sha256 = sha256Hex
                                     )
                                 }
                                 

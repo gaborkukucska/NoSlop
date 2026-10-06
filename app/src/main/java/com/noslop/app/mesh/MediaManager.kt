@@ -25,6 +25,26 @@ object MediaManager {
 
     private val MEDIA_ID_REGEX = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")
 
+    /**
+     * C17: Computes SHA-256 digest of a media file.
+     */
+    fun computeSha256(file: File): String? {
+        if (!file.exists()) return null
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    digest.update(buffer, 0, bytesRead)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun isValidMediaId(mediaId: String?): Boolean {
         if (mediaId.isNullOrBlank()) return false
         if (mediaId.length > 128) return false
@@ -753,6 +773,33 @@ object MediaManager {
             if (dl.partFile.exists()) {
                 dl.partFile.renameTo(finalFile)
             }
+
+            // C17: Verify SHA-256 integrity hash if provided in metadata
+            val expectedHash = dl.metadata.sha256
+            if (!expectedHash.isNullOrBlank()) {
+                val actualHash = computeSha256(finalFile)
+                if (actualHash == null || !actualHash.equals(expectedHash, ignoreCase = true)) {
+                    Logger.error(
+                        TAG,
+                        "C17: Media integrity hash verification FAILED for ${dl.metadata.id}! Expected: $expectedHash, Actual: $actualHash. Deleting corrupt file and initiating recovery."
+                    )
+                    finalFile.delete()
+                    if (dl.partFile.exists()) dl.partFile.delete()
+
+                    val badPeer = dl.peerOnion
+                    if (badPeer != null) {
+                        com.noslop.app.mesh.GossipService.recordSendFailure(badPeer)
+                    }
+
+                    dl.peerOnion = null
+                    dl.status = ActiveDownload.Status.RECOVERING
+                    resetDownloadTracking(dl)
+                    dl.lastAttemptAt = System.currentTimeMillis()
+                    scope.launch { attemptMeshRecovery(dl) }
+                    return
+                }
+                Logger.info(TAG, "C17: Media integrity hash verified for ${dl.metadata.id}: $expectedHash")
+            }
             
             dl.status = ActiveDownload.Status.COMPLETED
             updateProgress(dl.metadata.id, 100)
@@ -1083,12 +1130,14 @@ object MediaManager {
         
         val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream" 
 
+        val hash = file?.let { computeSha256(it) }
         return MediaMetadata(
             id = mediaId,
             type = if (mimeType.startsWith("image")) "image" else if (mimeType.startsWith("video")) "video" else "file",
             mimeType = mimeType,
             size = file?.length() ?: 0,
-            chunkCount = 999
+            chunkCount = 999,
+            sha256 = hash
         )
     }
 

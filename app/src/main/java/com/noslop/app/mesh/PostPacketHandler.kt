@@ -35,18 +35,17 @@ class PostPacketHandler(
             if (!filterSettings.allowIncomingTextPosts) return false
         }
 
+        val mediaHash = postPay.mediaMetadata?.sha256
+        val payloadCanonicalV2 = if (mediaHash != null) {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64,
+                postPay.privacy, postPay.mediaId, postPay.clearnetUrl, mediaHash
+            )
+        } else null
         val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
             postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64,
             postPay.privacy, postPay.mediaId, postPay.clearnetUrl
         )
-        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
-        )
-        val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString()
-        )
-        val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
-        val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
         val sig = postPay.signature ?: ""
         // R05: Enforce strict mediaId == mediaMetadata.id consistency
         if (postPay.mediaMetadata != null && postPay.mediaId != postPay.mediaMetadata.id) {
@@ -58,7 +57,8 @@ class PostPacketHandler(
             return false
         }
 
-        val isCanonical = CryptoService.verify(payloadCanonical, sig, postPay.authorId)
+        val isCanonical = (payloadCanonicalV2 != null && CryptoService.verify(payloadCanonicalV2, sig, postPay.authorId)) ||
+            CryptoService.verify(payloadCanonical, sig, postPay.authorId)
         if (!isCanonical) {
             Logger.warn(TAG, "Rejected POST ${postPay.id}: Canonical 8-field signature verification failed")
             return false
@@ -176,17 +176,19 @@ class PostPacketHandler(
         }
 
         val effectivePrivacy = editPay.privacy ?: "public"
+        val mediaHash = editPay.mediaMetadata?.sha256
+        val payloadCanonicalV2 = if (mediaHash != null) {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64,
+                effectivePrivacy, editPay.mediaId, editPay.clearnetUrl, mediaHash
+            )
+        } else null
         val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64,
             effectivePrivacy, editPay.mediaId, editPay.clearnetUrl
         )
-        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
-        )
-        val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString()
-        )
-        val isCanonical = CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId)
+        val isCanonical = (payloadCanonicalV2 != null && CryptoService.verify(payloadCanonicalV2, editPay.signature, editPay.authorId)) ||
+            CryptoService.verify(payloadCanonical, editPay.signature, editPay.authorId)
         if (!isCanonical) {
             Logger.warn(TAG, "Rejected EDIT_POST ${editPay.postId}: Canonical 8-field signature verification failed")
             return false

@@ -150,6 +150,75 @@ class MediaManagerSecurityTest {
     }
 
     @Test
+    fun c17_mediaIntegrity_hashMismatch_deletesCorruptFile() = runBlocking {
+        val mediaId = "integrity_test_corrupt.bin"
+        val expectedHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // Hash of empty string
+        val corruptContent = "some non-empty tampered content".toByteArray()
+
+        val meta = MediaMetadata(
+            id = mediaId,
+            type = "file",
+            mimeType = "application/octet-stream",
+            size = corruptContent.size.toLong(),
+            chunkCount = 1,
+            sha256 = expectedHash
+        )
+
+        // Start download and simulate completing it with corrupt data
+        MediaManager.startDownload(meta, bobKeys.onionAddress)
+        val dl = MediaManager.getPartFile(mediaId)
+        assertNotNull("Part file should be created", dl)
+        dl!!.writeBytes(corruptContent)
+
+        // Delivery of chunk triggering finishDownload
+        val chunk = MediaChunkPayload(
+            mediaId = mediaId,
+            chunkIndex = 0,
+            totalChunks = 1,
+            byteOffset = 0L,
+            totalSize = corruptContent.size.toLong(),
+            data = android.util.Base64.encodeToString(corruptContent, android.util.Base64.NO_WRAP)
+        )
+        MediaManager.handleMediaChunk(bobKeys.publicKeyB64, chunk)
+
+        // The assembled file must be DELETED on hash mismatch!
+        val finalFile = MediaManager.getLocalFile(mediaId, "file")
+        assertNull("Corrupt file with mismatched hash must be deleted (C17)", finalFile)
+    }
+
+    @Test
+    fun c17_mediaIntegrity_matchingHash_preservesFile() = runBlocking {
+        val mediaId = "integrity_test_valid.bin"
+        val content = "authentic clean content for test".toByteArray()
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val correctHash = digest.digest(content).joinToString("") { "%02x".format(it) }
+
+        val meta = MediaMetadata(
+            id = mediaId,
+            type = "file",
+            mimeType = "application/octet-stream",
+            size = content.size.toLong(),
+            chunkCount = 1,
+            sha256 = correctHash
+        )
+
+        MediaManager.startDownload(meta, bobKeys.onionAddress)
+        val chunk = MediaChunkPayload(
+            mediaId = mediaId,
+            chunkIndex = 0,
+            totalChunks = 1,
+            byteOffset = 0L,
+            totalSize = content.size.toLong(),
+            data = android.util.Base64.encodeToString(content, android.util.Base64.NO_WRAP)
+        )
+        MediaManager.handleMediaChunk(bobKeys.publicKeyB64, chunk)
+
+        val finalFile = MediaManager.getLocalFile(mediaId, "file")
+        assertNotNull("Authentic file with matching hash must be saved", finalFile)
+        assertEquals("File content must match", String(content), finalFile!!.readText())
+    }
+
+    @Test
     fun c03_mediaAcl_publicMedia_allowedForAnyRequester() = runBlocking {
         val mediaId = "public_video_456"
 

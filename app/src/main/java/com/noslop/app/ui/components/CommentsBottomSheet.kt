@@ -149,6 +149,7 @@ fun CommentsBottomSheet(
                             
                             // Save to local mesh media storage
                             com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
+                            val sha256Hex = com.noslop.app.mesh.MediaManager.computeSha256(file)
                             com.noslop.app.mesh.MediaMetadata(
                                 id = id,
                                 type = type,
@@ -156,7 +157,8 @@ fun CommentsBottomSheet(
                                 size = file.length(),
                                 chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
                                 originNode = localKeys?.onionAddress,
-                                ownerId = localKeys?.publicKeyB64
+                                ownerId = localKeys?.publicKeyB64,
+                                sha256 = sha256Hex
                             )
                         }
 

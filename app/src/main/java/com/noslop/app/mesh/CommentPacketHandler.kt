@@ -24,6 +24,12 @@ class CommentPacketHandler(
 
     suspend fun handleComment(packet: NetworkPacket): Boolean {
         val commPay = packet.getCommentPayload() ?: return false
+        val mediaHash = commPay.comment.mediaMetadata?.sha256
+        val encPayloadV2 = if (mediaHash != null) {
+            com.noslop.app.crypto.CryptoService.encodeForSigning(
+                commPay.postId, commPay.comment.id, commPay.comment.content, commPay.comment.timestamp.toString(), commPay.comment.authorAvatarB64, mediaHash
+            )
+        } else null
         val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
             commPay.postId, commPay.comment.id, commPay.comment.content, commPay.comment.timestamp.toString(), commPay.comment.authorAvatarB64
         )
@@ -34,7 +40,8 @@ class CommentPacketHandler(
         if (commPay.comment.authorAvatarB64 != null) {
             pipePayload += "|${commPay.comment.authorAvatarB64}"
         }
-        val isValid = CryptoService.verify(encPayload, commPay.comment.signature, commPay.comment.authorId) ||
+        val isValid = (encPayloadV2 != null && CryptoService.verify(encPayloadV2, commPay.comment.signature, commPay.comment.authorId)) ||
+            CryptoService.verify(encPayload, commPay.comment.signature, commPay.comment.authorId) ||
             CryptoService.verify(encPayloadNoAvatar, commPay.comment.signature, commPay.comment.authorId) ||
             CryptoService.verify(pipePayload, commPay.comment.signature, commPay.comment.authorId)
         if (!isValid) {
