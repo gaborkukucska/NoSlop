@@ -120,7 +120,7 @@ data class ChatMessage(
     val mediaId: String? = null,
     val mediaType: String? = null,
     val replyToMessageId: String? = null,
-    val isLegacy: Boolean = false
+    @androidx.room.ColumnInfo(defaultValue = "0") val isLegacy: Boolean = false
 )
 
 @Entity(

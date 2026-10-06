@@ -83,7 +83,7 @@ class DmPacketHandler(
             return false
         }
 
-        val effectiveTimestamp = msgPay.timestamp ?: packet.timestamp ?: System.currentTimeMillis()
+        val effectiveTimestamp = msgPay.timestamp ?: System.currentTimeMillis()
         val seenKey = "${packet.senderId}:${msgPay.id}"
 
         // C08: Replay attack prevention under protocol v2
