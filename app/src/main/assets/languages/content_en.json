@@ -860,5 +860,6 @@
   "You've seen all fresh uploads (< 60 days) from your added channels. Discover and add more creators to expand your personal network.": "You've seen all fresh uploads (< 60 days) from your added channels. Discover and add more creators to expand your personal network.",
   "Your private identity will be sent to this host. Confirm you trust this machine.": "Your private identity will be sent to this host. Confirm you trust this machine.",
   "[Deleted]": "[Deleted]",
-  "{author} shared a new broadcast.": "{author} shared a new broadcast."
+  "{author} shared a new broadcast.": "{author} shared a new broadcast.",
+  "Update REJECTED: the downloaded file certificate does not match the installed application.": "Update REJECTED: the downloaded file certificate does not match the installed application."
 }

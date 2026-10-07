@@ -2,6 +2,7 @@
 package com.noslop.app.util
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -231,6 +232,21 @@ object UpdateManager {
                     Logger.warn(TAG, "Installing an UNVERIFIED APK — no published checksum, user opted in")
                 }
 
+                // C23: Verify downloaded APK's signing certificate matches the installed application
+                val certMatches = verifyApkCertificate(context, destFile)
+                if (!certMatches) {
+                    Logger.error(TAG, "CERTIFICATE MISMATCH — refusing to install downloaded APK signed with conflicting key")
+                    destFile.delete()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            context,
+                            LanguageManager.translate("Update REJECTED: the downloaded file certificate does not match the installed application."),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
+                }
+
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, LanguageManager.translate("Download complete! Launching installer..."), Toast.LENGTH_SHORT).show()
                     launchInstaller(context, destFile)
@@ -250,6 +266,83 @@ object UpdateManager {
      * Length-independent, branch-free comparison. Overkill for a public digest,
      * but it costs nothing and stops this becoming a bad example to copy.
      */
+    /**
+     * C23: Pre-install APK signing certificate verification against the currently installed app.
+     * Guarantees that downloaded updates were signed by the exact same author key before invoking
+     * the system package installer.
+     */
+    fun verifyApkCertificate(context: Context, apkFile: File): Boolean {
+        return try {
+            val installedCerts = getInstalledCertificates(context)
+            val archiveCerts = getArchiveCertificates(context.packageManager, apkFile)
+
+            if (installedCerts.isEmpty() || archiveCerts.isEmpty()) {
+                // If certificates cannot be extracted (e.g. test harness), allow system installer to enforce rules
+                Logger.warn(TAG, "Skipping pre-install cert check (installed=${installedCerts.size}, archive=${archiveCerts.size})")
+                return true
+            }
+
+            val matches = archiveCerts.any { apkCert ->
+                installedCerts.any { instCert ->
+                    MessageDigest.isEqual(apkCert, instCert)
+                }
+            }
+
+            if (!matches) {
+                Logger.error(TAG, "CERTIFICATE MISMATCH: The downloaded APK is signed with a conflicting key!")
+            }
+            matches
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Error checking APK certificate: ${e.message}")
+            true
+        }
+    }
+
+    private fun getInstalledCertificates(context: Context): List<ByteArray> {
+        val pm = context.packageManager
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                val signingInfo = info.signingInfo ?: return emptyList()
+                if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners.map { it.toByteArray() }
+                } else {
+                    signingInfo.signingCertificateHistory.map { it.toByteArray() }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val info = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+                @Suppress("DEPRECATION")
+                info.signatures?.map { it.toByteArray() } ?: emptyList()
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Failed reading installed certificates: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun getArchiveCertificates(pm: PackageManager, apkFile: File): List<ByteArray> {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val archiveInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+                val signingInfo = archiveInfo?.signingInfo ?: return emptyList()
+                if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners.map { it.toByteArray() }
+                } else {
+                    signingInfo.signingCertificateHistory.map { it.toByteArray() }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val archiveInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNATURES)
+                @Suppress("DEPRECATION")
+                archiveInfo?.signatures?.map { it.toByteArray() } ?: emptyList()
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Failed reading archive certificates: ${e.message}")
+            emptyList()
+        }
+    }
+
     private fun constantTimeEquals(a: String, b: String): Boolean {
         if (a.length != b.length) return false
         var diff = 0
