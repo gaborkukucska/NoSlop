@@ -440,59 +440,151 @@ private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> U
     }
 }
 
+/**
+ * Decodes one camera frame's luminance (Y) plane with ZXing. Pure function so it can be unit tested.
+ *
+ * The Y plane is commonly row-padded (rowStride > width) and may have a pixelStride > 1. ZXing's
+ * PlanarYUVLuminanceSource needs a tightly packed width x height array, so the plane is repacked
+ * first; passing the padded buffer with dataWidth = width shears the image and nothing decodes.
+ */
+internal fun packLuminancePlane(
+    plane: java.nio.ByteBuffer,
+    width: Int,
+    height: Int,
+    rowStride: Int,
+    pixelStride: Int
+): ByteArray {
+    val out = ByteArray(width * height)
+    val buffer = plane.duplicate()
+    buffer.rewind()
+    if (pixelStride == 1 && rowStride == width && buffer.remaining() >= out.size) {
+        buffer.get(out, 0, out.size)
+        return out
+    }
+    val row = ByteArray(rowStride.coerceAtLeast(width * pixelStride))
+    for (y in 0 until height) {
+        val rowStart = y * rowStride
+        if (rowStart >= buffer.limit()) break
+        buffer.position(rowStart)
+        val len = minOf(row.size, buffer.remaining())
+        buffer.get(row, 0, len)
+        val outRow = y * width
+        if (pixelStride == 1) {
+            System.arraycopy(row, 0, out, outRow, minOf(width, len))
+        } else {
+            var x = 0
+            while (x < width && x * pixelStride < len) {
+                out[outRow + x] = row[x * pixelStride]
+                x++
+            }
+        }
+    }
+    return out
+}
+
+internal fun decodeQrLuminance(
+    luminance: ByteArray,
+    width: Int,
+    height: Int,
+    reader: com.google.zxing.MultiFormatReader
+): String? {
+    val source = com.google.zxing.PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
+    return try {
+        reader.decodeWithState(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))).text
+    } catch (_: com.google.zxing.NotFoundException) {
+        // Inverted (light-on-dark) codes: try once more on the inverted source.
+        try {
+            reader.reset()
+            reader.decodeWithState(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source.invert()))).text
+        } catch (_: com.google.zxing.ReaderException) {
+            null
+        }
+    } catch (_: com.google.zxing.ReaderException) {
+        null
+    } finally {
+        reader.reset()
+    }
+}
+
 @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
-@SuppressLint("UnrememberedMutableState")
 @Composable
 fun CameraScanPreview(onBarcodeDetected: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember { PreviewView(context) }
+    // The analyzer outlives recompositions; always call the latest callback.
+    val latestOnDetected by rememberUpdatedState(onBarcodeDetected)
+    val cameraProviderRef = remember { java.util.concurrent.atomic.AtomicReference<ProcessCameraProvider?>(null) }
 
-    DisposableEffect(Unit) { onDispose { cameraExecutor.shutdown() } }
-
-    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize()) { view ->
+    // Bind the camera ONCE per composition lifetime. (Binding inside AndroidView's update block
+    // re-ran on every recomposition — the scanner's animation recomposes continuously — so the
+    // camera was torn down and rebound constantly and no frame was ever analysed to completion.)
+    DisposableEffect(lifecycleOwner) {
+        val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+        // After a hit, pause decoding briefly so one QR produces one callback, not one per frame.
+        val pausedUntil = java.util.concurrent.atomic.AtomicLong(0L)
+        val loggedFormat = java.util.concurrent.atomic.AtomicBoolean(false)
+        var lastErrorLogAt = 0L
+        val reader = com.google.zxing.MultiFormatReader().apply {
+            setHints(
+                mapOf(
+                    com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+                    com.google.zxing.DecodeHintType.TRY_HARDER to true
+                )
+            )
+        }
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
-            val reader = com.google.zxing.MultiFormatReader().apply {
-                setHints(mapOf(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE)))
-            }
-
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-
-            imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                try {
-                    val buffer = imageProxy.planes[0].buffer
-                    val data = ByteArray(buffer.remaining())
-                    buffer.get(data)
-                    val width = imageProxy.width
-                    val height = imageProxy.height
-                    val source = com.google.zxing.PlanarYUVLuminanceSource(
-                        data, width, height, 0, 0, width, height, false
-                    )
-                    val bBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
-                    val result = reader.decodeWithState(bBitmap)
-                    if (result != null && result.text.isNotBlank()) {
-                        onBarcodeDetected(result.text)
-                    }
-                } catch (_: Exception) {
-                    // Ignore frame misses
-                } finally {
-                    reader.reset()
-                    imageProxy.close()
-                }
-            }
-
             try {
+                val cameraProvider = cameraProviderFuture.get()
+                cameraProviderRef.set(cameraProvider)
+                val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                    .build()
+
+                imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                    try {
+                        if (System.currentTimeMillis() < pausedUntil.get()) return@setAnalyzer
+                        val plane = imageProxy.planes[0]
+                        val width = imageProxy.width
+                        val height = imageProxy.height
+                        if (loggedFormat.compareAndSet(false, true)) {
+                            Logger.info("QR_SCAN", "Camera frames: ${width}x$height rowStride=${plane.rowStride} pixelStride=${plane.pixelStride} rotation=${imageProxy.imageInfo.rotationDegrees}")
+                        }
+                        val luminance = packLuminancePlane(plane.buffer, width, height, plane.rowStride, plane.pixelStride)
+                        val text = decodeQrLuminance(luminance, width, height, reader)
+                        if (!text.isNullOrBlank()) {
+                            // Rejected payloads (invalid QR) can be re-scanned after the pause.
+                            pausedUntil.set(System.currentTimeMillis() + 2_000L)
+                            Logger.info("QR_SCAN", "QR code detected (${text.length} chars)")
+                            ContextCompat.getMainExecutor(context).execute { latestOnDetected(text) }
+                        }
+                    } catch (e: Exception) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastErrorLogAt > 5_000L) {
+                            lastErrorLogAt = now
+                            Logger.warn("QR_SCAN", "Frame analysis failed: ${e.javaClass.simpleName}: ${e.message}")
+                        }
+                    } finally {
+                        imageProxy.close()
+                    }
+                }
+
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis)
+                Logger.info("QR_SCAN", "Camera bound for QR scanning")
             } catch (e: Exception) {
                 Logger.error("QR_SCAN", "Failed to bind camera use cases: ${e.message}")
             }
         }, ContextCompat.getMainExecutor(context))
+
+        onDispose {
+            try { cameraProviderRef.get()?.unbindAll() } catch (_: Exception) {}
+            cameraExecutor.shutdown()
+        }
     }
+
+    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
 }
