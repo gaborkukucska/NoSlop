@@ -25,7 +25,7 @@ class SyncPacketHandler(
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
 
-    private fun MeshComment.toCommentSyncData(): CommentSyncData = CommentSyncData(
+    private suspend fun MeshComment.toCommentSyncData(): CommentSyncData = CommentSyncData(
         id = id,
         postId = postId,
         authorId = authorPublicKeyB64,
@@ -36,7 +36,20 @@ class SyncPacketHandler(
         signature = signature,
         parentCommentId = parentCommentId,
         mediaId = mediaId,
-        mediaType = mediaType
+        mediaType = mediaType,
+        // R2: carry the media descriptor and its signed digest so a comment with a GIF/image verifies
+        // (C17 v2 signature) and its media can be fetched after a sync.
+        mediaMetadata = mediaId?.let { mid ->
+            MediaMetadata(
+                id = mid,
+                type = mediaType ?: "image",
+                mimeType = "application/octet-stream",
+                size = 0,
+                chunkCount = 0,
+                ownerId = authorPublicKeyB64,
+                sha256 = repo.mediaDigestFor(mid)
+            )
+        }
     )
 
     private fun MeshReaction.toReactionSyncData(): ReactionSyncData = ReactionSyncData(
@@ -48,7 +61,7 @@ class SyncPacketHandler(
         signature = signature
     )
 
-    private fun MeshPost.toPostPayload(): PostPayload {
+    private suspend fun MeshPost.toPostPayload(): PostPayload {
         val rawMediaId = mediaUrl?.substringAfterLast("/")
         return PostPayload(
             id = id,
@@ -68,7 +81,9 @@ class SyncPacketHandler(
                 mimeType = "application/octet-stream",
                 size = mediaSize,
                 chunkCount = 0,
-                thumbnailB64 = thumbnailB64
+                thumbnailB64 = thumbnailB64,
+                // R2: the signed media digest; without it a C17 v2 signature cannot be checked.
+                sha256 = repo.mediaDigestFor(rawMediaId)
             ) else null,
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
@@ -346,7 +361,17 @@ class SyncPacketHandler(
                 continue
             }
 
-            val isCanonical = CryptoService.verify(payloadCanonical, sig, postPay.authorId)
+            // R2: accept the C17 v2 signature (canonical fields + media SHA-256) as the live POST handler
+            // does; since 3ff08c6 every media post was rejected here.
+            val mediaHash = postPay.mediaMetadata?.sha256
+            val isV2 = mediaHash != null && CryptoService.verify(
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64,
+                    postPay.privacy, postPay.mediaId, postPay.clearnetUrl, mediaHash
+                ),
+                sig, postPay.authorId
+            )
+            val isCanonical = isV2 || CryptoService.verify(payloadCanonical, sig, postPay.authorId)
             if (!isCanonical) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — canonical signature verification failed")
                 continue
@@ -379,10 +404,11 @@ class SyncPacketHandler(
                 Logger.debug(TAG, "Sync: Dropping post ${postPay.id} — already deleted, author mismatch, or older timestamp")
                 continue
             }
+            if (isV2) repo.recordMediaDigest(postPay.mediaId, mediaHash)
             
             if (postPay.mediaMetadata != null) {
                 com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
-                    postPay.mediaMetadata,
+                    if (isV2) postPay.mediaMetadata else postPay.mediaMetadata.copy(sha256 = null),
                     "friends",
                     postPay.authorId,
                     peerOnion
@@ -405,7 +431,15 @@ class SyncPacketHandler(
             val legacyPipe = "${c.postId}|${c.id}|${c.content}|${c.timestamp}"
             val legacyPipeWithAvatar = "${c.postId}|${c.id}|${c.content}|${c.timestamp}|${c.authorAvatarB64}"
             val sig = c.signature
-            val isValid = CryptoService.verify(payloadToVerify, sig, c.authorId) ||
+            // R2: C17 v2 comment signature (… avatar, media SHA-256), as CommentPacketHandler accepts.
+            val commentHash = c.mediaMetadata?.sha256
+            val isV2 = commentHash != null && CryptoService.verify(
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    c.postId, c.id, c.content, c.timestamp.toString(), c.authorAvatarB64, commentHash
+                ),
+                sig, c.authorId
+            )
+            val isValid = isV2 || CryptoService.verify(payloadToVerify, sig, c.authorId) ||
                 CryptoService.verify(payloadNoAvatar, sig, c.authorId) ||
                 CryptoService.verify(legacyPipe, sig, c.authorId) ||
                 CryptoService.verify(legacyPipeWithAvatar, sig, c.authorId)
@@ -427,11 +461,15 @@ class SyncPacketHandler(
                 mediaType = c.mediaType
             )
             commentDao.insertComment(meshComment)
+            if (isV2) repo.recordMediaDigest(c.mediaId, commentHash)
 
             // Trigger auto-download for comment media (GIFs, images)
-            if (c.mediaMetadata != null) {
+            if (c.mediaMetadata != null && c.mediaId != null && c.mediaMetadata.id == c.mediaId) {
                 val peerOnion = peerDao.getPeerByPublicKey(c.authorId)?.onionAddress
-                MediaManager.checkAndAutoDownload(c.mediaMetadata, "friends", c.authorId, peerOnion)
+                MediaManager.checkAndAutoDownload(
+                    if (isV2) c.mediaMetadata else c.mediaMetadata.copy(sha256 = null),
+                    "friends", c.authorId, peerOnion
+                )
             }
             storedComments++
         }

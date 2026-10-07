@@ -40,7 +40,8 @@ class CommentPacketHandler(
         if (commPay.comment.authorAvatarB64 != null) {
             pipePayload += "|${commPay.comment.authorAvatarB64}"
         }
-        val isValid = (encPayloadV2 != null && CryptoService.verify(encPayloadV2, commPay.comment.signature, commPay.comment.authorId)) ||
+        val isV2 = encPayloadV2 != null && CryptoService.verify(encPayloadV2, commPay.comment.signature, commPay.comment.authorId)
+        val isValid = isV2 ||
             CryptoService.verify(encPayload, commPay.comment.signature, commPay.comment.authorId) ||
             CryptoService.verify(encPayloadNoAvatar, commPay.comment.signature, commPay.comment.authorId) ||
             CryptoService.verify(pipePayload, commPay.comment.signature, commPay.comment.authorId)
@@ -62,6 +63,8 @@ class CommentPacketHandler(
             mediaType = commPay.comment.mediaType
         )
         commentDao.insertComment(meshComment)
+        // R2: keep the signed digest (sync re-serving, download verification).
+        if (isV2) repo.recordMediaDigest(commPay.comment.mediaId, mediaHash)
         
         if (commPay.comment.mediaId != null) {
             val authorPeer = repo.peerDao.getPeerByPublicKey(commPay.comment.authorId)
@@ -73,7 +76,8 @@ class CommentPacketHandler(
                 size = 0,
                 chunkCount = 0,
                 originNode = peerOnion,
-                ownerId = commPay.comment.authorId
+                ownerId = commPay.comment.authorId,
+                sha256 = if (isV2) mediaHash else null
             )
             com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
                 fakeMeta,

@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Environment
 import android.os.PowerManager
 import android.util.Base64
+import com.noslop.app.data.MediaOwner
 import com.noslop.app.data.NoSlopDatabase
 import com.noslop.app.data.NoSlopRepository
 import com.noslop.app.crypto.CryptoService
@@ -919,6 +920,37 @@ object MediaManager {
         return Pair(Pair(offset, MAX_CHUNK_BYTES), Pair(offset + MAX_CHUNK_BYTES, length - MAX_CHUNK_BYTES))
     }
 
+    /**
+     * R2: allow decision from the media_owner index. Public posts/comments: anyone. Friends-only:
+     * direct friends (not burnable/temporary contacts) and the item's author. DMs: the conversation
+     * partner. Groups: members and admin. Anything not matched falls through to the legacy checks.
+     */
+    internal suspend fun isAuthorizedByOwnerIndex(repo: NoSlopRepository, mediaId: String, senderId: String): Boolean {
+        val owners = try { repo.mediaOwnerDao.getOwners(mediaId) } catch (_: Exception) { emptyList() }
+        if (owners.isEmpty()) return false
+        val peer = repo.peerDao.getPeerByPublicKey(senderId)
+        val isDirectFriend = peer != null && peer.isTrusted && !peer.isTemporary &&
+            repo.getAppSetting("contact_identity_$senderId") != "burnable"
+        for (owner in owners) {
+            when (owner.ownerType) {
+                MediaOwner.TYPE_POST, MediaOwner.TYPE_COMMENT -> when (owner.privacy) {
+                    "public" -> return true
+                    "private" -> if (senderId == owner.authorPub) return true
+                    else -> if (isDirectFriend || senderId == owner.authorPub) return true
+                }
+                MediaOwner.TYPE_DM -> if (owner.ownerId == senderId) return true
+                MediaOwner.TYPE_GROUP -> {
+                    val group = repo.getGroupChatById(owner.ownerId) ?: continue
+                    val members = try {
+                        com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
+                    } catch (_: Exception) { emptyList() }
+                    if (senderId in members || senderId == group.adminPublicKeyB64) return true
+                }
+            }
+        }
+        return false
+    }
+
     suspend fun isMediaAuthorizedForSender(
         repo: NoSlopRepository,
         mediaId: String,
@@ -928,6 +960,13 @@ object MediaManager {
         val myKeys = repo.getLocalIdentity()
         val burnable = repo.getBurnableIdentity()
         if (senderId == myKeys?.publicKeyB64 || (burnable != null && senderId == burnable.publicKeyB64)) {
+            return@withContext true
+        }
+
+        // 0. R2: the media_owner index (maintained by the DAOs since migration 18->19) knows every post,
+        //    comment, DM and group message a media item belongs to. Comment media had no allow path at
+        //    all since 5f9a127 (.mine files were refused), so GIFs/images in comments never loaded.
+        if (isAuthorizedByOwnerIndex(repo, mediaId, senderId)) {
             return@withContext true
         }
 

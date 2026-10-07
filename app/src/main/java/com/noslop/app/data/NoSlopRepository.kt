@@ -56,6 +56,33 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
     val peerDao = db.peerDao()
+    internal val mediaOwnerDao = db.mediaOwnerDao()
+    internal suspend fun getGroupChatById(groupId: String): GroupChat? = db.groupChatDao().getGroupChatById(groupId)
+
+    /**
+     * R2: remembers the signed SHA-256 of a media item on its owner rows (never overwrites).
+     * Only call with a digest that a verified signature covered (C17 v2 post/comment signature).
+     */
+    suspend fun recordMediaDigest(mediaId: String?, sha256: String?) {
+        if (mediaId.isNullOrBlank() || sha256.isNullOrBlank()) return
+        for (owner in mediaOwnerDao.getOwners(mediaId)) {
+            mediaOwnerDao.attachSecrets(mediaId, owner.ownerType, owner.ownerId, null, sha256)
+        }
+    }
+
+    /**
+     * R2: the SHA-256 to send along with a synced post/comment so receivers can check its v2 (C17)
+     * signature: the stored digest, else the hash of our local copy (cached on the owner rows). A wrong
+     * digest can only make the receiver reject the item, never accept a forged one.
+     */
+    suspend fun mediaDigestFor(mediaId: String?): String? {
+        if (mediaId.isNullOrBlank()) return null
+        mediaOwnerDao.getOwners(mediaId).firstNotNullOfOrNull { it.sha256 }?.let { return it }
+        val file = com.noslop.app.mesh.MediaManager.getLocalFile(mediaId) ?: return null
+        val digest = com.noslop.app.mesh.MediaManager.computeSha256(file) ?: return null
+        recordMediaDigest(mediaId, digest)
+        return digest
+    }
     internal val postDao = db.postDao()
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
@@ -2216,8 +2243,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
                 post.privacy, rawMediaId, post.clearnetUrl
             )
+            // R2: a C17 v2 signature (canonical fields + media SHA-256) is current, not legacy. Re-signing
+            // it as 8-field silently stripped the media integrity binding on every Tor start.
+            val digest = if (rawMediaId != null) mediaDigestFor(rawMediaId) else null
+            val v2Payload = digest?.let {
+                CryptoService.encodeForSigning(
+                    post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
+                    post.privacy, rawMediaId, post.clearnetUrl, it
+                )
+            }
+            if (v2Payload != null && CryptoService.verify(v2Payload, post.signature, post.authorPublicKeyB64)) continue
             if (!CryptoService.verify(canonicalPayload, post.signature, post.authorPublicKeyB64)) {
-                val newSig = CryptoService.sign(canonicalPayload, signingKey.privateKeyB64)
+                val newSig = CryptoService.sign(v2Payload ?: canonicalPayload, signingKey.privateKeyB64)
                 // V08: Transactional compare-and-update on exact signature and timestamp read
                 val rows = postDao.updateSignatureIfUnchanged(
                     id = post.id,

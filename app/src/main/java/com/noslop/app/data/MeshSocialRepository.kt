@@ -725,6 +725,7 @@ class MeshSocialRepository(
         )
 
         postDao.insertPost(localPost)
+        meshTransport.repository.recordMediaDigest(mediaMetadata?.id, mediaMetadata?.sha256)
         Logger.info(TAG, "Local post created and signed", "postId=${id}")
 
         val filterSettings = getMeshFilterSettings()
@@ -1534,6 +1535,7 @@ class MeshSocialRepository(
         )
 
         commentDao.insertComment(localComment)
+        meshTransport.repository.recordMediaDigest(mediaMetadata?.id, mediaMetadata?.sha256)
         
         // Always broadcast comments on mesh posts (if we are commenting, the post is already tracked locally).
         // If we want to support isBridging for comments later, we can add it here.

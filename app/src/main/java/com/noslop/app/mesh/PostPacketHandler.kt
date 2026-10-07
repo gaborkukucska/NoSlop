@@ -57,8 +57,8 @@ class PostPacketHandler(
             return false
         }
 
-        val isCanonical = (payloadCanonicalV2 != null && CryptoService.verify(payloadCanonicalV2, sig, postPay.authorId)) ||
-            CryptoService.verify(payloadCanonical, sig, postPay.authorId)
+        val isV2 = payloadCanonicalV2 != null && CryptoService.verify(payloadCanonicalV2, sig, postPay.authorId)
+        val isCanonical = isV2 || CryptoService.verify(payloadCanonical, sig, postPay.authorId)
         if (!isCanonical) {
             Logger.warn(TAG, "Rejected POST ${postPay.id}: Canonical 8-field signature verification failed")
             return false
@@ -107,6 +107,8 @@ class PostPacketHandler(
             Logger.debug(TAG, "Dropping POST ${postPay.id}: post exists with newer timestamp, is orphaned, or author mismatch")
             return true
         }
+        // R2: keep the signed digest so this post can be re-served through sync with its v2 signature.
+        if (isV2) repo.recordMediaDigest(postPay.mediaId, mediaHash)
 
         // New Broadcast Notifications
         val myKeys = repo.getLocalIdentity()
