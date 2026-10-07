@@ -706,6 +706,11 @@ fun VideoPlayer(
         val resolvedSource = resolveSource(url, forceRefresh = forceRefresh, context = context)
         source = resolvedSource
         Logger.info("VIDEO", "Resolved source for $url → ${resolvedSource.javaClass.simpleName}")
+        // R3: only a mounted ExoVideoPlayer clears isVideoActive (onDispose). Embeds, unavailable sources
+        // and off-screen slides never mount one, which left the flag stuck on and stalled background work.
+        if (resolvedSource !is VideoSource.Direct || !isVisible) {
+            com.noslop.app.ui.PreloadManager.isVideoActive = false
+        }
 
         // --- NOSLOP_AUTO_RETRY_UNAVAILABLE_V1 ---
         // retryTrigger only ever advanced on ExoPlayer *playback* errors, so a

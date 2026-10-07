@@ -75,6 +75,9 @@ object TorService {
      */
     suspend fun awaitReady(timeoutMs: Long = 90_000L): Boolean {
         if (_torState.value == TorState.READY) return true
+        // R4: Android refused to start Tor while the app was in the background; nothing will make it
+        // READY until the app is foregrounded, so callers fail fast (their work goes to the outbox).
+        if (startBlockedInBackground && _torState.value == TorState.IDLE) return false
         val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
             _torState.first { it == TorState.READY || it == TorState.FAILED }
         }
@@ -104,6 +107,26 @@ object TorService {
     private var activeMainServiceId: String? = null
     private var activeBurnableServiceId: String? = null
 
+    /** True after Android refused to start the Tor service from the background (cleared on the next start). */
+    @Volatile var startBlockedInBackground: Boolean = false
+        private set
+
+    /**
+     * R4: hidden services added with ADD_ONION live inside one Tor process. When that process stops,
+     * they are gone, so the "already active" bookkeeping must be forgotten — otherwise the restarted
+     * daemon never gets ADD_ONION and this node's .onion stays unreachable until the app is killed.
+     */
+    internal fun forgetRegisteredHiddenServices(reason: String) {
+        if (activeMainServiceId != null || activeBurnableServiceId != null) {
+            Logger.info(TAG, "Forgetting registered hidden services ($reason); they will be re-registered on the next READY")
+        }
+        activeMainServiceId = null
+        activeBurnableServiceId = null
+    }
+
+    /** Test/diagnostic view of the bookkeeping that decides whether ADD_ONION is skipped. */
+    internal fun registeredServiceIds(): Pair<String?, String?> = activeMainServiceId to activeBurnableServiceId
+
 
     private val torStatusReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
@@ -125,6 +148,7 @@ object TorService {
                     }
                 }
                 org.torproject.jni.TorService.STATUS_OFF -> {
+                    forgetRegisteredHiddenServices("Tor daemon OFF")
                     if (_torState.value != TorState.STARTING) {
                         _torState.value = TorState.FAILED
                     }
@@ -140,6 +164,7 @@ object TorService {
         Logger.info(TAG, "Stopping Tor daemon...")
         bootstrapJob?.cancel()
         _torState.value = TorState.IDLE
+        forgetRegisteredHiddenServices("stopTor")
         try {
             TorControlChannel.open(connectTimeoutMs = 800, readTimeoutMs = 800)?.use { ch ->
                 ch.send("SIGNAL HALT")
@@ -237,6 +262,8 @@ object TorService {
         }
 
         Logger.info(TAG, "Starting embedded Tor daemon via native Intent (previous state=${_torState.value})...")
+        // A daemon being (re)started has no hidden services yet.
+        forgetRegisteredHiddenServices("daemon start")
         _torState.value = TorState.STARTING
         currentPrivateKeyB64 = privateKeyB64
         currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
@@ -253,6 +280,13 @@ object TorService {
                 val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: android.net.Network) {
                         val state = _torState.value
+                        // R4: a Tor started while offline parks in PROXY_READY ("waiting for network") and
+                        // nothing promoted it later, so every mesh send was refused. Re-check bootstrap now.
+                        if (state == TorState.PROXY_READY && bootstrapJob?.isActive != true) {
+                            Logger.info(TAG, "Network became available while Tor was PROXY_READY. Re-checking bootstrap...")
+                            confirmBootstrapThenPromote()
+                            return
+                        }
                         if ((state == TorState.FAILED || state == TorState.IDLE) && bootstrapJob?.isActive != true) {
                             Logger.info(TAG, "Network became available while Tor was in state $state. Triggering auto-recovery...")
                             scope.launch {
@@ -318,9 +352,11 @@ object TorService {
 
             if (!serviceStarted) {
                 Logger.warn(TAG, "TorService could not be started while backgrounded — leaving in IDLE until app foregrounded")
+                startBlockedInBackground = true
                 _torState.value = TorState.IDLE
                 return
             }
+            startBlockedInBackground = false
 
             // Unified self-healing bootstrap loop: wait for proxy port, then wait for circuit bootstrap
             bootstrapJob = scope.launch {

@@ -89,6 +89,13 @@ object GossipService {
     private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
     private val PEER_FAILURE_THRESHOLD = 3
     private val PEER_COOLDOWN_MS = 30 * 1000L // 30 seconds cooldown
+    // R1 (regression restore): failures only add up when they happen within 5 minutes of each other,
+    // as before 679a5a1. A 2-hour memory turned one failure per Tor restart into a permanent cooldown.
+    internal const val PEER_FAILURE_WINDOW_MS = 5 * 60 * 1000L
+    internal const val PEER_MAX_COOLDOWN_MS = 120_000L
+
+    /** Time source for the failure bookkeeping; replaced only by tests. */
+    internal var clock: () -> Long = { System.currentTimeMillis() }
 
     fun recordDeletedPeer(publicKeyB64: String) {
         recentlyDeletedPeers[publicKeyB64] = System.currentTimeMillis()
@@ -99,15 +106,14 @@ object GossipService {
      * mark peer as temporarily blocked.
      */
     fun recordSendFailure(peerOnionAddress: String) {
-        val now = System.currentTimeMillis()
+        val now = clock()
         val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: (0 to 0L)
         
-        val effectiveCount = if (now - lastFailureTime > 2 * 3600_000L) 1 else count + 1
+        val effectiveCount = if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS) 1 else count + 1
         peerSendFailures[peerOnionAddress] = effectiveCount to now
         
         if (effectiveCount >= PEER_FAILURE_THRESHOLD) {
-            val exponent = (effectiveCount - PEER_FAILURE_THRESHOLD).coerceAtMost(4)
-            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(180_000L) // Max 3 minutes
+            val cooldownMs = cooldownFor(effectiveCount)
             Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times. Cooldown for ${cooldownMs/1000}s")
         }
     }
@@ -119,23 +125,26 @@ object GossipService {
      */
     fun isPeerInCooldown(peerOnionAddress: String): Boolean {
         val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: return false
-        val now = System.currentTimeMillis()
+        val now = clock()
         
         if (count >= PEER_FAILURE_THRESHOLD) {
-            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(4)
-            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(180_000L) // Max 3 minutes
-            
-            if (now - lastFailureTime < cooldownMs) {
+            if (now - lastFailureTime < cooldownFor(count)) {
                 return true
             }
         }
         
-        // Clean up old entries if inactive for more than 2 hours
-        if (now - lastFailureTime > 2 * 3600_000L) {
-            peerSendFailures.remove(peerOnionAddress)
+        // Clean up entries whose failure window and cooldown have both passed
+        if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS + PEER_MAX_COOLDOWN_MS) {
+            peerSendFailures.remove(peerOnionAddress, count to lastFailureTime)
         }
         
         return false
+    }
+
+    /** 30 s, 60 s, then 120 s max (the pre-679a5a1 schedule). */
+    private fun cooldownFor(count: Int): Long {
+        val exponent = (count - PEER_FAILURE_THRESHOLD).coerceIn(0, 3)
+        return (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(PEER_MAX_COOLDOWN_MS)
     }
 
     /**
@@ -151,13 +160,12 @@ object GossipService {
      * Periodic cleanup of failure tracking data
      */
     private fun cleanupFailureTracking() {
-        val now = System.currentTimeMillis()
+        val now = clock()
         val iterator = peerSendFailures.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             val (_, lastFailureTime) = entry.value
-            // Retain failures for up to 2 hours so 30-minute cooldowns are not prematurely wiped
-            if (now - lastFailureTime > 2 * 3600_000L) {
+            if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS + PEER_MAX_COOLDOWN_MS) {
                 iterator.remove()
             }
         }
@@ -181,6 +189,7 @@ object GossipService {
 
     fun resetForTesting() {
         resetAllState()
+        clock = { System.currentTimeMillis() }
         peerDao = null
         transport = null
         localPublicKeyB64 = ""
@@ -639,6 +648,12 @@ object GossipService {
         // A forgery never reaches this line, so it can no longer displace the
         // real packet it was impersonating.
         markProcessed(packetId)
+
+        // R1 (regression restore of F18, removed in 4579860): a packet from a known peer that survived
+        // authentication proves the peer is alive, so its failure cooldown is cleared.
+        peerDao?.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
+            recordSendSuccess(it)
+        }
 
         // 4.5. Mesh Filters (Incoming)
         val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()

@@ -254,11 +254,10 @@ class MeshSocialRepository(
         outboxWorkerJob = repositoryScope.launch(Dispatchers.IO) {
             while (isActive) {
                 kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
-                // Do not flush outbox if Tor is not ready or during active video playback
+                // Do not flush outbox if Tor is not ready. R3 (regression restore): the outbox is no longer
+                // paused while a video player is mounted (679a5a1) — DMs, handshakes and group messages
+                // waited indefinitely because those flags are often never cleared.
                 if (com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
-                    continue
-                }
-                if (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
                     continue
                 }
                 // P0-1: Prune pending group messages older than 7 days

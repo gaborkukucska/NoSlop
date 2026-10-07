@@ -57,7 +57,8 @@ class DmPacketHandler(
         if (existingMsg != null) {
             Logger.debug(TAG, "Dropping duplicate DM ${msgPay.id}: already delivered, echoing ACK")
             if (msgPay.groupId.isNullOrBlank()) {
-                sendDmAck(msgPay.id, packet.senderId, myKeys)
+                // R1: never block inbound processing on the return path (see below).
+                com.noslop.app.util.AppScopes.io.launch { sendDmAck(msgPay.id, packet.senderId, myKeys) }
             }
             return true
         }
@@ -270,9 +271,11 @@ class DmPacketHandler(
             messageDao.insertMessage(msg)
             repo.triggerDmSync()
 
-            // C18: Send AEAD-authenticated DM_ACK for direct messages
+            // C18: Send AEAD-authenticated DM_ACK for direct messages.
+            // R1: fire-and-forget. Sending it inline held the inbound handler (and a DM slot) for up to
+            // ~2 minutes whenever the sender's onion was not reachable yet.
             if (msgPay.groupId.isNullOrBlank()) {
-                sendDmAck(msgPay.id, packet.senderId, myKeys)
+                com.noslop.app.util.AppScopes.io.launch { sendDmAck(msgPay.id, packet.senderId, myKeys) }
             }
             
             val group = if (groupId != null) db.groupChatDao().getGroupChatById(groupId) else null

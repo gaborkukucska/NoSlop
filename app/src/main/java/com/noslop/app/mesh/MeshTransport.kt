@@ -162,16 +162,12 @@ class MeshTransport(
         }
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
         
-        val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
-        val isDmHighPriority = packet.type == "MESSAGE" || packet.type == "DELETE_MESSAGE" ||
-            packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
-            packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
-            packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC" ||
-            packet.type == "CHAT_REACTION" || packet.type == "DM_ACK"
+        val isHandshake = isHandshakeType(packet.type)
+        val isDmHighPriority = isDmHighPriorityType(packet.type)
 
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isInteractive = packet.type == "TYPING" || packet.type == "READ_RECEIPT"
-        val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
+        val isBackground = isBackgroundPresenceType(packet.type)
 
         // Ensure Tor circuits are established before attempting SOCKS sends to .onion addresses.
         // During Tor bootstrap, do NOT hammer SOCKS proxy with background traffic to prevent Tor event loop freezes.
@@ -191,10 +187,11 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
-        // User DMs, handshakes, and active media transfers bypass cooldown.
-        // General broadcasts, forwards, sync, and background presence respect cooldown.
-        val bypassCooldown = isHandshake || isDmHighPriority || isMediaPacket
-        if (!bypassCooldown && GossipService.isPeerInCooldown(onionAddress)) {
+        // R1 (regression restore): only unsolicited background presence respects the failure cooldown,
+        // as GossipService.broadcast intends. Since 439c83b/34770ba posts, comments, reactions and sync
+        // to a peer in cooldown were dropped here with no retry. (Relay forwards are filtered in
+        // GossipService.forwardPacket.)
+        if (respectsPeerCooldown(packet.type) && GossipService.isPeerInCooldown(onionAddress)) {
             Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub
         }
@@ -203,7 +200,9 @@ class MeshTransport(
         var acquiredMedia = false
         var acquiredBulk = false
 
-        if (isDmHighPriority) {
+        if (usesPrioritySlot(packet.type)) {
+            // R2 (regression restore): handshakes lost their priority slot in 439c83b and fell into the
+            // 4-permit bulk pool, where they were dropped after 4 s or blocked posts for minutes.
             dmSemaphore.acquire()
             acquiredDm = true
         } else if (isInteractive) {
@@ -296,7 +295,9 @@ class MeshTransport(
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
             // Record failure for all traffic except transient interactive signals (typing, read receipts)
-            if (!isInteractive) {
+            // and DM_ACK: a receipt we can't return says nothing new about the peer, and counting it
+            // put peers that had just messaged us into cooldown (R1).
+            if (countsAsPeerFailure(packet.type)) {
                 GossipService.recordSendFailure(onionAddress)
             }
             return@withContext pushedToHub
@@ -390,6 +391,27 @@ class MeshTransport(
     }
 
     companion object {
+        internal fun isHandshakeType(type: String) = type == "CONNECTION_REQUEST" || type == "USER_HANDSHAKE"
+
+        internal fun isDmHighPriorityType(type: String) = type == "MESSAGE" || type == "DELETE_MESSAGE" ||
+            type == "DM_SYNC_REQUEST" || type == "GROUP_INVITE" ||
+            type == "GROUP_UPDATE" || type == "GROUP_DELETE" ||
+            type == "GROUP_QUERY" || type == "GROUP_SYNC" ||
+            type == "CHAT_REACTION" || type == "DM_ACK"
+
+        internal fun isBackgroundPresenceType(type: String) =
+            type == "ANNOUNCE_PEER" || type == "ANNOUNCE_DISCOVERABLE" || type == "USER_EXIT"
+
+        /** R1: only unsolicited background presence is skipped for a peer in failure cooldown. */
+        internal fun respectsPeerCooldown(type: String) = isBackgroundPresenceType(type)
+
+        /** R2: handshakes share the DM pool (blocking acquire) instead of the 4-permit bulk pool. */
+        internal fun usesPrioritySlot(type: String) = isDmHighPriorityType(type) || isHandshakeType(type)
+
+        /** R1: typing/read receipts and DM receipts never count toward a peer's cooldown. */
+        internal fun countsAsPeerFailure(type: String) =
+            type != "TYPING" && type != "READ_RECEIPT" && type != "DM_ACK"
+
         /** How long a CONNECTION_REQUEST connection stays open for the accepter's answer. */
         const val HANDSHAKE_REPLY_WINDOW_MS = 6_000L
         private const val PROBE_CONNECT_TIMEOUT_MS = 30_000
