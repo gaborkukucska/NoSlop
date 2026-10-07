@@ -1,12 +1,12 @@
 package com.noslop.app.ui
 
-import androidx.test.core.app.ApplicationProvider
 import com.noslop.app.NoSlopApp
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -17,7 +17,7 @@ class IdentityViewModelTest {
 
     @Before
     fun setup() {
-        val app = ApplicationProvider.getApplicationContext<NoSlopApp>()
+        val app = RuntimeEnvironment.getApplication() as NoSlopApp
         identityViewModel = IdentityViewModel(app)
     }
 
