@@ -361,9 +361,11 @@ class MeshSocialRepository(
         _acceptedHandshakeFlow.value = null
     }
 
+    /** Stops the background presence loop and any pending-request probing (Round A2). */
     fun stopPresenceHeartbeat() {
         presenceJob?.cancel()
         presenceJob = null
+        outgoingRequestPolls.keys.toList().forEach { stopOutgoingRequestPoll(it) }
     }
 
     fun startPresenceHeartbeat() {
@@ -802,6 +804,9 @@ class MeshSocialRepository(
         // Sync with hub before dispatching so the hub firewall is aware of the pending peer
         meshTransport.repository.syncPeersWithHub()
 
+        // Asking them is consent: forget that we once declined a request from them.
+        db.appSettingDao().removeSetting("declined_request_$publicKeyB64")
+
         val boundIdentity = db.appSettingDao().getSetting("contact_identity_$publicKeyB64")
         val useBurnable = useBurnableIdentity || boundIdentity == "burnable"
         val myKeys = if (useBurnable) getBurnableIdentity() else getLocalIdentity()
@@ -809,54 +814,128 @@ class MeshSocialRepository(
             if (useBurnable) {
                 db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
             }
-            val userProfile = getUserProfile()
-            val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
-            val now = System.currentTimeMillis()
-
-            val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
-                id = UUID.randomUUID().toString(),
-                fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName,
-                fromDisplayName = myKeys.displayName,
-                authorAvatarB64 = avatarB64,
-                bio = userProfile.bio.takeIf { it.isNotBlank() },
-                fromHomeNode = myKeys.onionAddress,
-                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                timestamp = now,
-                signature = null,
-                requestNonce = nonce,
-                targetUserId = publicKeyB64,
-                version = 2
-            )
-            val payloadToSign = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
-                fromUserId = myKeys.publicKeyB64,
-                fromUsername = reqPay.fromUsername,
-                fromHomeNode = myKeys.onionAddress,
-                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                targetUserId = publicKeyB64,
-                nonce = nonce,
-                timestamp = now,
-                authorAvatarB64 = avatarB64,
-                bio = reqPay.bio
-            )
-            val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             if (existing?.relationship == PeerRelationship.ACCEPTED) {
                 // Nonce is only needed if the peer lost us; store it so their echo can be matched.
                 peerDao.getPeerByPublicKey(publicKeyB64)?.let { peerDao.insertPeer(it.copy(pendingNonce = nonce)) }
             }
-            val gson = com.noslop.app.util.Json.gson
-            val packet = com.noslop.app.mesh.NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 3,
-                senderId = myKeys.publicKeyB64,
-                targetUserId = publicKeyB64,
-                type = "CONNECTION_REQUEST",
-                payload = gson.toJsonTree(reqPay),
-                signature = reqSig
-            )
+            val packet = buildConnectionRequestPacket(myKeys, publicKeyB64, nonce)
             dispatchPacket(targetOnion, packet)
+            if (existing?.relationship != PeerRelationship.ACCEPTED) {
+                startOutgoingRequestPoll(publicKeyB64, nonce)
+            }
         }
         true
+    }
+
+    /**
+     * Builds a v2 CONNECTION_REQUEST from [myKeys] to [targetPub] for [nonce], signed now. Used for
+     * the first send and for every Round A2 probe (same nonce, fresh timestamp and packet id).
+     */
+    private suspend fun buildConnectionRequestPacket(
+        myKeys: CryptoService.IdentityKeys,
+        targetPub: String,
+        nonce: String
+    ): com.noslop.app.mesh.NetworkPacket {
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
+        val now = System.currentTimeMillis()
+        val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
+            id = UUID.randomUUID().toString(),
+            fromUserId = myKeys.publicKeyB64,
+            fromUsername = myKeys.displayName,
+            fromDisplayName = myKeys.displayName,
+            authorAvatarB64 = avatarB64,
+            bio = userProfile.bio.takeIf { it.isNotBlank() },
+            fromHomeNode = myKeys.onionAddress,
+            fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+            timestamp = now,
+            signature = null,
+            requestNonce = nonce,
+            targetUserId = targetPub,
+            version = 2
+        )
+        val payloadToSign = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
+            fromUserId = myKeys.publicKeyB64,
+            fromUsername = reqPay.fromUsername,
+            fromHomeNode = myKeys.onionAddress,
+            fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+            targetUserId = targetPub,
+            nonce = nonce,
+            timestamp = now,
+            authorAvatarB64 = avatarB64,
+            bio = reqPay.bio
+        )
+        val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        return com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 3,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = targetPub,
+            type = "CONNECTION_REQUEST",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(reqPay),
+            signature = reqSig
+        )
+    }
+
+    // ---- Round A2: requester-side probing while our request is pending -----------------------
+
+    private val outgoingRequestPolls = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+    private val OUTGOING_POLL_INTERVAL_MS = 15_000L
+    private val OUTGOING_POLL_WINDOW_MS = 10 * 60 * 1000L
+
+    /**
+     * The re-signed request for a pending outgoing request, or null when there is nothing pending.
+     * Same nonce as the stored row (so the accepter's answer still matches), fresh timestamp (so
+     * an accepter that already accepted treats it as current), fresh packet id (so mesh dedup lets
+     * it through), same identity we originally asked from.
+     */
+    internal suspend fun buildPendingRequestProbe(peerPub: String): com.noslop.app.mesh.NetworkPacket? {
+        val row = peerDao.getPeerByPublicKey(peerPub) ?: return null
+        val nonce = row.pendingNonce
+        if (row.relationship != PeerRelationship.OUTGOING_PENDING || nonce.isNullOrBlank()) return null
+        val useBurnable = db.appSettingDao().getSetting("contact_identity_$peerPub") == "burnable"
+        val myKeys = (if (useBurnable) getBurnableIdentity() else getLocalIdentity()) ?: return null
+        return buildConnectionRequestPacket(myKeys, peerPub, nonce)
+    }
+
+    /**
+     * While our request is pending, re-contact the peer every [OUTGOING_POLL_INTERVAL_MS] for up to
+     * [OUTGOING_POLL_WINDOW_MS]. We can reach them long before they can reach us (a freshly
+     * published onion descriptor takes minutes to propagate), and they answer on our connection.
+     * The accepter never re-notifies the user for a request it already has. Stops as soon as the
+     * row leaves OUTGOING_PENDING or its nonce changes (accepted, declined, cancelled, re-sent).
+     */
+    private fun startOutgoingRequestPoll(peerPub: String, nonce: String) {
+        val job = repositoryScope.launch(Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val deadline = System.currentTimeMillis() + OUTGOING_POLL_WINDOW_MS
+            var probes = 0
+            try {
+                while (isActive && System.currentTimeMillis() < deadline) {
+                    kotlinx.coroutines.delay(OUTGOING_POLL_INTERVAL_MS)
+                    val row = peerDao.getPeerByPublicKey(peerPub) ?: break
+                    if (row.relationship != PeerRelationship.OUTGOING_PENDING || row.pendingNonce != nonce) break
+                    if (row.onionAddress.isBlank()) continue
+                    if (com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) continue
+                    val probe = buildPendingRequestProbe(peerPub) ?: break
+                    probes++
+                    Logger.info(TAG, "Pending request to ${row.handle}: probe $probes (waiting for their answer)")
+                    meshTransport.probeConnectionRequest(row.onionAddress, probe)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Pending-request probing for ${peerPub.take(12)} stopped: ${e.message}")
+            } finally {
+                val self = coroutineContext[kotlinx.coroutines.Job]
+                if (self != null) outgoingRequestPolls.remove(peerPub, self)
+            }
+        }
+        outgoingRequestPolls.put(peerPub, job)?.cancel()
+        job.start()
+    }
+
+    private fun stopOutgoingRequestPoll(peerPub: String) {
+        outgoingRequestPolls.remove(peerPub)?.cancel()
     }
 
     /**
@@ -866,7 +945,10 @@ class MeshSocialRepository(
      * This is the only code path that sets relationship = ACCEPTED besides handleUserHandshake's
      * nonce-verified promotion.
      */
-    suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
+    suspend fun acceptConnectionRequest(
+        peer: Peer,
+        replyVia: com.noslop.app.mesh.ReplyChannel? = null
+    ): Boolean = withContext(Dispatchers.IO) {
         val current = peerDao.getPeerByPublicKey(peer.publicKeyB64)
         if (current == null ||
             (current.relationship != PeerRelationship.INCOMING_PENDING && current.relationship != PeerRelationship.ACCEPTED)
@@ -883,6 +965,7 @@ class MeshSocialRepository(
             db.appSettingDao().insertSetting(AppSetting("contact_identity_${current.publicKeyB64}", "burnable"))
         }
         db.appSettingDao().removeSetting("requested_identity_${current.publicKeyB64}")
+        db.appSettingDao().removeSetting("declined_request_${current.publicKeyB64}")
         val isTemp = current.isTemporary || contactIdentity == "burnable"
         val replyNonce = current.pendingNonce ?: ""
         peerDao.insertPeer(current.copy(isTemporary = isTemp, relationship = PeerRelationship.ACCEPTED, pendingNonce = null))
@@ -934,9 +1017,63 @@ class MeshSocialRepository(
                 payload = gson.toJsonTree(handshakePay),
                 signature = handshakeSig
             )
-            dispatchPacket(current.onionAddress, packet)
+            // Round A2: answer on the requester's own connection when we have one. Our outbound
+            // connection to a freshly (re)started requester can take minutes to build.
+            val repliedInline = replyVia != null && try { replyVia(packet) } catch (_: Exception) { false }
+            if (repliedInline) {
+                Logger.info(TAG, "USER_HANDSHAKE for ${current.handle} returned on their own connection")
+            } else {
+                val alreadyQueued = pendingOutboxMessages[current.publicKeyB64]?.let { list ->
+                    synchronized(list) { list.any { it.type == "USER_HANDSHAKE" } }
+                } == true
+                if (replyVia != null && alreadyQueued) {
+                    // A probe whose connection closed before we answered: the next probe gets the
+                    // answer, and a handshake is already queued for the outbound path.
+                    Logger.debug(TAG, "USER_HANDSHAKE for ${current.handle} already queued; not dispatching again")
+                } else {
+                    dispatchPacket(current.onionAddress, packet)
+                }
+            }
         }
         true
+    }
+
+    /**
+     * Round A2: a requester still probing a request the user already declined gets the rejection
+     * on its own connection, signed by the identity the request addressed.
+     */
+    suspend fun answerDeclinedRequest(
+        addressedIdentity: String,
+        peerPub: String,
+        reply: com.noslop.app.mesh.ReplyChannel
+    ): Boolean = withContext(Dispatchers.IO) {
+        val burnable = getBurnableIdentity()
+        val myKeys = if (burnable != null && burnable.publicKeyB64 == addressedIdentity) burnable else getLocalIdentity()
+        if (myKeys == null || myKeys.publicKeyB64 != addressedIdentity) return@withContext false
+        try { reply(buildConnectionRejectedPacket(myKeys, peerPub)) } catch (_: Exception) { false }
+    }
+
+    private fun buildConnectionRejectedPacket(
+        myKeys: CryptoService.IdentityKeys,
+        peerPub: String
+    ): com.noslop.app.mesh.NetworkPacket {
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val rejectPay = com.noslop.app.mesh.ConnectionRejectedPayload(
+            fromUserId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature
+        )
+        return com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 3,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = peerPub,
+            type = "CONNECTION_REJECTED",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(rejectPay),
+            signature = signature
+        )
     }
 
     suspend fun shareDiscoverableNodesWith(targetPeer: Peer) = withContext(Dispatchers.IO) {
@@ -1060,31 +1197,19 @@ class MeshSocialRepository(
             Logger.warn(TAG, "rejectConnectionRequest ignored for ${peer.publicKeyB64.take(12)}: relationship is ${current?.relationship ?: "absent"}")
             return@withContext false
         }
+        // Resolve the identity they addressed BEFORE dropping requested_identity_*: otherwise a
+        // request to our burnable identity would be declined by the main one.
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         peerDao.deletePeer(current)
         db.appSettingDao().removeSetting("requested_identity_${peer.publicKeyB64}")
+        // Round A2: their requester keeps probing with this nonce; remember the decision so the
+        // probes are answered with the rejection instead of re-asking the user.
+        current.pendingNonce?.takeIf { it.isNotBlank() }?.let { declined ->
+            db.appSettingDao().insertSetting(AppSetting("declined_request_${peer.publicKeyB64}", declined))
+        }
 
-        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         if (myKeys != null) {
-            val timestamp = System.currentTimeMillis()
-            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
-            val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-            
-            val rejectPay = com.noslop.app.mesh.ConnectionRejectedPayload(
-                fromUserId = myKeys.publicKeyB64,
-                timestamp = timestamp,
-                signature = signature
-            )
-            
-            val packet = com.noslop.app.mesh.NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 3,
-                senderId = myKeys.publicKeyB64,
-                targetUserId = peer.publicKeyB64,
-                type = "CONNECTION_REJECTED",
-                payload = com.noslop.app.util.Json.gson.toJsonTree(rejectPay),
-                signature = signature
-            )
-            
+            val packet = buildConnectionRejectedPacket(myKeys, peer.publicKeyB64)
             repositoryScope.launch {
                 meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
             }
@@ -1096,6 +1221,7 @@ class MeshSocialRepository(
     suspend fun cancelOutgoingRequest(publicKeyB64: String): Boolean = withContext(Dispatchers.IO) {
         val current = peerDao.getPeerByPublicKey(publicKeyB64) ?: return@withContext false
         if (current.relationship != PeerRelationship.OUTGOING_PENDING) return@withContext false
+        stopOutgoingRequestPoll(publicKeyB64)
         if (current.isDiscoverable || current.publicKeyB64 == NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
             // Keep discoverable nodes listed; just drop the pending state.
             peerDao.insertPeer(current.copy(relationship = PeerRelationship.NONE, pendingNonce = null))

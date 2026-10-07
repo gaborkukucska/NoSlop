@@ -29,7 +29,11 @@ class MeshPacketHandler(
     private val handshake = HandshakePacketHandler(repo, db)
     private val media = MediaPacketHandler(repo, db)
 
-    suspend fun handleIncomingPacket(packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * [reply] is only present for packets that arrived on a direct inbound connection; only the
+     * CONNECTION_REQUEST handler may use it (Round A2 handshake reply path).
+     */
+    suspend fun handleIncomingPacket(packet: NetworkPacket, reply: ReplyChannel? = null): Boolean = withContext(Dispatchers.IO) {
         val localKeys = repo.getLocalIdentity()
         val burnableKeys = repo.getBurnableIdentity()
         if (localKeys == null) {
@@ -71,7 +75,7 @@ class MeshPacketHandler(
             "MESSAGE" -> dm.handleDirectMessage(packet, localKeys)
             "DM_ACK" -> dm.handleDmAck(packet, localKeys)
             "DELETE_MESSAGE" -> dm.handleDeleteMessage(packet)
-            "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet)
+            "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet, reply)
             "USER_HANDSHAKE" -> handshake.handleUserHandshake(packet)
             "CONNECTION_REJECTED" -> handshake.handleConnectionRejected(packet)
             "DM_SYNC_REQUEST" -> dm.handleDmSyncRequest(packet, localKeys)

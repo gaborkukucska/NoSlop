@@ -2136,8 +2136,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, clearnetMediaType, postIdOverride
     )
 
-    suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 
-        meshPacketHandler.handleIncomingPacket(packet)
+    suspend fun handleIncomingPacket(
+        packet: com.noslop.app.mesh.NetworkPacket,
+        reply: com.noslop.app.mesh.ReplyChannel? = null
+    ): Boolean = meshPacketHandler.handleIncomingPacket(packet, reply)
 
     suspend fun setIncomingRequest(peer: Peer) = meshSocialRepository.setIncomingRequest(peer)
     fun setHandshakeAccepted(peer: Peer) = meshSocialRepository.setHandshakeAccepted(peer)
@@ -2167,8 +2169,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
     }
 
-    suspend fun acceptConnectionRequest(peer: Peer): Boolean =
-        meshSocialRepository.acceptConnectionRequest(peer)
+    suspend fun acceptConnectionRequest(peer: Peer, replyVia: com.noslop.app.mesh.ReplyChannel? = null): Boolean =
+        meshSocialRepository.acceptConnectionRequest(peer, replyVia)
+
+    /** Round A2: answers a still-polling request we already declined, on the requester's connection. */
+    suspend fun answerDeclinedRequest(addressedIdentity: String, peerPub: String, reply: com.noslop.app.mesh.ReplyChannel): Boolean =
+        meshSocialRepository.answerDeclinedRequest(addressedIdentity, peerPub, reply)
+
+    /** Round A2: the re-signed CONNECTION_REQUEST the requester sends while its request is pending. */
+    internal suspend fun buildPendingRequestProbe(peerPub: String): com.noslop.app.mesh.NetworkPacket? =
+        meshSocialRepository.buildPendingRequestProbe(peerPub)
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.rejectConnectionRequest(peer)

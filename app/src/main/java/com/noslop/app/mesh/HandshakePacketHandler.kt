@@ -18,6 +18,24 @@ class HandshakePacketHandler(
     private val notificationDao = db.notificationDao()
     private val autoAcceptRateLimits = java.util.concurrent.ConcurrentHashMap<String, MutableList<Long>>()
 
+    /**
+     * Round A2: newest request timestamp per sender that was answered on its own connection.
+     * The requester re-signs every probe with a fresh timestamp, so a replayed copy of an earlier
+     * request (e.g. one that travelled through gossip) never collects a reply.
+     */
+    private val lastAnsweredRequestTs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun claimReplySlot(fromUserId: String, timestamp: Long): Boolean {
+        var claimed = false
+        lastAnsweredRequestTs.compute(fromUserId) { _, previous ->
+            if (previous == null || timestamp > previous) {
+                claimed = true
+                timestamp
+            } else previous
+        }
+        return claimed
+    }
+
     private suspend fun syncMemberPeers(memberDetails: Map<String, GroupMemberInfo>?) {
         repo.syncMemberPeers(memberDetails)
     }
@@ -81,7 +99,13 @@ class HandshakePacketHandler(
         )
     }
 
-    suspend fun handleConnectionRequest(packet: NetworkPacket, sendResponse: suspend (NetworkPacket) -> Unit = {}): Boolean {
+    /**
+     * [reply] is present only when the request arrived on a direct inbound connection (Round A2).
+     * It is used solely after the request passed the signature, target and freshness checks below,
+     * and only once per request timestamp ([claimReplySlot]), so a forged or replayed request can
+     * never collect our handshake.
+     */
+    suspend fun handleConnectionRequest(packet: NetworkPacket, reply: ReplyChannel? = null): Boolean {
         val connPay = packet.getConnectionRequestPayload() ?: return false
         val myPubKey = repo.getLocalIdentity()?.publicKeyB64
         val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
@@ -117,11 +141,31 @@ class HandshakePacketHandler(
         val existingPeer = peerDao.getPeerByPublicKey(connPay.fromUserId)
         val isOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 5 * 60 * 1000L
         val isVeryOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 60 * 60 * 1000L // 1 hour
+        val isFromFuture = (connPay.timestamp - System.currentTimeMillis()) > 5 * 60 * 1000L
+        // Round A2: the reply channel is usable only for a fresh request, once per timestamp.
+        fun replyChannelIfFresh(): ReplyChannel? =
+            if (reply != null && !isOldPacket && !isFromFuture && claimReplySlot(connPay.fromUserId, connPay.timestamp)) reply else null
 
         // D06: BLOCKED is only ever left by explicit user action.
         if (existingPeer?.relationship == PeerRelationship.BLOCKED) {
             Logger.info(TAG, "Ignored CONNECTION_REQUEST from blocked peer ${connPay.fromUserId.take(12)}")
             return true
+        }
+
+        // Round A2: the requester keeps re-sending its pending request (same nonce) until it hears
+        // back. Once the user declined that request, answer with the rejection instead of asking the
+        // user again; a new request (new nonce, i.e. the requester tapped Re-send) is asked normally.
+        val declinedNonce = db.appSettingDao().getSetting("declined_request_${connPay.fromUserId}")
+        if (declinedNonce != null) {
+            if (declinedNonce == nonce && (existingPeer == null || existingPeer.relationship == PeerRelationship.NONE)) {
+                val channel = replyChannelIfFresh()
+                if (channel != null) {
+                    repo.answerDeclinedRequest(targetUser, connPay.fromUserId, channel)
+                }
+                Logger.info(TAG, "CONNECTION_REQUEST from ${connPay.fromUserId.take(12)} repeats a request the user declined; not asking again")
+                return true
+            }
+            db.appSettingDao().removeSetting("declined_request_${connPay.fromUserId}")
         }
 
         // Ignore zombie requests from deleted peers if they are older than 1 hour
@@ -168,7 +212,7 @@ class HandshakePacketHandler(
                 lastSeenAt = System.currentTimeMillis()
             ))
             Logger.info(TAG, "Recent CONNECTION_REQUEST from accepted peer ${existingPeer.handle}; re-sending USER_HANDSHAKE")
-            repo.acceptConnectionRequest(existingPeer)
+            repo.acceptConnectionRequest(existingPeer, replyChannelIfFresh())
             return true
         }
 
@@ -189,7 +233,7 @@ class HandshakePacketHandler(
                 bio = connPay.bio ?: existingPeer.bio,
                 lastSeenAt = System.currentTimeMillis()
             ))
-            repo.acceptConnectionRequest(existingPeer)
+            repo.acceptConnectionRequest(existingPeer, replyChannelIfFresh())
             GossipService.flushFirewallBuffer(connPay.fromUserId)
             return true
         }
@@ -239,7 +283,7 @@ class HandshakePacketHandler(
             }
 
             if (allowed) {
-                repo.acceptConnectionRequest(peer)
+                repo.acceptConnectionRequest(peer, replyChannelIfFresh())
                 GossipService.flushFirewallBuffer(connPay.fromUserId)
                 Logger.info(TAG, "Auto-accepted follower connection request from ${peer.handle} (creator identity)")
             } else {
