@@ -5,8 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=android">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.6.5--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.6.9--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
@@ -27,13 +26,13 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 ## ⚡ Why Stop the Slop?
 
 * 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked.
-* 🚫 **100% Ad & Tracker-Free** — Zero banners, zero tracking scripts, zero sponsored interruptions. Always.
-* 🎯 **Total Feed Sovereignty** — Strict chronological curation. You decide your content mix, your sources, and your priorities.
+* 🚫 **100% Ad & Tracker-Free** — Pure tracker-free client (using offline ZXing barcode scanning, no Google telemetry SDKs). Zero banners or sponsored interruptions.
+* 🎯 **Total Feed Sovereignty** — Non-algorithmic curation. You choose your mix quotas, sources, and categories with chronological history and optional Random Discover mode.
 * 🕸️ **Decentralized Social Mesh** — Direct peer-to-peer communication across Tor hidden services with multi-hop gossip relay.
-* 🔒 **Mathematical Privacy** — E2EE Direct Messages (X25519 + ChaCha20-Poly1305) and multi-member mesh group chats.
-* 🧅 **Strict Tor-Routed Anonymity** — All network traffic routes through an embedded Tor SOCKS5 daemon with dedicated per-stream circuit isolation.
+* 🔒 **Cryptographic Privacy** — E2EE Direct Messages (v2 directional X25519 + ChaCha20-Poly1305 AEAD with AAD metadata binding and delivery ACKs) and pairwise encrypted group chats.
+* 🧅 **Tor-Routed Anonymity** — Default network traffic routes through an embedded Tor daemon with per-stream circuit isolation. Article WebViews and external browser links are gated with explicit Tor leak warnings.
 * 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
-* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery.
+* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery (780+ UI strings with test-enforced parity).
 
 ---
 
@@ -46,7 +45,7 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 * 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with dynamic ahead-of-time Tor preloading.
 * 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
 * 📖 **Segmented Article Reader** — Multi-page horizontal book-style reader with asynchronous OpenGraph lead image resolution and full Markdown support.
-* 🎛️ **3-Tier Priority Curation** — Strictly orders content chronologically in three tiers: `Favorite Creators > Selected Topics > Fallback Discoveries`.
+* 🎛️ **Non-Algorithmic Interleaved Curation** — Balanced mix quotas interleaving favorite creators, selected topics, and discovery items without opaque recommendation algorithms.
 * 🏷️ **3-Tier Nuanced Reactions** — 20 expressive reactions categorized into **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫).
 * 🚫 **1-Tap Channel Banning** — React with 🚫 to immediately blacklist content creators and purge their slides from your feed.
 * 📅 **Content Farm Cut-Off Filter** — Exclude automated channels created after a set date (e.g. drop post-2022 AI content farms).
@@ -57,9 +56,9 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 
 ### 🕸️ Serverless Social Mesh (HAI-Net)
 
-Direct peer-to-peer communication over the HAI-Net gossip network — no central server ever exists:
+Direct peer-to-peer communication over the HAI-Net gossip network — no central server (fresh nodes bootstrap discoverability with an optional untrusted Official Creator Node):
 
-* 📬 **End-to-End Encrypted DMs** — Mathematically secure messaging via X25519 key agreement and ChaCha20-Poly1305 AEAD.
+* 📬 **End-to-End Encrypted DMs** — Secure messaging via directional X25519 key agreement and ChaCha20-Poly1305 AEAD (v2) with AAD binding and delivery acknowledgments.
 * 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
 * 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish broadcasts without leaking their personal identity.
 * 🏠 **Home HUBs & Admin AI** — Link or auto-deploy an always-on home server over SSH as your sovereign master database and private LLM assistant.
@@ -74,7 +73,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
-* 🪪 **Human-Readable Tripcode** — 6-character Base32 visual display disambiguator (`@handle.tripcode`).
+* 🪪 **Visual Safety Fingerprints** — 6-character display tripcodes plus 20-character Base32 cryptographic safety fingerprints for out-of-band contact verification.
 
 ---
 
@@ -83,7 +82,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🛡️ **Default Tor Routing** — Outbound feed fetches, media streams, API requests, and mesh packets route through an embedded local Tor daemon.
 * 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns unique circuits and exit nodes to distinct media streams, guaranteeing exit affinity and eliminating Google IP-lock stalls.
 * 🔁 **Graceful Exit Hopping** — Nonce-bumping hops Tor exits upon provider blocks without process-wide circuit disruption.
-* 📲 **Peerless OTA Updates** — Automated background update detection with SHA-256 cryptographic checksum verification before installation.
+* 📲 **Peerless OTA Updates** — Background update checking over Tor with SHA-256 checksum verification and pre-install same-signer certificate matching.
 
 ---
 
@@ -124,7 +123,7 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 | **Media** | Media3 / ExoPlayer, Coil, Android System WebView (fallback) |
 | **Networking** | Embedded Tor daemon (`tor-android`), OkHttp, SOCKS5 Stream Isolation |
 | **Cryptography** | Ed25519 (Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
-| **Persistence** | Room (SQLite, Keystore AES-256-GCM message encryption), EncryptedSharedPreferences |
+| **Persistence** | Room (SQLite; Keystore AES-256-GCM group message encryption at rest; database files protected by Android file-based encryption), EncryptedSharedPreferences (hardware Keystore with AES-GCM fallback) |
 | **Hardware** | CameraX (QR scanning & media capture), ZXing (tracker-free) |
 | **Background** | Android WorkManager & Foreground Services |
 

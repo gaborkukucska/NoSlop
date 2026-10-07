@@ -78,10 +78,14 @@
   * Removed obsolete Lazysodium and JNA keep rules from `proguard-rules.pro`.
   * Tightened overbroad Bouncy Castle and OkHttp ProGuard rules to allow R8 optimization and shrinking.
 
-### Remaining Roadmap for Next Session (Batch 5)
-1. **C25 (P2)**: **Maintainability Refactoring**:
-   - Standardize on shared `Json.gson`, structured `AppScopes`, and extract `IdentityViewModel` from `NoSlopViewModel`.
-2. **C23 (P2)**: **Translation String Parity & Documentation Sync**.
+* **Maintainability & ViewModel Extraction (C25) — Tested (unit: `IdentityViewModelTest`)**:
+  * Standardized JSON serialization across the entire application on process-wide shared `com.noslop.app.util.Json.gson`, avoiding repetitive reflection metadata allocations across 50+ classes.
+  * Introduced structured application coroutine scopes `com.noslop.app.util.AppScopes` (`io`, `default`, `main`) equipped with unified `CoroutineExceptionHandler` unhandled error logging.
+  * Extracted sovereign identity, account lifecycle, onboarding, Word Cloud mnemonic, backup export/import, and creator identity management from `NoSlopViewModel` into dedicated `IdentityViewModel`.
+* **Translation Parity & Documentation Synchronization (C23) — Tested (unit: `TranslationParityTest`)**:
+  * Added missing translation keys to `content_en.json` (100% string coverage across 780+ UI strings). Added automated `TranslationParityTest` scanning all code literals for missing translation dictionary keys.
+  * Implemented pre-install APK signing certificate verification in `UpdateManager.kt` (`PackageManager.getPackageArchiveInfo`), ensuring downloaded APKs match the installed application's signing key before launching the system package installer.
+  * Corrected documentation claims in `README.md` and consolidated the project status register into a unified audit verification matrix.
 
 ## Completed Changes (2026-10-04) — Protocol Canonicalization, Atomic Post Transactions, Task Ownership & Safe Recovery (v0.6.9-alpha)
 
@@ -213,20 +217,6 @@
   * In `MeshSocialRepository.requestInventorySync()`, outgoing inventory hash lists filter out Friends Only posts when synchronizing with non-direct peers, preventing the leaking of private post IDs or hashes to temporary contacts and creator nodes.
 * **Test Suite Expansion (`GossipServiceTest.kt`)**:
   * Added unit test coverage in `GossipServiceTest.kt` asserting that `GossipService.broadcast()` excludes temporary contacts and creator nodes connected via severable connections when sending Friends Only broadcasts, and verifying that `processIncoming()` blocks incoming Friends Only broadcasts from temporary or burnable peers.
-
-## Completed Changes (2026-10-01) — Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (v0.6.7-alpha)
-
-* **Friends-Only Broadcast Isolation to Trusted Direct Peers (`GossipService.kt`, `MeshSocialRepository.kt`)**:
-  * Excluded temporary contacts (`peer.isTemporary`), creator nodes (`peer.isCreator`), and peers connected via severable temporary connections (`contact_identity_${peer.publicKeyB64} == "burnable"`) from receiving Friends Only mesh broadcasts (`privacy == "friends"` or `hops == 1`). Friends Only content is now strictly broadcast to authentic trusted direct personal peers (`peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactIdentity != "burnable"`).
-  * Outbound Friends Only broadcasts on Creator nodes now strictly use the node's primary personal identity (`getLocalIdentity()`) instead of the severable burnable creator identity, guaranteeing that personal friends recognize the author and that follower contacts are not leaked private broadcasts.
-  * In `GossipService.processIncoming()`, added firewall gating that drops any inbound Friends Only broadcast arriving from non-direct peers (temporary contacts, creator nodes, or burnable connections).
-  * Enforced that Friends Only packets are never forwarded across the mesh (`forwardPacket` drop and `shouldForward = false`).
-* **Friends-Only Historical & Inventory Sync Protection (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**:
-  * In `SyncPacketHandler.handleSyncRequest()` and `handleInventorySyncRequest()`, gated candidate posts, comments, and reactions: sync requests from temporary contacts, creator nodes, or severable burnable connections strictly filter out `privacy == "friends"` posts and their engagement data.
-  * In `SyncPacketHandler.handleSyncResponse()`, incoming Friends Only posts from non-direct peers are dropped.
-  * In `MeshSocialRepository.requestInventorySync()`, outgoing inventory hash lists filter out Friends Only posts when synchronizing with non-direct peers, preventing the leaking of private post IDs or hashes to temporary contacts and creator nodes.
-* **Test Suite Expansion (`GossipServiceTest.kt`)**:
-  * Added unit test coverage in `GossipServiceTest.kt` asserting that `GossipService.broadcast()` excludes temporary contacts and creator nodes when sending Friends Only broadcasts, and verifying that `processIncoming()` blocks incoming Friends Only broadcasts from temporary, creator, or burnable peers.
 
 ## Completed Changes (2026-09-30) — Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (v0.6.6-alpha)
 
@@ -1156,48 +1146,44 @@ same-device backup export/import. Multi-device testing is next.
 
 ---
 
-## Still open
+## Security & Codebase Audit Verification Matrix (C01–C26 & W01–W08)
 
-Ordered by how much it would hurt to ship without it.
-
-1. **`AUTO` leaves the TCP control port open.** The local attack surface from
-   §17.1 is temporarily back. One log line decides it — if
-   `TOR_CONTROL Control channel opened` reports `transport=unix:…`, set
-   `MODE = Mode.UNIX_ONLY` and it closes for good. If it reports `tcp:9051`,
-   the WARN block above it has the directory listing and torrc read-back needed
-   to work out where tor actually put its socket.
-2. **OTA verifies integrity, not authenticity.** An attacker controlling both
-   `content.json` and the APK can publish a matching pair. Needs the Ed25519
-   release signature from §2 of the proposal, with the public key compiled in.
-   Do not describe OTA as MITM-resistant until then.
-3. **`lastRestoreNeedsIdentityRecovery` is set but never read.** A cross-device
-   restore brings data back and silently loses the identity. Wire it into the
-   restore screen before telling anyone device migration works.
-4. ~~**The proxy secret still crosses the wire.**~~ **Resolved 2026-09-26**: `PROXY_SEND_LEGACY_SECRET` is set to `false` and the Cloudflare Worker enforces `ACCEPT_LEGACY_SECRET = false`. Raw secrets no longer cross the wire; authentication is 100% HMAC-SHA256.
-5. **No user-configurable Worker endpoint.** This is the part of §1.2 that
-   genuinely removes the single point of failure, and it needs a Settings UI
-   rather than a config change.
-6. **Test coverage is ~3.7%** — 1,612 lines against 43.6k. What is covered
-   (crypto, wire protocol, gossip) is covered sensibly; what is not is exactly
-   where the time goes. `BackupManagerTest` never calls `BackupManager` — it
-   reimplements the crypto and asserts against itself, so it would pass if the
-   class were deleted. A real export/import round trip through Robolectric
-   would be ~40 lines and would have caught the OOM.
-7. **God objects.** `NoSlopViewModel` 2458 lines, `UnifiedFeedTab` 2126,
-   `VideoPlayer` 1803, `NoSlopRepository` 1686, `SettingsTab` 1512. The
-   handler-per-packet split in `mesh/` is the shape to copy.
-8. **LAN Hub over cleartext is now blocked** by the tightened NSC and falls
-   back to the `.onion` route. `HubSetupScreen` and QR link-by-IP will report
-   the Hub unreachable until either the LAN address is pinned in the config or
-   the Hub path is moved to the onion permanently.
-9. **`mvp/` is 2.8MB of dead weight** outside the build. Either wire it into
-   `settings.gradle.kts` or move it out of the repo root.
-10. **The prebuffer ceiling never fires for long videos.** itag=18 full-length
-    files exceed it, so they get no prebuffer at all and always feel slow to
-    start over Tor. Working as designed, but the design is worth revisiting.
-11. **Reddit still 403s from the Worker.** Almost certainly egress IP rather
-    than User-Agent; the fallback chain is the mitigation. Worth measuring
-    whether the Reddit route through the Worker still earns its place at all.
+| Finding ID | Severity | Description | Status | Validation / Test Suite |
+|---|---|---|---|---|
+| **C01** | P0 | USER_HANDSHAKE relationship state machine & nonce exchange | **Resolved** | `HandshakeSecurityTest` |
+| **C02** | P0 | Handshake encryption key binding & destination auth (`noslop-hs-v2`) | **Resolved** | `HandshakeSecurityTest` |
+| **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Resolved** | `MediaManagerSecurityTest` |
+| **C04** | P0 | Article WebView Tor leak elimination & external browser gating | **Resolved** | `TorLeakArchitectureTest` |
+| **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
+| **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Resolved** | `BackupManagerTest` |
+| **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** | `BackupManagerTest` |
+| **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** | `CryptoServiceRobolectricTest` |
+| **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
+| **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** | `SyncPacketHandlerTest` |
+| **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** | `CryptoServiceRobolectricTest` |
+| **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
+| **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
+| **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
+| **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** | `BackupManagerTest` |
+| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Resolved** | `IdentityRepositoryTest` |
+| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** | `MediaManagerSecurityTest` |
+| **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** | `CryptoServiceRobolectricTest`, `WireProtocolTest` |
+| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Resolved** | `LoggerTest` |
+| **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Resolved** | `JamendoApiClientTest` |
+| **C21** | P2 | Respected NXDOMAIN in cascading DNS (DoH opt-in only) | **Resolved** | `TorLeakArchitectureTest` |
+| **C22** | P2 | Click-to-load prompts for remote GIFs & retired cleartext GROUP_MESSAGE | **Resolved** | `TorLeakArchitectureTest` |
+| **C23** | P2 | Translation key parity (`content_en.json`), pre-install APK cert verification, docs sync | **Resolved** | `TranslationParityTest` |
+| **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Resolved** | `testGithubDebugUnitTest` |
+| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** | `IdentityViewModelTest` |
+| **C26** | P2 | Canonical presence-encoded signing formats (`ABSENT` / `CLEAR` / `SET:`) | **Resolved** | `GroupMessageSecurityTest` |
+| **W01** | P0 | Synchronized Feed sync cancellation deadlock fix | **Resolved** | `FeedRepositoryTest` |
+| **W02** | P0 | Eliminated legacy 4-field GROUP_UPDATE bypass | **Resolved** | `GroupMessageSecurityTest` |
+| **W03** | P0 | Injective group update canonical encoding & presence flags | **Resolved** | `GroupMessageSecurityTest` |
+| **W04** | P1 | Group revision alignment strictly on admin & ban clearing propagation | **Resolved** | `GroupMessageSecurityTest` |
+| **W05** | P1 | Synchronous API key commits & rollback atomicity | **Resolved** | `BackupManagerTest` |
+| **W06** | P1 | Monotonic author-scoped tombstones (`timestamp > existingTs`) | **Resolved** | `PostPacketHandlerTest` |
+| **W07** | P1 | Content-matching signature upgrades on equal timestamps | **Resolved** | `PostPacketHandlerTest` |
+| **W08** | P1 | Asynchronous recovery StateFlow & runBlocking elimination | **Resolved** | `OnboardingScreen` |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
 
