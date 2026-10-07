@@ -27,6 +27,14 @@ object CryptoService {
     private const val TAG = "CRYPTO"
     private val BC_PROVIDER = org.bouncycastle.jce.provider.BouncyCastleProvider()
 
+    init {
+        try {
+            if (Security.getProvider("BC") == null) {
+                Security.addProvider(BC_PROVIDER)
+            }
+        } catch (_: Throwable) {}
+    }
+
     // Standard ASN.1 headers for 100% legacy mesh compatibility
     private val ED25519_PKCS8_HEADER = byteArrayOf(
         0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
@@ -88,12 +96,20 @@ object CryptoService {
     }
 
     fun generateX25519Keypair(): Pair<String, String> {
-        val kpg = KeyPairGenerator.getInstance("X25519", BC_PROVIDER)
+        val kpg = org.bouncycastle.crypto.generators.X25519KeyPairGenerator()
+        kpg.init(org.bouncycastle.crypto.params.X25519KeyGenerationParameters(SecureRandom()))
         val kp = kpg.generateKeyPair()
-        return Pair(
-            Base64.encodeToString(kp.public.encoded, Base64.NO_WRAP),
-            Base64.encodeToString(kp.private.encoded, Base64.NO_WRAP)
+        val pubParams = kp.public as org.bouncycastle.crypto.params.X25519PublicKeyParameters
+        val privParams = kp.private as org.bouncycastle.crypto.params.X25519PrivateKeyParameters
+        val pubB64 = Base64.encodeToString(
+            org.bouncycastle.crypto.util.SubjectPublicKeyInfoFactory.createSubjectPublicKeyInfo(pubParams).encoded,
+            Base64.NO_WRAP
         )
+        val privB64 = Base64.encodeToString(
+            org.bouncycastle.crypto.util.PrivateKeyInfoFactory.createPrivateKeyInfo(privParams).encoded,
+            Base64.NO_WRAP
+        )
+        return Pair(pubB64, privB64)
     }
 
     fun deriveIdentityFromSeed(seed: ByteArray, handle: String): IdentityKeys {
@@ -140,12 +156,11 @@ object CryptoService {
     fun generateIdentity(handle: String): IdentityKeys {
         Logger.info(TAG, "Generating Ed25519 and X25519 identity for handle: $handle")
         return try {
-            val kpg = KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER).also {
-                it.initialize(255, SecureRandom())
-            }
+            val kpg = org.bouncycastle.crypto.generators.Ed25519KeyPairGenerator()
+            kpg.init(org.bouncycastle.crypto.params.Ed25519KeyGenerationParameters(SecureRandom()))
             val kp = kpg.generateKeyPair()
-            val rawPub = getEd25519PublicKeyParams(kp.public.encoded).encoded
-            val rawSeed = getEd25519PrivateKeyParams(kp.private.encoded).encoded
+            val rawPub = (kp.public as Ed25519PublicKeyParameters).encoded
+            val rawSeed = (kp.private as Ed25519PrivateKeyParameters).encoded
 
             // GUARANTEE BACKWARDS COMPATIBILITY: Wrap raw keys in ASN.1 headers before Base64 encoding.
             val pubB64 = Base64.encodeToString(ED25519_X509_HEADER + rawPub, Base64.NO_WRAP)
@@ -347,6 +362,46 @@ object CryptoService {
         return kDir
     }
 
+    private fun calculateX25519SharedSecret(myEncPrivB64: String, theirEncPubB64: String): ByteArray {
+        val myPrivParams = getX25519PrivateKeyParams(Base64.decode(myEncPrivB64, Base64.DEFAULT))
+        val theirPubParams = getX25519PublicKeyParams(Base64.decode(theirEncPubB64, Base64.DEFAULT))
+        val agreement = org.bouncycastle.crypto.agreement.X25519Agreement()
+        agreement.init(myPrivParams)
+        val secret = ByteArray(agreement.agreementSize)
+        agreement.calculateAgreement(theirPubParams, secret, 0)
+        return secret
+    }
+
+    private fun chacha20Poly1305Encrypt(key: ByteArray, iv: ByteArray, plaintext: ByteArray, aad: ByteArray? = null): ByteArray {
+        val cipher = org.bouncycastle.crypto.modes.ChaCha20Poly1305()
+        val params = org.bouncycastle.crypto.params.AEADParameters(
+            org.bouncycastle.crypto.params.KeyParameter(key),
+            128,
+            iv,
+            aad
+        )
+        cipher.init(true, params)
+        val out = ByteArray(cipher.getOutputSize(plaintext.size))
+        val len = cipher.processBytes(plaintext, 0, plaintext.size, out, 0)
+        cipher.doFinal(out, len)
+        return out
+    }
+
+    private fun chacha20Poly1305Decrypt(key: ByteArray, iv: ByteArray, ciphertext: ByteArray, aad: ByteArray? = null): ByteArray {
+        val cipher = org.bouncycastle.crypto.modes.ChaCha20Poly1305()
+        val params = org.bouncycastle.crypto.params.AEADParameters(
+            org.bouncycastle.crypto.params.KeyParameter(key),
+            128,
+            iv,
+            aad
+        )
+        cipher.init(false, params)
+        val out = ByteArray(cipher.getOutputSize(ciphertext.size))
+        val len = cipher.processBytes(ciphertext, 0, ciphertext.size, out, 0)
+        val finalLen = cipher.doFinal(out, len)
+        return out.copyOfRange(0, len + finalLen)
+    }
+
     /**
      * C08: DM v2 Directional encryption with AAD binding.
      */
@@ -360,25 +415,11 @@ object CryptoService {
         groupId: String? = null,
         timestamp: Long = System.currentTimeMillis()
     ): Pair<String, String> {
-        val myPriv = decodeX25519PrivateKey(myEncPrivB64)
-        val theirPub = decodeX25519PublicKey(theirEncPubB64)
-
-        val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
-        ka.init(myPriv)
-        ka.doPhase(theirPub, true)
-        val sharedSecret = ka.generateSecret()
-
+        val sharedSecret = calculateX25519SharedSecret(myEncPrivB64, theirEncPubB64)
         val chachaKey = deriveDirectionalKeyV2(sharedSecret, senderEdPub, recipientEdPub)
-        val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
-
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-        val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-        val ivSpec = IvParameterSpec(iv)
-        cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
-
         val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp)
-        cipher.updateAAD(aad)
-        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val ciphertext = chacha20Poly1305Encrypt(chachaKey, iv, plaintext.toByteArray(Charsets.UTF_8), aad)
 
         return Pair(
             Base64.encodeToString(ciphertext, Base64.NO_WRAP),
@@ -401,25 +442,11 @@ object CryptoService {
         timestamp: Long
     ): String? {
         return try {
-            val myPriv = decodeX25519PrivateKey(myEncPrivB64)
-            val theirPub = decodeX25519PublicKey(theirEncPubB64)
-
-            val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
-            ka.init(myPriv)
-            ka.doPhase(theirPub, true)
-            val sharedSecret = ka.generateSecret()
-
+            val sharedSecret = calculateX25519SharedSecret(myEncPrivB64, theirEncPubB64)
             val chachaKey = deriveDirectionalKeyV2(sharedSecret, senderEdPub, recipientEdPub)
-            val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
-
             val iv = Base64.decode(nonceB64, Base64.DEFAULT)
-            val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-            val ivSpec = IvParameterSpec(iv)
-            cipher.init(Cipher.DECRYPT_MODE, secureKey, ivSpec)
-
             val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp)
-            cipher.updateAAD(aad)
-            val decrypted = cipher.doFinal(Base64.decode(ciphertextB64, Base64.DEFAULT))
+            val decrypted = chacha20Poly1305Decrypt(chachaKey, iv, Base64.decode(ciphertextB64, Base64.DEFAULT), aad)
             String(decrypted, Charsets.UTF_8)
         } catch (e: Exception) {
             Logger.debug(TAG, "DM v2 decryption failed: ${e.message}")
@@ -460,25 +487,15 @@ object CryptoService {
     }
 
     fun encryptDM(plaintext: String, theirEncPubB64: String, myEncPrivB64: String): Pair<String, String> {
-        val myPriv = decodeX25519PrivateKey(myEncPrivB64)
-        val theirPub = decodeX25519PublicKey(theirEncPubB64)
-
-        val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
-        ka.init(myPriv)
-        ka.doPhase(theirPub, true)
-        val sharedSecret = ka.generateSecret()
+        val sharedSecret = calculateX25519SharedSecret(myEncPrivB64, theirEncPubB64)
 
         val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
         val chachaKey = ByteArray(digest.digestSize)
         digest.update(sharedSecret, 0, sharedSecret.size)
         digest.doFinal(chachaKey, 0)
-        val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-        val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-        val ivSpec = IvParameterSpec(iv)
-        cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
-        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val ciphertext = chacha20Poly1305Encrypt(chachaKey, iv, plaintext.toByteArray(Charsets.UTF_8), null)
 
         return Pair(
             Base64.encodeToString(ciphertext, Base64.NO_WRAP),
@@ -491,25 +508,15 @@ object CryptoService {
         theirEncPubB64: String, myEncPrivB64: String
     ): String? {
         return try {
-            val myPriv = decodeX25519PrivateKey(myEncPrivB64)
-            val theirPub = decodeX25519PublicKey(theirEncPubB64)
-
-            val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
-            ka.init(myPriv)
-            ka.doPhase(theirPub, true)
-            val sharedSecret = ka.generateSecret()
+            val sharedSecret = calculateX25519SharedSecret(myEncPrivB64, theirEncPubB64)
 
             val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
             val chachaKey = ByteArray(digest.digestSize)
             digest.update(sharedSecret, 0, sharedSecret.size)
             digest.doFinal(chachaKey, 0)
-            val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
             val iv = Base64.decode(nonceB64, Base64.DEFAULT)
-            val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-            val ivSpec = IvParameterSpec(iv)
-            cipher.init(Cipher.DECRYPT_MODE, secureKey, ivSpec)
-            val decrypted = cipher.doFinal(Base64.decode(ciphertextB64, Base64.DEFAULT))
+            val decrypted = chacha20Poly1305Decrypt(chachaKey, iv, Base64.decode(ciphertextB64, Base64.DEFAULT), null)
             String(decrypted, Charsets.UTF_8)
         } catch (e: Exception) {
             Logger.warn(TAG, "DM decryption failed: ${e.message}")
@@ -570,14 +577,28 @@ object CryptoService {
         }
     }
 
-    private fun decodeX25519PublicKey(b64: String): PublicKey {
-        val bytes = Base64.decode(b64, Base64.DEFAULT)
-        return KeyFactory.getInstance("X25519", BC_PROVIDER).generatePublic(X509EncodedKeySpec(bytes))
+    private fun getX25519PrivateKeyParams(bytes: ByteArray): org.bouncycastle.crypto.params.X25519PrivateKeyParameters {
+        if (bytes.size == 32) {
+            return org.bouncycastle.crypto.params.X25519PrivateKeyParameters(bytes, 0)
+        }
+        return try {
+            PrivateKeyFactory.createKey(bytes) as org.bouncycastle.crypto.params.X25519PrivateKeyParameters
+        } catch (_: Exception) {
+            val raw = if (bytes.size >= 32) bytes.copyOfRange(bytes.size - 32, bytes.size) else bytes
+            org.bouncycastle.crypto.params.X25519PrivateKeyParameters(raw, 0)
+        }
     }
 
-    private fun decodeX25519PrivateKey(b64: String): PrivateKey {
-        val bytes = Base64.decode(b64, Base64.DEFAULT)
-        return KeyFactory.getInstance("X25519", BC_PROVIDER).generatePrivate(PKCS8EncodedKeySpec(bytes))
+    private fun getX25519PublicKeyParams(bytes: ByteArray): org.bouncycastle.crypto.params.X25519PublicKeyParameters {
+        if (bytes.size == 32) {
+            return org.bouncycastle.crypto.params.X25519PublicKeyParameters(bytes, 0)
+        }
+        return try {
+            PublicKeyFactory.createKey(bytes) as org.bouncycastle.crypto.params.X25519PublicKeyParameters
+        } catch (_: Exception) {
+            val raw = if (bytes.size >= 32) bytes.copyOfRange(bytes.size - 32, bytes.size) else bytes
+            org.bouncycastle.crypto.params.X25519PublicKeyParameters(raw, 0)
+        }
     }
 
     private fun ByteArray.sha256Hex(): String {

@@ -1,8 +1,5 @@
-# Bouncy Castle — preserve JCA provider and crypto engine classes used by NoSlop
--keep class org.bouncycastle.jce.provider.BouncyCastleProvider { *; }
--keep class org.bouncycastle.jcajce.provider.asymmetric.edec.** { *; }
--keep class org.bouncycastle.crypto.** { *; }
--keep class org.bouncycastle.asn1.** { *; }
+# Bouncy Castle — required for crypto engine and JCA provider across all API levels
+-keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
 
 # Room — granular entity and DAO keep rules
