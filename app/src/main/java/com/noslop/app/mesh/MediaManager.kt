@@ -133,7 +133,7 @@ object MediaManager {
                 if (entries.isEmpty()) {
                     repo.putAppSetting("pending_downloads", "")
                 } else {
-                    repo.putAppSetting("pending_downloads", com.google.gson.Gson().toJson(entries))
+                    repo.putAppSetting("pending_downloads", com.noslop.app.util.Json.gson.toJson(entries))
                 }
             } catch (e: Exception) {
                 Logger.error(TAG, "Failed to persist download queue: ${e.message}")
@@ -147,7 +147,7 @@ object MediaManager {
         val json = repo.getAppSetting("pending_downloads")
         if (json.isNullOrEmpty()) return
         try {
-            val entries = com.google.gson.Gson().fromJson(json, Array<PendingDownloadEntry>::class.java)
+            val entries = com.noslop.app.util.Json.gson.fromJson(json, Array<PendingDownloadEntry>::class.java)
             var resumed = 0
             for (entry in entries) {
                 if (activeDownloads.containsKey(entry.metadata.id)) continue
@@ -483,7 +483,7 @@ object MediaManager {
                             senderId = burnable.publicKeyB64,
                             targetUserId = targetPeer?.publicKeyB64,
                             type = "ANNOUNCE_DISCOVERABLE",
-                            payload = com.google.gson.Gson().toJsonTree(payload),
+                            payload = com.noslop.app.util.Json.gson.toJsonTree(payload),
                             signature = signature
                         )
                         repo.meshTransport.sendPacket(peerOnion, Constants.MESH_PORT, packet)
@@ -656,7 +656,7 @@ object MediaManager {
                     senderId = mySenderId,
                     targetUserId = targetPubKey,
                     type = "MEDIA_REQUEST",
-                    payload = com.google.gson.Gson().toJsonTree(payload)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
                 )
                 val success = repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
                 if (!success) {
@@ -823,7 +823,7 @@ object MediaManager {
                         senderId = mySenderId,
                         targetUserId = targetPeer?.publicKeyB64,
                         type = "MEDIA_TRANSFER_ACK",
-                        payload = com.google.gson.Gson().toJsonTree(ack)
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(ack)
                     )
                     repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
                 }
@@ -852,7 +852,7 @@ object MediaManager {
             hops = 6,
             senderId = myIdentity.publicKeyB64,
             type = "MEDIA_RELAY_REQUEST",
-            payload = com.google.gson.Gson().toJsonTree(payload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
         )
         
         Logger.info(TAG, "Attempting mesh recovery for ${dl.metadata.id}")
@@ -925,7 +925,7 @@ object MediaManager {
         }.getAllGroupChatsList()
         for (group in groupChats) {
             val members = try {
-                com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+                com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
             } catch (_: Exception) { emptyList() }
             if (senderId in members || senderId == group.adminPublicKeyB64) {
                 val groupMsgWithMedia = repo.context.let { ctx ->
@@ -1003,7 +1003,7 @@ object MediaManager {
                         senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                         targetUserId = senderId,
                         type = "MEDIA_METADATA_RESPONSE", 
-                        payload = com.google.gson.Gson().toJsonTree(metadata)
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(metadata)
                     )
                     repo.meshTransport.sendPacket(targetOnion, Constants.MESH_PORT, packet)
                 }
@@ -1068,7 +1068,7 @@ object MediaManager {
                     senderId = mySenderId,
                     targetUserId = senderId,
                     type = "MEDIA_CHUNK",
-                    payload = com.google.gson.Gson().toJsonTree(chunkPay)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(chunkPay)
                 )
 
                 repo.meshTransport.sendPacket(targetOnion, Constants.MESH_PORT, packet)

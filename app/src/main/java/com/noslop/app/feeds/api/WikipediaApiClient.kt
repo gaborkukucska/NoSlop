@@ -26,7 +26,7 @@ import okhttp3.Request
 object WikipediaApiClient {
 
     private const val TAG = "WIKIPEDIA_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchArticles(

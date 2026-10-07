@@ -90,7 +90,7 @@ class MeshSocialRepository(
                 val json = db.appSettingDao().getSetting("pending_dm_outbox")
                 if (!json.isNullOrBlank()) {
                     val jsonObj = com.google.gson.JsonParser.parseString(json).asJsonObject
-                    val gson = com.google.gson.Gson()
+                    val gson = com.noslop.app.util.Json.gson
                     jsonObj.entrySet().forEach { (peerPub, element) ->
                         if (element.isJsonArray) {
                             val list = mutableListOf<com.noslop.app.mesh.NetworkPacket>()
@@ -123,7 +123,7 @@ class MeshSocialRepository(
                     copy[peerPub] = snapshot
                 }
             }
-            val json = com.google.gson.Gson().toJson(copy)
+            val json = com.noslop.app.util.Json.gson.toJson(copy)
             repositoryScope.launch(Dispatchers.IO) {
                 db.appSettingDao().insertSetting(AppSetting("pending_dm_outbox", json))
             }
@@ -226,7 +226,7 @@ class MeshSocialRepository(
                             senderId = myKeys.publicKeyB64,
                             targetUserId = recipientPub,
                             type = "MESSAGE",
-                            payload = com.google.gson.Gson().toJsonTree(msgPayload)
+                            payload = com.noslop.app.util.Json.gson.toJsonTree(msgPayload)
                         )
                         val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                         if (success) {
@@ -378,7 +378,7 @@ class MeshSocialRepository(
                             hops = 3,
                             senderId = myKeys.publicKeyB64,
                             type = "ANNOUNCE_PEER",
-                            payload = com.google.gson.Gson().toJsonTree(announcePay),
+                            payload = com.noslop.app.util.Json.gson.toJsonTree(announcePay),
                             signature = signature
                         )
                         
@@ -416,7 +416,7 @@ class MeshSocialRepository(
                                     hops = 4, // 4 hops to reach wider network periodically
                                     senderId = burnableIdentity.publicKeyB64,
                                     type = "ANNOUNCE_DISCOVERABLE",
-                                    payload = com.google.gson.Gson().toJsonTree(discPayload),
+                                    payload = com.noslop.app.util.Json.gson.toJsonTree(discPayload),
                                     signature = sig
                                 )
                                 com.noslop.app.mesh.GossipService.broadcast(discPacket)
@@ -479,7 +479,7 @@ class MeshSocialRepository(
                                 hops = 6,
                                 senderId = myKeys.publicKeyB64,
                                 type = "DELETE_POST",
-                                payload = com.google.gson.Gson().toJsonTree(deletePay),
+                                payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
                                 signature = delSig
                             )
                             com.noslop.app.mesh.GossipService.broadcast(delPacket)
@@ -523,7 +523,7 @@ class MeshSocialRepository(
             hops = if (existingPost.privacy == "friends") 1 else 6,
             senderId = signingKey.publicKeyB64,
             type = "DELETE_POST",
-            payload = com.google.gson.Gson().toJsonTree(deletePay),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
             signature = signature
         )
         
@@ -620,7 +620,7 @@ class MeshSocialRepository(
             hops = if (privacy == "friends") 1 else 6,
             senderId = signingKey.publicKeyB64,
             type = "EDIT_POST",
-            payload = com.google.gson.Gson().toJsonTree(editPay),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(editPay),
             signature = signature
         )
 
@@ -680,7 +680,7 @@ class MeshSocialRepository(
             clearnetMediaType = clearnetMediaType
         )
 
-        val gson = com.google.gson.Gson()
+        val gson = com.noslop.app.util.Json.gson
         val payloadJson = gson.toJsonTree(postPay)
 
         val packet = com.noslop.app.mesh.NetworkPacket(
@@ -801,7 +801,7 @@ class MeshSocialRepository(
                 bio = reqPay.bio
             )
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-            val gson = com.google.gson.Gson()
+            val gson = com.noslop.app.util.Json.gson
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 3,
@@ -859,7 +859,7 @@ class MeshSocialRepository(
                 bio = handshakePay.bio
             )
             val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-            val gson = com.google.gson.Gson()
+            val gson = com.noslop.app.util.Json.gson
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 3,
@@ -883,7 +883,7 @@ class MeshSocialRepository(
             val packetJson = db.appSettingDao().getSetting("disc_packet_${node.publicKeyB64}")
             if (!packetJson.isNullOrBlank()) {
                 try {
-                    val originalPacket = com.google.gson.Gson().fromJson(packetJson, com.noslop.app.mesh.NetworkPacket::class.java)
+                    val originalPacket = com.noslop.app.util.Json.gson.fromJson(packetJson, com.noslop.app.mesh.NetworkPacket::class.java)
                     val relayed = originalPacket.copy(
                         id = UUID.randomUUID().toString(),
                         hops = 2,
@@ -926,7 +926,7 @@ class MeshSocialRepository(
             senderId = myKeys.publicKeyB64,
             targetUserId = peer.publicKeyB64,
             type = "DM_SYNC_REQUEST",
-            payload = com.google.gson.Gson().toJsonTree(payload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
         )
         Logger.info(TAG, "Requesting DM sync from ${peer.handle} (since=$since)")
         meshTransport.sendPacket(peer.onionAddress, packet = packet)
@@ -974,7 +974,7 @@ class MeshSocialRepository(
         }
         
         val syncReqPay = com.noslop.app.mesh.InventorySyncRequestPayload(inventory = inventory)
-        val gson = com.google.gson.Gson()
+        val gson = com.noslop.app.util.Json.gson
         val syncPacket = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
             hops = 3,
@@ -1008,7 +1008,7 @@ class MeshSocialRepository(
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peer.publicKeyB64,
                 type = "CONNECTION_REJECTED",
-                payload = com.google.gson.Gson().toJsonTree(rejectPay),
+                payload = com.noslop.app.util.Json.gson.toJsonTree(rejectPay),
                 signature = signature
             )
             
@@ -1052,7 +1052,7 @@ class MeshSocialRepository(
                 senderId = myKeys.publicKeyB64,
                 targetUserId = targetPub,
                 type = "PEER_REMOVED",
-                payload = com.google.gson.Gson().toJsonTree(removePayload),
+                payload = com.noslop.app.util.Json.gson.toJsonTree(removePayload),
                 signature = signature
             )
             
@@ -1183,7 +1183,7 @@ class MeshSocialRepository(
         if (replyToMessageId != null) {
             map["replyTo"] = replyToMessageId
         }
-        val contentToSend = com.google.gson.Gson().toJson(map)
+        val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
 
         val msgId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -1231,7 +1231,7 @@ class MeshSocialRepository(
             timestamp = localMsg.timestamp,
             v = 2
         )
-        val gson = com.google.gson.Gson()
+        val gson = com.noslop.app.util.Json.gson
         val payloadJson = gson.toJsonTree(msgPay)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = localMsg.id,
@@ -1304,7 +1304,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT",
-            payload = com.google.gson.Gson().toJsonTree(commentPay),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(commentPay),
             signature = signature
         )
 
@@ -1369,7 +1369,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = signingKey.publicKeyB64,
             type = "EDIT_COMMENT",
-            payload = com.google.gson.Gson().toJsonTree(editPay),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(editPay),
             signature = signature
         )
 
@@ -1409,7 +1409,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = signingKey.publicKeyB64,
             type = "DELETE_COMMENT",
-            payload = com.google.gson.Gson().toJsonTree(deletePay),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
             signature = signature
         )
 
@@ -1444,7 +1444,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "REACTION",
-            payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(reactionPayload),
             signature = signature
         )
 
@@ -1492,7 +1492,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "VOTE",
-            payload = com.google.gson.Gson().toJsonTree(votePayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(votePayload),
             signature = signature
         )
 
@@ -1596,7 +1596,7 @@ class MeshSocialRepository(
                 senderId = myKeys.publicKeyB64,
                 targetUserId = recipientPubB64,
                 type = "CHAT_REACTION",
-                payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+                payload = com.noslop.app.util.Json.gson.toJsonTree(reactionPayload),
                 signature = signature
             )
             repositoryScope.launch {
@@ -1654,7 +1654,7 @@ class MeshSocialRepository(
         }
 
         val memberPubs: List<String> = try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
         val allMembers = (memberPubs + group.adminPublicKeyB64).distinct()
@@ -1668,7 +1668,7 @@ class MeshSocialRepository(
                     senderId = senderKeys.publicKeyB64,
                     targetUserId = null, // Group reactions belong to the group, not a single user
                     type = "CHAT_REACTION",
-                    payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(reactionPayload),
                     signature = signature
                 )
                 repositoryScope.launch {
@@ -1683,7 +1683,7 @@ class MeshSocialRepository(
             senderId = senderKeys.publicKeyB64,
             targetUserId = null,
             type = "CHAT_REACTION",
-            payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(reactionPayload),
             signature = signature
         )
         com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
@@ -1736,7 +1736,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT_REACTION",
-            payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(reactionPayload),
             signature = signature
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -1770,7 +1770,7 @@ class MeshSocialRepository(
             hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT_VOTE",
-            payload = com.google.gson.Gson().toJsonTree(votePayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(votePayload),
             signature = signature
         )
 
@@ -1816,7 +1816,7 @@ class MeshSocialRepository(
             hops = 6,
             senderId = myKeys.publicKeyB64,
             type = "IDENTITY_UPDATE",
-            payload = com.google.gson.Gson().toJsonTree(updatePayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload),
             signature = signature
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -1840,7 +1840,7 @@ class MeshSocialRepository(
             hops = 6,
             senderId = myKeys.publicKeyB64,
             type = "USER_EXIT",
-            payload = com.google.gson.Gson().toJsonTree(exitPayload),
+            payload = com.noslop.app.util.Json.gson.toJsonTree(exitPayload),
             signature = signature
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -1885,7 +1885,7 @@ class MeshSocialRepository(
                     senderId = myKeys.publicKeyB64,
                     targetUserId = peerPubB64,
                     type = "DELETE_MESSAGE",
-                    payload = com.google.gson.Gson().toJsonTree(deletePay),
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
                     signature = signature
                 )
                 
@@ -1970,7 +1970,7 @@ class MeshSocialRepository(
                     senderId = myKeys.publicKeyB64,
                     targetUserId = peerPubB64,
                     type = "DELETE_MESSAGE",
-                    payload = com.google.gson.Gson().toJsonTree(deletePay),
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
                     signature = signature
                 )
                 dispatchPacket(peer.onionAddress, packet)

@@ -36,7 +36,7 @@ object OpenverseApiClient {
     private const val BASE_URL = "https://api.openverse.org/v1/audio/"
     private const val RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000L
 
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**

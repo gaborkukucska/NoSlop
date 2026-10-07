@@ -14,13 +14,13 @@ data class MediaSettings(
     val imageQuality: String = "medium",
     val enableWebViewEmbeds: Boolean = false
 ) {
-    fun toJson(): String = Gson().toJson(this)
+    fun toJson(): String = com.noslop.app.util.Json.gson.toJson(this)
 
     companion object {
         fun fromJson(json: String?): MediaSettings {
             if (json == null) return MediaSettings()
             return try {
-                Gson().fromJson(json, MediaSettings::class.java)
+                com.noslop.app.util.Json.gson.fromJson(json, MediaSettings::class.java)
             } catch (e: Exception) {
                 MediaSettings()
             }

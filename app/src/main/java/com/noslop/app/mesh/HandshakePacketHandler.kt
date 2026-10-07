@@ -631,7 +631,7 @@ class HandshakePacketHandler(
                         senderId = if (group.allowMemberInvites) adminKeys.publicKeyB64 else myKeys.publicKeyB64,
                         targetUserId = peerPubKey,
                         type = "GROUP_INVITE",
-                        payload = com.google.gson.Gson().toJsonTree(invitePayload)
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
                     )
                     Logger.info(TAG, "Re-sending GROUP_INVITE for '${group.title}' to connected peer $peerPubKey")
                     repo.dispatchPacket(peerOnion, packet)
@@ -756,7 +756,7 @@ class HandshakePacketHandler(
     }
 
     private fun parseMembers(membersJson: String): MutableList<String> = try {
-        com.google.gson.Gson().fromJson(membersJson, Array<String>::class.java).toMutableList()
+        com.noslop.app.util.Json.gson.fromJson(membersJson, Array<String>::class.java).toMutableList()
     } catch (e: Exception) { mutableListOf() }
 
     private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
@@ -847,8 +847,8 @@ class HandshakePacketHandler(
         val isMyGroup = invite.adminPublicKeyB64 == myKeys?.publicKeyB64 || invite.adminPublicKeyB64 == burnable?.publicKeyB64
         if (isMyGroup) {
             syncMemberPeers(invite.memberDetails)
-            val membersJson = com.google.gson.Gson().toJson(invite.members)
-            val memberHandlesJson = com.google.gson.Gson().toJson(invite.memberHandles ?: emptyMap<String, String>())
+            val membersJson = com.noslop.app.util.Json.gson.toJson(invite.members)
+            val memberHandlesJson = com.noslop.app.util.Json.gson.toJson(invite.memberHandles ?: emptyMap<String, String>())
             val group = GroupChat(
                 groupId = invite.groupId,
                 title = invite.title,
@@ -864,7 +864,7 @@ class HandshakePacketHandler(
             return true
         }
 
-        val jsonPayload = com.google.gson.Gson().toJson(invite)
+        val jsonPayload = com.noslop.app.util.Json.gson.toJson(invite)
         db.appSettingDao().insertSetting(AppSetting("pending_group_invite_${invite.groupId}", jsonPayload))
 
         val inviterPeer = peerDao.getPeerByPublicKey(verifiedSigner)
@@ -966,9 +966,9 @@ class HandshakePacketHandler(
             avatarB64 = update.avatarB64 ?: existing.avatarB64,
             allowMemberInvites = allowInvites,
             allowMemberSelfRemove = allowSelfRemove,
-            membersJson = com.google.gson.Gson().toJson(currentMembers.distinct()),
-            memberHandlesJson = com.google.gson.Gson().toJson(handlesMap),
-            bannedMembersJson = if (isAdmin && update.bannedMembers != null) com.google.gson.Gson().toJson(bannedSet.toList()) else existing.bannedMembersJson,
+            membersJson = com.noslop.app.util.Json.gson.toJson(currentMembers.distinct()),
+            memberHandlesJson = com.noslop.app.util.Json.gson.toJson(handlesMap),
+            bannedMembersJson = if (isAdmin && update.bannedMembers != null) com.noslop.app.util.Json.gson.toJson(bannedSet.toList()) else existing.bannedMembersJson,
             revision = if (isAdmin) maxOf(existing.revision, update.timestamp) else existing.revision
         )
 
@@ -1024,7 +1024,7 @@ class HandshakePacketHandler(
 
         db.groupChatDao().deleteGroupChat(del.groupId)
         val previousMembers = try {
-            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
         repo.cleanupOrphanedGroupPeers(previousMembers + existing.adminPublicKeyB64, excludedGroupId = del.groupId)
         Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet and cleaned up group peers")
@@ -1064,7 +1064,7 @@ class HandshakePacketHandler(
         val burnableKeys = repo.getBurnableIdentity()
         val signingKey = if (burnableKeys != null && (group.membersJson.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
 
-        val groupJson = com.google.gson.Gson().toJson(group)
+        val groupJson = com.noslop.app.util.Json.gson.toJson(group)
         val stateTimestamp = maxOf(group.createdAt, group.revision)
 
         val allMembers = parseMembers(group.membersJson) + group.adminPublicKeyB64
@@ -1093,7 +1093,7 @@ class HandshakePacketHandler(
             senderId = signingKey.publicKeyB64,
             targetUserId = packet.senderId,
             type = "GROUP_SYNC",
-            payload = com.google.gson.Gson().toJsonTree(syncPayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(syncPayload)
         )
         val targetOnion = senderPeer?.onionAddress?.takeIf { it.isNotBlank() }
             ?: requesterPeer?.onionAddress?.takeIf { it.isNotBlank() }
@@ -1109,7 +1109,7 @@ class HandshakePacketHandler(
     suspend fun handleGroupSync(packet: NetworkPacket): Boolean {
         val sync = packet.getGroupSyncPayload() ?: return false
         val group = try {
-            com.google.gson.Gson().fromJson(sync.groupChatJson, GroupChat::class.java)
+            com.noslop.app.util.Json.gson.fromJson(sync.groupChatJson, GroupChat::class.java)
         } catch (e: Exception) {
             Logger.warn(TAG, "Failed to parse GroupChat from GROUP_SYNC: ${e.message}")
             return false
@@ -1209,15 +1209,15 @@ class HandshakePacketHandler(
                 avatarB64 = group.avatarB64,
                 allowMemberInvites = group.allowMemberInvites,
                 allowMemberSelfRemove = group.allowMemberSelfRemove,
-                membersJson = com.google.gson.Gson().toJson(mergedMembers),
-                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles),
-                bannedMembersJson = com.google.gson.Gson().toJson(bannedSet.toList()),
+                membersJson = com.noslop.app.util.Json.gson.toJson(mergedMembers),
+                memberHandlesJson = com.noslop.app.util.Json.gson.toJson(mergedHandles),
+                bannedMembersJson = com.noslop.app.util.Json.gson.toJson(bannedSet.toList()),
                 revision = maxOf(existing.revision, sync.timestamp)
             )
         } else {
             existing.copy(
-                membersJson = com.google.gson.Gson().toJson(mergedMembers),
-                memberHandlesJson = com.google.gson.Gson().toJson(mergedHandles),
+                membersJson = com.noslop.app.util.Json.gson.toJson(mergedMembers),
+                memberHandlesJson = com.noslop.app.util.Json.gson.toJson(mergedHandles),
                 revision = existing.revision
             )
         }

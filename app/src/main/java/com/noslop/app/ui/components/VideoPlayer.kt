@@ -321,7 +321,7 @@ private suspend fun doResolve(rawUrl: String, quality: String, isPreload: Boolea
                 if (response.isSuccessful) {
                     val body = response.body?.string()
                     if (body != null) {
-                        val root = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                        val root = com.noslop.app.util.Json.gson.fromJson(body, com.google.gson.JsonObject::class.java)
                         val server = root?.get("server")?.asString ?: "archive.org"
                         val dir = root?.get("dir")?.asString ?: ""
                         val files = root?.getAsJsonArray("files")
@@ -460,7 +460,7 @@ private fun resolveVimeoSource(url: String, quality: String): VideoSource {
             if (!res.isSuccessful) return fallbackVimeoEmbed(url)
             res.body?.string()
         } ?: return fallbackVimeoEmbed(url)
-        val root = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+        val root = com.noslop.app.util.Json.gson.fromJson(body, com.google.gson.JsonObject::class.java)
 
         val progressive = root
             ?.getAsJsonObject("request")

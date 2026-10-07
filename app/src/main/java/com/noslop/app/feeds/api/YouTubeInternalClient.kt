@@ -53,7 +53,7 @@ object YouTubeInternalClient {
     private const val CLIENT_NAME = "WEB"
     private const val CLIENT_VERSION = "2.20240717.01.00"
     
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()

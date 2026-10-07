@@ -260,7 +260,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             val groupMemberPubKeys = remember(groupChats) {
                 groupChats.flatMap { g ->
                     try {
-                        com.google.gson.Gson().fromJson(g.membersJson, Array<String>::class.java).toList() + g.adminPublicKeyB64
+                        com.noslop.app.util.Json.gson.fromJson(g.membersJson, Array<String>::class.java).toList() + g.adminPublicKeyB64
                     } catch (_: Exception) { emptyList() }
                 }.toSet()
             }
@@ -319,7 +319,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(group.title, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     val memberCount = try {
-                                        com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).size
+                                        com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).size
                                     } catch (e: Exception) { 1 }
                                     Text("{count} members".tr.replace("{count}", memberCount.toString()), color = TextMuted, fontSize = 12.sp)
                                 }

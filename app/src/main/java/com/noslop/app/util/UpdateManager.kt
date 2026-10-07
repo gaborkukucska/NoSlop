@@ -109,7 +109,7 @@ object UpdateManager {
         Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
         Logger.info(TAG, "Starting update download for version $version")
 
-        CoroutineScope(Dispatchers.IO).launch {
+        com.noslop.app.util.AppScopes.io.launch {
             try {
                 if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                     Logger.info(TAG, "Waiting for Tor bootstrap before downloading update...")

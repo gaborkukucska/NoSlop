@@ -120,7 +120,7 @@ fun QRScanScreen(
                     // Not a JSON object or not a login QR, fall through to peer parsing
                 }
 
-                val peer = Gson().fromJson(raw, QRScannedPeer::class.java)
+                val peer = com.noslop.app.util.Json.gson.fromJson(raw, QRScannedPeer::class.java)
                 if (peer.handle.isNotBlank() && peer.publicKey.isNotBlank() && peer.onionAddress.isNotBlank()) {
                     parsedPeer = peer
                     showConfirmDialog = true

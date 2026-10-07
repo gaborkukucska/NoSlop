@@ -12,7 +12,7 @@ import okhttp3.Request
 /** Vimeo API client — optional user access token. Embed URLs work in WebView without auth. */
 object VimeoApiClient {
     private const val TAG = "VIMEO_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun fetchFeatured(

@@ -15,7 +15,7 @@ import okhttp3.Request
 object RedditApiClient {
 
     private const val TAG = "REDDIT_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
 
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 

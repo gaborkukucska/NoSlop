@@ -175,7 +175,7 @@ class FeedRepository(
 
         // Restore default categories (all of them) so the API pipeline has something to work with
         val allCategories = com.noslop.app.feeds.SourceLibrary.categories
-        val json = com.google.gson.Gson().toJson(allCategories)
+        val json = com.noslop.app.util.Json.gson.toJson(allCategories)
         appSettingDao.insertSetting(AppSetting("selected_categories", json))
 
         // Also re-mark onboarding as complete in Room (it survived in ESP but Room was wiped)

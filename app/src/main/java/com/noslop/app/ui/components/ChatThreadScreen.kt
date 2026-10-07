@@ -422,8 +422,8 @@ fun ChatThreadScreen(
                         }
                             ?: msg.ciphertext
                         try {
-                            val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
-                            if (obj.has("media")) meta = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
+                            val obj = com.noslop.app.util.Json.gson.fromJson(plaintext, com.google.gson.JsonObject::class.java)
+                            if (obj.has("media")) meta = com.noslop.app.util.Json.gson.fromJson(obj.get("media"), MediaMetadata::class.java)
                             text = if (obj.has("content")) obj.get("content").asString else plaintext
                         } catch (e: Exception) { text = plaintext }
                     }
@@ -507,7 +507,7 @@ fun ChatThreadScreen(
                                             var replyText = replyTextRaw
                                             if (replyTextRaw != null) {
                                                 try {
-                                                    val obj = com.google.gson.Gson().fromJson(replyTextRaw, com.google.gson.JsonObject::class.java)
+                                                    val obj = com.noslop.app.util.Json.gson.fromJson(replyTextRaw, com.google.gson.JsonObject::class.java)
                                                     replyText = if (obj.has("content")) obj.get("content").asString else replyTextRaw
                                                 } catch (e: Exception) { replyText = replyTextRaw }
                                             }
@@ -592,7 +592,7 @@ fun ChatThreadScreen(
                                                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
                                                                 Icon(Icons.Default.Image, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
                                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                                Text("Tap to load GIF from $host".tr, color = TextLight, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                                                Text("Tap to load GIF from {host}".tr.replace("{host}", host), color = TextLight, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                                             }
                                                         }
                                                     } else {

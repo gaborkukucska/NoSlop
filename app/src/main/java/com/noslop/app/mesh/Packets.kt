@@ -590,167 +590,167 @@ data class NetworkPacket(
     val type: String,
     val payload: JsonElement? = null
 ) {
-    fun toJson(): String = Gson().toJson(this)
+    fun toJson(): String = com.noslop.app.util.Json.gson.toJson(this)
 
     companion object {
-        fun fromJson(json: String): NetworkPacket = Gson().fromJson(json, NetworkPacket::class.java)
+        fun fromJson(json: String): NetworkPacket = com.noslop.app.util.Json.gson.fromJson(json, NetworkPacket::class.java)
     }
 
     // Strongly typed accessor helpers
     fun getPostPayload(): PostPayload? = if (type == "POST" && payload != null) {
-        Gson().fromJson(payload, PostPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PostPayload::class.java)
     } else null
 
     fun getMessagePayload(): EncryptedPayload? = if (type == "MESSAGE" && payload != null) {
-        Gson().fromJson(payload, EncryptedPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, EncryptedPayload::class.java)
     } else null
 
     fun getConnectionRequestPayload(): PeerHandshakePayload? = if (type == "CONNECTION_REQUEST" && payload != null) {
-        Gson().fromJson(payload, PeerHandshakePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PeerHandshakePayload::class.java)
     } else null
 
     fun getUserHandshakePayload(): PeerHandshakePayload? = if (type == "USER_HANDSHAKE" && payload != null) {
-        Gson().fromJson(payload, PeerHandshakePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PeerHandshakePayload::class.java)
     } else null
 
     fun getSyncRequestPayload(): SyncRequestPayload? = if (type == "SYNC_REQUEST" && payload != null) {
-        Gson().fromJson(payload, SyncRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, SyncRequestPayload::class.java)
     } else null
 
     fun getSyncResponsePayload(): SyncResponsePayload? = if (type == "SYNC_RESPONSE" && payload != null) {
-        Gson().fromJson(payload, SyncResponsePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, SyncResponsePayload::class.java)
     } else null
 
     fun getMediaRequestPayload(): MediaRequestPayload? = if (type == "MEDIA_REQUEST" && payload != null) {
-        Gson().fromJson(payload, MediaRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaRequestPayload::class.java)
     } else null
 
     fun getMediaChunkPayload(): MediaChunkPayload? = if (type == "MEDIA_CHUNK" && payload != null) {
-        Gson().fromJson(payload, MediaChunkPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaChunkPayload::class.java)
     } else null
 
     fun getMediaRelayRequestPayload(): MediaRelayRequestPayload? = if (type == "MEDIA_RELAY_REQUEST" && payload != null) {
-        Gson().fromJson(payload, MediaRelayRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaRelayRequestPayload::class.java)
     } else null
 
     fun getMediaRecoveryFoundPayload(): MediaRecoveryFoundPayload? = if (type == "MEDIA_RECOVERY_FOUND" && payload != null) {
-        Gson().fromJson(payload, MediaRecoveryFoundPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaRecoveryFoundPayload::class.java)
     } else null
 
     fun getCommentPayload(): CommentPayload? = if (type == "COMMENT" && payload != null) {
-        Gson().fromJson(payload, CommentPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, CommentPayload::class.java)
     } else null
 
     fun getReactionPayload(): ReactionPayload? = if (type == "REACTION" && payload != null) {
-        Gson().fromJson(payload, ReactionPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ReactionPayload::class.java)
     } else null
 
     fun getChatReactionPayload(): ChatReactionPayload? = if (type == "CHAT_REACTION" && payload != null) {
-        Gson().fromJson(payload, ChatReactionPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ChatReactionPayload::class.java)
     } else null
 
     fun getCommentReactionPayload(): CommentReactionPayload? = if (type == "COMMENT_REACTION" && payload != null) {
-        Gson().fromJson(payload, CommentReactionPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, CommentReactionPayload::class.java)
     } else null
 
     fun getVotePayload(): VotePayload? = if (type == "VOTE" && payload != null) {
-        Gson().fromJson(payload, VotePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, VotePayload::class.java)
     } else null
 
     fun getCommentVotePayload(): CommentVotePayload? = if (type == "COMMENT_VOTE" && payload != null) {
-        Gson().fromJson(payload, CommentVotePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, CommentVotePayload::class.java)
     } else null
 
     fun getAnnouncePeerPayload(): AnnouncePeerPayload? = if (type == "ANNOUNCE_PEER" && payload != null) {
-        Gson().fromJson(payload, AnnouncePeerPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, AnnouncePeerPayload::class.java)
     } else null
 
     fun getAnnounceDiscoverablePayload(): AnnounceDiscoverablePayload? = if (type == "ANNOUNCE_DISCOVERABLE" && payload != null) {
-        Gson().fromJson(payload, AnnounceDiscoverablePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, AnnounceDiscoverablePayload::class.java)
     } else null
 
 
     fun getFollowPayload(): FollowPayload? = if ((type == "FOLLOW" || type == "UNFOLLOW") && payload != null) {
-        Gson().fromJson(payload, FollowPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, FollowPayload::class.java)
     } else null
 
     fun getGroupInvitePayload(): GroupInvitePayload? = if (type == "GROUP_INVITE" && payload != null) {
-        Gson().fromJson(payload, GroupInvitePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupInvitePayload::class.java)
     } else null
 
     fun getGroupUpdatePayload(): GroupUpdatePayload? = if (type == "GROUP_UPDATE" && payload != null) {
-        Gson().fromJson(payload, GroupUpdatePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupUpdatePayload::class.java)
     } else null
 
     fun getGroupDeletePayload(): GroupDeletePayload? = if (type == "GROUP_DELETE" && payload != null) {
-        Gson().fromJson(payload, GroupDeletePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupDeletePayload::class.java)
     } else null
 
     fun getGroupQueryPayload(): GroupQueryPayload? = if (type == "GROUP_QUERY" && payload != null) {
-        Gson().fromJson(payload, GroupQueryPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupQueryPayload::class.java)
     } else null
 
     fun getGroupSyncPayload(): GroupSyncPayload? = if (type == "GROUP_SYNC" && payload != null) {
-        Gson().fromJson(payload, GroupSyncPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupSyncPayload::class.java)
     } else null
 
     fun getGroupMessagePayload(): GroupMessagePayload? = if (type == "GROUP_MESSAGE" && payload != null) {
-        Gson().fromJson(payload, GroupMessagePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupMessagePayload::class.java)
     } else null
 
     fun getDmAckPayload(): DmAckPayload? = if (type == "DM_ACK" && payload != null) {
-        Gson().fromJson(payload, DmAckPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, DmAckPayload::class.java)
     } else null
 
     fun getTypingPayload(): TypingPayload? = if (type == "TYPING" && payload != null) {
-        Gson().fromJson(payload, TypingPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, TypingPayload::class.java)
     } else null
 
     fun getReadReceiptPayload(): ReadReceiptPayload? = if (type == "READ_RECEIPT" && payload != null) {
-        Gson().fromJson(payload, ReadReceiptPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ReadReceiptPayload::class.java)
     } else null
 
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {
-        Gson().fromJson(payload, InventorySyncRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, InventorySyncRequestPayload::class.java)
     } else null
 
     fun getDmSyncRequestPayload(): DmSyncRequestPayload? = if (type == "DM_SYNC_REQUEST" && payload != null) {
-        Gson().fromJson(payload, DmSyncRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, DmSyncRequestPayload::class.java)
     } else null
 
     fun getIdentityUpdatePayload(): IdentityUpdatePayload? = if (type == "IDENTITY_UPDATE" && payload != null) {
-        Gson().fromJson(payload, IdentityUpdatePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, IdentityUpdatePayload::class.java)
     } else null
 
     fun getUserExitPayload(): UserExitPayload? = if (type == "USER_EXIT" && payload != null) {
-        Gson().fromJson(payload, UserExitPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, UserExitPayload::class.java)
     } else null
 
     fun getPeerRemovedPayload(): PeerRemovedPayload? = if (type == "PEER_REMOVED" && payload != null) {
-        Gson().fromJson(payload, PeerRemovedPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PeerRemovedPayload::class.java)
     } else null
 
     fun getConnectionRejectedPayload(): ConnectionRejectedPayload? = if (type == "CONNECTION_REJECTED" && payload != null) {
-        Gson().fromJson(payload, ConnectionRejectedPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ConnectionRejectedPayload::class.java)
     } else null
 
     fun getEditPostPayload(): EditPostPayload? = if (type == "EDIT_POST" && payload != null) {
-        Gson().fromJson(payload, EditPostPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, EditPostPayload::class.java)
     } else null
 
     fun getDeletePostPayload(): DeletePostPayload? = if (type == "DELETE_POST" && payload != null) {
-        Gson().fromJson(payload, DeletePostPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, DeletePostPayload::class.java)
     } else null
 
     fun getEditCommentPayload(): EditCommentPayload? = if (type == "EDIT_COMMENT" && payload != null) {
-        Gson().fromJson(payload, EditCommentPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, EditCommentPayload::class.java)
     } else null
 
     fun getDeleteCommentPayload(): DeleteCommentPayload? = if (type == "DELETE_COMMENT" && payload != null) {
-        Gson().fromJson(payload, DeleteCommentPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, DeleteCommentPayload::class.java)
     } else null
 
     fun getDeleteMessagePayload(): DeleteMessagePayload? = if (type == "DELETE_MESSAGE" && payload != null) {
-        Gson().fromJson(payload, DeleteMessagePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, DeleteMessagePayload::class.java)
     } else null
 }

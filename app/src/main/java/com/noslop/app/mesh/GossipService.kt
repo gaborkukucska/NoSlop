@@ -534,7 +534,7 @@ object GossipService {
                 } else {
                     groupDao?.getAllGroupChatsList()?.any { group ->
                         val members: List<String> = try {
-                            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+                            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
                         } catch (_: Exception) { emptyList() }
                         group.adminPublicKeyB64 == senderId || 
                         senderId in members ||
@@ -717,7 +717,7 @@ object GossipService {
                     "DELETE_MESSAGE" -> packet.getDeleteMessagePayload()?.groupId
                     "MESSAGE" -> packet.getMessagePayload()?.groupId
                     "GROUP_SYNC" -> packet.getGroupSyncPayload()?.let {
-                        try { com.google.gson.Gson().fromJson(it.groupChatJson, com.noslop.app.data.GroupChat::class.java)?.groupId } catch (_: Exception) { null }
+                        try { com.noslop.app.util.Json.gson.fromJson(it.groupChatJson, com.noslop.app.data.GroupChat::class.java)?.groupId } catch (_: Exception) { null }
                     }
                     else -> null
                 }
@@ -788,7 +788,7 @@ object GossipService {
                     senderId = mySenderId,
                     targetUserId = senderId,
                     type = "MEDIA_RECOVERY_FOUND",
-                    payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
                 )
                 transport?.sendPacket(senderId, Constants.MESH_PORT, foundPacket)
             }
@@ -822,7 +822,7 @@ object GossipService {
                 hops = 6,
                 senderId = localPublicKeyB64,
                 type = "MEDIA_RELAY_REQUEST",
-                payload = com.google.gson.Gson().toJsonTree(payload)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
             )
             broadcast(packet)
         }
@@ -853,7 +853,7 @@ object GossipService {
                             senderId = mySenderId,
                             targetUserId = listenerId,
                             type = "MEDIA_RECOVERY_FOUND",
-                            payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
+                            payload = com.noslop.app.util.Json.gson.toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
                         )
                         
                         val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
@@ -896,7 +896,7 @@ object GossipService {
                     com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()
                 }
                 groupDao.getAllGroupChatsList().flatMap {
-                    try { com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64 } catch (_: Exception) { emptyList() }
+                    try { com.noslop.app.util.Json.gson.fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64 } catch (_: Exception) { emptyList() }
                 }.toSet()
             } catch (_: Exception) { emptySet() }
         } else emptySet()
@@ -960,7 +960,7 @@ object GossipService {
                     com.noslop.app.data.NoSlopDatabase.getDatabase(ctx).groupChatDao()
                 }
                 groupDao.getAllGroupChatsList().flatMap {
-                    try { com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64 } catch (_: Exception) { emptyList() }
+                    try { com.noslop.app.util.Json.gson.fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64 } catch (_: Exception) { emptyList() }
                 }.toSet()
             } catch (_: Exception) { emptySet() }
         } else emptySet()

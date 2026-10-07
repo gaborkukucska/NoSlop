@@ -12,7 +12,7 @@ import okhttp3.Request
 /** The Guardian API client — optional user key. 12 calls/sec, 5000/day free. */
 object GuardianApiClient {
     private const val TAG = "GUARDIAN_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchArticles(query: String, section: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-guardian-search", recentOnly: Boolean = false): List<FeedItem> {

@@ -175,12 +175,12 @@ class DmPacketHandler(
             var replyToMessageId: String? = null
 
             try {
-                val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
+                val obj = com.noslop.app.util.Json.gson.fromJson(plaintext, com.google.gson.JsonObject::class.java)
                 if (obj.has("content")) {
                     finalContent = obj.get("content").asString
                 }
                 if (obj.has("media")) {
-                    mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
+                    mediaMetadata = com.noslop.app.util.Json.gson.fromJson(obj.get("media"), MediaMetadata::class.java)
                     mediaId = mediaMetadata.id
                     mediaType = mediaMetadata.type
                 }
@@ -200,7 +200,7 @@ class DmPacketHandler(
             var groupId: String? = msgPay.groupId?.takeIf { it.isNotBlank() }
             if (groupId == null) {
                 try {
-                    val gObj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
+                    val gObj = com.noslop.app.util.Json.gson.fromJson(plaintext, com.google.gson.JsonObject::class.java)
                     if (gObj.has("groupId")) groupId = gObj.get("groupId").asString?.takeIf { it.isNotBlank() }
                 } catch (e: Exception) { /* not JSON -- an ordinary 1:1 DM */ }
             }
@@ -211,7 +211,7 @@ class DmPacketHandler(
                     return false
                 }
                 val members: List<String> = try {
-                    com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+                    com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
                 } catch (e: Exception) { emptyList() }
                 val isMemberOrAdmin = members.contains(packet.senderId) || 
                     group.adminPublicKeyB64 == packet.senderId ||
@@ -418,7 +418,7 @@ class DmPacketHandler(
                 senderId = localKeys.publicKeyB64,
                 targetUserId = peerPub,
                 type = "MESSAGE",
-                payload = com.google.gson.Gson().toJsonTree(msgPay)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(msgPay)
             )
             repo.meshTransport.sendPacket(peer.onionAddress, packet = packetToSend)
             kotlinx.coroutines.delay(100L)
@@ -466,7 +466,7 @@ class DmPacketHandler(
             senderId = myKeys.publicKeyB64,
             targetUserId = recipientPub,
             type = "DM_ACK",
-            payload = com.google.gson.Gson().toJsonTree(ackPayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(ackPayload)
         )
 
         val success = repo.meshTransport.sendPacket(onion, Constants.MESH_PORT, packet)

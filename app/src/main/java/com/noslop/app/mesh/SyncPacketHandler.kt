@@ -145,7 +145,7 @@ class SyncPacketHandler(
                     senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
-                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
                 repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
                 delay(500)
@@ -160,7 +160,7 @@ class SyncPacketHandler(
                     senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
-                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
                 repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
                 delay(500)
@@ -175,7 +175,7 @@ class SyncPacketHandler(
                     senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
-                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
                 repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
                 delay(500)
@@ -258,7 +258,7 @@ class SyncPacketHandler(
                     senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
-                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
                 repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
                 delay(500)
@@ -273,7 +273,7 @@ class SyncPacketHandler(
                     senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
-                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
                 repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
                 delay(500)
@@ -288,7 +288,7 @@ class SyncPacketHandler(
                     senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
-                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
                 repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
                 delay(500)

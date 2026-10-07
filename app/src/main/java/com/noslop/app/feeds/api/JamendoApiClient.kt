@@ -21,7 +21,7 @@ object JamendoApiClient {
     val CLIENT_ID: String?
         get() = userClientId?.takeIf { it.isNotBlank() }
 
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchTracks(

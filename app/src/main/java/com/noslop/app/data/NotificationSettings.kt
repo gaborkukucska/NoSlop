@@ -12,14 +12,14 @@ data class NotificationSettings(
     val broadcasts: Boolean = true
 ) {
     fun toJson(): String {
-        return Gson().toJson(this)
+        return com.noslop.app.util.Json.gson.toJson(this)
     }
 
     companion object {
         fun fromJson(json: String?): NotificationSettings {
             if (json == null) return NotificationSettings()
             return try {
-                val map = Gson().fromJson(json, Map::class.java) as Map<String, Any>
+                val map = com.noslop.app.util.Json.gson.fromJson(json, Map::class.java) as Map<String, Any>
                 NotificationSettings(
                     dms = map["dms"] as? Boolean ?: true,
                     comments = map["comments"] as? Boolean ?: true,

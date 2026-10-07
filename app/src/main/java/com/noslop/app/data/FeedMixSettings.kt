@@ -14,13 +14,13 @@ data class FeedMixSettings(
     val articlePercent: Int = 10,
     val meshPercent: Int = 20
 ) {
-    fun toJson(): String = Gson().toJson(this)
+    fun toJson(): String = com.noslop.app.util.Json.gson.toJson(this)
 
     companion object {
         fun fromJson(json: String?): FeedMixSettings {
             if (json.isNullOrBlank()) return FeedMixSettings()
             return try {
-                Gson().fromJson(json, FeedMixSettings::class.java)
+                com.noslop.app.util.Json.gson.fromJson(json, FeedMixSettings::class.java)
             } catch (e: Exception) {
                 FeedMixSettings()
             }

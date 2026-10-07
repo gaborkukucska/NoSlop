@@ -32,7 +32,7 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             private set
     }
 
-    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val repositoryScope = com.noslop.app.util.AppScopes.io
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)

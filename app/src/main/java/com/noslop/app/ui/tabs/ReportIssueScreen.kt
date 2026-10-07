@@ -278,7 +278,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                                 "body" to bodyBuilder.toString()
                             )
 
-                            val json = Gson().toJson(payload)
+                            val json = com.noslop.app.util.Json.gson.toJson(payload)
                             val requestBody = json.toRequestBody("application/json".toMediaType())
 
                             val request = Request.Builder()

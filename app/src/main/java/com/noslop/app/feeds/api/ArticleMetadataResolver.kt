@@ -42,7 +42,7 @@ object ArticleMetadataResolver {
                         client.newCall(restReq).execute().use { restRes ->
                             if (restRes.isSuccessful) {
                                 val jsonStr = restRes.body?.string() ?: ""
-                                val root = com.google.gson.Gson().fromJson(jsonStr, com.google.gson.JsonObject::class.java)
+                                val root = com.noslop.app.util.Json.gson.fromJson(jsonStr, com.google.gson.JsonObject::class.java)
                                 val img = root.getAsJsonObject("thumbnail")?.get("source")?.asString
                                     ?: root.getAsJsonObject("originalimage")?.get("source")?.asString
                                 if (!img.isNullOrBlank()) {

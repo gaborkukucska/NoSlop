@@ -73,6 +73,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val repository = NoSlopApp.repository
     val logFilePath: String
 
+    val identityViewModel: IdentityViewModel = IdentityViewModel(application)
+
     init {
         Logger.initialize(application)
         logFilePath = Logger.getLogFilePath()
@@ -2677,7 +2679,7 @@ fun toggleAggregator() {
                         hops = 6,
                         senderId = burnable.publicKeyB64,
                         type = "USER_EXIT",
-                        payload = com.google.gson.Gson().toJsonTree(exitPay),
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(exitPay),
                         signature = signature
                     )
                     com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -2819,7 +2821,7 @@ fun toggleAggregator() {
                 id = UUID.randomUUID().toString(),
                 senderId = localKeyB64,
                 type = "ANNOUNCE_DISCOVERABLE",
-                payload = com.google.gson.Gson().toJsonTree(payload),
+                payload = com.noslop.app.util.Json.gson.toJsonTree(payload),
                 hops = 6 // Spread up to 6 hops
             )
             

@@ -77,7 +77,7 @@ fun QRShareSheet(
         if (isCreator) {
             payloadMap["isCreator"] = "true"
         }
-        Gson().toJson(payloadMap)
+        com.noslop.app.util.Json.gson.toJson(payloadMap)
     }
 
     // Generate high-contrast, thematic QR code bitmap

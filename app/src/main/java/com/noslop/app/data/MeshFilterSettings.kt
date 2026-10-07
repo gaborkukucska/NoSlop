@@ -10,14 +10,14 @@ data class MeshFilterSettings(
     val allowIncomingVideoPosts: Boolean = true
 ) {
     fun toJson(): String {
-        return Gson().toJson(this)
+        return com.noslop.app.util.Json.gson.toJson(this)
     }
 
     companion object {
         fun fromJson(json: String?): MeshFilterSettings {
             if (json == null) return MeshFilterSettings()
             return try {
-                Gson().fromJson(json, MeshFilterSettings::class.java)
+                com.noslop.app.util.Json.gson.fromJson(json, MeshFilterSettings::class.java)
             } catch (e: Exception) {
                 MeshFilterSettings()
             }

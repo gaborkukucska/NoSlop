@@ -23,7 +23,7 @@ import okhttp3.Request
 object ArtInstituteClient {
 
     private const val TAG = "ARTIC_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private const val DEFAULT_IIIF = "https://www.artic.edu/iiif/2"

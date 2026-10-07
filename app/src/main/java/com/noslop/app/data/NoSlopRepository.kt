@@ -205,7 +205,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun syncPostsWithHub() = withContext(Dispatchers.IO) {
         val posts = postDao.getPostsSince(0).take(50)
         val packetArray = JSONArray()
-        val gson = com.google.gson.Gson()
+        val gson = com.noslop.app.util.Json.gson
         posts.forEach { post ->
             val meta = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
                 id = post.mediaUrl,
@@ -393,7 +393,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         )
                         map["media"] = metadata
                     }
-                    val contentToSend = com.google.gson.Gson().toJson(map)
+                    val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
                     val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
                     
                     if (ciphertext != null && nonce != null) {
@@ -522,7 +522,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             thumbnailB64 = null
                         )
                     }
-                    val contentToSend = com.google.gson.Gson().toJson(map)
+                    val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
                     val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
                     
                     if (ciphertext != null && nonce != null) {
@@ -541,7 +541,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         
                         // If WE sent this DM (via Hub Web UI), we must push it back to the Hub so it routes over Tor!
                         if (sender == myKeys.publicKeyB64) {
-                            val payloadJson = com.google.gson.Gson().toJsonTree(
+                            val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
                                 com.noslop.app.mesh.EncryptedPayload(
                                     id = id,
                                     nonce = nonce,
@@ -560,7 +560,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
                         } else {
                             // If we received this DM from a peer, we must process it locally to update the UI
-                            val payloadJson = com.google.gson.Gson().toJsonTree(
+                            val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
                                 com.noslop.app.mesh.EncryptedPayload(
                                     id = id,
                                     nonce = nonce,
@@ -610,7 +610,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val packetsArray = res.optJSONArray("packets")
             if (packetsArray != null && packetsArray.length() > 0) {
                 Logger.info("HUB_SYNC", "Pulled ${packetsArray.length()} valid mesh packets from Hub")
-                val gson = com.google.gson.Gson()
+                val gson = com.noslop.app.util.Json.gson
                 for (i in 0 until packetsArray.length()) {
                     try {
                         val packetJson = packetsArray.getJSONObject(i).toString()
@@ -694,7 +694,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 id = java.util.UUID.randomUUID().toString(),
                 senderId = myKeys.publicKeyB64,
                 type = if (follow) "FOLLOW" else "UNFOLLOW",
-                payload = com.google.gson.Gson().toJsonTree(followPayload)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(followPayload)
             )
             com.noslop.app.mesh.GossipService.broadcast(packet)
         }
@@ -719,7 +719,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
         val groupId = java.util.UUID.randomUUID().toString()
         val allMembers = (memberPubs + adminKeys.publicKeyB64).distinct()
-        val membersJson = com.google.gson.Gson().toJson(allMembers)
+        val membersJson = com.noslop.app.util.Json.gson.toJson(allMembers)
         val timestamp = System.currentTimeMillis()
         
         val myHandle = getLocalHandle() ?: "Me"
@@ -740,7 +740,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             allowMemberInvites = allowMemberInvites,
             allowMemberSelfRemove = allowMemberSelfRemove,
             avatarB64 = avatarB64,
-            memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap),
+            memberHandlesJson = com.noslop.app.util.Json.gson.toJson(memberHandlesMap),
             revision = timestamp
         )
         db.groupChatDao().insertGroupChat(group)
@@ -793,7 +793,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             id = "group_invite_${groupId}",
             senderId = adminKeys.publicKeyB64,
             type = "GROUP_INVITE",
-            payload = com.google.gson.Gson().toJsonTree(invitePayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
 
@@ -870,9 +870,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val setting = db.appSettingDao().getSetting("pending_group_invite_$groupId")
         if (!setting.isNullOrBlank()) {
             try {
-                val invite = com.google.gson.Gson().fromJson(setting, com.noslop.app.mesh.GroupInvitePayload::class.java)
-                val membersJson = com.google.gson.Gson().toJson(invite.members)
-                val memberHandlesJson = com.google.gson.Gson().toJson(invite.memberHandles ?: emptyMap<String, String>())
+                val invite = com.noslop.app.util.Json.gson.fromJson(setting, com.noslop.app.mesh.GroupInvitePayload::class.java)
+                val membersJson = com.noslop.app.util.Json.gson.toJson(invite.members)
+                val memberHandlesJson = com.noslop.app.util.Json.gson.toJson(invite.memberHandles ?: emptyMap<String, String>())
                 val group = GroupChat(
                     groupId = invite.groupId,
                     title = invite.title,
@@ -946,7 +946,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peerPub,
                 type = "TYPING",
-                payload = com.google.gson.Gson().toJsonTree(typingPayload)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(typingPayload)
             )
             meshTransport.sendPacket(peer.onionAddress, packet = packet)
         }
@@ -961,7 +961,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val myHandle = getLocalHandle() ?: "Me"
 
         val memberPubs: List<String> = try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
         // Determine sender keys based on audience privacy and group configuration:
@@ -999,7 +999,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val jsonPayload = com.google.gson.JsonObject().apply {
             addProperty("content", text)
             addProperty("groupId", groupId)
-            if (media != null) add("media", com.google.gson.Gson().toJsonTree(media))
+            if (media != null) add("media", com.noslop.app.util.Json.gson.toJsonTree(media))
             if (replyToMessageId != null) addProperty("replyTo", replyToMessageId)
         }.toString()
 
@@ -1052,7 +1052,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 senderId = senderKeys.publicKeyB64,
                 targetUserId = memberPub,
                 type = "MESSAGE",
-                payload = com.google.gson.Gson().toJsonTree(msgPayload)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(msgPayload)
             )
 
             if (peer != null && peer.onionAddress.isNotBlank()) {
@@ -1103,13 +1103,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // kept receiving its messages. Diff against the stored list and send
         // the actual deltas instead.
         val previousMembers: List<String> = try {
-            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
         val newMembers = membersList.distinct()
         val addedMembers = newMembers.filter { it !in previousMembers }
         val removedMembers = previousMembers.filter { it !in newMembers }
 
-        val membersJson = com.google.gson.Gson().toJson(newMembers)
+        val membersJson = com.noslop.app.util.Json.gson.toJson(newMembers)
         val timestamp = System.currentTimeMillis()
 
         val myHandle = getLocalHandle() ?: "Me"
@@ -1136,8 +1136,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             allowMemberInvites = effectiveAllowInvites,
             allowMemberSelfRemove = effectiveAllowSelfRemove,
             membersJson = membersJson,
-            memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap),
-            bannedMembersJson = com.google.gson.Gson().toJson(effectiveBannedList),
+            memberHandlesJson = com.noslop.app.util.Json.gson.toJson(memberHandlesMap),
+            bannedMembersJson = com.noslop.app.util.Json.gson.toJson(effectiveBannedList),
             // W04: Only admin updates advance revision to prevent member clock skew rejecting admin updates
             revision = if (isAdmin) timestamp else existing.revision
         )
@@ -1213,7 +1213,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             id = java.util.UUID.randomUUID().toString(),
             senderId = myKeys.publicKeyB64,
             type = "GROUP_UPDATE",
-            payload = com.google.gson.Gson().toJsonTree(updatePayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload)
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
 
@@ -1284,7 +1284,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     senderId = effectiveSenderId,
                     targetUserId = addedPub,
                     type = "GROUP_INVITE",
-                    payload = com.google.gson.Gson().toJsonTree(invitePayload)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
                 )
                 if (onion.isNotBlank()) {
                     meshSocialRepository.dispatchPacket(onion, invitePacket)
@@ -1296,7 +1296,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 id = "group_invite_${groupId}_${System.currentTimeMillis()}",
                 senderId = adminKeys.publicKeyB64,
                 type = "GROUP_INVITE",
-                payload = com.google.gson.Gson().toJsonTree(invitePayload)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
             )
             com.noslop.app.mesh.GossipService.broadcast(generalInvitePacket)
         }
@@ -1331,10 +1331,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 id = java.util.UUID.randomUUID().toString(),
                 senderId = adminKeys.publicKeyB64,
                 type = "GROUP_DELETE",
-                payload = com.google.gson.Gson().toJsonTree(deletePayload)
+                payload = com.noslop.app.util.Json.gson.toJsonTree(deletePayload)
             )
             val members = try {
-                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+                com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
             } catch (e: Exception) { emptyList() }
             for (memberPub in members) {
                 if (memberPub == adminKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
@@ -1358,7 +1358,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // Clean up any remaining ghost peers stored only for this deleted group
         if (existing != null) {
             val deletedGroupMembers = try {
-                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList() + existing.adminPublicKeyB64
+                com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList() + existing.adminPublicKeyB64
             } catch (_: Exception) { emptyList() }
             cleanupOrphanedGroupPeers(deletedGroupMembers, excludedGroupId = groupId)
         }
@@ -1370,7 +1370,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
 
         val previousMembers: List<String> = try {
-            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
         // Determine which identity we are known by in this group
@@ -1409,7 +1409,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             id = java.util.UUID.randomUUID().toString(),
             senderId = signingKey.publicKeyB64,
             type = "GROUP_UPDATE",
-            payload = com.google.gson.Gson().toJsonTree(updatePayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload)
         )
 
         // 1. Direct targeted dispatch to all group members (including admin) so it reliably reaches them
@@ -1444,7 +1444,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
 
         val members = try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
         val myHandle = getLocalHandle() ?: "Me"
@@ -1504,7 +1504,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             id = "group_invite_${groupId}",
             senderId = if (group.allowMemberInvites) adminKeys.publicKeyB64 else myKeys.publicKeyB64,
             type = "GROUP_INVITE",
-            payload = com.google.gson.Gson().toJsonTree(invitePayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
         )
 
         com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -1539,7 +1539,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val senderKeys = if (burnableKeys != null && (group?.membersJson?.contains(burnableKeys.publicKeyB64) == true || group?.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
         val members = if (group != null) {
             try {
-                com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+                com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
             } catch (e: Exception) { emptyList() }
         } else emptyList()
 
@@ -1554,7 +1554,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             id = java.util.UUID.randomUUID().toString(),
             senderId = senderKeys.publicKeyB64,
             type = "GROUP_QUERY",
-            payload = com.google.gson.Gson().toJsonTree(queryPayload)
+            payload = com.noslop.app.util.Json.gson.toJsonTree(queryPayload)
         )
 
         if (members.isNotEmpty()) {
@@ -1652,7 +1652,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 hops = 6,
                 senderId = burnable.publicKeyB64,
                 type = "USER_EXIT",
-                payload = com.google.gson.Gson().toJsonTree(com.noslop.app.mesh.UserExitPayload(burnable.publicKeyB64, timestamp, sig)),
+                payload = com.noslop.app.util.Json.gson.toJsonTree(com.noslop.app.mesh.UserExitPayload(burnable.publicKeyB64, timestamp, sig)),
                 signature = sig
             )
             com.noslop.app.mesh.GossipService.broadcast(exitPacket)
@@ -1693,7 +1693,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 hops = 6,
                 senderId = myKeys.publicKeyB64,
                 type = "USER_HANDSHAKE",
-                payload = com.google.gson.Gson().toJsonTree(syncReq),
+                payload = com.noslop.app.util.Json.gson.toJsonTree(syncReq),
                 signature = signature
             )
             com.noslop.app.mesh.GossipService.broadcast(syncPacket)
@@ -1761,7 +1761,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val otherGroups = db.groupChatDao().getAllGroupChatsList().filter { excludedGroupId == null || it.groupId != excludedGroupId }
         val otherGroupMembers = otherGroups.flatMap {
             try {
-                com.google.gson.Gson().fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+                com.noslop.app.util.Json.gson.fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
             } catch (_: Exception) { emptyList() }
         }.toSet()
 
@@ -2330,7 +2330,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
 
         val memberPubs: List<String> = try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
         for (messageId in messageIds) {
@@ -2370,7 +2370,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         senderId = signingKey.publicKeyB64,
                         targetUserId = memberPub,
                         type = "DELETE_MESSAGE",
-                        payload = com.google.gson.Gson().toJsonTree(deletePay),
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
                         signature = signature
                     )
                     meshSocialRepository.dispatchPacket(peer.onionAddress, packet)

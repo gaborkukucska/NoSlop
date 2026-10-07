@@ -32,7 +32,7 @@ class PreferencesRepository(
 
     /** Save the user's selected categories (chosen during onboarding or in settings). */
     suspend fun saveSelectedCategories(categories: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(categories)
+        val json = com.noslop.app.util.Json.gson.toJson(categories)
         appSettingDao.insertSetting(AppSetting("selected_categories", json))
         Logger.info(TAG, "Saved ${categories.size} user categories")
     }
@@ -46,7 +46,7 @@ class PreferencesRepository(
         if (!json.isNullOrBlank()) {
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
             } catch (_: Exception) {}
         }
         // Fallback: derive from active sources
@@ -57,7 +57,7 @@ class PreferencesRepository(
 
     /** Save user keywords for a specific category (for targeted API searches). */
     suspend fun saveKeywordsForCategory(category: String, keywords: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(keywords)
+        val json = com.noslop.app.util.Json.gson.toJson(keywords)
         appSettingDao.insertSetting(AppSetting("keywords_$category", json))
     }
 
@@ -67,7 +67,7 @@ class PreferencesRepository(
         if (!json.isNullOrBlank()) {
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
             } catch (_: Exception) {}
         }
         emptyList()
@@ -102,7 +102,7 @@ class PreferencesRepository(
 
     /** Save the user's selected music genres. */
     suspend fun saveSelectedMusicGenres(genres: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(genres)
+        val json = com.noslop.app.util.Json.gson.toJson(genres)
         appSettingDao.insertSetting(AppSetting("selected_music_genres", json))
     }
 
@@ -112,7 +112,7 @@ class PreferencesRepository(
         if (!json.isNullOrBlank()) {
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
             } catch (_: Exception) {}
         }
         emptyList()
@@ -120,7 +120,7 @@ class PreferencesRepository(
 
     /** Save the user's selected video genres. */
     suspend fun saveSelectedVideoGenres(genres: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(genres)
+        val json = com.noslop.app.util.Json.gson.toJson(genres)
         appSettingDao.insertSetting(AppSetting("selected_video_genres", json))
     }
 
@@ -130,7 +130,7 @@ class PreferencesRepository(
         if (!json.isNullOrBlank()) {
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
             } catch (_: Exception) {}
         }
         emptyList()
@@ -160,7 +160,7 @@ class PreferencesRepository(
 
     /** Persist the editable [UserProfile] (display fields, avatar) as JSON. */
     suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(profile)
+        val json = com.noslop.app.util.Json.gson.toJson(profile)
         appSettingDao.insertSetting(AppSetting("user_profile", json))
     }
 
@@ -169,7 +169,7 @@ class PreferencesRepository(
         val json = appSettingDao.getSetting("user_profile")
         if (!json.isNullOrBlank()) {
             try {
-                return@withContext com.google.gson.Gson().fromJson(json, UserProfile::class.java)
+                return@withContext com.noslop.app.util.Json.gson.fromJson(json, UserProfile::class.java)
             } catch (_: Exception) {}
         }
         UserProfile() // Default empty profile
@@ -212,7 +212,7 @@ class PreferencesRepository(
     )
 
     suspend fun saveBannedNodes(nodes: List<BannedNode>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(nodes)
+        val json = com.noslop.app.util.Json.gson.toJson(nodes)
         appSettingDao.insertSetting(AppSetting("banned_nodes", json))
     }
 
@@ -221,7 +221,7 @@ class PreferencesRepository(
         if (json.isBlank()) return@withContext emptyList()
         try {
             val type = object : com.google.gson.reflect.TypeToken<List<BannedNode>>() {}.type
-            com.google.gson.Gson().fromJson(json, type) ?: emptyList()
+            com.noslop.app.util.Json.gson.fromJson(json, type) ?: emptyList()
         } catch (_: Exception) {
             emptyList()
         }

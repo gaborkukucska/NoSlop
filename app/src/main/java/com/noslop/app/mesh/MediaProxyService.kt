@@ -54,7 +54,7 @@ object MediaProxyService {
         if (isRunning) return
         Logger.info(TAG, "Starting MediaProxyService...")
         isRunning = true
-        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val scope = com.noslop.app.util.AppScopes.io
         proxyScope = scope
         scope.launch {
             try {

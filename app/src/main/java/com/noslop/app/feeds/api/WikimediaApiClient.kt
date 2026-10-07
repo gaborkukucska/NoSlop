@@ -29,7 +29,7 @@ import okhttp3.Request
 object WikimediaApiClient {
 
     private const val TAG = "WIKIMEDIA_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private var lastContinueToken: String? = null

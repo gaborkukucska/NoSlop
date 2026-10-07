@@ -20,7 +20,7 @@ object NasaApiClient {
 
     private const val TAG = "NASA_API"
     private const val DEMO_KEY = "DEMO_KEY"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
 
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 

@@ -138,7 +138,7 @@ fun GroupSettingsModal(
 
     val currentMembers: List<String> = remember(group.membersJson) {
         try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
     }
     var membersList by remember { mutableStateOf(currentMembers) }

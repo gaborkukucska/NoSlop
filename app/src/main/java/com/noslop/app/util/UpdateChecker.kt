@@ -87,7 +87,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
         val json = appSettingDao.getSetting("update_available_info")
         if (!json.isNullOrBlank()) {
             try {
-                _updateInfo.value = Gson().fromJson(json, UpdateInfo::class.java)
+                _updateInfo.value = com.noslop.app.util.Json.gson.fromJson(json, UpdateInfo::class.java)
             } catch (_: Exception) { /* ignore corrupt cache */ }
         }
     }
@@ -129,7 +129,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
                     if (response.isSuccessful) response.body?.string() else null
                 }
                 if (body != null) {
-                    val content = Gson().fromJson(body, ContentJson::class.java)
+                    val content = com.noslop.app.util.Json.gson.fromJson(body, ContentJson::class.java)
                     apkUrl = content.hero?.apkUrl
                     expectedSha = content.hero?.apkSha256?.trim()?.lowercase()?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
                     if (apkUrl != null) latestVersion = extractVersion(apkUrl)
@@ -147,7 +147,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
                         if (response.isSuccessful) response.body?.string() else null
                     }
                     if (body != null) {
-                        val release = Gson().fromJson(body, GithubRelease::class.java)
+                        val release = com.noslop.app.util.Json.gson.fromJson(body, GithubRelease::class.java)
                         latestVersion = release.tagName?.removePrefix("v")
                         apkUrl = release.assets?.firstOrNull { it.browserDownloadUrl?.endsWith(".apk") == true }?.browserDownloadUrl
 
@@ -202,7 +202,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
 
             _updateInfo.value = info
             appSettingDao.insertSetting(
-                AppSetting("update_available_info", if (info != null) Gson().toJson(info) else "")
+                AppSetting("update_available_info", if (info != null) com.noslop.app.util.Json.gson.toJson(info) else "")
             )
             Logger.info(
                 TAG,

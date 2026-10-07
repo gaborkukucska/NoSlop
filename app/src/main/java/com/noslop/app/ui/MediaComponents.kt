@@ -796,7 +796,7 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "Android's embedded web engine cannot route traffic through Tor. Opening this webpage in an embedded view would leak your real IP address to $host.".tr,
+                                text = "Android's embedded web engine cannot route traffic through Tor. Opening this webpage in an embedded view would leak your real IP address to {host}.".tr.replace("{host}", host),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextMuted,
                                 textAlign = TextAlign.Center
@@ -867,7 +867,7 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                 title = { Text("Open Outside NoSlop?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Text(
-                        "Opening this link in an external browser will route traffic outside NoSlop's Tor connection, exposing your IP address to $host.".tr,
+                        "Opening this link in an external browser will route traffic outside NoSlop's Tor connection, exposing your IP address to {host}.".tr.replace("{host}", host),
                         color = TextMuted
                     )
                 },

@@ -35,7 +35,7 @@ object InternetArchiveClient {
     private const val MAX_METADATA_RESOLUTIONS = 10
 
     private val metadataResolutions = java.util.concurrent.atomic.AtomicInteger(0)
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
 
     // --- NOSLOP_IMAGE_SOURCES_V1 ---
     // Archive.org carries an enormous volume of machine-uploaded YouTube
