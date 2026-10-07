@@ -63,15 +63,22 @@ object MediaManager {
     
     // Dynamic Chunk Sizing Bounds tuned for Tor (fewer sockets, larger payloads)
     const val MIN_CHUNK_SIZE = 128 * 1024
-    const val MAX_CHUNK_SIZE = 1024 * 1024
     const val MAX_CHUNK_BYTES = 256 * 1024 // C03: Max chunk payload ceiling for incoming requests
+    // The downloader's adaptive window must never outgrow what a sender will serve. It used to grow
+    // to 1 MB while senders reject anything above MAX_CHUNK_BYTES, so every file needing more than
+    // two chunks (e.g. any recorded video) stalled for good at 2 chunks (~9% of 5 MB). Pinned by
+    // MediaChunkWindowTest.
+    const val MAX_CHUNK_SIZE = MAX_CHUNK_BYTES
     const val DOWNLOAD_TIMEOUT_MS = 90000L // 90 seconds (generous for Tor, avoids dead time)
     private const val MAX_CONCURRENCY = 2
 
     // C03: Outbound bandwidth rate limiting per requester
     private val outboundMediaBytes = ConcurrentHashMap<String, Long>()
     @Volatile private var outboundBytesWindowStart = 0L
-    private const val MAX_OUTBOUND_BYTES_PER_WINDOW = 5L * 1024 * 1024 // 5 MB per 60s per sender
+    // 16 MB per 60 s per requester (~270 KB/s). The former 5 MB (~85 KB/s) sat below normal Tor
+    // throughput, so a single 5+ MB video tripped it mid-transfer; requests over the cap are dropped
+    // silently and the requester only retries after its 90 s chunk timeout.
+    private const val MAX_OUTBOUND_BYTES_PER_WINDOW = 16L * 1024 * 1024
 
     // C03: Long-lived CoroutineExceptionHandler preventing unhandled exceptions from crashing the process
     private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
@@ -608,8 +615,10 @@ object MediaManager {
 
                 if (dl.retryQueue.isNotEmpty()) {
                     val retry = dl.retryQueue.poll()!!
-                    offset = retry.first
-                    length = retry.second
+                    val (servable, remainder) = splitToServable(retry.first, retry.second)
+                    offset = servable.first
+                    length = servable.second
+                    if (remainder != null) dl.retryQueue.offer(remainder)
                 } else {
                     if (dl.eofOffset != -1L) break
                     if (dl.totalBytes > 0 && dl.nextRequestOffset >= dl.totalBytes) break
@@ -746,7 +755,7 @@ object MediaManager {
             finishDownload(dl)
         } else {
             synchronized(dl) {
-                dl.currentChunkSize = Math.min(MAX_CHUNK_SIZE, dl.currentChunkSize + 32 * 1024)
+                dl.currentChunkSize = grownChunkSize(dl.currentChunkSize)
                 if (dl.currentConcurrency < dl.ssthresh) {
                     dl.currentConcurrency += 1.0
                 } else {
@@ -881,6 +890,35 @@ object MediaManager {
     /**
      * C03: Validates whether a requesting peer is authorized to receive the requested mediaId.
      */
+    /** Adaptive window growth after a successful chunk; never exceeds what senders serve. */
+    internal fun grownChunkSize(current: Int): Int = Math.min(MAX_CHUNK_SIZE, current + 32 * 1024)
+
+    /**
+     * C03 bounds check a sender applies to a MEDIA_REQUEST before serving it.
+     * Returns the rejection reason, or null when the request is servable.
+     */
+    internal fun chunkRequestRejection(payload: MediaRequestPayload): String? {
+        val isMetadataReq = payload.chunkSize == 0 && (payload.byteLength == null || payload.byteLength == 0)
+        if (isMetadataReq) return null
+        if (payload.chunkSize !in 1..MAX_CHUNK_BYTES) return "invalid chunkSize ${payload.chunkSize}"
+        val reqLen = payload.byteLength ?: payload.chunkSize
+        if (reqLen !in 1..MAX_CHUNK_BYTES) return "invalid byteLength $reqLen"
+        if ((payload.byteOffset != null && payload.byteOffset < 0) || payload.chunkIndex < 0) {
+            return "negative offset or chunkIndex"
+        }
+        return null
+    }
+
+    /**
+     * The request the downloader actually sends for (offset, length): never longer than a sender
+     * serves. A longer pending range (e.g. re-queued from before this cap existed) is split; the
+     * remainder is returned so it can be queued instead of leaving a permanent gap.
+     */
+    internal fun splitToServable(offset: Long, length: Int): Pair<Pair<Long, Int>, Pair<Long, Int>?> {
+        if (length <= MAX_CHUNK_BYTES) return Pair(Pair(offset, length), null)
+        return Pair(Pair(offset, MAX_CHUNK_BYTES), Pair(offset + MAX_CHUNK_BYTES, length - MAX_CHUNK_BYTES))
+    }
+
     suspend fun isMediaAuthorizedForSender(
         repo: NoSlopRepository,
         mediaId: String,
@@ -970,20 +1008,10 @@ object MediaManager {
 
             // C03: Bounds validation on chunk sizes and byte offsets
             val isMetadataReq = payload.chunkSize == 0 && (payload.byteLength == null || payload.byteLength == 0)
-            if (!isMetadataReq) {
-                if (payload.chunkSize !in 1..MAX_CHUNK_BYTES) {
-                    Logger.warn(TAG, "Rejected MEDIA_REQUEST from $senderId: invalid chunkSize ${payload.chunkSize}")
-                    return@launch
-                }
-                val reqLen = payload.byteLength ?: payload.chunkSize
-                if (reqLen !in 1..MAX_CHUNK_BYTES) {
-                    Logger.warn(TAG, "Rejected MEDIA_REQUEST from $senderId: invalid byteLength $reqLen")
-                    return@launch
-                }
-                if ((payload.byteOffset != null && payload.byteOffset < 0) || payload.chunkIndex < 0) {
-                    Logger.warn(TAG, "Rejected MEDIA_REQUEST from $senderId: negative offset or chunkIndex")
-                    return@launch
-                }
+            val rejection = chunkRequestRejection(payload)
+            if (rejection != null) {
+                Logger.warn(TAG, "Rejected MEDIA_REQUEST from $senderId: $rejection")
+                return@launch
             }
 
             // C03: Media Access Control (ACL)
