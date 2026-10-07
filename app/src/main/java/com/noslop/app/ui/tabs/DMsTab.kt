@@ -276,6 +276,10 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
+            // D07: requests we sent that have not been answered yet (previously invisible).
+            val outgoingRequests = peers.filter {
+                it.relationship == com.noslop.app.data.PeerRelationship.OUTGOING_PENDING && it.publicKeyB64 !in bannedKeys
+            }
 
             val eligibleGroupMembers = remember(rawContacts, temporaryContacts, discoverablePeers) {
                 (rawContacts + temporaryContacts + discoverablePeers.filter { it.onionAddress.isNotBlank() })
@@ -544,6 +548,21 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         PeerItem(peer, conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, viewModel)
                     }
                 }
+
+                if (outgoingRequests.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "SENT REQUESTS".tr,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMuted,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    items(outgoingRequests, key = { "out_" + it.publicKeyB64 }) { peer ->
+                        OutgoingRequestRow(peer = peer, viewModel = viewModel)
+                    }
+                }
                 
                 if (visibleDiscoverablePeers.isNotEmpty()) {
                     item {
@@ -749,6 +768,61 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     } // Close Box
 }
 
+
+/**
+ * D07: one unanswered outgoing connection request. Because v0.7.0 is a hard handshake-protocol
+ * break, a request to a contact still on an older NoSlop version can never complete; when we have
+ * seen that peer speak the legacy protocol we say so instead of leaving the request silently pending.
+ */
+@Composable
+fun OutgoingRequestRow(peer: Peer, viewModel: NoSlopViewModel) {
+    val isLegacyPeer by produceState(initialValue = false, peer.publicKeyB64) {
+        value = viewModel.isPeerOnLegacyProtocol(peer.publicKeyB64)
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, BorderSubtle)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AccessTime, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = peer.handle.ifBlank { peer.publicKeyB64.take(8) },
+                    color = TextLight,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (isLegacyPeer) {
+                    "This contact is running an older NoSlop version. Both of you need to update before you can connect.".tr
+                } else {
+                    "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.".tr
+                },
+                color = if (isLegacyPeer) DestructiveRed else TextMuted,
+                fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.resendConnectionRequest(peer) },
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
+                ) { Text("Re-send".tr, fontSize = 12.sp) }
+                OutlinedButton(
+                    onClick = { viewModel.cancelOutgoingRequest(peer) },
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = DestructiveRed)
+                ) { Text("Cancel Request".tr, fontSize = 12.sp) }
+            }
+        }
+    }
+}
 
 @Composable
 fun TutorialSpotlight(

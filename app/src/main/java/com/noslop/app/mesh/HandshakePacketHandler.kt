@@ -22,6 +22,65 @@ class HandshakePacketHandler(
         repo.syncMemberPeers(memberDetails)
     }
 
+    /**
+     * D07: legacy (pre-v0.7.0) handshakes are signed without the encryption key, target or nonce.
+     * They are never accepted — this only recognises them so the user can be told the other side
+     * runs an older NoSlop version instead of the request vanishing silently.
+     */
+    private fun isLegacyHandshakeSignature(pay: PeerHandshakePayload, signature: String): Boolean {
+        val encodePayload = CryptoService.encodeForSigning(
+            pay.fromUserId, pay.fromUsername, pay.fromHomeNode, pay.timestamp.toString(),
+            pay.authorAvatarB64, pay.bio.takeIf { !it.isNullOrBlank() }
+        )
+        var pipePayload = "${pay.fromUserId}|${pay.fromUsername}|${pay.fromHomeNode}|${pay.timestamp}"
+        if (pay.authorAvatarB64 != null) pipePayload += "|${pay.authorAvatarB64}"
+        if (!pay.bio.isNullOrBlank()) pipePayload += "|${pay.bio}"
+        return CryptoService.verify(encodePayload, signature, pay.fromUserId) ||
+            CryptoService.verify(pipePayload, signature, pay.fromUserId)
+    }
+
+    /** D07: v2 is the only accepted handshake encoding; it binds enc key, recipient and nonce. */
+    private fun isV2HandshakeSignature(pay: PeerHandshakePayload, signature: String, target: String, nonce: String): Boolean {
+        val v2Payload = CryptoService.canonicalHandshakePayloadV2(
+            fromUserId = pay.fromUserId,
+            fromUsername = pay.fromUsername,
+            fromHomeNode = pay.fromHomeNode,
+            fromEncryptionPublicKey = pay.fromEncryptionPublicKey ?: "",
+            targetUserId = target,
+            nonce = nonce,
+            timestamp = pay.timestamp,
+            authorAvatarB64 = pay.authorAvatarB64,
+            bio = pay.bio
+        )
+        return CryptoService.verify(v2Payload, signature, pay.fromUserId)
+    }
+
+    /**
+     * D07: remember that this key spoke the legacy protocol, and tell the user (at most once a day).
+     * Read back by the "Sent requests" list in the DMs tab.
+     */
+    private suspend fun recordLegacyProtocolPeer(pay: PeerHandshakePayload) {
+        val key = "peer_legacy_protocol_${pay.fromUserId}"
+        val now = System.currentTimeMillis()
+        val last = db.appSettingDao().getSetting(key)?.toLongOrNull() ?: 0L
+        db.appSettingDao().insertSetting(AppSetting(key, now.toString()))
+        if (now - last < 24 * 60 * 60 * 1000L) return
+        val title = com.noslop.app.util.LanguageManager.translate("Older NoSlop Version")
+        val msg = com.noslop.app.util.LanguageManager.translate("{author} tried to connect using an older NoSlop version. Both of you need to update before you can connect.")
+            .replace("{author}", pay.fromUsername.ifBlank { pay.fromUserId.take(8) })
+        notificationDao.insertNotification(
+            NotificationItem(
+                id = "legacy_proto_${pay.fromUserId}",
+                type = "SYSTEM",
+                title = title,
+                body = msg,
+                targetRoute = "notifications",
+                iconType = "handshake_declined",
+                senderPub = pay.fromUserId
+            )
+        )
+    }
+
     suspend fun handleConnectionRequest(packet: NetworkPacket, sendResponse: suspend (NetworkPacket) -> Unit = {}): Boolean {
         val connPay = packet.getConnectionRequestPayload() ?: return false
         val myPubKey = repo.getLocalIdentity()?.publicKeyB64
@@ -30,64 +89,38 @@ class HandshakePacketHandler(
             return false
         }
 
-        // C02: Destination check - ensure the packet is addressed to our identity
+        // C02/D07: the request must name one of our identities, and the envelope may not disagree.
         val targetUser = connPay.targetUserId ?: packet.targetUserId
-        if (targetUser != null && !repo.isLocalUser(targetUser)) {
-            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: targetUserId $targetUser does not match local identity")
+        if (targetUser.isNullOrBlank() || !repo.isLocalUser(targetUser)) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: targetUserId ${targetUser?.take(12)} is not a local identity")
             return false
         }
-        
+        if (packet.targetUserId != null && packet.targetUserId != targetUser) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: envelope target does not match signed target")
+            return false
+        }
+
         val signature = packet.signature ?: connPay.signature ?: return false
-
-        // C02: Verify v2 signature with key binding & nonce if present, else fallback for legacy
         val nonce = connPay.requestNonce ?: ""
-        val encPub = connPay.fromEncryptionPublicKey ?: ""
-        val targetForVerify = targetUser ?: ""
-        val v2Payload = CryptoService.canonicalHandshakePayloadV2(
-            fromUserId = connPay.fromUserId,
-            fromUsername = connPay.fromUsername,
-            fromHomeNode = connPay.fromHomeNode,
-            fromEncryptionPublicKey = encPub,
-            targetUserId = targetForVerify,
-            nonce = nonce,
-            timestamp = connPay.timestamp,
-            authorAvatarB64 = connPay.authorAvatarB64,
-            bio = connPay.bio
-        )
 
-        val encodePayload = CryptoService.encodeForSigning(
-            connPay.fromUserId, connPay.fromUsername, connPay.fromHomeNode, connPay.timestamp.toString(),
-            connPay.authorAvatarB64, connPay.bio.takeIf { !it.isNullOrBlank() }
-        )
-        var pipePayload = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
-        if (connPay.authorAvatarB64 != null) {
-            pipePayload += "|${connPay.authorAvatarB64}"
-        }
-        if (!connPay.bio.isNullOrBlank()) {
-            pipePayload += "|${connPay.bio}"
-        }
-
-        val isV2Valid = CryptoService.verify(v2Payload, signature, connPay.fromUserId)
-        val isLegacyValid = CryptoService.verify(encodePayload, signature, connPay.fromUserId) ||
-            CryptoService.verify(pipePayload, signature, connPay.fromUserId)
-
-        if (!isV2Valid && !isLegacyValid) {
-            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: signature verification failed for ${connPay.fromUserId}")
+        // D07: hard protocol break — only v2 signatures (binding enc key, target and nonce) are accepted.
+        if (nonce.isBlank() || !isV2HandshakeSignature(connPay, signature, targetUser, nonce)) {
+            if (isLegacyHandshakeSignature(connPay, signature)) {
+                Logger.warn(TAG, "Rejected CONNECTION_REQUEST from ${connPay.fromUserId.take(12)}: legacy (pre-v2) handshake — peer must update NoSlop")
+                recordLegacyProtocolPeer(connPay)
+            } else {
+                Logger.warn(TAG, "Rejected CONNECTION_REQUEST: signature verification failed for ${connPay.fromUserId.take(12)}")
+            }
             return false
         }
-        
+
         val existingPeer = peerDao.getPeerByPublicKey(connPay.fromUserId)
-        val isTrusted = existingPeer?.isTrusted ?: false
         val isOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 5 * 60 * 1000L
         val isVeryOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 60 * 60 * 1000L // 1 hour
 
-        if (isTrusted) {
-            if (!isOldPacket) {
-                Logger.info(TAG, "Received recent CONNECTION_REQUEST from already trusted peer ${existingPeer?.handle}. Resending USER_HANDSHAKE.")
-                repo.acceptConnectionRequest(existingPeer!!)
-            } else {
-                Logger.debug(TAG, "Ignored old CONNECTION_REQUEST from already trusted peer.")
-            }
+        // D06: BLOCKED is only ever left by explicit user action.
+        if (existingPeer?.relationship == PeerRelationship.BLOCKED) {
+            Logger.info(TAG, "Ignored CONNECTION_REQUEST from blocked peer ${connPay.fromUserId.take(12)}")
             return true
         }
 
@@ -103,51 +136,97 @@ class HandshakePacketHandler(
             return false
         }
 
-        val isNewRequest = existingPeer == null
-
         val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
-        
         var handleToUse = if (connPay.fromUsername.isNotBlank()) connPay.fromUsername else existingPeer?.handle ?: "Unknown"
         if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
-        
-        // C02: Only update encryption key if authenticated via v2 signature
-        val encPubToUse = if (isV2Valid && !connPay.fromEncryptionPublicKey.isNullOrBlank()) {
-            connPay.fromEncryptionPublicKey
-        } else {
-            existingPeer?.encPublicKeyB64 ?: ""
-        }
-        val avatarToUse = connPay.authorAvatarB64 ?: existingPeer?.authorAvatarB64
-        
+        val signedEncKey = connPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() }
+
         val burnable = repo.getBurnableIdentity()
-        val isLocalCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true" ||
-                             db.appSettingDao().getSetting("is_creator") == "true"
-        if (burnable != null && (packet.targetUserId == burnable.publicKeyB64 || isLocalCreator)) {
-            db.appSettingDao().insertSetting(com.noslop.app.data.AppSetting("contact_identity_${connPay.fromUserId}", "burnable"))
+        val requestedBurnable = burnable != null && targetUser == burnable.publicKeyB64
+
+        if (existingPeer != null && existingPeer.relationship == PeerRelationship.ACCEPTED) {
+            // A friend re-requesting (reinstall, lost our row). Re-send our handshake echoing THEIR
+            // nonce. Never silently replace their encryption key: a change waits for the user (C02).
+            if (isOldPacket) {
+                Logger.debug(TAG, "Ignored old CONNECTION_REQUEST from accepted peer ${existingPeer.handle}.")
+                return true
+            }
+            val keyChanged = signedEncKey != null && existingPeer.encPublicKeyB64.isNotBlank() &&
+                signedEncKey != existingPeer.encPublicKeyB64
+            if (keyChanged) {
+                Logger.warn(TAG, "Safety key changed for ACCEPTED peer ${existingPeer.handle} (via CONNECTION_REQUEST); held in pendingEncKey")
+            }
+            peerDao.insertPeer(existingPeer.copy(
+                handle = handleToUse,
+                onionAddress = connPay.fromHomeNode.ifBlank { existingPeer.onionAddress },
+                encPublicKeyB64 = if (existingPeer.encPublicKeyB64.isBlank()) (signedEncKey ?: "") else existingPeer.encPublicKeyB64,
+                pendingEncKey = if (keyChanged) signedEncKey else existingPeer.pendingEncKey,
+                pendingNonce = nonce,
+                authorAvatarB64 = connPay.authorAvatarB64 ?: existingPeer.authorAvatarB64,
+                bio = connPay.bio ?: existingPeer.bio,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+            Logger.info(TAG, "Recent CONNECTION_REQUEST from accepted peer ${existingPeer.handle}; re-sending USER_HANDSHAKE")
+            repo.acceptConnectionRequest(existingPeer)
+            return true
         }
 
-        // C01: Sets relationship to INCOMING_PENDING and records request nonce
-        val peer = Peer(
+        if (existingPeer != null && existingPeer.relationship == PeerRelationship.OUTGOING_PENDING) {
+            // D06: crossing requests. We asked them (user action — OUTGOING_PENDING is only ever
+            // created by sendConnectionRequest from the UI) and they asked us with a valid v2 request
+            // addressed to us: mutual consent. Stage the row as INCOMING_PENDING carrying THEIR nonce
+            // and let acceptConnectionRequest promote it and answer with a USER_HANDSHAKE. Their
+            // handshake answering our own nonce then lands as an ACCEPTED profile refresh.
+            Logger.info(TAG, "Crossing CONNECTION_REQUEST from ${existingPeer.handle}: mutual consent, promoting to ACCEPTED")
+            peerDao.insertPeer(existingPeer.copy(
+                handle = handleToUse,
+                onionAddress = connPay.fromHomeNode.ifBlank { existingPeer.onionAddress },
+                encPublicKeyB64 = signedEncKey ?: existingPeer.encPublicKeyB64,
+                relationship = PeerRelationship.INCOMING_PENDING,
+                pendingNonce = nonce,
+                authorAvatarB64 = connPay.authorAvatarB64 ?: existingPeer.authorAvatarB64,
+                bio = connPay.bio ?: existingPeer.bio,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+            repo.acceptConnectionRequest(existingPeer)
+            GossipService.flushFirewallBuffer(connPay.fromUserId)
+            return true
+        }
+
+        val isNewRequest = existingPeer?.relationship != PeerRelationship.INCOMING_PENDING
+
+        // D01: record which of our identities was asked — but do NOT bind the contact identity
+        // (contact_identity_*) until the user (or the creator auto-accept below) consents.
+        db.appSettingDao().insertSetting(
+            AppSetting("requested_identity_${connPay.fromUserId}", if (requestedBurnable) "burnable" else "main")
+        )
+
+        // C01/D06: INCOMING_PENDING, merged onto any existing row (group stub, discoverable node).
+        val base = existingPeer ?: Peer(
             publicKeyB64 = connPay.fromUserId,
             handle = handleToUse,
             tripcode = tripcode,
-            onionAddress = connPay.fromHomeNode,
-            encPublicKeyB64 = encPubToUse,
-            isTrusted = false,
-            relationship = "INCOMING_PENDING",
-            pendingNonce = connPay.requestNonce,
+            onionAddress = connPay.fromHomeNode
+        )
+        val peer = base.copy(
+            handle = handleToUse,
+            tripcode = tripcode,
+            onionAddress = connPay.fromHomeNode.ifBlank { base.onionAddress },
+            encPublicKeyB64 = signedEncKey ?: base.encPublicKeyB64,
+            relationship = PeerRelationship.INCOMING_PENDING,
+            pendingNonce = nonce,
             lastSeenAt = System.currentTimeMillis(),
-            authorAvatarB64 = avatarToUse,
-            isTemporary = if (burnable != null && packet.targetUserId == burnable.publicKeyB64) true else (existingPeer?.isTemporary ?: false),
-            isDiscoverable = existingPeer?.isDiscoverable ?: false,
-            isCreator = existingPeer?.isCreator ?: false,
-            fundMeLink = existingPeer?.fundMeLink,
-            customFolder = existingPeer?.customFolder,
-            bio = connPay.bio ?: existingPeer?.bio
+            authorAvatarB64 = connPay.authorAvatarB64 ?: base.authorAvatarB64,
+            isTemporary = base.isTemporary || requestedBurnable,
+            bio = connPay.bio ?: base.bio
         )
         peerDao.insertPeer(peer)
-        
-        if (isLocalCreator) {
+
+        val isLocalCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true" ||
+                             db.appSettingDao().getSetting("is_creator") == "true"
+        // D01: creator auto-accept applies only to followers who addressed the burnable (creator) identity.
+        if (isLocalCreator && requestedBurnable) {
             val now = System.currentTimeMillis()
             val senderLimits = autoAcceptRateLimits.getOrPut(connPay.fromUserId) { mutableListOf() }
             var allowed = false
@@ -158,12 +237,11 @@ class HandshakePacketHandler(
                     allowed = true
                 }
             }
-            
+
             if (allowed) {
-                peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = true, relationship = "ACCEPTED"))
                 repo.acceptConnectionRequest(peer)
                 GossipService.flushFirewallBuffer(connPay.fromUserId)
-                Logger.info(TAG, "Auto-accepted connection request from ${peer.handle}")
+                Logger.info(TAG, "Auto-accepted follower connection request from ${peer.handle} (creator identity)")
             } else {
                 repo.setIncomingRequest(peer)
             }
@@ -178,7 +256,7 @@ class HandshakePacketHandler(
                     val msg = com.noslop.app.util.LanguageManager.translate("{author} wants to connect with you.")
                         .replace("{author}", peer.handle)
                     val route = "notifications"
-                    
+
                     notificationDao.insertNotification(
                         NotificationItem(
                             id = "conn_req_${peer.publicKeyB64}",
@@ -212,46 +290,29 @@ class HandshakePacketHandler(
         val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
         if (myPubKey == handPay.fromUserId || myBurnablePubKey == handPay.fromUserId) return false
 
-        // C02: Destination check - ensure the packet is addressed to our identity
+        // C02/D07: the handshake must name one of our identities, and the envelope may not disagree.
         val targetUser = handPay.targetUserId ?: packet.targetUserId
-        if (targetUser != null && !repo.isLocalUser(targetUser)) {
-            Logger.warn(TAG, "Rejected USER_HANDSHAKE: targetUserId $targetUser does not match local identity")
+        if (targetUser.isNullOrBlank() || !repo.isLocalUser(targetUser)) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: targetUserId ${targetUser?.take(12)} is not a local identity")
+            return false
+        }
+        if (packet.targetUserId != null && packet.targetUserId != targetUser) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: envelope target does not match signed target")
             return false
         }
 
         val nonce = handPay.inReplyToNonce ?: ""
         val encPub = handPay.fromEncryptionPublicKey ?: ""
-        val targetForVerify = targetUser ?: ""
-        val v2Payload = CryptoService.canonicalHandshakePayloadV2(
-            fromUserId = handPay.fromUserId,
-            fromUsername = handPay.fromUsername,
-            fromHomeNode = handPay.fromHomeNode,
-            fromEncryptionPublicKey = encPub,
-            targetUserId = targetForVerify,
-            nonce = nonce,
-            timestamp = handPay.timestamp,
-            authorAvatarB64 = handPay.authorAvatarB64,
-            bio = handPay.bio
-        )
 
-        val encodePayload = CryptoService.encodeForSigning(
-            handPay.fromUserId, handPay.fromUsername, handPay.fromHomeNode, handPay.timestamp.toString(),
-            handPay.authorAvatarB64, handPay.bio.takeIf { !it.isNullOrBlank() }
-        )
-        var pipePayload = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
-        if (handPay.authorAvatarB64 != null) {
-            pipePayload += "|${handPay.authorAvatarB64}"
-        }
-        if (!handPay.bio.isNullOrBlank()) {
-            pipePayload += "|${handPay.bio}"
-        }
-
-        val isV2Valid = CryptoService.verify(v2Payload, signature, handPay.fromUserId)
-        val isLegacyValid = CryptoService.verify(encodePayload, signature, handPay.fromUserId) ||
-            CryptoService.verify(pipePayload, signature, handPay.fromUserId)
-
-        if (!isV2Valid && !isLegacyValid) {
-            Logger.warn(TAG, "Rejected USER_HANDSHAKE: signature verification failed for ${handPay.fromUserId}")
+        // D07: hard protocol break — the nonce echo only proves consent when the signature covers it,
+        // so legacy encodings are never accepted for promotion or key updates (or at all).
+        if (!isV2HandshakeSignature(handPay, signature, targetUser, nonce)) {
+            if (isLegacyHandshakeSignature(handPay, signature)) {
+                Logger.warn(TAG, "Rejected USER_HANDSHAKE from ${handPay.fromUserId.take(12)}: legacy (pre-v2) handshake — peer must update NoSlop")
+                recordLegacyProtocolPeer(handPay)
+            } else {
+                Logger.warn(TAG, "Rejected USER_HANDSHAKE: signature verification failed for ${handPay.fromUserId.take(12)}")
+            }
             return false
         }
 
@@ -284,9 +345,9 @@ class HandshakePacketHandler(
                     handle = if (handPay.fromUsername.isNotBlank() && handPay.fromUsername != "Member") handPay.fromUsername else fallbackHandle,
                     tripcode = tripcode,
                     onionAddress = handPay.fromHomeNode,
-                    encPublicKeyB64 = if (isV2Valid) encPub else "",
+                    encPublicKeyB64 = encPub,
                     isTrusted = false,
-                    relationship = "NONE",
+                    relationship = PeerRelationship.NONE,
                     isTemporary = false,
                     lastSeenAt = System.currentTimeMillis()
                 )
@@ -300,8 +361,8 @@ class HandshakePacketHandler(
         }
 
         val isOldPacket = (System.currentTimeMillis() - handPay.timestamp) > 5 * 60 * 1000L
-        if (peer.isTrusted && isOldPacket) {
-            Logger.debug(TAG, "Ignored old USER_HANDSHAKE from already trusted peer ${peer.handle}.")
+        if (peer.relationship == PeerRelationship.ACCEPTED && isOldPacket) {
+            Logger.debug(TAG, "Ignored old USER_HANDSHAKE from already accepted peer ${peer.handle}.")
             return true
         }
 
@@ -312,8 +373,8 @@ class HandshakePacketHandler(
         if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
 
         // C01: Relationship state transition enforcement
-        val isOutgoingPending = peer.relationship == "OUTGOING_PENDING"
-        val isAlreadyAccepted = peer.relationship == "ACCEPTED" || peer.isTrusted
+        val isOutgoingPending = peer.relationship == PeerRelationship.OUTGOING_PENDING
+        val isAlreadyAccepted = peer.relationship == PeerRelationship.ACCEPTED
 
         if (isOutgoingPending) {
             // Verify inReplyToNonce matches the pendingNonce we generated when sending CONNECTION_REQUEST
@@ -324,11 +385,11 @@ class HandshakePacketHandler(
             }
 
             // Both nonce and signature matched! Promote to ACCEPTED
-            val encKeyToSave = if (isV2Valid && encPub.isNotBlank()) encPub else peer.encPublicKeyB64
+            val encKeyToSave = if (encPub.isNotBlank()) encPub else peer.encPublicKeyB64
             val updated = peer.copy(
                 handle = handleToUse,
                 isTrusted = true,
-                relationship = "ACCEPTED",
+                relationship = PeerRelationship.ACCEPTED,
                 pendingNonce = null,
                 pendingEncKey = null,
                 lastSeenAt = System.currentTimeMillis(),
@@ -379,18 +440,21 @@ class HandshakePacketHandler(
             // C02: Key change detection for already accepted peer
             var pendingKeyAlert: String? = peer.pendingEncKey
             var encKey = peer.encPublicKeyB64
-            if (isV2Valid && encPub.isNotBlank() && encPub != peer.encPublicKeyB64) {
+            if (encPub.isNotBlank() && peer.encPublicKeyB64.isNotBlank() && encPub != peer.encPublicKeyB64) {
                 Logger.warn(TAG, "Safety key changed for ACCEPTED peer ${peer.handle}! Storing in pendingEncKey for user acknowledgement.")
                 pendingKeyAlert = encPub
             }
 
+            if (peer.encPublicKeyB64.isBlank() && encPub.isNotBlank()) encKey = encPub
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 lastSeenAt = System.currentTimeMillis(),
                 onionAddress = handPay.fromHomeNode,
+                encPublicKeyB64 = encKey,
                 authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64,
                 bio = handPay.bio ?: peer.bio,
-                pendingEncKey = pendingKeyAlert
+                pendingEncKey = pendingKeyAlert,
+                pendingNonce = if (!peer.pendingNonce.isNullOrBlank() && handPay.inReplyToNonce == peer.pendingNonce) null else peer.pendingNonce
             ))
             Logger.info(TAG, "Refreshed profile details for already ACCEPTED peer ${peer.handle}")
             return true
@@ -415,8 +479,11 @@ class HandshakePacketHandler(
         if (!isValid) return false
 
         val peer = peerDao.getPeerByPublicKey(rejectPay.fromUserId)
-        if (peer != null && !peer.isTrusted) {
+        // D06: a rejection only cancels OUR pending request; it can never delete a group stub,
+        // an incoming request or a discoverable node row.
+        if (peer != null && peer.relationship == PeerRelationship.OUTGOING_PENDING) {
             peerDao.deletePeer(peer)
+            db.appSettingDao().removeSetting("contact_identity_${peer.publicKeyB64}")
 
             val notifSettings = repo.notificationSettingsFlow.value
             if (notifSettings.system) {
@@ -533,7 +600,7 @@ class HandshakePacketHandler(
                 onionAddress = announcePay.onionAddress,
                 encPublicKeyB64 = announcePay.encPublicKey,
                 isTrusted = false,
-                relationship = "NONE",
+                relationship = PeerRelationship.NONE,
                 isTemporary = true,
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
@@ -705,7 +772,7 @@ class HandshakePacketHandler(
 
         val peer = peerDao.getPeerByPublicKey(exitPay.userId)
         if (peer != null) {
-            peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))
+            peerDao.updatePresence(peer.publicKeyB64, false, System.currentTimeMillis())
         }
         if (repo.isNodeBanned(exitPay.userId)) {
             Logger.info(TAG, "Banned node ${exitPay.userId.take(8)}... exited/shut down — removing from ban list")
@@ -1062,7 +1129,7 @@ class HandshakePacketHandler(
 
         val myKeys = repo.getLocalIdentity() ?: return false
         val burnableKeys = repo.getBurnableIdentity()
-        val signingKey = if (burnableKeys != null && (group.membersJson.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
+        val signingKey = if (burnableKeys != null && (members.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
 
         val groupJson = com.noslop.app.util.Json.gson.toJson(group)
         val stateTimestamp = maxOf(group.createdAt, group.revision)

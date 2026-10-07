@@ -861,5 +861,12 @@
   "Your private identity will be sent to this host. Confirm you trust this machine.": "Your private identity will be sent to this host. Confirm you trust this machine.",
   "[Deleted]": "[Deleted]",
   "{author} shared a new broadcast.": "{author} shared a new broadcast.",
-  "Update REJECTED: the downloaded file certificate does not match the installed application.": "Update REJECTED: the downloaded file certificate does not match the installed application."
+  "Update REJECTED: the downloaded file certificate does not match the installed application.": "Update REJECTED: the downloaded file certificate does not match the installed application.",
+  "Older NoSlop Version": "Older NoSlop Version",
+  "{author} tried to connect using an older NoSlop version. Both of you need to update before you can connect.": "{author} tried to connect using an older NoSlop version. Both of you need to update before you can connect.",
+  "SENT REQUESTS": "SENT REQUESTS",
+  "This contact is running an older NoSlop version. Both of you need to update before you can connect.": "This contact is running an older NoSlop version. Both of you need to update before you can connect.",
+  "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.": "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.",
+  "Re-send": "Re-send",
+  "Cancel Request": "Cancel Request"
 }

@@ -339,16 +339,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val myKeys = getLocalIdentity() ?: return@withContext
         val adminPubKey = "admin_${myKeys.publicKeyB64}"
         val existing = peerDao.getPeerByPublicKey(adminPubKey)
-        if (existing == null) {
-            peerDao.insertPeer(com.noslop.app.data.Peer(
+        // D01 (explicit decision): the Hub's Admin AI is the user's OWN node, so it is ACCEPTED.
+        if (existing == null || existing.relationship != PeerRelationship.ACCEPTED) {
+            peerDao.insertPeer((existing ?: com.noslop.app.data.Peer(
                 publicKeyB64 = adminPubKey,
                 handle = "Admin AI (Hub)",
                 tripcode = "admin",
                 onionAddress = myKeys.onionAddress,
                 encPublicKeyB64 = myKeys.encPublicKeyB64,
-                isTrusted = true,
                 lastSeenAt = System.currentTimeMillis()
-            ))
+            )).copy(relationship = PeerRelationship.ACCEPTED))
         }
     }
 
@@ -474,7 +474,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         tripcode = "sync",
                         onionAddress = peerObj.optString("onion_address", ""),
                         encPublicKeyB64 = encPubKey,
-                        isTrusted = peerObj.optBoolean("is_trusted", false),
+                        // D01 (explicit decision): the Hub is the user's own mirror of this device's
+                        // contact list, so its "trusted" flag restores an ACCEPTED relationship.
+                        relationship = if (peerObj.optBoolean("is_trusted", false)) PeerRelationship.ACCEPTED else PeerRelationship.NONE,
                         lastSeenAt = System.currentTimeMillis()
                     ))
                 }
@@ -897,13 +899,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         val pubBytes = try { android.util.Base64.decode(invite.adminPublicKeyB64, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
                         val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "admin"
                         peerDao.insertPeer(
+                            // D01: a group admin is a group member (relationship NONE), not a friend.
+                            // Friends-only posts, sync and media stay off-limits to them.
                             Peer(
                                 publicKeyB64 = invite.adminPublicKeyB64,
                                 handle = invite.memberHandles?.get(invite.adminPublicKeyB64) ?: "Group Admin",
                                 tripcode = tripcode,
                                 onionAddress = invite.adminOnion ?: "",
                                 encPublicKeyB64 = invite.adminEncPublicKey ?: "",
-                                isTrusted = true,
+                                isTrusted = false,
+                                relationship = PeerRelationship.NONE,
                                 isTemporary = false,
                                 lastSeenAt = System.currentTimeMillis()
                             )
@@ -912,8 +917,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         peerDao.insertPeer(
                             adminPeer.copy(
                                 encPublicKeyB64 = adminPeer.encPublicKeyB64.ifBlank { invite.adminEncPublicKey ?: "" },
-                                onionAddress = adminPeer.onionAddress.ifBlank { invite.adminOnion ?: "" },
-                                isTrusted = true
+                                onionAddress = adminPeer.onionAddress.ifBlank { invite.adminOnion ?: "" }
                             )
                         )
                     }
@@ -1014,11 +1018,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
             val encPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
             if (encPub == null) {
-                // Never fallback to Ed25519 key for X25519 encryption. Send connection request & group catchup to learn key.
-                Logger.warn("REPOSITORY", "Member ${memberPub.take(12)}... has no X25519 key. Requesting handshake and group catchup.")
-                if (peer != null && peer.onionAddress.isNotBlank()) {
-                    sendConnectionRequest(peer.handle, memberPub, peer.onionAddress)
-                }
+                // Never fall back to the Ed25519 key for X25519 encryption. D01/D06: never send an
+                // automatic CONNECTION_REQUEST either (it would fake the user's consent); the member's
+                // key comes from the signed group directory via catch-up.
+                Logger.warn("REPOSITORY", "Member ${memberPub.take(12)}... has no X25519 key. Requesting group catch-up.")
                 requestGroupCatchup(groupId)
                 continue
             }
@@ -1768,7 +1771,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         for (memberPub in candidatePubs) {
             if (memberPub !in otherGroupMembers && memberPub != myKeys?.publicKeyB64 && memberPub != burnable?.publicKeyB64) {
                 val p = peerDao.getPeerByPublicKey(memberPub)
-                if (p != null && !p.isTrusted && !p.isDiscoverable) {
+                // D06: only plain group stubs are cleaned up — never a pending request in either direction.
+                if (p != null && p.relationship == PeerRelationship.NONE && !p.isDiscoverable) {
                     peerDao.deletePeer(p)
                     Logger.info("REPOSITORY", "Cleaned up non-contact group peer: ${p.handle}")
                 }
@@ -1776,33 +1780,38 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
-    fun startPresenceHeartbeat() {
-        // Clean up any duplicate temporary peers that were erroneously promoted to contacts
-        repositoryScope.launch(Dispatchers.IO) {
-            try {
-                val allPeersList = peerDao.getAllPeersList()
-                for (p in allPeersList) {
-                    // Upgrade placeholder handle 'Member' to distinguished handle to prevent key loss
-                    if (p.handle == "Member") {
-                        peerDao.insertPeer(p.copy(handle = "Member_${p.publicKeyB64.take(6)}"))
-                        continue
-                    }
-                    // Heal and restore connected creator peers that were erroneously demoted
-                    val contactIdentity = appSettingDao.getSetting("contact_identity_${p.publicKeyB64}")
-                    if (contactIdentity == "burnable" && !p.isTrusted) {
-                        peerDao.insertPeer(p.copy(isTrusted = true, isTemporary = true))
-                        Logger.info("REPOSITORY", "Restored connected creator peer: ${p.handle}")
-                    }
+    /**
+     * Startup peer maintenance, run once when the presence heartbeat starts. Split out so the
+     * D01 regression test can run exactly this code deterministically.
+     */
+    internal suspend fun runStartupPeerMaintenance() {
+        try {
+            val allPeersList = peerDao.getAllPeersList()
+            for (p in allPeersList) {
+                // Upgrade placeholder handle 'Member' to distinguished handle to prevent key loss
+                if (p.handle == "Member") {
+                    peerDao.insertPeer(p.copy(handle = "Member_${p.publicKeyB64.take(6)}"))
                 }
-                if (preferencesRepository.isNodeBanned(OFFICIAL_CREATOR_PUBKEY)) {
-                    postDao.deletePostsByAuthor(OFFICIAL_CREATOR_PUBKEY)
-                    val oldP = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
-                    if (oldP != null) peerDao.deletePeer(oldP)
-                }
-            } catch (_: Exception) {}
+                // D01: the former "heal" block that promoted burnable-contact peers to trusted on
+                // every start was removed — it granted trust without consent. Trust now comes only
+                // from relationship == ACCEPTED (see PeerDao.insertPeer).
+            }
+            if (preferencesRepository.isNodeBanned(OFFICIAL_CREATOR_PUBKEY)) {
+                postDao.deletePostsByAuthor(OFFICIAL_CREATOR_PUBKEY)
+                val oldP = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
+                if (oldP != null) peerDao.deletePeer(oldP)
+            }
+        } catch (e: Exception) {
+            Logger.warn("REPOSITORY", "Startup peer maintenance failed: ${e.message}")
         }
+    }
+
+    fun startPresenceHeartbeat() {
+        repositoryScope.launch(Dispatchers.IO) { runStartupPeerMaintenance() }
         meshSocialRepository.startPresenceHeartbeat()
     }
+
+    fun stopPresenceHeartbeat() = meshSocialRepository.stopPresenceHeartbeat()
 
     // --- Media / Notification / Foreground Settings (delegated to SettingsRepository) ---
     suspend fun getMediaSettings(): MediaSettings = settingsRepository.getMediaSettings()
@@ -2164,7 +2173,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun rejectConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.rejectConnectionRequest(peer)
 
-    suspend fun togglePeerTrust(peer: Peer) = meshSocialRepository.togglePeerTrust(peer)
+    suspend fun cancelOutgoingRequest(publicKeyB64: String): Boolean = meshSocialRepository.cancelOutgoingRequest(publicKeyB64)
+
+    /** D07: true when this peer was last seen speaking the pre-v0.7.0 handshake protocol. */
+    suspend fun isPeerOnLegacyProtocol(publicKeyB64: String): Boolean =
+        appSettingDao.getSetting("peer_legacy_protocol_$publicKeyB64") != null
 
     suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = meshSocialRepository.deletePeer(publicKeyB64, notifyRemote)
     suspend fun deleteNotificationsBySender(senderPub: String) = db.notificationDao().deleteNotificationsBySender(senderPub)

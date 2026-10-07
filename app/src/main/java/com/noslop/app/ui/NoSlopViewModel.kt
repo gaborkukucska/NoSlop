@@ -703,13 +703,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     if (oldPeer != null && oldPeer.handle == "Admin AI") {
                         repository.peerDao.deletePeer(oldPeer)
                     }
+                    // D01 (explicit decision): the Hub's Admin AI is the user's own node -> ACCEPTED.
                     val adminPeer = com.noslop.app.data.Peer(
                         publicKeyB64 = "admin_${identity.publicKeyB64}",
                         handle = "Admin AI",
                         tripcode = identity.tripcode,
                         onionAddress = identity.onionAddress,
                         encPublicKeyB64 = identity.encPublicKeyB64,
-                        isTrusted = true,
+                        relationship = com.noslop.app.data.PeerRelationship.ACCEPTED,
                         lastSeenAt = System.currentTimeMillis()
                     )
                     repository.peerDao.insertPeer(adminPeer)
@@ -2744,13 +2745,14 @@ fun toggleAggregator() {
                     if (oldPeer != null && oldPeer.handle == "Admin AI") {
                         repository.peerDao.deletePeer(oldPeer)
                     }
+                    // D01 (explicit decision): the Hub's Admin AI is the user's own node -> ACCEPTED.
                     val adminPeer = com.noslop.app.data.Peer(
                         publicKeyB64 = "admin_${identity.publicKeyB64}",
                         handle = "Admin AI",
                         tripcode = identity.tripcode,
                         onionAddress = identity.onionAddress,
                         encPublicKeyB64 = identity.encPublicKeyB64,
-                        isTrusted = true,
+                        relationship = com.noslop.app.data.PeerRelationship.ACCEPTED,
                         lastSeenAt = System.currentTimeMillis()
                     )
                     repository.peerDao.insertPeer(adminPeer)
@@ -2860,7 +2862,21 @@ fun toggleAggregator() {
             }
         }
     }
-    fun togglePeerTrust(peer: Peer) { viewModelScope.launch { repository.togglePeerTrust(peer) } }
+    /** D07: re-sends a connection request the peer never answered. */
+    fun resendConnectionRequest(peer: Peer) {
+        viewModelScope.launch {
+            val useBurnable = repository.getAppSetting("contact_identity_${peer.publicKeyB64}") == "burnable"
+            repository.sendConnectionRequest(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnable)
+        }
+    }
+
+    /** D07: withdraws an unanswered outgoing request. */
+    fun cancelOutgoingRequest(peer: Peer) {
+        viewModelScope.launch { repository.cancelOutgoingRequest(peer.publicKeyB64) }
+    }
+
+    /** D07: whether this peer was last seen running the pre-v0.7.0 handshake protocol. */
+    suspend fun isPeerOnLegacyProtocol(peerPub: String): Boolean = repository.isPeerOnLegacyProtocol(peerPub)
     fun removePeer(peerPub: String) { 
         viewModelScope.launch { 
             val peer = peers.value.find { it.publicKeyB64 == peerPub }

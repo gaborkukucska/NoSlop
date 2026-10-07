@@ -26,9 +26,10 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class,
         GroupChat::class,
-        PendingGroupMessage::class
+        PendingGroupMessage::class,
+        MediaOwner::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = true
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -49,6 +50,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
     abstract fun swipeTrackerDao(): SwipeTrackerDao
     abstract fun groupChatDao(): GroupChatDao
     abstract fun pendingGroupMessageDao(): PendingGroupMessageDao
+    abstract fun mediaOwnerDao(): MediaOwnerDao
 
     companion object {
         @Volatile
@@ -239,6 +241,81 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v0.7.0 (round-2 review, D01/D02/D10). The only schema change of this release:
+         *  1. peers.verifiedFingerprint (D10 "Mark verified").
+         *  2. media_owner index table (D02), back-filled from every existing post, comment and
+         *     message attachment so the deny-by-default media ACL knows every file on disk.
+         *  3. Trust repair (D01): burnable-identity contacts are always temporary, and
+         *     isTrusted is re-derived from relationship. This demotes every peer the old
+         *     startup "heal" promoted without consent (relationship stayed INCOMING_PENDING)
+         *     and every group admin that acceptGroupInvite made a full friend.
+         */
+        val MIGRATION_18_19 = object : androidx.room.migration.Migration(18, 19) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE peers ADD COLUMN verifiedFingerprint TEXT DEFAULT NULL")
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `media_owner` (`mediaId` TEXT NOT NULL, `ownerType` TEXT NOT NULL, " +
+                    "`ownerId` TEXT NOT NULL, `privacy` TEXT NOT NULL, `authorPub` TEXT NOT NULL, `accessKey` TEXT, " +
+                    "`sha256` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`mediaId`, `ownerType`, `ownerId`))"
+                )
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_media_owner_mediaId` ON `media_owner` (`mediaId`)")
+
+                // D01 trust repair. 'contact_identity_' is 17 characters, so the peer key starts at 18.
+                database.execSQL(
+                    "UPDATE peers SET isTemporary = 1 WHERE publicKeyB64 IN " +
+                    "(SELECT substr(`key`, 18) FROM app_settings WHERE `key` LIKE 'contact_identity_%' AND `value` = 'burnable')"
+                )
+                database.execSQL("UPDATE peers SET isTrusted = CASE WHEN relationship = 'ACCEPTED' THEN 1 ELSE 0 END")
+
+                backfillMediaOwners(database)
+            }
+        }
+
+        /** D02 back-fill, shared by MIGRATION_18_19. Idempotent (INSERT OR IGNORE). */
+        internal fun backfillMediaOwners(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            val now = System.currentTimeMillis()
+            fun insert(mediaId: String, type: String, ownerId: String, privacy: String, author: String) {
+                if (!com.noslop.app.mesh.MediaManager.isValidMediaId(mediaId)) return
+                database.execSQL(
+                    "INSERT OR IGNORE INTO media_owner (mediaId, ownerType, ownerId, privacy, authorPub, accessKey, sha256, createdAt) " +
+                    "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)",
+                    arrayOf<Any?>(mediaId, type, ownerId, privacy, author, now)
+                )
+            }
+            database.query("SELECT id, mediaUrl, privacy, authorPublicKeyB64 FROM mesh_posts WHERE mediaUrl IS NOT NULL AND isOrphaned = 0").use { c ->
+                while (c.moveToNext()) {
+                    val mediaId = MediaOwner.mediaIdFromUrl(c.getString(1)) ?: continue
+                    insert(mediaId, MediaOwner.TYPE_POST, c.getString(0), MediaOwner.normalizePrivacy(c.getString(2)), c.getString(3) ?: "")
+                }
+            }
+            database.query(
+                "SELECT c.id, c.mediaId, c.authorPublicKeyB64, p.privacy FROM mesh_comments c " +
+                "LEFT JOIN mesh_posts p ON p.id = c.postId WHERE c.mediaId IS NOT NULL"
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val mediaId = c.getString(1) ?: continue
+                    insert(mediaId, MediaOwner.TYPE_COMMENT, c.getString(0), MediaOwner.normalizePrivacy(c.getString(3)), c.getString(2) ?: "")
+                }
+            }
+            database.query(
+                "SELECT m.mediaId, m.chatWithPeerPub, m.senderPub, " +
+                "(SELECT COUNT(*) FROM group_chats g WHERE g.groupId = m.chatWithPeerPub) FROM chat_messages m WHERE m.mediaId IS NOT NULL"
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val mediaId = c.getString(0) ?: continue
+                    val isGroup = c.getInt(3) > 0
+                    insert(
+                        mediaId,
+                        if (isGroup) MediaOwner.TYPE_GROUP else MediaOwner.TYPE_DM,
+                        c.getString(1) ?: continue,
+                        if (isGroup) "group" else "private",
+                        c.getString(2) ?: ""
+                    )
+                }
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -247,7 +324,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
                 .build()
                 .also { INSTANCE = it }
             }

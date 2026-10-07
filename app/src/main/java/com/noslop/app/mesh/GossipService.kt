@@ -552,9 +552,10 @@ object GossipService {
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 val contactSetting = transport?.repository?.getAppSetting("contact_identity_${senderId}")
-                val isSeverableOrTemporary = peer == null || !peer.isTrusted || peer.isTemporary || contactSetting == "burnable"
+                // D01: friends-only traffic is accepted from friends (Peer.isFriend) and from the post's author.
+                val isFriendSender = peer?.isFriend == true && contactSetting != "burnable"
                 val isPostAuthor = postContext.targetPostAuthor != null && senderId == postContext.targetPostAuthor
-                if (isSeverableOrTemporary && !isPostAuthor) {
+                if (!isFriendSender && !isPostAuthor) {
                     Logger.warn("FIREWALL", "FIREWALL BLOCKED: Dropping friends-only ${packet.type} packet $packetId from non-direct peer $senderId (temporary/burnable)")
                     return false
                 }
@@ -972,9 +973,10 @@ object GossipService {
         val targetPeers = if (isFriendsOnly) {
             activePeers.filter { peer ->
                 val contactSetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
-                val isSeverableOrTemporary = peer.isTemporary || contactSetting == "burnable"
+                // D01: friends-only content goes to friends only (plus the author of the post it belongs to).
+                val isFriendTarget = peer.isFriend && contactSetting != "burnable"
                 val isPostAuthor = targetPostAuthor != null && peer.publicKeyB64 == targetPostAuthor
-                peer.isTrusted && (!isSeverableOrTemporary || isPostAuthor) &&
+                (isFriendTarget || (isPostAuthor && peer.isTrusted)) &&
                     peer.publicKeyB64 != localPublicKeyB64 &&
                     peer.onionAddress.isNotBlank()
             }

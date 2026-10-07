@@ -112,7 +112,8 @@ class MeshSocialRepositoryTest {
         peerDao.insertPeer(
             Peer(
                 publicKeyB64 = bob.publicKeyB64, handle = "bob", tripcode = bob.tripcode,
-                onionAddress = "bob.onion", encPublicKeyB64 = bob.encPublicKeyB64, isTrusted = true,
+                onionAddress = "bob.onion", encPublicKeyB64 = bob.encPublicKeyB64,
+                relationship = PeerRelationship.ACCEPTED,
             )
         )
 
@@ -141,16 +142,20 @@ class MeshSocialRepositoryTest {
     @Test
     fun acceptConnectionRequest_trustsPeerAndClearsIncoming() = runBlocking {
         val bob = CryptoService.generateIdentity("bob")
+        // D01: only a stored INCOMING_PENDING request can be accepted.
         val peer = Peer(
             publicKeyB64 = bob.publicKeyB64, handle = "bob", tripcode = bob.tripcode,
             onionAddress = "bob.onion", encPublicKeyB64 = bob.encPublicKeyB64, isTrusted = false,
+            relationship = PeerRelationship.INCOMING_PENDING, pendingNonce = "bob-nonce",
         )
+        peerDao.insertPeer(peer)
         repo.setIncomingRequest(peer)
         assertNotNull(repo.incomingRequestFlow.value)
 
         assertTrue(repo.acceptConnectionRequest(peer))
 
         assertTrue("accepted peer becomes trusted", peerDao.peers[bob.publicKeyB64]!!.isTrusted)
+        assertEquals(PeerRelationship.ACCEPTED, peerDao.peers[bob.publicKeyB64]!!.relationship)
         assertNull("the incoming request is cleared", repo.incomingRequestFlow.value)
         coVerify { meshTransport.sendPacket("bob.onion", any(), any()) }
     }

@@ -177,9 +177,9 @@ class GossipServiceTest {
         MeshPacketVerifier.enforce = false
         try {
             val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
-            io.mockk.coEvery { mockDao.getPeerByPublicKey("direct-friend") } returns com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, isTemporary = false, isCreator = false)
-            io.mockk.coEvery { mockDao.getPeerByPublicKey("temp-contact") } returns com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, isTemporary = true, isCreator = false)
-            io.mockk.coEvery { mockDao.getPeerByPublicKey("creator-node") } returns com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, isTemporary = false, isCreator = true)
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("direct-friend") } returns com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, relationship = "ACCEPTED", isTemporary = false, isCreator = false)
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("temp-contact") } returns com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, relationship = "ACCEPTED", isTemporary = true, isCreator = false)
+            io.mockk.coEvery { mockDao.getPeerByPublicKey("creator-node") } returns com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, relationship = "ACCEPTED", isTemporary = false, isCreator = true)
 
             val mockRepo = io.mockk.mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
             io.mockk.coEvery { mockRepo.getAppSetting("contact_identity_direct-friend") } returns null
@@ -213,9 +213,9 @@ class GossipServiceTest {
     @Test
     fun broadcast_excludesTemporaryContactsAndCreatorNodesForFriendsOnly() = runBlocking {
         val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
-        val friendPeer = com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, isTemporary = false, isCreator = false)
-        val tempPeer = com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, isTemporary = true, isCreator = false)
-        val creatorPeer = com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, isTemporary = false, isCreator = true)
+        val friendPeer = com.noslop.app.data.Peer("direct-friend", "", "", "friend.onion", isTrusted = true, relationship = "ACCEPTED", isTemporary = false, isCreator = false)
+        val tempPeer = com.noslop.app.data.Peer("temp-contact", "", "", "temp.onion", isTrusted = true, relationship = "ACCEPTED", isTemporary = true, isCreator = false)
+        val creatorPeer = com.noslop.app.data.Peer("creator-node", "", "", "creator.onion", isTrusted = true, relationship = "ACCEPTED", isTemporary = false, isCreator = true)
 
         io.mockk.coEvery { mockDao.getAllPeersList() } returns listOf(friendPeer, tempPeer, creatorPeer)
 

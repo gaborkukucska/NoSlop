@@ -115,10 +115,34 @@ interface PeerDao {
     @Query("SELECT * FROM peers WHERE publicKeyB64 = :pubKey LIMIT 1")
     suspend fun getPeerByPublicKey(pubKey: String): Peer?
 
+    /** Raw REPLACE. Do not call directly — use [insertPeer], which enforces the trust invariant. */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPeer(peer: Peer)
+    suspend fun insertPeerRow(peer: Peer)
 
+    /**
+     * D01: the single write path for peers. Whatever the caller put in `isTrusted`,
+     * the stored row satisfies `isTrusted == (relationship == ACCEPTED)`.
+     */
+    suspend fun insertPeer(peer: Peer) {
+        insertPeerRow(peer.withNormalizedTrust())
+    }
 
+    /** D10: records (or clears, with null) the safety fingerprint the user verified out-of-band. */
+    @Query("UPDATE peers SET verifiedFingerprint = :fingerprint WHERE publicKeyB64 = :pubKey")
+    suspend fun setVerifiedFingerprint(pubKey: String, fingerprint: String?)
+
+    /**
+     * D06: presence changes touch only presence columns. Re-inserting a whole row read moments
+     * earlier could silently undo a concurrent relationship change (e.g. a handshake promotion).
+     */
+    @Query("UPDATE peers SET isOnline = :isOnline, lastSeenAt = :lastSeenAt WHERE publicKeyB64 = :pubKey")
+    suspend fun updatePresence(pubKey: String, isOnline: Boolean, lastSeenAt: Long)
+
+    @Query("UPDATE peers SET isOnline = 0 WHERE publicKeyB64 = :pubKey")
+    suspend fun markOffline(pubKey: String)
+
+    @Query("UPDATE peers SET isDiscoverable = :isDiscoverable WHERE publicKeyB64 = :pubKey")
+    suspend fun setDiscoverableFlag(pubKey: String, isDiscoverable: Boolean)
 
     @Delete
     suspend fun deletePeer(peer: Peer)
@@ -135,8 +159,40 @@ interface PostDao {
     @Query("DELETE FROM mesh_posts WHERE authorPublicKeyB64 = :authorId")
     suspend fun deletePostsByAuthor(authorId: String)
 
+    /** Raw REPLACE. Use [insertPost], which also keeps the media_owner index (D02) in step. */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertPost(post: MeshPost)
+    suspend fun insertPostRow(post: MeshPost)
+
+    @Transaction
+    suspend fun insertPost(post: MeshPost) {
+        insertPostRow(post)
+        syncPostMediaOwner(post.id, post.mediaUrl, post.privacy, post.authorPublicKeyB64, post.isOrphaned)
+    }
+
+    // --- D02: media_owner maintenance for posts ---
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMediaOwnerIgnore(owner: MediaOwner)
+
+    @Query("UPDATE media_owner SET privacy = :privacy, authorPub = :authorPub WHERE ownerType = :ownerType AND ownerId = :ownerId")
+    suspend fun updateMediaOwnerPrivacy(ownerType: String, ownerId: String, privacy: String, authorPub: String)
+
+    @Query("DELETE FROM media_owner WHERE ownerType = :ownerType AND ownerId = :ownerId AND mediaId != :keepMediaId")
+    suspend fun deleteOtherMediaOwners(ownerType: String, ownerId: String, keepMediaId: String)
+
+    @Query("DELETE FROM media_owner WHERE ownerType = :ownerType AND ownerId = :ownerId")
+    suspend fun deleteMediaOwnersFor(ownerType: String, ownerId: String)
+
+    suspend fun syncPostMediaOwner(postId: String, mediaUrl: String?, privacy: String, authorPub: String, isOrphaned: Boolean) {
+        val mediaId = MediaOwner.mediaIdFromUrl(mediaUrl)
+        if (mediaId == null || isOrphaned) {
+            deleteMediaOwnersFor(MediaOwner.TYPE_POST, postId)
+            return
+        }
+        deleteOtherMediaOwners(MediaOwner.TYPE_POST, postId, mediaId)
+        val normalized = MediaOwner.normalizePrivacy(privacy)
+        insertMediaOwnerIgnore(MediaOwner(mediaId, MediaOwner.TYPE_POST, postId, normalized, authorPub))
+        updateMediaOwnerPrivacy(MediaOwner.TYPE_POST, postId, normalized, authorPub)
+    }
 
     @Query("SELECT COUNT(*) FROM mesh_posts WHERE id = :id")
     suspend fun hasPost(id: String): Int
@@ -168,7 +224,13 @@ interface PostDao {
     suspend fun resetDeletionBroadcasts(authorId: String)
 
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
-    suspend fun markPostOrphaned(id: String)
+    suspend fun markPostOrphanedRow(id: String)
+
+    @Transaction
+    suspend fun markPostOrphaned(id: String) {
+        markPostOrphanedRow(id)
+        deleteMediaOwnersFor(MediaOwner.TYPE_POST, id)
+    }
 
     @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
     suspend fun getTombstone(key: String): String?
@@ -233,6 +295,7 @@ interface PostDao {
         if (existing.isOrphaned) return false
         if (existing.timestamp > newTimestamp) return false
         updatePostDetails(id, newContent, newTimestamp, newSignature, authorAvatarB64, mediaUrl, mediaType, thumbnailB64, mediaSize, privacy, clearnetUrl)
+        syncPostMediaOwner(id, mediaUrl, privacy, authorId, isOrphaned = false)
         return true
     }
 
@@ -280,8 +343,31 @@ interface MessageDao {
     """)
     fun getConversations(): Flow<List<ChatMessage>>
 
+    /** Raw REPLACE. Use [insertMessage], which also registers attachments in media_owner (D02). */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMessage(message: ChatMessage)
+    suspend fun insertMessageRow(message: ChatMessage)
+
+    @Query("SELECT COUNT(*) FROM group_chats WHERE groupId = :threadKey")
+    suspend fun countGroupsWithId(threadKey: String): Int
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMediaOwnerIgnore(owner: MediaOwner)
+
+    @Transaction
+    suspend fun insertMessage(message: ChatMessage) {
+        insertMessageRow(message)
+        val mediaId = message.mediaId?.takeIf { com.noslop.app.mesh.MediaManager.isValidMediaId(it) } ?: return
+        val isGroup = countGroupsWithId(message.chatWithPeerPub) > 0
+        insertMediaOwnerIgnore(
+            MediaOwner(
+                mediaId = mediaId,
+                ownerType = if (isGroup) MediaOwner.TYPE_GROUP else MediaOwner.TYPE_DM,
+                ownerId = message.chatWithPeerPub,
+                privacy = if (isGroup) "group" else "private",
+                authorPub = message.senderPub
+            )
+        )
+    }
 
     @Query("UPDATE chat_messages SET isRead = 1 WHERE chatWithPeerPub = :peerPub")
     suspend fun markAsRead(peerPub: String)
@@ -318,8 +404,27 @@ interface CommentDao {
     @Query("SELECT COUNT(*) FROM mesh_comments WHERE id = :id")
     suspend fun hasComment(id: String): Int
 
+    /** Raw REPLACE. Use [insertComment], which also registers attachments in media_owner (D02). */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertComment(comment: MeshComment)
+    suspend fun insertCommentRow(comment: MeshComment)
+
+    @Query("SELECT privacy FROM mesh_posts WHERE id = :postId LIMIT 1")
+    suspend fun getParentPostPrivacy(postId: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMediaOwnerIgnore(owner: MediaOwner)
+
+    @Query("DELETE FROM media_owner WHERE ownerType = 'COMMENT' AND ownerId = :commentId")
+    suspend fun deleteCommentMediaOwners(commentId: String)
+
+    @Transaction
+    suspend fun insertComment(comment: MeshComment) {
+        insertCommentRow(comment)
+        val mediaId = comment.mediaId?.takeIf { com.noslop.app.mesh.MediaManager.isValidMediaId(it) } ?: return
+        // A comment's media is exactly as visible as the post it hangs off; unknown parent -> friends.
+        val privacy = MediaOwner.normalizePrivacy(getParentPostPrivacy(comment.postId))
+        insertMediaOwnerIgnore(MediaOwner(mediaId, MediaOwner.TYPE_COMMENT, comment.id, privacy, comment.authorPublicKeyB64))
+    }
 
     // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
     @Query("DELETE FROM mesh_comments WHERE authorPublicKeyB64 = :authorId")
@@ -343,7 +448,13 @@ interface CommentDao {
     suspend fun updateCommentContent(id: String, newContent: String, newTimestamp: Long, newSignature: String)
 
     @Query("UPDATE mesh_comments SET content = '[Deleted]', mediaId = null, mediaType = null WHERE id = :id")
-    suspend fun markCommentDeleted(id: String)
+    suspend fun markCommentDeletedRow(id: String)
+
+    @Transaction
+    suspend fun markCommentDeleted(id: String) {
+        markCommentDeletedRow(id)
+        deleteCommentMediaOwners(id)
+    }
 }
 
 @Dao
@@ -587,4 +698,24 @@ interface PendingGroupMessageDao {
 
     @Query("DELETE FROM pending_group_messages WHERE memberPub = :memberPub")
     suspend fun deleteForMember(memberPub: String)
+}
+
+/** D02: read/write access to the media ownership index used by the media ACL. */
+@Dao
+interface MediaOwnerDao {
+    @Query("SELECT * FROM media_owner WHERE mediaId = :mediaId")
+    suspend fun getOwners(mediaId: String): List<MediaOwner>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnore(owner: MediaOwner)
+
+    /** Attaches the capability key / signed digest to an owner row without ever overwriting an existing one. */
+    @Query(
+        "UPDATE media_owner SET accessKey = COALESCE(accessKey, :accessKey), sha256 = COALESCE(sha256, :sha256) " +
+        "WHERE mediaId = :mediaId AND ownerType = :ownerType AND ownerId = :ownerId"
+    )
+    suspend fun attachSecrets(mediaId: String, ownerType: String, ownerId: String, accessKey: String?, sha256: String?)
+
+    @Query("SELECT COUNT(*) FROM media_owner")
+    suspend fun count(): Int
 }

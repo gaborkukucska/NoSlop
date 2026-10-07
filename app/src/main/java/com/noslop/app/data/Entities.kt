@@ -65,10 +65,90 @@ data class Peer(
     val fundMeLink: String? = null,
     val bio: String? = null,
     val isFollowing: Boolean = false,
-    val relationship: String = "NONE", // NONE, OUTGOING_PENDING, INCOMING_PENDING, ACCEPTED, BLOCKED
+    val relationship: String = PeerRelationship.NONE, // NONE, OUTGOING_PENDING, INCOMING_PENDING, ACCEPTED, BLOCKED
     val pendingNonce: String? = null,
-    val pendingEncKey: String? = null
+    val pendingEncKey: String? = null,
+    /** D10: safety fingerprint the user confirmed out-of-band; stale as soon as either key changes. */
+    val verifiedFingerprint: String? = null
+) {
+    /**
+     * D01: a direct, consented, non-temporary contact. This is the single rule for
+     * "may receive friends-only content" (posts, sync, friends-only media). Temporary
+     * contacts (creator followers, burnable-identity contacts) are never friends; the
+     * 18->19 migration and every write path keep `isTemporary = true` for burnable contacts.
+     */
+    val isFriend: Boolean
+        get() = relationship == PeerRelationship.ACCEPTED && !isTemporary
+
+    /**
+     * D01: `relationship` is the only source of truth for trust. `isTrusted` is a
+     * denormalised mirror kept for queries and the UI; [PeerDao.insertPeer] always
+     * stores the output of this function, so no write path can set the two out of step.
+     */
+    fun withNormalizedTrust(): Peer {
+        val trusted = relationship == PeerRelationship.ACCEPTED
+        return if (isTrusted == trusted) this else copy(isTrusted = trusted)
+    }
+}
+
+/** D01: peer relationship states. `ACCEPTED` is the only state that grants trust. */
+object PeerRelationship {
+    const val NONE = "NONE"
+    const val OUTGOING_PENDING = "OUTGOING_PENDING"
+    const val INCOMING_PENDING = "INCOMING_PENDING"
+    const val ACCEPTED = "ACCEPTED"
+    const val BLOCKED = "BLOCKED"
+}
+
+/**
+ * D02: index of who a media file belongs to, so the media ACL is one indexed lookup
+ * instead of a full scan + substring match on every chunk request.
+ *
+ * ownerType / ownerId:  POST -> post id, COMMENT -> comment id,
+ *                       DM -> counterparty public key, GROUP -> group id.
+ * privacy:              public | friends | private | group (deny-by-default for anything else).
+ * accessKey:            capability carried only inside signed/encrypted payloads (D02); null for
+ *                       media attached before v0.7.0.
+ * sha256:               signed whole-file digest when the owning record carried one (C17/D08).
+ *
+ * Rows are written by the DAOs themselves (PostDao.insertPost, CommentDao.insertComment,
+ * MessageDao.insertMessage), so no caller can forget to register an attachment.
+ */
+@Entity(
+    tableName = "media_owner",
+    primaryKeys = ["mediaId", "ownerType", "ownerId"],
+    indices = [Index(value = ["mediaId"])]
 )
+data class MediaOwner(
+    val mediaId: String,
+    val ownerType: String,
+    val ownerId: String,
+    val privacy: String,
+    val authorPub: String,
+    val accessKey: String? = null,
+    val sha256: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    companion object {
+        const val TYPE_POST = "POST"
+        const val TYPE_COMMENT = "COMMENT"
+        const val TYPE_DM = "DM"
+        const val TYPE_GROUP = "GROUP"
+
+        /** Extracts the media id from a `noslop://<onion>/<mediaId>` URL; null when absent or invalid. */
+        fun mediaIdFromUrl(mediaUrl: String?): String? {
+            val id = mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() } ?: return null
+            return id.takeIf { com.noslop.app.mesh.MediaManager.isValidMediaId(it) }
+        }
+
+        /** Unknown privacy values are treated as friends-only (deny by default). */
+        fun normalizePrivacy(privacy: String?): String = when (privacy) {
+            "public" -> "public"
+            "private" -> "private"
+            else -> "friends"
+        }
+    }
+}
 
 @Entity(tableName = "mesh_posts")
 data class MeshPost(

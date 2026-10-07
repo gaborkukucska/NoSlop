@@ -6,6 +6,7 @@ import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import com.noslop.app.util.Constants
 import java.util.*
+import kotlinx.coroutines.launch
 
 /**
  * Handles incoming DM mesh packets (handleDirectMessage).
@@ -65,24 +66,25 @@ class DmPacketHandler(
         val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
         
         if (opponentEncPub == null) {
+            // D01/D06: never send a CONNECTION_REQUEST on our own initiative here. An automatic
+            // OUTGOING_PENDING row would count as the user's consent if the sender's own request
+            // then crossed it. Group members' keys come from the signed group directory instead.
+            val groupIdHint = msgPay.groupId?.takeIf { it.isNotBlank() }
             val now = System.currentTimeMillis()
             val lastReq = lastAutoConnRequests[packet.senderId] ?: 0L
-            if (now - lastReq > 60_000L && !peer?.onionAddress.isNullOrBlank()) {
+            if (groupIdHint != null && now - lastReq > 60_000L) {
                 lastAutoConnRequests[packet.senderId] = now
-                Logger.warn(TAG, "Missing X25519 key for DM sender ${packet.senderId}. Triggering rate-limited connection request.")
-                try {
-                    repo.sendConnectionRequest(
-                        handle = peer?.handle ?: "Unknown",
-                        publicKeyB64 = packet.senderId,
-                        onionAddress = peer?.onionAddress ?: "",
-                        encPublicKeyB64 = "",
-                        useBurnableIdentity = (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64)
-                    )
-                } catch (e: Exception) {
-                    Logger.error(TAG, "Failed to send connection request to ${packet.senderId}")
+                Logger.warn(TAG, "Missing X25519 key for group member ${packet.senderId.take(12)}; requesting group catch-up for $groupIdHint")
+                // Fire-and-forget: the catch-up may wait for Tor; never block inbound packet processing.
+                com.noslop.app.util.AppScopes.io.launch {
+                    try {
+                        repo.requestGroupCatchup(groupIdHint)
+                    } catch (e: Exception) {
+                        Logger.error(TAG, "Failed to request group catch-up for $groupIdHint: ${e.message}")
+                    }
                 }
             } else {
-                Logger.warn(TAG, "Missing X25519 key for DM sender ${packet.senderId}. Skipping connection request (rate-limited or missing onion).")
+                Logger.warn(TAG, "Dropping DM from ${packet.senderId.take(12)}: no X25519 key on record (no accepted handshake)")
             }
             return false
         }
@@ -163,9 +165,11 @@ class DmPacketHandler(
             seenV2Messages.add(seenKey)
         }
         if (plaintext != null) {
-            // Once cryptographically authenticated: associate peer with burnable identity if reached via burnable
-            if (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64) {
-                db.appSettingDao().insertSetting(AppSetting("contact_identity_${packet.senderId}", "burnable"))
+            // Once cryptographically authenticated: remember that this sender reached our burnable identity,
+            // so our replies come from it too. D01: an accepted contact's bound identity is never changed
+            // here, and for anyone else this is only the *requested* identity until the user accepts.
+            if (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64 && peer?.relationship != PeerRelationship.ACCEPTED) {
+                db.appSettingDao().insertSetting(AppSetting("requested_identity_${packet.senderId}", "burnable"))
             }
 
             var finalContent = plaintext
@@ -236,7 +240,7 @@ class DmPacketHandler(
             // Peer just delivered an authenticated DM, update online presence and clear typing status
             repo.updatePeerTypingState(packet.senderId, false)
             peer?.let {
-                peerDao.insertPeer(it.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+                peerDao.updatePresence(it.publicKeyB64, true, System.currentTimeMillis())
             }
 
             val threadKey = groupId ?: packet.senderId
@@ -364,7 +368,7 @@ class DmPacketHandler(
         Logger.debug(TAG, "Received TYPING signal from ${packet.senderId}: isTyping=${typing.isTyping}")
         repo.updatePeerTypingState(packet.senderId, typing.isTyping)
         peerDao.getPeerByPublicKey(packet.senderId)?.let {
-            peerDao.insertPeer(it.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+            peerDao.updatePresence(it.publicKeyB64, true, System.currentTimeMillis())
         }
         return true
     }

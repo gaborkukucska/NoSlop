@@ -130,7 +130,20 @@ class FakeVoteDao : VoteDao {
 class FakePeerDao : PeerDao {
     val peers = linkedMapOf<String, Peer>()
     override suspend fun getPeerByPublicKey(pubKey: String): Peer? = peers[pubKey]
-    override suspend fun insertPeer(peer: Peer) { peers[peer.publicKeyB64] = peer }
+    // insertPeer is the interface default (D01 trust normalisation); only the raw row write is faked.
+    override suspend fun insertPeerRow(peer: Peer) { peers[peer.publicKeyB64] = peer }
+    override suspend fun setVerifiedFingerprint(pubKey: String, fingerprint: String?) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(verifiedFingerprint = fingerprint) }
+    }
+    override suspend fun updatePresence(pubKey: String, isOnline: Boolean, lastSeenAt: Long) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isOnline = isOnline, lastSeenAt = lastSeenAt) }
+    }
+    override suspend fun markOffline(pubKey: String) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isOnline = false) }
+    }
+    override suspend fun setDiscoverableFlag(pubKey: String, isDiscoverable: Boolean) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isDiscoverable = isDiscoverable) }
+    }
     override suspend fun deletePeer(peer: Peer) { peers.remove(peer.publicKeyB64) }
     override suspend fun getAllPeersList(): List<Peer> = peers.values.toList()
     override fun getAllPeers(): Flow<List<Peer>> = flowOf(peers.values.toList())
@@ -147,7 +160,23 @@ class FakePeerDao : PeerDao {
 /** Fake [PostDao] keyed by id (REPLACE on insert). */
 class FakePostDao : PostDao {
     val posts = linkedMapOf<String, MeshPost>()
-    override suspend fun insertPost(post: MeshPost) { posts[post.id] = post }
+    /** D02: media_owner rows maintained by the PostDao defaults, keyed by (mediaId, ownerType, ownerId). */
+    val mediaOwners = linkedMapOf<Triple<String, String, String>, MediaOwner>()
+    // insertPost / markPostOrphaned are interface defaults (they also maintain media_owner).
+    override suspend fun insertPostRow(post: MeshPost) { posts[post.id] = post }
+    override suspend fun insertMediaOwnerIgnore(owner: MediaOwner) {
+        mediaOwners.putIfAbsent(Triple(owner.mediaId, owner.ownerType, owner.ownerId), owner)
+    }
+    override suspend fun updateMediaOwnerPrivacy(ownerType: String, ownerId: String, privacy: String, authorPub: String) {
+        mediaOwners.entries.filter { it.key.second == ownerType && it.key.third == ownerId }
+            .forEach { mediaOwners[it.key] = it.value.copy(privacy = privacy, authorPub = authorPub) }
+    }
+    override suspend fun deleteOtherMediaOwners(ownerType: String, ownerId: String, keepMediaId: String) {
+        mediaOwners.keys.removeAll { it.second == ownerType && it.third == ownerId && it.first != keepMediaId }
+    }
+    override suspend fun deleteMediaOwnersFor(ownerType: String, ownerId: String) {
+        mediaOwners.keys.removeAll { it.second == ownerType && it.third == ownerId }
+    }
     override suspend fun hasPost(id: String): Int = if (posts.containsKey(id)) 1 else 0
     override suspend fun getPostById(id: String): MeshPost? = posts[id]
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
@@ -164,7 +193,7 @@ class FakePostDao : PostDao {
         posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId }
             .forEach { posts[it.id] = it.copy(deletionBroadcasts = 0) }
     }
-    override suspend fun markPostOrphaned(id: String) {
+    override suspend fun markPostOrphanedRow(id: String) {
         posts[id]?.let {
             posts[id] = it.copy(
                 isOrphaned = true,
@@ -235,7 +264,16 @@ class FakePostDao : PostDao {
 /** Fake [MessageDao] collecting stored messages. */
 class FakeMessageDao : MessageDao {
     val messages = mutableListOf<ChatMessage>()
-    override suspend fun insertMessage(message: ChatMessage) { messages.add(message) }
+    val mediaOwners = mutableListOf<MediaOwner>()
+    val groupIds = mutableSetOf<String>()
+    // insertMessage is the interface default (it also registers attachments in media_owner).
+    override suspend fun insertMessageRow(message: ChatMessage) { messages.add(message) }
+    override suspend fun countGroupsWithId(threadKey: String): Int = if (threadKey in groupIds) 1 else 0
+    override suspend fun insertMediaOwnerIgnore(owner: MediaOwner) {
+        if (mediaOwners.none { it.mediaId == owner.mediaId && it.ownerType == owner.ownerType && it.ownerId == owner.ownerId }) {
+            mediaOwners.add(owner)
+        }
+    }
     override suspend fun hasMessage(id: String): Int = if (messages.any { it.id == id }) 1 else 0
     override fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         flowOf(messages.filter { it.chatWithPeerPub == peerPub })

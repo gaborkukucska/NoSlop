@@ -95,8 +95,8 @@ class SyncPacketHandler(
         val syncPay = packet.getSyncRequestPayload() ?: return false
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
-        val isTrustedDirectPeer = requestingPeer != null && requestingPeer.isTrusted &&
-            !requestingPeer.isTemporary && contactIdentity != "burnable"
+        // D01: one friend rule everywhere (Peer.isFriend), plus the bound contact identity.
+        val isTrustedDirectPeer = requestingPeer?.isFriend == true && contactIdentity != "burnable"
         val myPub = localKeys.publicKeyB64
 
         val recentPosts = postDao.getPostsSince(syncPay.since).filter { post ->
@@ -191,8 +191,8 @@ class SyncPacketHandler(
         
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
-        val isTrustedDirectPeer = requestingPeer != null && requestingPeer.isTrusted &&
-            !requestingPeer.isTemporary && contactIdentity != "burnable"
+        // D01: one friend rule everywhere (Peer.isFriend), plus the bound contact identity.
+        val isTrustedDirectPeer = requestingPeer?.isFriend == true && contactIdentity != "burnable"
 
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = localKeys.publicKeyB64
@@ -302,8 +302,7 @@ class SyncPacketHandler(
         val syncPay = packet.getSyncResponsePayload() ?: return false
         val senderPeer = peerDao.getPeerByPublicKey(packet.senderId)
         val senderContactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
-        val isSenderTrustedDirect = senderPeer != null && senderPeer.isTrusted &&
-            !senderPeer.isTemporary && senderContactIdentity != "burnable"
+        val isSenderTrustedDirect = senderPeer?.isFriend == true && senderContactIdentity != "burnable"
 
         val filterSettings = try { repo.getMeshFilterSettings() ?: MeshFilterSettings() } catch (e: Exception) { MeshFilterSettings() }
         var stored = 0

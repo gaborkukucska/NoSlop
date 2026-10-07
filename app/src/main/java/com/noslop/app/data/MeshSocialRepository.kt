@@ -67,8 +67,14 @@ class MeshSocialRepository(
     private val voteDao = db.voteDao()
     private val commentVoteDao = db.commentVoteDao()
 
+    /**
+     * Which of our identities a peer knows us by. The bound contact identity wins; before the
+     * user has accepted, the identity the peer addressed (requested_identity_*) is used so a reply
+     * to someone who contacted our burnable identity never comes from the personal one (D01/D04).
+     */
     private suspend fun getIdentityForPeer(peerPubKey: String): CryptoService.IdentityKeys? {
         val setting = db.appSettingDao().getSetting("contact_identity_$peerPubKey")
+            ?: db.appSettingDao().getSetting("requested_identity_$peerPubKey")
         return if (setting == "burnable") getBurnableIdentity() else getLocalIdentity()
     }
 
@@ -355,6 +361,11 @@ class MeshSocialRepository(
         _acceptedHandshakeFlow.value = null
     }
 
+    fun stopPresenceHeartbeat() {
+        presenceJob?.cancel()
+        presenceJob = null
+    }
+
     fun startPresenceHeartbeat() {
         if (presenceJob?.isActive == true) return
         presenceJob = repositoryScope.launch {
@@ -435,7 +446,7 @@ class MeshSocialRepository(
                     val peers = peerDao.getAllPeersList()
                     for (peer in peers) {
                         if (peer.isOnline && peer.lastSeenAt < timeout) {
-                            peerDao.insertPeer(peer.copy(isOnline = false))
+                            peerDao.markOffline(peer.publicKeyB64)
                             Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
                         }
                         if (peer.isDiscoverable && peer.lastSeenAt < discoverableTimeout) {
@@ -443,7 +454,7 @@ class MeshSocialRepository(
                                 peerDao.deletePeer(peer)
                                 Logger.info(TAG, "Removed inactive discoverable peer: ${peer.handle}")
                             } else {
-                                peerDao.insertPeer(peer.copy(isDiscoverable = false))
+                                peerDao.setDiscoverableFlag(peer.publicKeyB64, false)
                             }
                         }
                         if (peer.lastSeenAt < archiveTimeout) {
@@ -736,6 +747,13 @@ class MeshSocialRepository(
         _incomingRequestFlow.value = null
     }
 
+    /**
+     * Sends a CONNECTION_REQUEST. Must only be called from an explicit user action: an
+     * OUTGOING_PENDING row is treated as the user's consent when the peer's request crosses ours (D06).
+     *
+     * D06: the peer row is merged, never rebuilt — an ACCEPTED friend is never downgraded, a
+     * BLOCKED peer is never contacted, and an INCOMING_PENDING request is simply accepted.
+     */
     suspend fun sendConnectionRequest(
         handle: String,
         publicKeyB64: String,
@@ -743,31 +761,52 @@ class MeshSocialRepository(
         encPublicKeyB64: String = "",
         useBurnableIdentity: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
-        val cleanHandle = handle
+        val existing = peerDao.getPeerByPublicKey(publicKeyB64)
+        if (existing != null && existing.relationship == PeerRelationship.BLOCKED) {
+            Logger.warn(TAG, "Not sending CONNECTION_REQUEST to blocked peer ${publicKeyB64.take(12)}")
+            return@withContext false
+        }
+        if (existing != null && existing.relationship == PeerRelationship.INCOMING_PENDING) {
+            // They already asked us; the user asking them back is consent.
+            Logger.info(TAG, "Connection request to a peer with a pending incoming request: accepting instead")
+            return@withContext acceptConnectionRequest(existing)
+        }
+
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
-        
         val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
-        val newPeer = Peer(
-            publicKeyB64 = publicKeyB64,
-            handle = cleanHandle,
-            tripcode = tripcode,
-            onionAddress = onionAddress,
-            encPublicKeyB64 = encPublicKeyB64,
-            isTrusted = false, // We requested them, they are pending until they accept
-            isTemporary = useBurnableIdentity,
-            lastSeenAt = System.currentTimeMillis(),
-            relationship = "OUTGOING_PENDING",
-            pendingNonce = nonce
-        )
-        peerDao.insertPeer(newPeer)
+        val targetOnion = onionAddress.ifBlank { existing?.onionAddress ?: "" }
+
+        if (existing != null && existing.relationship == PeerRelationship.ACCEPTED) {
+            // Re-sending to a friend (e.g. the DM screen's "reconnect"): keep ACCEPTED and every
+            // stored field; their handshake reply is processed as a profile refresh.
+            Logger.info(TAG, "Re-sending CONNECTION_REQUEST to already-accepted peer ${existing.handle}")
+        } else {
+            val pending = (existing ?: Peer(
+                publicKeyB64 = publicKeyB64,
+                handle = handle,
+                tripcode = tripcode,
+                onionAddress = targetOnion
+            )).copy(
+                handle = handle.ifBlank { existing?.handle ?: "" },
+                onionAddress = targetOnion,
+                encPublicKeyB64 = encPublicKeyB64.ifBlank { existing?.encPublicKeyB64 ?: "" },
+                isTemporary = (existing?.isTemporary ?: false) || useBurnableIdentity,
+                lastSeenAt = System.currentTimeMillis(),
+                relationship = PeerRelationship.OUTGOING_PENDING,
+                pendingNonce = nonce
+            )
+            peerDao.insertPeer(pending)
+        }
 
         // Sync with hub before dispatching so the hub firewall is aware of the pending peer
         meshTransport.repository.syncPeersWithHub()
 
-        val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
+        val boundIdentity = db.appSettingDao().getSetting("contact_identity_$publicKeyB64")
+        val useBurnable = useBurnableIdentity || boundIdentity == "burnable"
+        val myKeys = if (useBurnable) getBurnableIdentity() else getLocalIdentity()
         if (myKeys != null) {
-            if (useBurnableIdentity) {
+            if (useBurnable) {
                 db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
             }
             val userProfile = getUserProfile()
@@ -801,6 +840,10 @@ class MeshSocialRepository(
                 bio = reqPay.bio
             )
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            if (existing?.relationship == PeerRelationship.ACCEPTED) {
+                // Nonce is only needed if the peer lost us; store it so their echo can be matched.
+                peerDao.getPeerByPublicKey(publicKeyB64)?.let { peerDao.insertPeer(it.copy(pendingNonce = nonce)) }
+            }
             val gson = com.noslop.app.util.Json.gson
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
@@ -811,23 +854,45 @@ class MeshSocialRepository(
                 payload = gson.toJsonTree(reqPay),
                 signature = reqSig
             )
-            dispatchPacket(onionAddress, packet)
+            dispatchPacket(targetOnion, packet)
         }
         true
     }
 
+    /**
+     * Accepts a pending incoming request (user consent, creator auto-accept, or crossing requests)
+     * or re-sends our handshake to an already-accepted peer. Always re-reads the stored row: the
+     * UI may hand us a stale snapshot, and only INCOMING_PENDING / ACCEPTED rows may be accepted.
+     * This is the only code path that sets relationship = ACCEPTED besides handleUserHandshake's
+     * nonce-verified promotion.
+     */
     suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
-        val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
-        val isTemp = peer.isTemporary || contactIdentity == "burnable"
-        val replyNonce = peer.pendingNonce ?: ""
-        peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = isTemp, relationship = "ACCEPTED", pendingNonce = null))
-        com.noslop.app.mesh.GossipService.recordSendSuccess(peer.onionAddress)
+        val current = peerDao.getPeerByPublicKey(peer.publicKeyB64)
+        if (current == null ||
+            (current.relationship != PeerRelationship.INCOMING_PENDING && current.relationship != PeerRelationship.ACCEPTED)
+        ) {
+            Logger.warn(TAG, "acceptConnectionRequest refused for ${peer.publicKeyB64.take(12)}: relationship is ${current?.relationship ?: "absent"}")
+            if (_incomingRequestFlow.value?.publicKeyB64 == peer.publicKeyB64) _incomingRequestFlow.value = null
+            return@withContext false
+        }
+        // D01: the contact identity is bound only now, from the identity the peer actually addressed.
+        val boundIdentity = db.appSettingDao().getSetting("contact_identity_${current.publicKeyB64}")
+        val requestedIdentity = db.appSettingDao().getSetting("requested_identity_${current.publicKeyB64}")
+        val contactIdentity = boundIdentity ?: requestedIdentity
+        if (contactIdentity == "burnable") {
+            db.appSettingDao().insertSetting(AppSetting("contact_identity_${current.publicKeyB64}", "burnable"))
+        }
+        db.appSettingDao().removeSetting("requested_identity_${current.publicKeyB64}")
+        val isTemp = current.isTemporary || contactIdentity == "burnable"
+        val replyNonce = current.pendingNonce ?: ""
+        peerDao.insertPeer(current.copy(isTemporary = isTemp, relationship = PeerRelationship.ACCEPTED, pendingNonce = null))
+        com.noslop.app.mesh.GossipService.recordSendSuccess(current.onionAddress)
         _incomingRequestFlow.value = null
         
         // Sync with hub before dispatching so the hub firewall is aware of the new peer
         meshTransport.repository.syncPeersWithHub()
         
-        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
+        val myKeys = getIdentityForPeer(current.publicKeyB64) ?: getLocalIdentity()
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
         val now = System.currentTimeMillis()
@@ -844,7 +909,7 @@ class MeshSocialRepository(
                 timestamp = now,
                 signature = null,
                 inReplyToNonce = replyNonce,
-                targetUserId = peer.publicKeyB64,
+                targetUserId = current.publicKeyB64,
                 version = 2
             )
             val payloadToSign = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
@@ -852,7 +917,7 @@ class MeshSocialRepository(
                 fromUsername = handshakePay.fromUsername,
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                targetUserId = peer.publicKeyB64,
+                targetUserId = current.publicKeyB64,
                 nonce = replyNonce,
                 timestamp = now,
                 authorAvatarB64 = avatarB64,
@@ -864,12 +929,12 @@ class MeshSocialRepository(
                 id = UUID.randomUUID().toString(),
                 hops = 3,
                 senderId = myKeys.publicKeyB64,
-                targetUserId = peer.publicKeyB64,
+                targetUserId = current.publicKeyB64,
                 type = "USER_HANDSHAKE",
                 payload = gson.toJsonTree(handshakePay),
                 signature = handshakeSig
             )
-            dispatchPacket(peer.onionAddress, packet)
+            dispatchPacket(current.onionAddress, packet)
         }
         true
     }
@@ -951,7 +1016,7 @@ class MeshSocialRepository(
     suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
-        val isTrustedDirectPeer = peer.isTrusted && !peer.isTemporary && contactIdentity != "burnable"
+        val isTrustedDirectPeer = peer.isFriend && contactIdentity != "burnable"
 
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = myKeys.publicKeyB64
@@ -987,8 +1052,16 @@ class MeshSocialRepository(
     }
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
-        peerDao.deletePeer(peer)
+        val current = peerDao.getPeerByPublicKey(peer.publicKeyB64)
         _incomingRequestFlow.value = null
+        // D06: only a pending incoming request can be rejected; a stale notification must never
+        // delete an accepted friend or a group-member stub.
+        if (current == null || current.relationship != PeerRelationship.INCOMING_PENDING) {
+            Logger.warn(TAG, "rejectConnectionRequest ignored for ${peer.publicKeyB64.take(12)}: relationship is ${current?.relationship ?: "absent"}")
+            return@withContext false
+        }
+        peerDao.deletePeer(current)
+        db.appSettingDao().removeSetting("requested_identity_${peer.publicKeyB64}")
 
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         if (myKeys != null) {
@@ -1019,10 +1092,22 @@ class MeshSocialRepository(
         return@withContext true
     }
 
-    suspend fun togglePeerTrust(peer: Peer) = withContext(Dispatchers.IO) {
-        val updated = peer.copy(isTrusted = !peer.isTrusted)
-        peerDao.insertPeer(updated)
-        Logger.info(TAG, "Toggled peer trust state for ${peer.handle}", "trusted=${updated.isTrusted}")
+    /** D07: cancels a request we sent that was never answered (e.g. the peer runs an older version). */
+    suspend fun cancelOutgoingRequest(publicKeyB64: String): Boolean = withContext(Dispatchers.IO) {
+        val current = peerDao.getPeerByPublicKey(publicKeyB64) ?: return@withContext false
+        if (current.relationship != PeerRelationship.OUTGOING_PENDING) return@withContext false
+        if (current.isDiscoverable || current.publicKeyB64 == NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+            // Keep discoverable nodes listed; just drop the pending state.
+            peerDao.insertPeer(current.copy(relationship = PeerRelationship.NONE, pendingNonce = null))
+        } else {
+            peerDao.deletePeer(current)
+        }
+        db.appSettingDao().removeSetting("contact_identity_$publicKeyB64")
+        pendingOutboxMessages[publicKeyB64]?.let { list ->
+            synchronized(list) { list.removeAll { it.type == "CONNECTION_REQUEST" } }
+            savePersistedOutbox()
+        }
+        true
     }
 
     suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = withContext(Dispatchers.IO) {
@@ -1134,6 +1219,7 @@ class MeshSocialRepository(
             db.notificationDao().deleteNotificationsBySender(targetPub)
             db.pendingGroupMessageDao().deleteForMember(targetPub)
             db.appSettingDao().removeSetting("contact_identity_$targetPub")
+            db.appSettingDao().removeSetting("requested_identity_$targetPub")
             db.appSettingDao().removeSetting("disc_packet_$targetPub")
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to purge peer content: ${e.message}")
@@ -1613,7 +1699,10 @@ class MeshSocialRepository(
 
         // Determine which identity we are known by in this group:
         // If our burnable key is in the group members or admin, use burnable; if open group, use burnable; else main.
-        val senderKeys = if (burnableKeys != null && (group.membersJson.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) {
+        val parsedMembers: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        val senderKeys = if (burnableKeys != null && (parsedMembers.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) {
             burnableKeys
         } else if (group.allowMemberInvites && burnableKeys != null) {
             burnableKeys
