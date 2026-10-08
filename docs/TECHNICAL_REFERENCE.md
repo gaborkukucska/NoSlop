@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.6.8-alpha`, Room schema version 15 — see §10, compileSdk/targetSdk
+versionName `0.6.9-alpha`, Room schema version 19 — see §10, compileSdk/targetSdk
 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -344,7 +344,40 @@ checksum word). The mnemonic seeds the PBKDF2-HMAC-SHA512 key used by
   "hidden-service-only" architecture (milestone 13).
 - **Wire format**: newline-delimited JSON. Each line is one `NetworkPacket`
   serialized via Gson (`packet.toJson()` / `NetworkPacket.fromJson(line)`).
-- **Outbound sends** (`sendPacket(onionAddress, port, packet)`):
+  Framing lives in `mesh/MeshFraming.kt` (`FrameReader`: strips `\r`, skips
+  blank lines, drops an unterminated trailing frame, throws
+  `FrameTooLargeException` past `MAX_PACKET_CHARS` = 4 M chars). At most 16
+  inbound connections are served at once; read timeout 45 s.
+- **Reply channel (2026-10-07, Round A2)**: every inbound connection gets a
+  write-serialised `ReplyChannel = suspend (NetworkPacket) -> Boolean`, passed
+  through `NoSlopRepository.handleIncomingPacket(packet, reply)` →
+  `MeshPacketHandler` → handlers. Only `HandshakePacketHandler.handleConnectionRequest`
+  uses it (after authentication, once per request timestamp). The requester
+  side is `exchangeOverSocket`, which keeps a `CONNECTION_REQUEST` socket open
+  for `HANDSHAKE_REPLY_WINDOW_MS` (6 s), and `probeConnectionRequest` (own
+  2-slot pool, 30 s connect timeout) used by
+  `MeshSocialRepository.startOutgoingRequestPoll` (every 15 s for 10 min while
+  a request is pending). Protocol detail: WIRE_PROTOCOL_REFERENCE.md §3.1.
+- **Current send policy (2026-10-07, regression restore R1)** — the numbered
+  steps below are the original design; the code today does:
+  - **Tor gate**: sends only when `TorService` is `READY`; handshakes and
+    DM-priority packets wait up to 60 s (`awaitReady`, which returns `false`
+    at once when Android refused to start Tor in the background); everything
+    else is not sent during bootstrap.
+  - **Cooldown gate**: only `ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE` and
+    `USER_EXIT` are skipped for a peer in failure cooldown
+    (`respectsPeerCooldown`). User content and sync are always attempted.
+  - **Pools**: `dmSemaphore(4)` (blocking acquire) for `MESSAGE`,
+    `DELETE_MESSAGE`, `DM_SYNC_REQUEST`, `DM_ACK`, `CHAT_REACTION`, `GROUP_*`
+    **and** `CONNECTION_REQUEST` / `USER_HANDSHAKE` (`usesPrioritySlot`);
+    `mediaSemaphore(3)` (blocking) for `MEDIA_*`; `bulkSemaphore(4)` for the
+    rest — background presence and typing/read receipts are dropped if no
+    permit is free, other bulk packets wait up to 4 s.
+  - **Attempts / connect timeouts**: handshakes 2 × 35 s, DM-priority 2 × 25 s,
+    media 2 × 28 s, typing/read receipts 1 × 10 s, everything else 1 × 15 s.
+  - **Failure accounting**: a failed send counts toward the peer's cooldown
+    unless it is `TYPING`, `READ_RECEIPT` or `DM_ACK` (`countsAsPeerFailure`).
+- **Outbound sends** (`sendPacket(onionAddress, port, packet)`, original design):
   1. `TorService.waitForProxy(timeoutSeconds = 5)` — abort if SOCKS5 not
      reachable.
     2. Up to **3 attempts** (for critical packets; 2 for background). Each attempt opens a fresh
@@ -551,13 +584,23 @@ just to the wire protocol:
 
 ```kotlin
 const val MIN_CHUNK_SIZE = 128 * 1024        // 128 KB (Tor-optimized minimum)
-const val MAX_CHUNK_SIZE = 1024 * 1024       // 1 MB (maximizes per-circuit throughput)
-private const val MAX_CONCURRENCY = 2        // Max 2 concurrent SOCKS5 sockets
-const val DOWNLOAD_TIMEOUT_MS = 300000L      // 5 minutes (accommodates Tor latency)
+const val MAX_CHUNK_BYTES = 256 * 1024       // C03: largest request a sender serves
+const val MAX_CHUNK_SIZE = MAX_CHUNK_BYTES   // downloader window cap (was 1 MB)
+const val DOWNLOAD_TIMEOUT_MS = 90000L       // per-chunk inflight timeout
+private const val MAX_CONCURRENCY = 2        // Max 2 concurrent chunk requests
+private const val MAX_OUTBOUND_BYTES_PER_WINDOW = 16L * 1024 * 1024 // per requester per 60 s
 ```
-These values are specifically tuned for Tor Hidden Service circuits. The previous
-values (64KB min, 256KB max, 4 concurrent, 120s timeout) caused excessive SOCKS5
-handshake overhead and frequent timeouts on high-latency Tor circuits.
+The window starts at 256 KB, grows by 32 KB per received chunk
+(`grownChunkSize`, capped at `MAX_CHUNK_SIZE`) and halves on a timeout (not
+below `MIN_CHUNK_SIZE`). **The cap must never exceed `MAX_CHUNK_BYTES`**: until
+2026-10-07 it was 1 MB, so from the third request on every request was
+rejected by the sender and re-queued unchanged — recorded videos stopped at
+about 9 % (2 of 21 chunks). Pending ranges above 256 KB are split with
+`splitToServable`; the sender-side bounds check is `chunkRequestRejection`.
+`MediaChunkWindowTest` ties the two sides together. The outbound limit was
+raised from 5 MB to 16 MB per 60 s per requester (≈ 270 KB/s), since 5 MB was
+below normal Tor throughput and tripped mid-transfer; requests over it are
+dropped and retried after the 90 s chunk timeout.
 
 **AIMD Congestion Control.** Each download tracks a per-download AIMD state
 machine tuned for Tor's characteristics:
@@ -581,6 +624,39 @@ and directly resolves the gap flagged in
 [GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop).
 For full detail see
 [WIRE_PROTOCOL_REFERENCE.md §5](WIRE_PROTOCOL_REFERENCE.md#5-media-packet-family-6-types).
+
+### 6.1.1 Media Access Control (`MediaManager.isMediaAuthorizedForSender`)
+
+Evaluated for every `MEDIA_REQUEST`. Own identities (main and burnable) are
+always allowed. Then, in order:
+
+0. **`media_owner` index** (`isAuthorizedByOwnerIndex`, 2026-10-08): for each
+   owner row of the media id — `POST`/`COMMENT` with privacy `public` →
+   anyone; `private` → the author only; anything else (friends) → direct
+   friends (trusted, not temporary, contact identity not `burnable`) and the
+   author; `DM` → `ownerId == sender`; `GROUP` → members and admin of that
+   group. A match allows; no match falls through.
+1. Posts whose `mediaUrl`/`clearnetUrl` contains the id (full scan).
+2. DMs with the requester. 3. Group messages where the requester is a member.
+4. Constant-time `accessKey` compare (no code issues an `accessKey` yet).
+5. Files with a `.mine` sentinel are refused; otherwise any trusted peer is
+   allowed.
+
+Steps 1–5 predate the index. Review finding **D02** (open) asks for
+deny-by-default: refuse when a non-public owner exists and the requester is
+not authorised for it, remove step 5, and issue/require `accessKey`. Comment
+media had no allow path at all from `5f9a127` until step 0 was added.
+
+The `media_owner` table is maintained by the DAOs (`PostDao.insertPost`,
+`CommentDao.insertComment`, `MessageDao.insertMessage`, edit/orphan/delete
+paths), so every attachment is registered without callers having to remember.
+Comment media inherits the parent post's privacy; unknown privacy is stored as
+`friends`. `MediaOwnerDao.attachSecrets` adds an `accessKey`/`sha256` without
+ever overwriting one. `NoSlopRepository.recordMediaDigest` stores a verified
+C17 digest on all owner rows; `mediaDigestFor` returns it (or hashes the local
+file and caches it) for re-serving v2-signed posts/comments through sync and
+for `reissueLocalPostsWithCanonicalSignatures`, which keeps a valid v2
+signature and upgrades a legacy one to v2 when the digest is known.
 
 ### 6.2 Storage Layout
 
@@ -918,6 +994,25 @@ launch).
    onion address locally via `deriveOnionAddress` and still fires
    `onAddressReady` — so the UI updates even though `ADD_ONION` itself
    didn't return a fresh `ServiceID`.
+8. **Re-registration after a daemon restart (2026-10-07)**: services added
+   with `ADD_ONION` live only inside one Tor process, so
+   `forgetRegisteredHiddenServices(reason)` clears `activeMainServiceId` /
+   `activeBurnableServiceId` on `STATUS_OFF`, in `stopTor` and when a daemon
+   starts. Previously the "already active" bookkeeping survived the restart,
+   `ADD_ONION` was skipped and the node's onion stayed unreachable until the
+   app was killed. `registeredServiceIds()` exposes the bookkeeping for
+   diagnostics.
+
+**Other lifecycle fixes (2026-10-07).** When Android refuses to start the Tor
+service from the background, `startBlockedInBackground` is set (state stays
+`IDLE`) and `awaitReady` returns `false` immediately instead of waiting out its
+timeout; the flag clears on the next successful start. The connectivity
+callback now also handles `PROXY_READY`: a Tor started while offline parks
+there, and when a network becomes available (and no bootstrap job is running)
+`confirmBootstrapThenPromote()` re-checks and promotes it to `READY`. Tor still
+stops in the background when `NoSlopForegroundService` is not running (it runs
+only with the background-mesh setting on); this is a known limitation, not a
+regression.
 
 ### 9.3 Onboarding-to-Identity Transition
 
@@ -930,13 +1025,14 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 15)
+## 10. Data Model (Room, version 19)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
 | `feed_sources` | `id` | `url` (unique), `title`, `feedType`, `category`, `lastFetchedAt`, `unreadCount`, `isActive`, `addedDuringOnboarding`, `channelCreatedAt` | unique on `url` |
 | `feed_items` | `id` | `sourceId`, `title`, `url`, `excerpt`, `thumbnailUrl`, `publishedAt`, `isRead`, `isSaved`, `fullContent`, `mediaUrl`, `mediaType`, `apiSource`, `channelCreatedAt` | on `sourceId` |
-| `peers` | `publicKeyB64` | `handle`, `tripcode`, `onionAddress`, `encPublicKeyB64`, `isTrusted`, `lastSeenAt`, `customFolder`, `isTemporary`, `isDiscoverable`, `isCreator`, `fundMeLink`, `bio` | — |
+| `peers` | `publicKeyB64` | `handle`, `tripcode`, `onionAddress`, `encPublicKeyB64`, `isTrusted`, `lastSeenAt`, `customFolder`, `isTemporary`, `isDiscoverable`, `isCreator`, `fundMeLink`, `bio`, `relationship` (`PeerRelationship`: `NONE`/`OUTGOING_PENDING`/`INCOMING_PENDING`/`ACCEPTED`/`BLOCKED`), `pendingNonce`, `pendingEncKey`, `verifiedFingerprint` | — |
+| `media_owner` | (`mediaId`, `ownerType`, `ownerId`) | `ownerType` `POST`/`COMMENT`/`DM`/`GROUP`; `ownerId` post id / comment id / counterparty key / group id; `privacy` (`public`/`friends`/`private`/`group`); `authorPub`; `accessKey`?; `sha256`?; `createdAt` | on `mediaId` |
 | `mesh_posts` | `id` | `authorPublicKeyB64`, `authorHandle`, `authorTripcode`, `content`, `timestamp`, `signature`, `mediaUrl`, `mediaType`, `gossipCount`, `privacy`, `thumbnailB64`, `clearnetUrl`, `clearnetTitle`, `clearnetThumbnailUrl`, `clearnetMediaType`, `mediaSize`, `deletionBroadcasts` | — |
 | `chat_messages` | `id` | `chatWithPeerPub`, `senderPub`, `ciphertext`, `nonce`, `timestamp`, `isRead`, `mediaId`, `mediaType` | on `chatWithPeerPub`, on `timestamp` |
 | `mesh_comments` | `id` | `postId`, `authorPublicKeyB64`, `authorHandle`, `content`, `timestamp`, `signature`, `parentCommentId`, `mediaId`, `mediaType` | on `postId` |
@@ -956,7 +1052,18 @@ keyword lists (`keywords_<Category>`), `selected_categories`,
 `channel_cutoff_enabled`, `channel_cutoff_year`, `channel_cutoff_month`,
 `enable_aggregator`, `user_profile` (JSON), `dm_all_tab_hidden` (`"true"`/`"false"`).
 
-Database migrations (`MIGRATION_1_2` through `MIGRATION_14_15`) safely preserve data across schema updates. `MIGRATION_12_13` introduced `pending_group_messages` and Keystore message encryption, `MIGRATION_13_14` re-encrypted legacy group messages with mandatory AAD binding (`$groupId|$msgId`), and `MIGRATION_14_15` added `bannedMembersJson` to `group_chats` for decentralized group moderation.
+**Peer trust invariant (review D01, 2026-10-07).** `relationship` is the only
+source of truth. `PeerDao.insertPeer` is the only write path and stores
+`Peer.withNormalizedTrust()`, so `isTrusted == (relationship == ACCEPTED)` on
+every row (`insertPeerRow` is the raw REPLACE). `Peer.isFriend` (`ACCEPTED &&
+!isTemporary`) is the friends-only rule used by sync and the gossip filters.
+Presence changes go through `updatePresence` / `markOffline` /
+`setDiscoverableFlag`, never a whole-row re-insert. Related `app_settings`
+keys: `requested_identity_<pub>` (identity a pending requester addressed),
+`contact_identity_<pub>` (bound only on accept), `declined_request_<pub>`
+(nonce of a request the user declined).
+
+Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve data across schema updates. `MIGRATION_15_16` added `group_chats.revision`; `MIGRATION_16_17` added `peers.relationship`, `pendingNonce`, `pendingEncKey`; `MIGRATION_17_18` added `chat_messages.isLegacy` and `deliveryStatus`; `MIGRATION_18_19` added `peers.verifiedFingerprint` and the `media_owner` table (back-filled from all existing attachments), forced burnable-identity contacts to `isTemporary = 1` and re-derived `isTrusted` from `relationship` (`Migration18To19Test`). `MIGRATION_12_13` introduced `pending_group_messages` and Keystore message encryption, `MIGRATION_13_14` re-encrypted legacy group messages with mandatory AAD binding (`$groupId|$msgId`), and `MIGRATION_14_15` added `bannedMembersJson` to `group_chats` for decentralized group moderation.
 
 ---
 
@@ -1135,7 +1242,7 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 - **Authenticated Backup Encryption**: `BackupManager.kt` exports database and preferences using `AES-256-GCM` with a 4-byte `"NSG1"` magic header, a 12-byte random IV, and a 128-bit AEAD tag. On import, `BackupManager.kt` automatically detects `"NSG1"` for GCM decryption while maintaining backward compatibility for legacy `AES-256-CBC` archives.
 
 ### 15.4 Mesh Transport & Peer Failure Cooldown
-- **Exponential Cooldown Backoff**: `GossipService.kt` enforces exponential backoff (`30s * 2^(failures - 3)`, up to 1 hour) on peer send failures, preventing dead or unreachable onion addresses from continuously consuming Tor circuit permits.
+- **Exponential Cooldown Backoff**: `GossipService.kt` puts a peer's onion in cooldown after 3 send failures, each within `PEER_FAILURE_WINDOW_MS` (5 min) of the previous one: 30 s, then 60 s, then 120 s maximum (`cooldownFor`, `PEER_MAX_COOLDOWN_MS`). Failures further apart never accumulate. A successful send, or any authenticated inbound packet from that peer (`processIncoming` → `recordSendSuccess` on the sender's stored onion), clears the cooldown. Only background presence is skipped during cooldown (§4.1). History: commits `679a5a1`/`fd958b9` had stretched the failure memory to 2 h and `4579860` removed the inbound clear, leaving peers cooled down for hours; restored 2026-10-07 (`PeerCooldownRestoreTest`). Tests inject time through `GossipService.clock`.
 - **Non-Blocking Background Traffic**: `MeshTransport.kt` queues `ANNOUNCE_DISCOVERABLE` alongside `ANNOUNCE_PEER` as non-blocking background traffic, dropping queued background announcements when Tor circuit permits are full.
 
 ### 15.5 Strict Tor Isolation & Zero Clearnet Fallback Policy
@@ -1922,6 +2029,42 @@ In release builds (`assembleRelease`), R8 minification strips generic signatures
 2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
 3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
 
+### 17.23 Review Round 2 Remediation & Git-History Regression Restoration (2026-10-07/08)
+
+Changelog and test list: PROJECT_STATUS.md (2026-10-07 – 2026-10-08 entry).
+Mechanism detail lives in the sections it changed:
+
+- **Trust model (D01/D06)** — §10 "Peer trust invariant".
+- **v2-only handshakes (D07) and the handshake reply path (A2)** — §4.1 and
+  WIRE_PROTOCOL_REFERENCE.md §3 / §3.1.
+- **Send policy, pools and cooldown (R1)** — §4.1, §15.4, §19.
+- **Tor hidden-service re-registration, background start, offline
+  `PROXY_READY` (R1)** — §9.2.
+- **Chunk window cap and outbound limit** — §6.1.
+- **Media ACL, `media_owner`, digests and sync of v2-signed media (R2)** —
+  §6.1.1 and WIRE_PROTOCOL_REFERENCE.md §4.3.
+
+Two UI fixes have no other home:
+
+- **QR scanning (`QRScanScreen.kt`)**: CameraX hands over the Y plane with row
+  padding (`rowStride > width`) and sometimes `pixelStride > 1`;
+  `packLuminancePlane` repacks it into a tight `width × height` buffer before
+  ZXing, and the camera use cases are bound once instead of on every
+  recomposition. `QrFrameDecodeTest`.
+- **Chat / comment input (`ui/components/AndroidGifTextField.kt`)**: the field
+  is `internal class GifEditText : EditText` (platform class on purpose —
+  annotated `@SuppressLint("AppCompatCustomView")`). Commit `6f6dffe` had made
+  it an `AppCompatEditText`, which under the app's platform theme
+  (`android:Theme.DeviceDefault.NoActionBar`) loses the EditText style and is
+  not focusable in touch mode, so the keyboard never opened in DMs or
+  comments. The view sets `focusable` / `focusableInTouchMode` / `clickable`
+  explicitly, advertises `image/gif`, `image/png`, `image/jpeg`, `video/mp4`
+  for keyboard content, refreshes its callbacks in the `AndroidView` `update`
+  block (no stale lambdas after recomposition), and `applySendOnEnter`
+  switches between IME *Send* and multi-line input. `GifEditTextTest`.
+  **Do not change the base class back to `AppCompatEditText`** without also
+  moving the theme to an AppCompat parent.
+
 ### 17.22 Protocol Canonicalization, Atomic Post Persistence & Safe Staging (2026-10-04)
 
 A comprehensive hardening pass addressed the fifth round of external audit findings (R01–R18):
@@ -2053,7 +2196,7 @@ ExoPlayer range requests over Tor incur 10-15s latency round trips when seeking 
 
 ### 19.1 Concurrency Pool Isolation (`dmSemaphore` vs `bulkSemaphore`)
 Previously, `MeshTransport` funneled all outbound Tor sockets through a single `torSemaphore(4)`. When background inventory sync ran or peers exchanged broadcasts, bursts of `SYNC_RESPONSE` and media chunks exhausted all permits. Real-time DMs and typing signals were forced into an unconstrained FIFO queue behind 15-second Tor handshakes.
-- `dmSemaphore` (4 permits): Strictly reserved for `MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, and `GROUP_*` packets.
+- `dmSemaphore` (4 permits): Strictly reserved for `MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `DM_ACK`, `CHAT_REACTION` and `GROUP_*` packets. (Commit `439c83b` had moved the handshakes to the bulk pool, where they were dropped after 4 s; restored 2026-10-07.)
 - `bulkSemaphore` (4 permits): Confines bulk inventory sync, media chunk transfers, and general gossip.
 - Guarantees that feed and media activity can never monopolize circuits or delay direct messaging.
 
@@ -2061,14 +2204,17 @@ Previously, `MeshTransport` funneled all outbound Tor sockets through a single `
 In-memory coroutine retry loops failed to survive app kills or system reboots. Undelivered DMs are now serialized to `app_settings["pending_dm_outbox"]`.
 - When a direct send fails, the packet is placed into the persistent queue.
 - Reconnect triggers (Tor reaching `READY`, peer `ANNOUNCE_PEER` receipts, or opening a chat thread) flush pending outbox DMs immediately to the target onion address.
+- The outbox worker no longer pauses while a video player is mounted (the `PreloadManager.isVideoActive` / `currentlyPlayingUrl` gate from `679a5a1` was removed 2026-10-07; those flags were often never cleared, stalling DMs indefinitely). `VideoPlayer` now also clears `isVideoActive` for non-direct sources and off-screen slides.
+- Receivers send `DM_ACK` fire-and-forget on `AppScopes.io`, never inline on the inbound handler.
+- Open (register R8 / review D05): event-triggered flushes are throttled by the retry backoff (up to 5 min), and entries have no maximum age or attempt count.
 
 ### 19.3 Bi-directional Message Synchronization (`DM_SYNC_REQUEST`)
 Upon establishing peer presence or application start, nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and dispatch a `DM_SYNC_REQUEST(since: Long)`.
 The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any missing `MESSAGE` packets directly over the fast-lane. The existing idempotency of `messageDao.insertMessage` (`OnConflictStrategy.REPLACE`) ensures zero duplicate message creation.
 
 ### 19.4 Peer Cooldown Dynamic Reset & Verification Alignment
-- Peer failure cooldown is capped at 120s max (preventing 1-hour lockout traps).
-- Incoming authenticated packets from a peer immediately clear any failure cooldown on the peer's onion address.
+- Peer failure cooldown is capped at 120s max (preventing 1-hour lockout traps). (Lost in later commits and restored 2026-10-07 — see §15.4.)
+- Incoming authenticated packets from a peer immediately clear any failure cooldown on the peer's onion address. (Removed in `4579860`, restored 2026-10-07.)
 - `ANNOUNCE_PEER` signature verification accepts both `CryptoService.encodeForSigning` and legacy pipe payloads, ensuring peers are accurately marked `isOnline = true`.
 - Typing indicators feature a 6-second auto-expiration guard, immediate dismissal upon message delivery, and a 4-second client-side idle debounce.
 

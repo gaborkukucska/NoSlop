@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-03)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-08)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -17,6 +17,20 @@ This document merges what used to be two separate files
 `PACKET_SCHEMA.md` covered plain JSON field tables for 9 of the protocol's 24
 payload types; that coverage is now folded into §2 below so there's one place
 to look up any packet's shape.
+
+> **⚠️ Breaking change (2026-10-07, review round 2 D07): v2-only handshakes.**
+> `CONNECTION_REQUEST` and `USER_HANDSHAKE` are accepted **only** with a
+> `canonicalHandshakePayloadV2` signature (§3, §7). Nodes running an older
+> NoSlop sign handshakes with the legacy encoding and can no longer connect to
+> updated nodes, and vice versa — **both sides must update**. Rejected legacy
+> handshakes are logged (`legacy (pre-v2) handshake — peer must update NoSlop`),
+> the sender's key is remembered, and the user is told ("Older NoSlop
+> Version"; the DMs tab's *Sent requests* list marks such peers).
+>
+> **2026-10-07/08 additions** (no other envelope or payload changes):
+> the handshake reply path (§3.1), `media_metadata` on `CommentSyncData`
+> and v2 (media-hash) signature acceptance in `SYNC_RESPONSE` (§3, §4.3),
+> and the 256 KB chunk window (§6).
 
 ---
 
@@ -227,6 +241,12 @@ Every payload class in `Packets.kt`, with wire (`snake_case`) field names.
 | `clearnet_title`? | String | Original title if sharing a clearnet article |
 | `clearnet_thumbnail_url`? | String | URL of the thumbnail for the clearnet article |
 
+When `media_metadata.sha256` is present the author signs the **v2** form
+(the 8 canonical fields plus the digest, §7). A receiver that can only verify
+the 8-field form treats the digest as unsigned. In `SYNC_RESPONSE` the digest
+is then removed before auto-download (2026-10-08); the live `POST` /
+`EDIT_POST` path does not strip it yet (review finding D08, open).
+
 ### MESSAGE (Secure Direct Messages)
 **Type:** `MESSAGE` · class `EncryptedPayload`
 
@@ -270,7 +290,59 @@ at render time.
 | `from_home_node` | String | Sender's onion address |
 | `from_encryption_public_key`? | String | Sender's X25519 public key |
 | `timestamp` | Long | Epoch timestamp |
-| `signature`? | String | Signature over `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (and optional avatar/bio) |
+| `signature`? | String | v2 signature (below); the envelope `signature` takes precedence when both are set |
+| `request_nonce`? | String | `CONNECTION_REQUEST`: 128-bit random nonce chosen by the requester. **Required** (blank → rejected) |
+| `in_reply_to_nonce`? | String | `USER_HANDSHAKE`: echo of the requester's `request_nonce`; promotion to `ACCEPTED` requires it to match the stored `pendingNonce` |
+| `target_user_id`? | String | Identity this handshake is addressed to (main or burnable key). Must be a local identity and must equal the envelope `targetUserId` when that is set |
+| `version` | Int | `2` for handshakes built by current clients |
+
+**Signature (v2 only).** `canonicalHandshakePayloadV2` =
+`encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode,
+fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?)`,
+where `nonce` is `request_nonce` for a request and `in_reply_to_nonce` for a
+handshake. Legacy encodings (`fromUserId|fromUsername|fromHomeNode|timestamp…`)
+are recognised only to report "peer must update"; they are never accepted.
+
+**Receiver rules (`HandshakePacketHandler`).** Requests older than 1 hour from
+unknown peers are ignored, as are requests from a peer deleted within the last
+7 days unless the request was created after the deletion (a deliberate
+reconnect). A
+`BLOCKED` peer's request is ignored. A request crossing our own
+`OUTGOING_PENDING` request is treated as mutual consent. A request from an
+`ACCEPTED` friend re-sends our handshake echoing their nonce; a changed
+encryption key is held in `pendingEncKey` and never applied silently.
+
+#### 3.1 Handshake reply path (Round A2, 2026-10-07)
+
+A freshly published onion descriptor can take minutes to propagate, so the
+requester can often reach the accepter long before the accepter can reach the
+requester. The answer therefore travels back on the requester's own
+connection:
+
+1. The requester writes the `CONNECTION_REQUEST` and keeps the socket open for
+   `MeshTransport.HANDSHAKE_REPLY_WINDOW_MS` = **6 s**, reading newline-delimited
+   frames. It accepts exactly one `USER_HANDSHAKE` or `CONNECTION_REJECTED`
+   whose envelope `senderId` equals the identity it contacted (the request's
+   `targetUserId`); anything else on that socket is ignored.
+2. The accepter may write a reply on that inbound connection only after the
+   request passed signature, target and freshness checks (timestamp within
+   ±5 minutes), and at most once per request timestamp per sender (a
+   timestamp must be strictly newer than the last one answered). A replayed
+   or forged request never collects a handshake.
+3. Reply content: `USER_HANDSHAKE` when the user has accepted (or the peer is
+   already `ACCEPTED`); `CONNECTION_REJECTED` when the request repeats a nonce
+   the user declined (`declined_request_<pub>`); nothing while the request is
+   still awaiting the user — the requester learns by probing.
+4. **Probing.** While a request is `OUTGOING_PENDING`, the requester re-sends it
+   every **15 s** for up to **10 min**: same `request_nonce`, same identity,
+   fresh `timestamp`, fresh packet `id` (so dedup lets it through), each
+   probe re-signed. Probes are direct only (no Hub, outbox, gossip or cooldown
+   bookkeeping) and stop once the row leaves `OUTGOING_PENDING` or its nonce
+   changes. A pending request is never re-notified to the accepting user;
+   *Re-send* creates a new nonce and is asked normally.
+
+The normal (separate-connection) delivery of `USER_HANDSHAKE` and
+`CONNECTION_REJECTED` still happens as before; the reply path is an addition.
 
 ### ANNOUNCE_PEER
 **Type:** `ANNOUNCE_PEER` · class `AnnouncePeerPayload`
@@ -278,6 +350,7 @@ at render time.
 | Field | Type | Description |
 |---|---|---|
 | `author_id` | String | Sender's public key |
+| `onion_address`? | String | Sender's current onion address — **not covered by the signature** (open finding S2: a replayed fresh announce can rewrite a friend's stored onion) |
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Ed25519 signature over `authorId\|timestamp` |
 
@@ -326,6 +399,12 @@ at render time.
 | `from_user_id` | String | Public key of the peer who declined |
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Signature over `fromUserId\|timestamp` |
+
+Sent by the identity the request addressed. Since 2026-10-07 it can also arrive
+as the answer on the requester's own connection (§3.1), and the decliner
+remembers the declined nonce so repeated probes get this packet instead of a
+new prompt. Received `CONNECTION_REJECTED` only cancels our own
+`OUTGOING_PENDING` request; it never removes an accepted friend.
 
 ### EDIT_POST
 **Type:** `EDIT_POST` · class `EditPostPayload`
@@ -413,7 +492,13 @@ at render time.
 | `comments`? | Array\<`CommentSyncData`\> | Comments attached to those posts (milestone 159/172) |
 | `reactions`? | Array\<`ReactionSyncData`\> | Reactions attached to those posts (milestone 159/172) |
 
-`CommentSyncData`: `id, post_id, author_id, author_name, author_avatar_b64?, content, timestamp, signature, parent_comment_id?`
+`CommentSyncData`: `id, post_id, author_id, author_name, author_avatar_b64?, content, timestamp, signature, parent_comment_id?, media_id?, media_type?, media_metadata?`
+
+`posts[i].media_metadata.sha256` and `comments[i].media_metadata.sha256` carry
+the signed media digest (from 2026-10-08). The sender takes it from the
+`media_owner` index, or hashes its local copy; a missing or wrong digest can
+only make the receiver fall back to (or fail) the 8-field / legacy check,
+never accept a forged item.
 `ReactionSyncData`: `id, post_id, author_id, reaction_type, timestamp, signature`
 
 There is **no** separate `INVENTORY_SYNC_RESPONSE` type — both `SYNC_REQUEST`
@@ -660,11 +745,19 @@ strategies.
 
 ### 4.3 `handleSyncResponse` Verification
 
-Each post in `posts` is independently signature-verified
-(`id|authorId|content|timestamp`) before `postDao.insertPost`; invalid
-signatures are dropped per-post with a warning log. The `comments` and
-`reactions` arrays are similarly verified using their own signed formats
-before insertion via `commentDao`/`reactionDao`.
+Each post in `posts` is independently signature-verified before
+`postDao.insertPostSafely`, accepting — as the live `POST` handler does — the
+**v2** form (canonical 8 fields + `media_metadata.sha256`) or the canonical
+8-field form (§7); invalid signatures are dropped per post with a warning log.
+Until 2026-10-08 only the 8-field form was accepted here, so every post with a
+media digest was rejected by sync (regression R5). When v2 verified, the digest
+is recorded (`NoSlopRepository.recordMediaDigest`) so the item can be re-served
+with its v2 signature; when only the 8-field form verified, `sha256` is
+stripped before auto-download.
+
+The `comments` array is verified the same way (v2 comment form with the media
+digest, then the older comment encodings); `reactions` use their own signed
+format. Accepted items are inserted via `commentDao` / `reactionDao`.
 
 ---
 
@@ -708,7 +801,7 @@ before insertion via `commentDao`/`reactionDao`.
 
 | Type | Payload | Role |
 |---|---|---|
-| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, byte_offset?, byte_length?, access_key?, hls_file?, origin_onion?}` | Requests a specific chunk of a media item by index. `origin_onion` conveys the requester's Tor onion address so un-paired peers can return chunks directly. |
+| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, byte_offset?, byte_length?, access_key?, hls_file?, origin_onion?}` | Requests a byte range of a media item. `chunk_size` and `byte_length` must be in `1..262144` (256 KB, `MAX_CHUNK_BYTES`) and `byte_offset ≥ 0`; `chunk_size = 0` with no `byte_length` is a metadata request. The reply always goes to the requester's **stored** onion (C03); `origin_onion` is not used as a reply target. |
 | `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64), total_size?}` | Carries one chunk's bytes. `total_size` (optional Long) communicates the sender's known file size so receivers with indeterminate metadata can compute accurate download progress. |
 | `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id, origin_node?, owner_id?, access_key?, metadata?}` | Broadcast to trusted peers when the direct author is unreachable/unknown |
 | `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id, onion_address?}` | Sent back along the relay chain once the media's source node is located; `onion_address` provides the source's direct Tor onion address. |
@@ -717,7 +810,23 @@ before insertion via `commentDao`/`reactionDao`.
 
 > **Note on Temporary Contacts and Media Routing:** Media packets exchanged with a peer designated as a "Temporary Contact" (e.g., from a Discoverable connection) must explicitly use the local node's **burnable identity** public key as the `senderId` instead of the main identity. Because the temporary contact's gossip firewall is only aware of the burnable identity that performed the handshake, any media response or chunk request signed by the main identity will be immediately dropped as an unknown sender.
 
-`MediaMetadata` (embedded in `PostPayload.media_metadata` and
+**Chunk window and sender limits (2026-10-07).** The downloader's byte window
+starts at 256 KB, halves on a chunk timeout (down to 128 KB, `MIN_CHUNK_SIZE`)
+and grows back by 32 KB per received chunk, capped at **256 KB**
+(`MAX_CHUNK_SIZE = MAX_CHUNK_BYTES`). It used to grow to
+1 MB while senders reject anything above 256 KB, which stalled every file
+needing more than two requests (the "video stuck at 9%" bug). Pending ranges
+larger than 256 KB are split without gaps before being requested. Senders
+serve at most **16 MB per requester per 60 s** (previously 5 MB).
+
+**Who is served.** `MediaManager.isMediaAuthorizedForSender` first consults the
+`media_owner` index: public post/comment media → anyone; private → author;
+friends-only → direct friends and the author; DM → the conversation partner;
+group → members and admin. The older per-table checks follow (including the
+"trusted peer" fallback that review finding D02 asks to remove).
+
+`MediaMetadata` (embedded in `PostPayload.media_metadata`,
+`CommentSyncData.media_metadata`, DM plaintext and
 `MediaRelayRequestPayload.metadata`): `id, type ("audio"|"video"|"file"|
 "image"), mime_type, size, chunk_count, access_key?, filename?, origin_node?,
 owner_id?, thumbnail_b64?, sha256?` (C17 whole-file SHA-256 integrity digest).
@@ -788,21 +897,21 @@ and still accurate.
 
 | Packet type | Signed string |
 |---|---|
-| `POST` / `SYNC_RESPONSE.posts[i]` | Canonical 8-field `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy unauthenticated fallback restricted strictly to public posts without attachments (`id\|authorId\|content\|timestamp` + optional avatar). |
-| `COMMENT` / `SYNC_RESPONSE.comments[i]` | `postId\|commentId\|content\|timestamp` |
+| `POST` / `SYNC_RESPONSE.posts[i]` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl, sha256)`. Otherwise canonical 8-field `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Both forms are accepted by the live handler and, since 2026-10-08, by sync. Legacy unauthenticated fallback restricted strictly to public posts without attachments (`id\|authorId\|content\|timestamp` + optional avatar). |
+| `COMMENT` / `SYNC_RESPONSE.comments[i]` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(postId, commentId, content, timestamp, authorAvatarB64, sha256)`. Otherwise `encodeForSigning(postId, commentId, content, timestamp, authorAvatarB64)`, `encodeForSigning(postId, commentId, content, timestamp)`, or pipe `postId\|commentId\|content\|timestamp` (+`\|authorAvatarB64`) |
 | `REACTION` / `SYNC_RESPONSE.reactions[i]` | `postId\|reactionType\|authorId\|timestamp` |
 | `CHAT_REACTION` | `messageId\|reactionType\|authorId\|timestamp` |
 | `COMMENT_REACTION` | `commentId\|reactionType\|authorId\|timestamp` |
 | `VOTE` | `postId\|voteType\|authorId\|timestamp` |
 | `COMMENT_VOTE` | `commentId\|voteType\|authorId\|timestamp` |
-| `ANNOUNCE_PEER` | `authorId\|timestamp` |
+| `ANNOUNCE_PEER` | `authorId\|timestamp` (`onion_address` unsigned — S2, open) |
 | `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
 | `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
 | `EDIT_POST` | Canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy fallbacks strictly eliminated; complete signed state is atomically persisted to database. |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
-| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) (supporting encodeForSigning and pipe) |
+| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | **v2 only** (D07 hard break): `encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode, fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?)` with `nonce` = `request_nonce` (request) or `in_reply_to_nonce` (handshake). The legacy `fromUserId\|fromUsername\|fromHomeNode\|timestamp` forms are rejected. |
 | `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey, sortedMemberDetails, sortedMemberHandles)`. Legacy 7-field fallback strictly restricted to admin self-signed payloads with empty unsigned fields. |
 | `GROUP_UPDATE` | Canonical 13-field presence-encoded `canonicalGroupUpdatePayload(groupId, encodeOptString(wireTitle), signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, encodeOptBanned(banned), encodeOptString(wireDesc), encodeOptString(wireAvatar), encodeOptBool(wireAllowInvites), encodeOptBool(wireAllowSelfRemove), sortedMemberDetails, sortedMemberHandles)`. Distinguishes absent (`ABSENT`) from cleared (`CLEAR`) values per W03. |
 | `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |
@@ -838,7 +947,7 @@ and are not duplicated in this document:
   client roster, feed sync pipeline, RSS parsing).
 - §8 (clearnet-to-mesh bridge: deterministic anchor IDs).
 - §9 (Tor integration).
-- §10 (Room schema v23).
+- §10 (Room schema v19).
 - §11–14 (background work, build configuration, future HUB architecture,
   known discrepancies).
 

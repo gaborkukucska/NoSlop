@@ -120,8 +120,9 @@ object GossipService {
 
     /**
      * Check if a peer is currently in cooldown due to repeated failures.
-     * Uses exponential backoff (from 30s up to 1 hour) based on failure count
-     * so unreachable peers don't continuously burn Tor circuits.
+     * Uses exponential backoff (30 s, 60 s, then 120 s max — see [cooldownFor]) based on the
+     * failure count within PEER_FAILURE_WINDOW_MS, so unreachable peers don't continuously burn
+     * Tor circuits.
      */
     fun isPeerInCooldown(peerOnionAddress: String): Boolean {
         val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: return false

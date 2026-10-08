@@ -21,6 +21,8 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 > 📖 **Deep Technical Details:** All cryptographic derivations, transport architectures, and protocol specifications live in [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) and [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
 
+> ⚠️ **Update both devices (October 2026 builds):** contact requests now use only the signed v2 handshake, which binds the encryption key, the recipient and a one-time nonce. A node on an older NoSlop build can't connect to an updated one, and the reverse is also true. Such contacts are marked "older NoSlop version" in the DMs tab's *Sent requests* list. See [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
+
 ---
 
 ## ⚡ Why Stop the Slop?
@@ -60,7 +62,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 * 📬 **End-to-End Encrypted DMs** — Secure messaging via directional X25519 key agreement and ChaCha20-Poly1305 AEAD (v2) with AAD binding and delivery acknowledgments.
 * 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
-* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish broadcasts without leaking their personal identity.
+* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish broadcasts under a separate key and onion address. (Full separation from the personal profile — handle, bio, avatar, and every reply path — is still in progress.)
 * 🏠 **Home HUBs & Admin AI** — Link or auto-deploy an always-on home server over SSH as your sovereign master database and private LLM assistant.
 * 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post.
 * 🛡️ **Gossip Firewall & Mesh Filters** — 6-hop flood routing with LRU deduplication, packet verification, and granular toggles for incoming and outgoing media types.
@@ -73,14 +75,14 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
-* 🪪 **Visual Safety Fingerprints** — 6-character display tripcodes plus 20-character Base32 cryptographic safety fingerprints for out-of-band contact verification.
+* 🪪 **Visual Safety Fingerprints** — 6-character display tripcodes. A 20-character Base32 safety fingerprint is derived in code, but no screen shows it yet; that's planned for out-of-band contact verification.
 
 ---
 
 ### 🧅 Tor-Routed Networking
 
 * 🛡️ **Default Tor Routing** — Outbound feed fetches, media streams, API requests, and mesh packets route through an embedded local Tor daemon.
-* 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns unique circuits and exit nodes to distinct media streams, guaranteeing exit affinity and eliminating Google IP-lock stalls.
+* 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns separate circuits to distinct media streams. That keeps each stream on the same exit and reduces Google IP-lock stalls.
 * 🔁 **Graceful Exit Hopping** — Nonce-bumping hops Tor exits upon provider blocks without process-wide circuit disruption.
 * 📲 **Peerless OTA Updates** — Background update checking over Tor with SHA-256 checksum verification and pre-install same-signer certificate matching.
 
@@ -88,7 +90,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 ## 🌍 Community Localization (21+ Languages Supported)
 
-NoSlop is designed to be accessible to anyone, anywhere in the world. As of **v0.5.8-alpha**, the app includes **21 native language translations** covering every UI string, modal, and system message:
+NoSlop is designed to be accessible to anyone, anywhere in the world. As of **v0.5.8-alpha**, the app includes **21 native language translations** of the UI, modals and system messages. Any string not yet translated falls back to English:
 
 | Language | Code | Native Name | Language | Code | Native Name |
 |---|---|---|---|---|---|

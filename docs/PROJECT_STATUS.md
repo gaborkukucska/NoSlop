@@ -1,5 +1,257 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-07 – 2026-10-08) — Review Round 2 Remediation (D01/D06/D07), Handshake Reply Path & Git-History Regression Restoration (v0.6.9-alpha)
+
+This round has two parts. The first fixes the round-2 review findings D01, D06 and D07, plus groundwork for D02. The second is a review of the last 100 commits, done because several features that used to work had stopped working on devices. It found and fixed the regressions behind the failures seen in two-device testing.
+
+**How the status labels are used.** "Tested (unit: `X`)" names a test class that exists under `app/src/test` and passed with `./gradlew testGithubDebugUnitTest`. Every test runs the real handlers or repositories against an in-memory Room database or a real loopback socket; none of the code under test is mocked. "Verified on device" means the developer confirmed it in two-device testing on this build.
+
+**Verified on device (2026-10-08).** These all work between a trusted peer and a burnable-identity peer:
+- DMs, including recorded video and GIFs
+- Mesh posts, including video posts
+- Reactions
+- Comments, including GIF comments
+- The keyboard in DMs and comments
+- DM video that had been stuck before the fix, which then completed
+
+Under heavy load, GIFs can be slow to arrive, but they do arrive.
+
+> **Note on version naming.** Code comments written in this round call the release "v0.7.0". `versionName` is still `0.6.9-alpha` (versionCode 69).
+
+### Breaking change: the handshake is v2-only (D07)
+
+* **Both sides must update.**
+  * `HandshakePacketHandler` now accepts only `CONNECTION_REQUEST` and `USER_HANDSHAKE` packets carrying a `canonicalHandshakePayloadV2` signature. That signature binds the encryption key, the target identity and the nonce. The packet must also have a non-blank `request_nonce`.
+  * A request signed with only the legacy encoding is rejected and logged as `legacy (pre-v2) handshake — peer must update NoSlop`.
+  * A handshake signed with only the legacy encoding never promotes the peer, even when the nonce matches.
+* **The older-version case is shown to the user.**
+  * When a key is rejected for speaking the legacy protocol, that key is recorded, and the user gets at most one notification a day: "Older NoSlop Version".
+  * `NoSlopRepository.isPeerOnLegacyProtocol(pub)` exposes this state.
+* **Sent requests are visible.**
+  * The DMs tab has a new **SENT REQUESTS** list (`OutgoingRequestRow`) showing every `OUTGOING_PENDING` row. Each row has **Re-send** and **Cancel Request** actions.
+  * When the peer is known to be on the legacy protocol, the row says so.
+  * `MeshSocialRepository.cancelOutgoingRequest` removes the pending row.
+  * Seven new strings were added to `content_en.json`.
+* **Not done.** D07 also asked the migration to map un-trusted rows from the user's own requests to `OUTGOING_PENDING`. That wasn't done; the user re-sends from the Sent Requests list instead.
+* Tested (unit: `PeerTrustInvariantTest`: `d07_*`).
+
+### Room schema 18 → 19 (`MIGRATION_18_19`)
+
+* **Changes:**
+  * Adds `peers.verifiedFingerprint`.
+  * Creates the `media_owner` table (PK `mediaId, ownerType, ownerId`, index on `mediaId`) and back-fills it from every post, comment and message attachment.
+  * Repairs trust:
+    * Contacts of the burnable identity are forced to `isTemporary = 1`.
+    * `isTrusted` is re-derived as `relationship = 'ACCEPTED'` for every row.
+    * This demotes every peer that the old startup "heal" promoted without consent, and every group admin that `acceptGroupInvite` had made a friend.
+* **Validated against the real schema.** The test builds a real v18 database from `app/schemas/.../18.json`, migrates it, and lets Room validate it against the v19 entities.
+* Tested (unit: `Migration18To19Test`).
+* No device ran the interim builds 087–089, so the late change to `MIGRATION_17_18` (register item M1) doesn't affect any installed database.
+
+### D01 — Trust has a single source of truth
+
+* **The heal is gone.** The startup "heal" block that promoted burnable-contact peers to trusted on every start was removed. Startup maintenance now lives in `NoSlopRepository.runStartupPeerMaintenance()`, so the regression test can run exactly that code.
+* **`PeerRelationship` constants** cover `NONE`, `OUTGOING_PENDING`, `INCOMING_PENDING`, `ACCEPTED` and `BLOCKED`. `ACCEPTED` is the only state that grants trust.
+* **`PeerDao.insertPeer`** is now the only write path for peers. It stores `Peer.withNormalizedTrust()`, so `isTrusted == (relationship == ACCEPTED)` holds on every write. The raw REPLACE is `insertPeerRow`.
+* **`Peer.isFriend`** (`ACCEPTED && !isTemporary`) is the single "may receive friends-only content" rule. These all use it: `SyncPacketHandler` (sync request, inventory sync and comment/reaction sender checks) and the `GossipService` friends-only inbound and outbound filters.
+* **Contact identity is bound only at accept time.**
+  * `handleConnectionRequest` records which identity the peer addressed in `requested_identity_<pub>`.
+  * `contact_identity_<pub>` is written only in `acceptConnectionRequest`.
+* **Specific decisions:**
+  * A group admin is a group member (`NONE`), not a friend.
+  * The Hub's Admin AI and Hub-restored contacts are `ACCEPTED` on purpose, because the Hub is the user's own node.
+  * `togglePeerTrust` was removed.
+* **No automatic consent.** Neither a keyless DM sender nor a keyless group member triggers an automatic `CONNECTION_REQUEST` any more. If it did, a crossing request would fake the user's consent.
+* Tested (unit: `PeerTrustInvariantTest`: `d01_*`).
+
+### D06 — Peer rows are merged, never rebuilt
+
+* `sendConnectionRequest` merges into the existing row:
+  * An `ACCEPTED` friend is never downgraded, and its fields are kept.
+  * A `BLOCKED` peer is never contacted.
+  * An existing `INCOMING_PENDING` request is simply accepted.
+* `BLOCKED` is left only by explicit user action. A request from a blocked peer is ignored.
+* **Crossing requests count as mutual consent.** If our row is `OUTGOING_PENDING` and a valid v2 request addressed to us arrives, the row is staged as `INCOMING_PENDING` with *their* nonce and promoted through `acceptConnectionRequest`.
+* A request from an accepted friend keeps them `ACCEPTED`. A changed encryption key is held in `pendingEncKey`.
+* `rejectConnectionRequest` acts only on `INCOMING_PENDING` rows, so a stale notification can never delete a friend. `CONNECTION_REJECTED` only cancels our own pending request.
+* Presence updates touch only the presence columns (`PeerDao.updatePresence`, `markOffline`, `setDiscoverableFlag`). They never re-insert a whole row.
+* Tested (unit: `PeerTrustInvariantTest`: `d06_*`).
+
+### D02 (groundwork) — The `media_owner` index
+
+* **DAO-maintained.** The `PostDao`, `CommentDao` and `MessageDao` insert, edit, orphan and delete paths keep `media_owner` up to date themselves. No caller can forget to register an attachment.
+* **Visibility rules:**
+  * Comment media inherits the visibility of its parent post.
+  * Unknown privacy values are stored as `friends` (deny by default).
+* **Write-once secrets.** `MediaOwnerDao.attachSecrets` adds the `accessKey` and `sha256` to a row and never overwrites an existing value.
+* **Still open.** The index is used by the R2 allow path (below), but the ACL isn't deny-by-default yet. The trailing "any trusted peer" fallback is still there, and no `accessKey` is generated yet.
+* Tested (unit: `MediaOwnerIndexTest`).
+
+### Round A2 — Handshake answers come back on the requester's own connection
+
+**The problem.** After a fresh install or an onion change, a newly published onion descriptor takes minutes to propagate. During that window the requester can reach the accepter, but not the other way round. So the accepter's `USER_HANDSHAKE` was lost, and the pairing never completed.
+
+* **Framing:**
+  * New `mesh/MeshFraming.kt` holds `ReplyChannel = suspend (NetworkPacket) -> Boolean`, `FrameReader` (the newline framing rules, moved out of the listener unchanged) and `FrameTooLargeException`.
+  * Tested (unit: `FrameReaderTest`).
+* **Listener:**
+  * `MeshTransport.handleIncomingConnection` gives each inbound connection a write-serialised reply channel. It passes that channel through `NoSlopRepository.handleIncomingPacket` and `MeshPacketHandler` to the handlers.
+  * Only the `CONNECTION_REQUEST` handler ever uses it.
+* **Requester:**
+  * When `MeshTransport.exchangeOverSocket` sends a `CONNECTION_REQUEST`, it keeps the socket open for `HANDSHAKE_REPLY_WINDOW_MS` (6 s).
+  * It accepts one `USER_HANDSHAKE` or `CONNECTION_REJECTED` reply, and only from the identity it contacted.
+* **Accepter rules (`HandshakePacketHandler`):**
+  * The reply channel is used only after the request passed the signature, target and freshness checks.
+  * It is used at most once per request timestamp (`claimReplySlot`), so a replayed or forged request never collects our handshake.
+* **Probing (`MeshSocialRepository.startOutgoingRequestPoll`):**
+  * While a request is `OUTGOING_PENDING`, the requester re-sends it every 15 s for up to 10 min. Each probe uses `MeshTransport.probeConnectionRequest`, which has its own 2-slot pool and a 30 s connect timeout.
+  * Each probe keeps the **same nonce** but has a fresh timestamp and a fresh packet id.
+  * Probing stops when the row leaves `OUTGOING_PENDING`, when its nonce changes, or when the user cancels.
+  * Probes never touch the Hub, the outbox, gossip or the peer cooldown.
+* **Declined requests:**
+  * `rejectConnectionRequest` resolves the addressed identity *before* it removes `requested_identity_*`, so a burnable-identity request is declined by the burnable identity.
+  * It stores the declined nonce in `declined_request_<pub>`.
+  * Later probes with that nonce are answered with `CONNECTION_REJECTED` (`answerDeclinedRequest`) instead of re-asking the user. A new request (new nonce, from **Re-send**) is asked normally.
+* `acceptConnectionRequest(peer, replyVia)` answers on the reply channel when there is one, and over a normal send otherwise.
+* Tested (unit: `HandshakeReplyPathTest`: real `MeshTransport` listener on loopback, real repository stack, real Ed25519 keys on the other end of a real TCP socket, no Tor).
+
+### Camera QR scanner
+
+* **Cause.** CameraX delivers the Y plane row-padded (`rowStride > width`) and sometimes with `pixelStride > 1`. Handing that buffer straight to ZXing sheared the image, so the scanner never decoded a code.
+* **Fix.**
+  * `QRScanScreen.packLuminancePlane` repacks the plane into a tight buffer.
+  * The camera is bound once rather than on every recomposition.
+* Tested (unit: `QrFrameDecodeTest`: padded rows, pixel stride 2, tightly packed, inverted, no code).
+
+### Keyboard did not open in DMs or comments
+
+* **Cause.** Commit `6f6dffe` changed the base class of the chat/comment input to `AppCompatEditText`. Under the app's platform theme (`android:Theme.DeviceDefault.NoActionBar`), that lost the EditText style: the field wasn't focusable in touch mode, so a tap never focused it.
+* **Fix.** `ui/components/AndroidGifTextField.kt` was rewritten around `internal class GifEditText : EditText`, which:
+  * sets `focusable`, `focusableInTouchMode` and `clickable` explicitly;
+  * refreshes its callbacks (`onValueChange`, `onMediaAttached`, `onSend`, `currentValue`) in `update` so they're never stale;
+  * uses `applySendOnEnter` to switch between send-on-Enter and multi-line.
+* Keyboard GIF/image insertion (`image/gif`, `image/png`, `image/jpeg`, `video/mp4`) is unchanged.
+* Tested (unit: `GifEditTextTest`). Verified on device.
+
+### Recorded video stuck at 9%
+
+* **Cause.**
+  * The downloader grows its chunk window by 32 KB after every chunk and allowed it to reach 1 MB.
+  * Senders reject any request above `MAX_CHUNK_BYTES` (256 KB, C03).
+  * So from the third request (288 KB) onward, every request was rejected and re-queued at the same size. A 5.3 MB video stopped at 2 of 21 chunks.
+* **Fix (`MediaManager`):**
+  * `MAX_CHUNK_SIZE = MAX_CHUNK_BYTES` (256 KB).
+  * `grownChunkSize` caps the window.
+  * `splitToServable` splits an oversized pending range into servable pieces with no gap.
+  * `chunkRequestRejection` is the single sender-side bounds check, shared with the test.
+* The outbound media limit per requester rose from 5 MB to **16 MB per 60 s** (about 270 KB/s). The old limit was below normal Tor throughput, so a single 5 MB+ video tripped it mid-transfer.
+* Tested (unit: `MediaChunkWindowTest`). Verified on device.
+
+### Git-history regression review (commits 001–096)
+
+* Every commit in the last 100 was diffed and checked against the current tree. Findings are recorded as a register:
+  * **Tier 1** (mesh delivery): R1–R8
+  * **Tier 2** (other runtime): V1–V4, F1–F4, H1–H2, B1–B2, D1–D2, L1, U1, S1, M1, C1
+  * **New security finding**: S2
+* Items marked ✔ were re-verified against the work tree. Fixed items are listed below; open items are under **Still open** at the end of this entry.
+* Already resolved, no action needed: D1 (`REQUEST_INSTALL_PACKAGES` is present in the `github` flavour manifest) and M1 (see the schema notes above).
+
+### R1 — Mesh delivery restored
+
+* **Peer cooldown (`GossipService`):**
+  * Failures accumulate only within `PEER_FAILURE_WINDOW_MS` (5 min). Since `679a5a1` and `fd958b9` the window had been 2 h, so one failed send after each Tor restart left peers in cooldown for hours.
+  * The cooldown is 30 s → 60 s → 120 s max (`cooldownFor`).
+  * An authenticated inbound packet from a peer clears its cooldown again, through `recordSendSuccess` on the sender's stored onion. That behaviour came from F18 and was removed in `4579860`.
+  * The test clock is injectable (`GossipService.clock`).
+* **Transport policy (`MeshTransport` companion):**
+  * Only background presence (`ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE`, `USER_EXIT`) is skipped for a peer in cooldown (`respectsPeerCooldown`). Since `439c83b` and `34770ba`, posts, comments, reactions, votes, edits, deletes and sync to such a peer had been silently dropped.
+  * `CONNECTION_REQUEST` and `USER_HANDSHAKE` use the priority pool again (`usesPrioritySlot`, `dmSemaphore`, blocking acquire). They had fallen into the 4-permit bulk pool and were dropped after 4 s.
+  * `TYPING`, `READ_RECEIPT` and `DM_ACK` failures no longer count toward a peer's cooldown (`countsAsPeerFailure`).
+* **DM ACKs.** `DmPacketHandler` sends `DM_ACK` fire-and-forget through `AppScopes.io`. Sending inline had held the inbound handler and a DM slot for the whole Tor send.
+* **Outbox.** `startOutboxWorker` no longer pauses while a video player is mounted. `VideoPlayer` now clears `PreloadManager.isVideoActive` when the resolved source isn't a direct stream, or the slide isn't visible. Before, embeds and unavailable sources left the flag stuck on and stalled DMs, handshakes and group messages indefinitely.
+* **Tor (`TorService`):**
+  * `forgetRegisteredHiddenServices` clears the hidden-service bookkeeping on `STATUS_OFF`, in `stopTor` and on daemon start. A restarted daemon then gets `ADD_ONION` again; before, the node's onion stayed unreachable until the app was killed.
+  * `startBlockedInBackground` makes `awaitReady` return `false` immediately when Android refused to start Tor from the background, so the work goes to the outbox instead of waiting out the full timeout.
+  * When the network returns while Tor is parked in `PROXY_READY`, `confirmBootstrapThenPromote()` re-checks the bootstrap. A Tor started offline used to stay `PROXY_READY` forever.
+* Tested (unit: `PeerCooldownRestoreTest`). Verified on device.
+
+### R2 — Media posts and comment media sync again; comment media is served
+
+* **Sync accepts v2 (C17) signatures.** `SyncPacketHandler.handleSyncResponse` now accepts the v2 signature, which covers the 8 canonical fields plus the media SHA-256, for both posts and comments. It used to accept only the 8-field post signature, so every media post or comment with a hash binding was rejected by sync.
+  * When only a legacy signature verifies, the unsigned `sha256` is removed before auto-download.
+* **Sync carries the digest.**
+  * `toPostPayload` and `toCommentSyncData` (now `suspend`) send `media_metadata.sha256`.
+  * `CommentSyncData` now carries `media_metadata`.
+* **Digest bookkeeping (`NoSlopRepository`):**
+  * `recordMediaDigest` stores a verified digest on every owner row of the media.
+  * `mediaDigestFor` returns the stored digest, or hashes the local file and caches the result.
+  * The live POST/COMMENT handlers and local post/comment creation record the digest.
+  * Comment auto-download metadata keeps `sha256` only when the comment was v2-signed.
+* **Re-issue keeps the binding.** `reissueLocalPostsWithCanonicalSignatures` keeps a valid v2 signature, and upgrades a legacy one to v2 when the digest is known. Before, every Tor start re-signed media posts as 8-field and stripped the hash binding.
+* **Comment media ACL.** `MediaManager.isAuthorizedByOwnerIndex` now runs first in `isMediaAuthorizedForSender`:
+  * public post or comment media → anyone;
+  * private → the author only;
+  * friends-only → direct friends (not temporary or burnable contacts) and the author;
+  * DM → the conversation partner;
+  * group → members and the admin.
+  
+  Comment media had had no allow path since `5f9a127`, so comment GIFs and images never loaded remotely. Anything not matched falls through to the existing checks.
+* Tested (unit: `MediaSyncAndAclRestoreTest`). Verified on device.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `PeerTrustInvariantTest` | D01, D06, D07 (16 tests) |
+| `MediaOwnerIndexTest` | D02 index maintenance |
+| `Migration18To19Test` | `MIGRATION_18_19` against the exported v18 schema |
+| `FrameReaderTest` | A2 framing |
+| `HandshakeReplyPathTest` | A2 reply path, probing, declined requests, replay/forgery |
+| `QrFrameDecodeTest` | QR luminance repacking |
+| `GifEditTextTest` | Keyboard focus, IME content types, send-on-Enter |
+| `MediaChunkWindowTest` | Chunk window vs. sender cap |
+| `PeerCooldownRestoreTest` | R1 cooldown window and transport policy |
+| `MediaSyncAndAclRestoreTest` | R2 v2 sync, digest, re-issue, comment media ACL |
+
+These existing tests were adjusted to the new APIs: `MeshSocialRepositoryTest`, `GossipServiceTest` and `FakeDaos`.
+
+### Status corrections (D10)
+
+* The 2026-10-06 entry below cites test classes that don't exist in the repository: `IdentityRepositoryTest`, `SyncPacketHandlerTest`, `CryptoServiceTest`, `JamendoApiClientTest` and `LoggerTest`. It also cites `OnboardingScreen`, which is a composable, not a test.
+* Those changelog lines are kept as the historical record. The verification matrix now shows what is actually tested.
+* Other claims in that entry that don't hold:
+  * No `secureDelete()` function exists (C06).
+  * `IdentityViewModel` is an unused copy; its deletion is planned (C25).
+  * `deriveSafetyFingerprint()` has no callers, so no screen shows a fingerprint yet (C11).
+  * The README sentences about fingerprints, the creator identity, exit affinity and translation coverage were corrected.
+
+### Still open (carried forward)
+
+* **Review round 2:**
+  * **D02** — deny-by-default ACL; issue and require `accessKey`.
+  * **D03** — relay listeners get chunks without an ACL check; the recovery reply is broken.
+  * **D04** — `IdentityRouter`; separate creator profile; capture test.
+  * **D05** — v1 DM latch; `DM_ACK` domain separation; outbox expiry.
+  * **D08** — the live `POST` and `EDIT_POST` path still passes an unsigned `sha256` to auto-download when only the legacy signature verified. Sync is fixed by R2.
+  * **D09** — typed `ImportResult`; check before commit.
+  * **D10** — fingerprint UI and `pendingEncKey` banner; `IdentityViewModel` deletion; status-file test-existence check.
+  * **D11** — smaller items.
+  * **D12** — items still open from round 1.
+* **Regression register:**
+  * **R4d** — handshake send budget. The A2 reply path covers the main symptom.
+  * **R6b** — media requests from non-contacts and public media requests; hub re-stamping.
+  * **R6c** — over-cap or unknown media requests are dropped silently.
+  * **R7a** — `leaveGroupChat` signs 11 fields, but receivers require the 13-field `canonicalGroupUpdatePayload`, so every leave or non-admin delete is rejected.
+  * **R7b–R7f** — `GROUP_SYNC` revision stamping; group rate limit for non-friend members; invitee bootstrap; reinstall recovery; freshness check before signer check.
+  * **R8** — DM outbox backoff throttles event-triggered flushes; no expiry.
+  * **Tier 2** — V1–V4, F1–F4, H1–H2, B1–B2, D2, L1, U1, S1, C1.
+* **S2 (security, new):**
+  * The `ANNOUNCE_PEER` signature covers only `authorId|timestamp`. `onion_address` is unsigned, and `handleAnnouncePeer` overwrites the stored onion with it.
+  * A replayed fresh announce could therefore redirect a friend's onion.
+* **Background Tor.** Tor dies in the background unless `NoSlopForegroundService` is running, which it is only when the background-mesh setting is on. Android then refuses the restart. This isn't a regression; R1 makes callers fail fast instead of waiting.
+
+---
+
 ## Completed Changes (2026-10-06) — Trust Boundaries, Tor Leak Elimination, Multi-Store Rollback & Protocol Hardening (v0.6.9-alpha)
 
 * **Explicit Peer Relationship State Machine & Nonce Exchange (C01) — Tested (unit: `HandshakeSecurityTest`)**:
@@ -1150,31 +1402,31 @@ same-device backup export/import. Multi-device testing is next.
 
 | Finding ID | Severity | Description | Status | Validation / Test Suite |
 |---|---|---|---|---|
-| **C01** | P0 | USER_HANDSHAKE relationship state machine & nonce exchange | **Resolved** | `HandshakeSecurityTest` |
+| **C01** | P0 | USER_HANDSHAKE relationship state machine & nonce exchange (heal side door closed by D01) | **Resolved** | `HandshakeSecurityTest`, `PeerTrustInvariantTest`, `HandshakeReplyPathTest` |
 | **C02** | P0 | Handshake encryption key binding & destination auth (`noslop-hs-v2`) | **Resolved** | `HandshakeSecurityTest` |
-| **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Resolved** | `MediaManagerSecurityTest` |
+| **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Partial** — bounds ✔; ACL not deny-by-default, no `accessKey` (D02); relay listeners bypass ACL (D03) | `MediaManagerSecurityTest`, `MediaChunkWindowTest`, `MediaSyncAndAclRestoreTest` |
 | **C04** | P0 | Article WebView Tor leak elimination & external browser gating | **Resolved** | `TorLeakArchitectureTest` |
 | **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
-| **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Resolved** | `BackupManagerTest` |
+| **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Partial** — internal staging ✔; plaintext zip still written; no `secureDelete()` exists (D10/D12) | `BackupManagerTest` |
 | **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** | `BackupManagerTest` |
-| **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** | `CryptoServiceRobolectricTest` |
+| **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Partial** — v2 ✔; unconditional v1 fallback, no ACK domain label (D05) | `CryptoServiceRobolectricTest` |
 | **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
-| **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** | `SyncPacketHandlerTest` |
-| **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** | `CryptoServiceRobolectricTest` |
+| **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Partial (~20%)** — sync batches only (D04) | Implemented (untested): cited `SyncPacketHandlerTest` does not exist |
+| **C11** | P1 | 20-character visual safety fingerprint derivation | **Partial** — derivation ✔; no caller, not shown in any screen (D10) | `CryptoServiceRobolectricTest` |
 | **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
 | **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
 | **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
 | **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** | `BackupManagerTest` |
-| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Resolved** | `IdentityRepositoryTest` |
-| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** | `MediaManagerSecurityTest` |
-| **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** | `CryptoServiceRobolectricTest`, `WireProtocolTest` |
-| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Resolved** | `LoggerTest` |
-| **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Resolved** | `JamendoApiClientTest` |
+| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** | cited `IdentityRepositoryTest` does not exist |
+| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Partial** — v2 binding ✔, now also via sync and re-issue (R2); live POST/EDIT legacy path keeps unsigned hash (D08) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest` |
+| **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Partial** — ACK ✔ (sent off the inbound path since R1); no outbox expiry (D05/R8) | `CryptoServiceRobolectricTest`, `WireProtocolTest` |
+| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Implemented (untested)** — ~20 logs still carry search terms / bare IDs (D11) | cited `LoggerTest` does not exist |
+| **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** | cited `JamendoApiClientTest` does not exist |
 | **C21** | P2 | Respected NXDOMAIN in cascading DNS (DoH opt-in only) | **Resolved** | `TorLeakArchitectureTest` |
 | **C22** | P2 | Click-to-load prompts for remote GIFs & retired cleartext GROUP_MESSAGE | **Resolved** | `TorLeakArchitectureTest` |
 | **C23** | P2 | Translation key parity (`content_en.json`), pre-install APK cert verification, docs sync | **Resolved** | `TranslationParityTest` |
 | **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Resolved** | `testGithubDebugUnitTest` |
-| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** | `IdentityViewModelTest` |
+| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Partial** — `IdentityViewModel` is an unused copy (deletion planned, D10) | `IdentityViewModelTest` |
 | **C26** | P2 | Canonical presence-encoded signing formats (`ABSENT` / `CLEAR` / `SET:`) | **Resolved** | `GroupMessageSecurityTest` |
 | **W01** | P0 | Synchronized Feed sync cancellation deadlock fix | **Resolved** | `FeedRepositoryTest` |
 | **W02** | P0 | Eliminated legacy 4-field GROUP_UPDATE bypass | **Resolved** | `GroupMessageSecurityTest` |
@@ -1183,7 +1435,32 @@ same-device backup export/import. Multi-device testing is next.
 | **W05** | P1 | Synchronous API key commits & rollback atomicity | **Resolved** | `BackupManagerTest` |
 | **W06** | P1 | Monotonic author-scoped tombstones (`timestamp > existingTs`) | **Resolved** | `PostPacketHandlerTest` |
 | **W07** | P1 | Content-matching signature upgrades on equal timestamps | **Resolved** | `PostPacketHandlerTest` |
-| **W08** | P1 | Asynchronous recovery StateFlow & runBlocking elimination | **Resolved** | `OnboardingScreen` |
+| **W08** | P1 | Asynchronous recovery StateFlow & runBlocking elimination | **Implemented (untested)** | `OnboardingScreen` is a composable, not a test |
+
+### Review round 2 (D01–D12) and git-history regressions — status 2026-10-08
+
+| Finding ID | Severity | Description | Status | Validation / Test Suite |
+|---|---|---|---|---|
+| **D01** | P1 | Startup "heal" granted trust without consent; one trust rule (`relationship`, `Peer.isFriend`) | **Resolved** | `PeerTrustInvariantTest`, `Migration18To19Test` |
+| **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Partial** — index ✔ and used as allow path (R2); deny-by-default and `accessKey` open | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest` |
+| **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Open** | — |
+| **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Open** | — |
+| **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Open** (ACK no longer blocks inbound, R1) | — |
+| **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
+| **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
+| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Partial** — sync path fixed (R2); live POST/EDIT path and `insertPostSafely` match open | `MediaSyncAndAclRestoreTest` |
+| **D09** | P2 | Cross-device restore mismatch reported after commit | **Open** | — |
+| **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; fingerprint UI, `IdentityViewModel` deletion, status-file check open | — |
+| **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** | — |
+| **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |
+| **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |
+| **QR** | — | Camera QR frames never decoded (row padding / pixel stride) | **Resolved** | `QrFrameDecodeTest` |
+| **KB** | — | Keyboard did not open in DMs/comments (`6f6dffe`) | **Resolved** (device-verified) | `GifEditTextTest` |
+| **VID** | — | Recorded video stuck at 9% (chunk window above sender cap) | **Resolved** (device-verified) | `MediaChunkWindowTest` |
+| **R1–R4c** | — | Cooldown memory, cooldown gate, cooldown clear, blocking ACK, handshake pool, outbox video gate, Tor hidden-service re-registration, background start, offline PROXY_READY | **Resolved** (device-verified) | `PeerCooldownRestoreTest` |
+| **R5, R6a** | — | Sync rejected v2-signed media posts/comments; re-issue stripped hash; comment media never served | **Resolved** (device-verified) | `MediaSyncAndAclRestoreTest` |
+| **R4d, R6b, R6c, R7a–R7f, R8** | — | Handshake budget; non-contact media replies; silent media drops; group leave/sync/rate-limit/bootstrap; outbox backoff | **Open** | — |
+| **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
 
