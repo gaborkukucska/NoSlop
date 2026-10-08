@@ -3018,6 +3018,10 @@ fun toggleAggregator() {
 
     fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String) { viewModelScope.launch { repository.reactToChat(messageId, reactionType, recipientPubB64) } }
 
+    /** R3b: the identity a group message (and its attachment) is sent as. */
+    suspend fun groupSenderIdentity(groupId: String, privacy: String): CryptoService.IdentityKeys? =
+        repository.groupSenderIdentity(groupId, privacy)
+
     /** R3: re-sends a DM the outbox gave up on (status FAILED). */
     fun retryFailedMessage(messageId: String) { viewModelScope.launch(Dispatchers.IO) { repository.retryFailedDirectMessage(messageId) } }
     fun reactToGroupChat(messageId: String, reactionType: String, groupId: String) { viewModelScope.launch { repository.reactToGroupChat(messageId, reactionType, groupId) } }

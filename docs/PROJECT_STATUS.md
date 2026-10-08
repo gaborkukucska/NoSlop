@@ -72,6 +72,12 @@ This round continues the git-history regression register. It covers the group it
     * anything else → as before.
   * It's used for `MEDIA_REQUEST` (including its `origin_onion`) and for `MEDIA_TRANSFER_ACK`.
   * Tested (unit: `GroupLifecycleRestoreTest`).
+* **Group GIF/video still failing for one member (second device test).** Two more causes:
+  * The group chat screen stamped every attachment with the **burnable** onion and owner whenever a burnable identity existed, even when the message was sent under the main member key. Downloads were then pointed at the burnable onion, which one member could never reach ("Connect timed out" on every attempt), while the sender's main onion worked.
+    * Attachments now use the same identity as the message: `NoSlopRepository.groupSenderIdentity` / `groupSenderKeys`, which `sendGroupMessage` also uses.
+  * Message media is downloaded from the authenticated sender's known onion first, with `originNode` only as a fallback. Both of a node's onions reach the same app, so this also repairs attachments sent before this fix.
+  * Downloading group media no longer sends an `ANNOUNCE_DISCOVERABLE` (as the burnable identity) to the sender. Group members already know each other from the signed group directory.
+  * Tested (unit: `GroupLifecycleRestoreTest`).
 * **Create Group dialog.** The member list now starts with the creator, ticked, greyed out and labelled "You (admin)". This makes it clear that the "NoSlop · Creator" row below is the official NoSlop creator node, not the group's own creator.
 * **Invite not received by one node.** In this test that node (both apps on one emulator) couldn't be reached at all. The queued `GROUP_INVITE` was retried from the outbox every minute and is delivered once the node is reachable. No code change was needed.
 

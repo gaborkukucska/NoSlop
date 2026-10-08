@@ -131,6 +131,11 @@ class GroupLifecycleRestoreTest {
         assertEquals(burnable.publicKeyB64, NoSlopRepository.groupMemberIdentity(listOf(dave.publicKeyB64), true, alice, burnable).publicKeyB64)
         assertEquals(alice.publicKeyB64, NoSlopRepository.groupMemberIdentity(listOf(dave.publicKeyB64), false, alice, burnable).publicKeyB64)
         assertEquals(alice.publicKeyB64, NoSlopRepository.groupMemberIdentity(listOf(dave.publicKeyB64), true, alice, null).publicKeyB64)
+        // Messages and their attachments: the member key; "friends only" uses the main key when it is a member.
+        assertEquals(alice.publicKeyB64, NoSlopRepository.groupSenderKeys(asMain, true, "public", alice, burnable).publicKeyB64)
+        assertEquals(alice.publicKeyB64, NoSlopRepository.groupSenderKeys(asMain, true, "friends", alice, burnable).publicKeyB64)
+        assertEquals(burnable.publicKeyB64, NoSlopRepository.groupSenderKeys(asBurnable, true, "public", alice, burnable).publicKeyB64)
+        assertEquals(burnable.publicKeyB64, NoSlopRepository.groupSenderKeys(asBurnable, true, "friends", alice, burnable).publicKeyB64)
     }
 
     // ------------------------------------------------------------------ R7b: catch-up after member-initiated changes

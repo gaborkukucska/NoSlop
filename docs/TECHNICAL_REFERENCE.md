@@ -647,7 +647,7 @@ always allowed. Then, in order:
 - DM media → the identity bound to the contact (`contact_identity_*`);
 - anything else → the burnable key towards a temporary contact, else the main key.
 
-Requests for open-group media used to go out under the main key, which isn't a member, so they were refused.
+Requests for open-group media used to go out under the main key, which isn't a member, so they were refused. The download address for message media is the authenticated sender's peer onion, falling back to `originNode`. Group attachments are stamped with the sender's member identity (`groupSenderIdentity`). `startDownload` sends no `ANNOUNCE_DISCOVERABLE` for group media.
 
 Steps 1–5 predate the index. Review finding **D02** (open) asks for
 deny-by-default: refuse when a non-public owner exists and the requester is

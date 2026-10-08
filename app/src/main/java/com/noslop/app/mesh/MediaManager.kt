@@ -463,7 +463,13 @@ object MediaManager {
             scope.launch {
                 val repo = repository ?: return@launch
                 val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peerOnion }
-                if (targetPeer == null || !targetPeer.isTrusted) {
+                // R3b: group members already know each other from the signed group directory. Announcing
+                // our burnable identity to them as "discoverable" listed us as a stranger next to the
+                // contact they already have, so skip it for group media.
+                val isGroupMedia = try {
+                    repo.mediaOwnerDao.getOwners(metadata.id).any { it.ownerType == MediaOwner.TYPE_GROUP }
+                } catch (_: Exception) { false }
+                if (!isGroupMedia && (targetPeer == null || !targetPeer.isTrusted)) {
                     val burnable = repo.getBurnableIdentity()
                     if (burnable != null) {
                         val handle = repo.getLocalHandle()

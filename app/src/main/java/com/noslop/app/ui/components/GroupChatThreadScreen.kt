@@ -819,7 +819,10 @@ fun GroupChatThreadScreen(
                     isProcessingMedia = true
                     compressionProgress = null
                     coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        val activeSender = if (privacy == "friends") localKeys else (burnableKeys ?: localKeys)
+                        // R3b: stamp the attachment with the identity the message is actually sent as
+                        // (its member key). Using the burnable key whenever one existed pointed every
+                        // download at an onion that is not the sender's member identity.
+                        val activeSender = viewModel.groupSenderIdentity(group.groupId, privacy) ?: localKeys
                         val mediaMetadata = buildMediaMetadata(fileToProcess, activeSender)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             isProcessingMedia = false

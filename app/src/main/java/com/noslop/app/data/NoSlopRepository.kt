@@ -1000,8 +1000,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // "Friends only" uses the main identity when it is a member. R3: open groups no longer switch
         // to the burnable identity when it is not the member key (a member invited under its main key
         // who also had a burnable identity sent as a non-member, and every recipient dropped it).
-        val memberKeys = groupMemberIdentity(memberPubs, group.allowMemberInvites, myKeys, burnableKeys)
-        val senderKeys = if (privacy == "friends" && memberPubs.contains(myKeys.publicKeyB64)) myKeys else memberKeys
+        val senderKeys = groupSenderKeys(memberPubs, group.allowMemberInvites, privacy, myKeys, burnableKeys)
 
         // P0-2: Store group message body encrypted at rest with AAD binding
         val (encryptedBody, bodyNonce) = try {
@@ -1532,6 +1531,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         Logger.info("REPOSITORY", "Re-sent group invites for '${group.title}' ($groupId) to ${members.size} member(s)")
     }
 
+    /**
+     * R3b: the identity to send a group message as, for the UI to stamp attachments with the same
+     * origin onion / owner the message is sent under (see groupSenderKeys).
+     */
+    suspend fun groupSenderIdentity(groupId: String, privacy: String): CryptoService.IdentityKeys? {
+        val myKeys = getLocalIdentity() ?: return null
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return myKeys
+        val members: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java)?.toList() ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+        return groupSenderKeys(members, group.allowMemberInvites, privacy, myKeys, getBurnableIdentity())
+    }
+
     suspend fun requestGroupCatchup(groupId: String) {
         val myKeys = getLocalIdentity() ?: return
         val burnableKeys = getBurnableIdentity()
@@ -1979,6 +1991,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             burnable != null && allowMemberInvites -> burnable
             else -> main
         }
+
+        /**
+         * R3b: the identity a group message (and its attachment's origin) is sent as. "Friends only"
+         * uses the main key when it is a member; otherwise the member key (groupMemberIdentity).
+         */
+        internal fun groupSenderKeys(
+            members: List<String>,
+            allowMemberInvites: Boolean,
+            privacy: String,
+            main: CryptoService.IdentityKeys,
+            burnable: CryptoService.IdentityKeys?
+        ): CryptoService.IdentityKeys =
+            if (privacy == "friends" && members.contains(main.publicKeyB64)) main
+            else groupMemberIdentity(members, allowMemberInvites, main, burnable)
 
         /**
          * R3 (regression restore, register R7a): a member's signed self-removal. It must be signed with

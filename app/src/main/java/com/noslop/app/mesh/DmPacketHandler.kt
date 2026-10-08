@@ -312,7 +312,11 @@ class DmPacketHandler(
             )
             
             if (mediaMetadata != null) {
-                val onion = mediaMetadata.originNode ?: peer?.onionAddress
+                // R3b: prefer the authenticated sender's current onion. The attachment's originNode is only a
+                // hint written at send time (group attachments were stamped with the burnable onion even
+                // when the message came from the main identity), and both of a node's onions reach the
+                // same app, so the sender's known address is the reliable one.
+                val onion = peer?.onionAddress?.takeIf { it.isNotBlank() && it.endsWith(".onion") } ?: mediaMetadata.originNode
                 MediaManager.checkAndAutoDownload(
                     mediaMetadata,
                     if (groupId != null) "group" else "private",
