@@ -646,7 +646,10 @@ object MediaManager {
             val length = req.second
 
             scope.launch {
-                val myOnion = repo.getLocalIdentity()?.onionAddress
+                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
+                // R3b: ask as the identity the owner of this media knows (see requesterIdentity).
+                val me = requesterIdentity(repo, dl.metadata.id, targetPeer)
+                val myOnion = me?.onionAddress
                 val payload = MediaRequestPayload(
                     mediaId = dl.metadata.id,
                     chunkIndex = (offset / MIN_CHUNK_SIZE).toInt(),
@@ -656,10 +659,8 @@ object MediaManager {
                     accessKey = dl.metadata.accessKey,
                     originOnion = myOnion
                 )
-                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
                 val targetPubKey = targetPeer?.publicKeyB64
-                val isTargetTemp = targetPeer?.isTemporary == true
-                val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
+                val mySenderId = me?.publicKeyB64 ?: ""
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
@@ -825,8 +826,7 @@ object MediaManager {
             if (peer != null) {
                 scope.launch {
                     val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
-                    val isTargetTemp = targetPeer?.isTemporary == true
-                    val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
+                    val mySenderId = requesterIdentity(repo, dl.metadata.id, targetPeer)?.publicKeyB64 ?: ""
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
                         hops = 3,
@@ -925,6 +925,38 @@ object MediaManager {
      * direct friends (not burnable/temporary contacts) and the item's author. DMs: the conversation
      * partner. Groups: members and admin. Anything not matched falls through to the legacy checks.
      */
+    /**
+     * R3b: the identity to request (and acknowledge) a media item as — the one its owner authorises:
+     *  - group media: our member key in that group (NoSlopRepository.groupMemberIdentity). In an open
+     *    group we are listed (and the admin is) under the burnable key, but requests went out under
+     *    the main key, so the owner's ACL refused them ("Rejected unauthorized MEDIA_REQUEST") and
+     *    group images/GIFs never downloaded;
+     *  - DM media: the identity bound to that contact (contact_identity_*);
+     *  - otherwise, as before: the burnable key towards a temporary contact, else the main key.
+     */
+    internal suspend fun requesterIdentity(
+        repo: NoSlopRepository,
+        mediaId: String,
+        targetPeer: com.noslop.app.data.Peer?
+    ): CryptoService.IdentityKeys? {
+        val main = repo.getLocalIdentity() ?: return null
+        val burnable = repo.getBurnableIdentity()
+        val owners = try { repo.mediaOwnerDao.getOwners(mediaId) } catch (_: Exception) { emptyList() }
+        owners.firstOrNull { it.ownerType == MediaOwner.TYPE_GROUP }?.let { owner ->
+            val group = repo.getGroupChatById(owner.ownerId)
+            if (group != null) {
+                val members = try {
+                    com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java)?.toList() ?: emptyList()
+                } catch (_: Exception) { emptyList() }
+                return NoSlopRepository.groupMemberIdentity(members, group.allowMemberInvites, main, burnable)
+            }
+        }
+        owners.firstOrNull { it.ownerType == MediaOwner.TYPE_DM }?.let { owner ->
+            return if (burnable != null && repo.getAppSetting("contact_identity_${owner.ownerId}") == "burnable") burnable else main
+        }
+        return if (targetPeer?.isTemporary == true) burnable ?: main else main
+    }
+
     internal suspend fun isAuthorizedByOwnerIndex(repo: NoSlopRepository, mediaId: String, senderId: String): Boolean {
         val owners = try { repo.mediaOwnerDao.getOwners(mediaId) } catch (_: Exception) { emptyList() }
         if (owners.isEmpty()) return false

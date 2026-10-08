@@ -63,6 +63,18 @@ This round continues the git-history regression register. It covers the group it
 * **Ordered saves.** Outbox saves take their snapshot under a lock, so saves can't land out of order.
 * Tested (unit: `OutboxExpiryTest`).
 
+### Follow-up from device testing (2026-10-08)
+
+* **Group images/GIFs never downloaded.** In an open group, members (and the admin) are listed under their burnable key. Media requests always went out under the main key, so the owner's media check refused them; a device log showed "Rejected unauthorized MEDIA_REQUEST" on every retry.
+  * `MediaManager.requesterIdentity` now picks the identity the media's owner authorises:
+    * group media → our member key in that group;
+    * DM media → the identity bound to that contact;
+    * anything else → as before.
+  * It's used for `MEDIA_REQUEST` (including its `origin_onion`) and for `MEDIA_TRANSFER_ACK`.
+  * Tested (unit: `GroupLifecycleRestoreTest`).
+* **Create Group dialog.** The member list now starts with the creator, ticked, greyed out and labelled "You (admin)". This makes it clear that the "NoSlop · Creator" row below is the official NoSlop creator node, not the group's own creator.
+* **Invite not received by one node.** In this test that node (both apps on one emulator) couldn't be reached at all. The queued `GROUP_INVITE` was retried from the outbox every minute and is delivered once the node is reachable. No code change was needed.
+
 ### Reviewed, not changed
 
 * **R7d.** After an invite is accepted, the group is stored and catch-up accepts syncs from any member. Only a member-signed sync arriving *before* acceptance is refused, which is harmless.

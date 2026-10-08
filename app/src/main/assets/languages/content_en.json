@@ -869,5 +869,7 @@
   "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.": "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.",
   "Re-send": "Re-send",
   "Cancel Request": "Cancel Request",
-  "Not delivered. Tap to retry": "Not delivered. Tap to retry"
+  "Not delivered. Tap to retry": "Not delivered. Tap to retry",
+  "You (admin)": "You (admin)",
+  "Me": "Me"
 }

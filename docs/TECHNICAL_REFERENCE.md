@@ -642,6 +642,13 @@ always allowed. Then, in order:
 5. Files with a `.mine` sentinel are refused; otherwise any trusted peer is
    allowed.
 
+**Requesting side (2026-10-08).** `MediaManager.requesterIdentity` picks the identity a `MEDIA_REQUEST`, its `origin_onion` and the final `MEDIA_TRANSFER_ACK` are sent as:
+- group media → our member key in that group (`groupMemberIdentity`);
+- DM media → the identity bound to the contact (`contact_identity_*`);
+- anything else → the burnable key towards a temporary contact, else the main key.
+
+Requests for open-group media used to go out under the main key, which isn't a member, so they were refused.
+
 Steps 1–5 predate the index. Review finding **D02** (open) asks for
 deny-by-default: refuse when a non-public owner exists and the requester is
 not authorised for it, remove step 5, and issue/require `accessKey`. Comment

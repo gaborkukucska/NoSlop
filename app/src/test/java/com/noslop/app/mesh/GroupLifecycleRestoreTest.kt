@@ -205,6 +205,42 @@ class GroupLifecycleRestoreTest {
         assertEquals("naming a group does not exempt a non-member", 10, strangerClaimingTheGroup)
     }
 
+    // ------------------------------------------------------------------ group media requester identity
+
+    @Test
+    fun groupMedia_isRequestedAsOurMemberKey_whichTheOwnerAuthorises() = runBlocking<Unit> {
+        // An open group we administer under the burnable key (as createGroupChat does).
+        val burnable = repo.generateBurnableIdentity()
+        db.groupChatDao().insertGroupChat(group(burnable.publicKeyB64, listOf(burnable.publicKeyB64, bob.publicKeyB64)))
+        db.messageDao().insertMessage(
+            ChatMessage(id = "g1", chatWithPeerPub = groupId, senderPub = bob.publicKeyB64, ciphertext = "x", nonce = "y",
+                mediaId = "group_image_1_gboard_attach_2.gif", mediaType = "image")
+        )
+        MediaManager.initialize(repo)
+        try {
+            // Before, requests went out under the main key, which is not a member; the owner refused them
+            // ("Rejected unauthorized MEDIA_REQUEST") whenever its own copy carried the .mine sentinel.
+            val me = MediaManager.requesterIdentity(repo, "group_image_1_gboard_attach_2.gif", null)!!
+            assertEquals(burnable.publicKeyB64, me.publicKeyB64)
+            assertTrue(MediaManager.isMediaAuthorizedForSender(repo, "group_image_1_gboard_attach_2.gif", bob.publicKeyB64, null))
+            assertFalse(MediaManager.isMediaAuthorizedForSender(repo, "group_image_1_gboard_attach_2.gif", mallory.publicKeyB64, null))
+        } finally {
+            MediaManager.resetForTesting()
+        }
+    }
+
+    @Test
+    fun dmMedia_isRequestedAsTheIdentityBoundToThatContact() = runBlocking<Unit> {
+        val burnable = repo.generateBurnableIdentity()
+        db.messageDao().insertMessage(
+            ChatMessage(id = "d1", chatWithPeerPub = bob.publicKeyB64, senderPub = bob.publicKeyB64, ciphertext = "x", nonce = "y",
+                mediaId = "dm-photo_1.jpg", mediaType = "image")
+        )
+        assertEquals(alice.publicKeyB64, MediaManager.requesterIdentity(repo, "dm-photo_1.jpg", null)!!.publicKeyB64)
+        db.appSettingDao().insertSetting(com.noslop.app.data.AppSetting("contact_identity_${bob.publicKeyB64}", "burnable"))
+        assertEquals(burnable.publicKeyB64, MediaManager.requesterIdentity(repo, "dm-photo_1.jpg", null)!!.publicKeyB64)
+    }
+
     // ------------------------------------------------------------------ queued group messages
 
     @Test

@@ -289,6 +289,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             if (showCreateGroupDialog) {
                 CreateGroupDialog(
                     peers = eligibleGroupMembers,
+                    ownHandle = handle,
                     onDismiss = { showCreateGroupDialog = false },
                     onCreate = { title, desc, avatarB64, allowInvites, allowSelfRemove, selectedMembers ->
                         viewModel.createGroupChat(title, selectedMembers, avatarB64, desc, allowInvites, allowSelfRemove)
@@ -898,6 +899,7 @@ fun TutorialSpotlight(
 @Composable
 fun CreateGroupDialog(
     peers: List<Peer>,
+    ownHandle: String = "",
     onDismiss: () -> Unit,
     onCreate: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, selectedMemberPubs: List<String>) -> Unit
 ) {
@@ -1041,6 +1043,30 @@ fun CreateGroupDialog(
 
                 Text("Select Members:".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(6.dp))
+
+                // The creator is always a member (the admin): shown ticked and greyed out, so it is clear
+                // who the group's own "creator" is, as opposed to discoverable creator nodes listed below.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(PrimaryBlack.copy(alpha = 0.25f))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Checkbox(
+                            checked = true,
+                            onCheckedChange = null,
+                            enabled = false
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(ownHandle.ifBlank { "Me".tr }, color = TextMuted, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text("You (admin)".tr, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
 
                 val displayPeers = remember(peers, allowInvites) {
                     if (allowInvites) {
