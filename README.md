@@ -21,8 +21,6 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 > 📖 **Deep Technical Details:** All cryptographic derivations, transport architectures, and protocol specifications live in [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) and [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
 
-> ⚠️ **Update both devices (October 2026 builds):** contact requests now use only the signed v2 handshake, which binds the encryption key, the recipient and a one-time nonce. A node on an older NoSlop build can't connect to an updated one, and the reverse is also true. Such contacts are marked "older NoSlop version" in the DMs tab's *Sent requests* list. See [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
-
 ---
 
 ## ⚡ Why Stop the Slop?
