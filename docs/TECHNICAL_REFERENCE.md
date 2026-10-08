@@ -1048,6 +1048,8 @@ the ephemeral onion with the identity-derived one.
 `mesh_filter_settings` (JSON — see §4.6), per-category
 keyword lists (`keywords_<Category>`), `selected_categories`,
 `selected_music_genres`, `selected_video_genres`, `negative_keywords`,
+`pending_dm_outbox` / `pending_dm_outbox_meta` (§19.2),
+`group_admin_sync_ts_<groupId>` (last applied admin `GROUP_SYNC`, replay guard),
 `language_preference`, `creator_keywords`, `banned_channels` (comma-separated blacklist),
 `channel_cutoff_enabled`, `channel_cutoff_year`, `channel_cutoff_month`,
 `enable_aggregator`, `user_profile` (JSON), `dm_all_tab_hidden` (`"true"`/`"false"`).
@@ -2065,6 +2067,34 @@ Two UI fixes have no other home:
   **Do not change the base class back to `AppCompatEditText`** without also
   moving the theme to an AppCompat parent.
 
+### 17.24 Round R3 — Groups & DM Outbox (2026-10-08)
+
+Changelog: PROJECT_STATUS.md (2026-10-08 R3 entry). Mechanism:
+
+- **Leaving a group** is signed with `NoSlopRepository.groupLeavePayload`, the
+  same 13-field `canonicalGroupUpdatePayload` that
+  `HandshakePacketHandler.resolveUpdateSigner` verifies. The previous 11-field
+  form was rejected by every receiver (register R7a).
+- **Member identity**: `NoSlopRepository.groupMemberIdentity(members,
+  allowMemberInvites, main, burnable)` picks the key that is listed in the
+  group. It is used by `leaveGroupChat`, non-admin `updateGroupChat` (signing,
+  `senderId`, the invites it sends), `sendGroupMessage` ("friends only" still
+  uses the main key when it is a member) and `reactToGroupChat`.
+  `requestGroupCatchup` parses the member list instead of a substring match,
+  and no longer sends a query to our own burnable identity.
+- **Group catch-up** (register R7b): the admin's `GROUP_SYNC` answer is stamped
+  with its signing time (`groupSyncTimestamp`). Receivers record the last
+  applied admin sync in `group_admin_sync_ts_<groupId>` and set the stored
+  revision to the state's revision. Detail: WIRE_PROTOCOL_REFERENCE.md §3
+  GROUP_SYNC.
+- **Group members vs the stranger-DM limit** (register R7c):
+  `GossipService.isFromMemberOfStoredGroup` exempts a directed group `MESSAGE`
+  whose sender is a member or the admin of that stored group.
+- **DM outbox limits, forced flushes, group legs, queued group sender**: §19.2.
+- Not changed, by decision: the `GROUP_UPDATE` freshness gate stays before the
+  signer check (R7f). Accepting member updates older than the stored revision
+  would let a replayed old leave remove a member who was re-added.
+
 ### 17.22 Protocol Canonicalization, Atomic Post Persistence & Safe Staging (2026-10-04)
 
 A comprehensive hardening pass addressed the fifth round of external audit findings (R01–R18):
@@ -2206,7 +2236,11 @@ In-memory coroutine retry loops failed to survive app kills or system reboots. U
 - Reconnect triggers (Tor reaching `READY`, peer `ANNOUNCE_PEER` receipts, or opening a chat thread) flush pending outbox DMs immediately to the target onion address.
 - The outbox worker no longer pauses while a video player is mounted (the `PreloadManager.isVideoActive` / `currentlyPlayingUrl` gate from `679a5a1` was removed 2026-10-07; those flags were often never cleared, stalling DMs indefinitely). `VideoPlayer` now also clears `isVideoActive` for non-direct sources and off-screen slides.
 - Receivers send `DM_ACK` fire-and-forget on `AppScopes.io`, never inline on the inbound handler.
-- Open (register R8 / review D05): event-triggered flushes are throttled by the retry backoff (up to 5 min), and entries have no maximum age or attempt count.
+- **Limits (2026-10-08, register R8 / review D05).** Each entry's queue time and its number of deliveries without a `DM_ACK` are kept in `outboxMeta`, persisted as `app_settings["pending_dm_outbox_meta"]` (`{packetId: [enqueuedAt, unackedDeliveries]}`, plain JSON so R8 cannot break it). `expireOutbox()` runs on every worker pass (every 10 s, even while Tor is down). It gives up on an entry older than `OUTBOX_MAX_AGE_MS` (7 days), or on a 1:1 DM delivered `OUTBOX_MAX_UNACKED_DELIVERIES` (50) times with no ACK. A DM it gives up on is marked `deliveryStatus = "FAILED"` unless an ACK already marked it `DELIVERED`. The chat shows a red error icon that calls `retryFailedDirectMessage`, which re-queues the identical packet (same id, nonce, ciphertext) with a fresh age. Failed connection attempts don't count toward the 50; an offline peer is covered by the age limit.
+- **Only 1:1 DMs wait for an ACK** (`awaitsDmAck`): a group fan-out leg (`MESSAGE` with `group_id`) is removed after a successful send. Since `3c766cb` every `MESSAGE` had stayed queued until an ACK that never comes for groups, and was re-sent forever.
+- **Event-triggered flushes** (`flushOutboxForPeer(..., force = true)`: an `ANNOUNCE_PEER` from the peer, opening the chat, Tor becoming ready) skip the exponential backoff but keep a 15 s spacing (`OUTBOX_EVENT_MIN_INTERVAL_MS`). The 10 s worker keeps the backoff (10 s doubling to 5 min).
+- Saves take the snapshot under a mutex (`persistOutboxNow`), so two quick saves can't land out of order.
+- **Queued group messages** (`pending_group_messages`) are flushed under the identity of the local echo's `senderPub` and as `v = 2` (`pendingGroupPacket`). Before, they always went out as the main identity, so the AAD check failed at the recipient for every burnable-identity sender.
 
 ### 19.3 Bi-directional Message Synchronization (`DM_SYNC_REQUEST`)
 Upon establishing peer presence or application start, nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and dispatch a `DM_SYNC_REQUEST(since: Long)`.

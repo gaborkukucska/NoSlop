@@ -2478,7 +2478,7 @@ fun toggleAggregator() {
 
     fun syncDmsWithPeer(peer: Peer) {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+            repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress, force = true)
             repository.requestDmSync(peer)
         }
     }
@@ -3017,6 +3017,9 @@ fun toggleAggregator() {
     }
 
     fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String) { viewModelScope.launch { repository.reactToChat(messageId, reactionType, recipientPubB64) } }
+
+    /** R3: re-sends a DM the outbox gave up on (status FAILED). */
+    fun retryFailedMessage(messageId: String) { viewModelScope.launch(Dispatchers.IO) { repository.retryFailedDirectMessage(messageId) } }
     fun reactToGroupChat(messageId: String, reactionType: String, groupId: String) { viewModelScope.launch { repository.reactToGroupChat(messageId, reactionType, groupId) } }
     fun reactToComment(commentId: String, reactionType: String) {
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToComment(commentId, reactionType) }

@@ -868,5 +868,6 @@
   "This contact is running an older NoSlop version. Both of you need to update before you can connect.": "This contact is running an older NoSlop version. Both of you need to update before you can connect.",
   "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.": "Waiting for them to accept. If nothing happens, they may be offline or on an older NoSlop version.",
   "Re-send": "Re-send",
-  "Cancel Request": "Cancel Request"
+  "Cancel Request": "Cancel Request",
+  "Not delivered. Tap to retry": "Not delivered. Tap to retry"
 }

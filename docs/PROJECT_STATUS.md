@@ -1,5 +1,84 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-08) — Round R3: Group Leave & Catch-up, Group Sender Identity, DM Outbox Limits (v0.6.9-alpha)
+
+This round continues the git-history regression register. It covers the group items R7a–R7c and the DM outbox item R8. While tracing those paths, three more defects turned up in the same code; they're fixed here too. Labels are used as in the entry below: a "Tested" label names a test class that exists and must pass with `./gradlew testGithubDebugUnitTest`. None of this has been verified on device yet.
+
+**Protocol compatibility.** No packet layout changed. Leaves, `GROUP_SYNC` answers and queued group messages from older builds are handled as before. Receivers on older builds also accept an updated admin's newer `GROUP_SYNC` stamp.
+
+### R7a — Leaving a group never reached anyone (regression from `7de5d96`)
+
+* **Cause.** `leaveGroupChat` signed an 11-field `encodeForSigning`, with `""` for every absent field. Receivers verify only the 13-field `canonicalGroupUpdatePayload`, where absent fields are encoded `ABSENT`. So every member and the admin rejected the leave ("signature matches no current member"), and the leaver stayed in everyone else's copy of the group.
+* **Fix.** `NoSlopRepository.groupLeavePayload` builds and signs the leave in exactly the receiver's form.
+* **Test fix.** `GroupMessageSecurityTest.groupLeave_canonicalSigning_verified` signed and verified the same 11-field string, so it passed while leaves failed on every device. It now verifies the shipped leave against the receiver's form.
+* Tested (unit: `GroupLifecycleRestoreTest`, `GroupMessageSecurityTest`).
+
+### Group sender identity (found while tracing R7a)
+
+* **Cause.** Several group paths chose the sending identity by a rule of their own, so a member could act under a key that isn't in the group. This hit a member who was invited under the main key into an open group and also had a burnable identity (any discoverable user). It affected:
+  * non-admin `updateGroupChat` (signature, `senderId`, and the invites it sends);
+  * `sendGroupMessage`;
+  * `reactToGroupChat`.
+  
+  Receivers drop group messages from non-members and reject updates no member signed, so all of these were lost.
+* **Fix.** All of them now use `NoSlopRepository.groupMemberIdentity`, which picks the key actually listed in the group. "Friends only" group messages still use the main key when it's a member.
+* `requestGroupCatchup` parses the member list instead of a substring match (review D11), and no longer sends a `GROUP_QUERY` to our own burnable identity.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### R7b — A member who missed a member-initiated change could never catch up
+
+* **Cause.**
+  * Only admin updates advance a group's `revision`. Leaves and member invites don't.
+  * `GROUP_SYNC` answers were stamped with the state revision.
+  * Receivers drop a sync whose stamp isn't newer than their stored revision.
+  
+  So the admin's answer to a `GROUP_QUERY` was ignored by every member already at that revision. (The freshness gates came in with S04/U05, `ab3333b`/`5ac03bf`; before them, any validly signed sync was applied.)
+* **Fix.**
+  * The admin stamps its answer with the signing time (`groupSyncTimestamp`).
+  * Receivers keep the last applied admin sync time in `group_admin_sync_ts_<groupId>`, so a replayed snapshot can't roll state back.
+  * Applying an admin sync sets the stored revision to the state's own revision, not the signing time, so a leave still in flight is accepted afterwards.
+  * A member's answer keeps the old stamp, so a stale member copy can't pass the gate.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### R7c — Group members hit the stranger-DM limit (regression from `34770ba`/`5b6bf1d`)
+
+* **Cause.** The untrusted directed-DM limiter (10/min per sender, 30/min overall) also applied to group messages from members who aren't contacts. Since D01, that includes the group admin. Group messages carry no ACK, so everything over 10/min was lost silently.
+* **Fix.** `GossipService.isFromMemberOfStoredGroup` exempts a directed group `MESSAGE` whose sender is a member or the admin of that stored group. A non-member naming the group is still limited.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### Queued group messages went out under the wrong sender (found while tracing R8)
+
+* **Cause.** Group legs queued for members without a known onion were flushed as the main identity and as `v = 1`. The v2 AAD binds the sender key, so every queued message from a burnable-identity sender failed to decrypt.
+* **Fix.** `MeshSocialRepository.pendingGroupPacket` uses the local echo's `senderPub`, and `v = 2`.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### R8 — DM outbox: limits, forced flushes, group legs (from `3c766cb`)
+
+* **Limits.** Each entry's queue time and number of unacknowledged deliveries are persisted (`pending_dm_outbox_meta`).
+  * `expireOutbox` gives up after **7 days**, or after **50 deliveries with no `DM_ACK`**. Failed connection attempts don't count toward the 50.
+  * A DM it gives up on is marked `FAILED`. The chat shows a red error icon; tapping it (`retryFailedMessage` → `retryFailedDirectMessage`) re-sends the identical packet.
+  * New string: "Not delivered. Tap to retry".
+* **Group legs.** Only 1:1 DMs wait for an ACK (`awaitsDmAck`). Group fan-out legs that went through the outbox had waited for an ACK that never comes, and were re-sent forever.
+* **Forced flushes.** Event-triggered flushes skip the backoff (15 s minimum spacing): the peer's `ANNOUNCE_PEER`, opening the chat, Tor becoming ready. Before, a DM that had backed off to 5 min waited it out even with the peer online.
+* **Ordered saves.** Outbox saves take their snapshot under a lock, so saves can't land out of order.
+* Tested (unit: `OutboxExpiryTest`).
+
+### Reviewed, not changed
+
+* **R7d.** After an invite is accepted, the group is stored and catch-up accepts syncs from any member. Only a member-signed sync arriving *before* acceptance is refused, which is harmless.
+* **R7e** (deliberate: only the admin can restore a group to a reinstalled member).
+* **R7f.** The `GROUP_UPDATE` freshness gate stays before the signer check. Accepting older member updates would let a replayed leave remove a re-added member.
+
+### Tests added or changed in this round
+
+| Test class | Covers |
+|---|---|
+| `GroupLifecycleRestoreTest` | R7a leave (admin and member receivers; the old form is rejected), member identity, R7b sync heal, replay guard and in-flight leave, R7c limiter, queued group sender |
+| `OutboxExpiryTest` | 7-day expiry → FAILED, ACKed DMs untouched, 50-delivery cap, group legs exempt, ACK cleanup, retry re-queues the same bytes, metadata round trip |
+| `GroupMessageSecurityTest` (changed) | Leave test now checks the shipped leave against the receiver's form |
+
+---
+
 ## Completed Changes (2026-10-07 – 2026-10-08) — Review Round 2 Remediation (D01/D06/D07), Handshake Reply Path & Git-History Regression Restoration (v0.6.9-alpha)
 
 This round has two parts. The first fixes the round-2 review findings D01, D06 and D07, plus groundwork for D02. The second is a review of the last 100 commits, done because several features that used to work had stopped working on devices. It found and fixed the regressions behind the failures seen in two-device testing.
@@ -1419,7 +1498,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** | `BackupManagerTest` |
 | **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** | cited `IdentityRepositoryTest` does not exist |
 | **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Partial** — v2 binding ✔, now also via sync and re-issue (R2); live POST/EDIT legacy path keeps unsigned hash (D08) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest` |
-| **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Partial** — ACK ✔ (sent off the inbound path since R1); no outbox expiry (D05/R8) | `CryptoServiceRobolectricTest`, `WireProtocolTest` |
+| **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** — ACK sent off the inbound path (R1); outbox expiry → FAILED with retry, group legs not held for ACKs (R3) | `CryptoServiceRobolectricTest`, `WireProtocolTest`, `OutboxExpiryTest` |
 | **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Implemented (untested)** — ~20 logs still carry search terms / bare IDs (D11) | cited `LoggerTest` does not exist |
 | **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** | cited `JamendoApiClientTest` does not exist |
 | **C21** | P2 | Respected NXDOMAIN in cascading DNS (DoH opt-in only) | **Resolved** | `TorLeakArchitectureTest` |
@@ -1445,13 +1524,13 @@ same-device backup export/import. Multi-device testing is next.
 | **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Partial** — index ✔ and used as allow path (R2); deny-by-default and `accessKey` open | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest` |
 | **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Open** | — |
 | **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Open** | — |
-| **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Open** (ACK no longer blocks inbound, R1) | — |
+| **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Partial** — outbox expiry + FAILED/retry ✔ (R3); v1 latch and ACK domain separation open | `OutboxExpiryTest` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
 | **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Partial** — sync path fixed (R2); live POST/EDIT path and `insertPostSafely` match open | `MediaSyncAndAclRestoreTest` |
 | **D09** | P2 | Cross-device restore mismatch reported after commit | **Open** | — |
 | **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; fingerprint UI, `IdentityViewModel` deletion, status-file check open | — |
-| **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** | — |
+| **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |
 | **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |
 | **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |
 | **QR** | — | Camera QR frames never decoded (row padding / pixel stride) | **Resolved** | `QrFrameDecodeTest` |
@@ -1459,7 +1538,9 @@ same-device backup export/import. Multi-device testing is next.
 | **VID** | — | Recorded video stuck at 9% (chunk window above sender cap) | **Resolved** (device-verified) | `MediaChunkWindowTest` |
 | **R1–R4c** | — | Cooldown memory, cooldown gate, cooldown clear, blocking ACK, handshake pool, outbox video gate, Tor hidden-service re-registration, background start, offline PROXY_READY | **Resolved** (device-verified) | `PeerCooldownRestoreTest` |
 | **R5, R6a** | — | Sync rejected v2-signed media posts/comments; re-issue stripped hash; comment media never served | **Resolved** (device-verified) | `MediaSyncAndAclRestoreTest` |
-| **R4d, R6b, R6c, R7a–R7f, R8** | — | Handshake budget; non-contact media replies; silent media drops; group leave/sync/rate-limit/bootstrap; outbox backoff | **Open** | — |
+| **R7a–R7c, R8** | — | Group leave signature; group catch-up after member-initiated changes; group members rate-limited; DM outbox backoff/expiry (plus group sender identity and queued group sender) | **Resolved** | `GroupLifecycleRestoreTest`, `OutboxExpiryTest` |
+| **R7d–R7f** | — | Invitee bootstrap; reinstall recovery; update freshness gate | **Reviewed, no change** (see 2026-10-08 R3 entry) | — |
+| **R4d, R6b, R6c** | — | Handshake budget; non-contact media replies; silent media drops | **Open** | — |
 | **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session

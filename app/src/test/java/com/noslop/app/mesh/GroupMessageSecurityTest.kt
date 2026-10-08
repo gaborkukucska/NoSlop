@@ -58,13 +58,20 @@ class GroupMessageSecurityTest {
 
     @Test
     fun groupLeave_canonicalSigning_verified() {
+        // R3: this test used to sign and verify the same (11-field) string, so it passed while every
+        // receiver rejected real leaves. It now checks the shipped leave against the receiver's form.
         val timestamp = 1700000000L
-        val leavePayloadToSign = CryptoService.encodeForSigning(
-            groupId, "", alice.publicKeyB64, timestamp.toString(),
-            "", alice.publicKeyB64, "", "", "", "", ""
+        val leave = com.noslop.app.data.NoSlopRepository.groupLeavePayload(groupId, alice, timestamp)
+        val receiverForm = canonicalGroupUpdatePayload(
+            leave.groupId, leave.title, alice.publicKeyB64, leave.timestamp,
+            leave.addedMembers?.sorted()?.joinToString(",") ?: "",
+            leave.removedMembers?.sorted()?.joinToString(",") ?: "",
+            encodeOptBanned(leave.bannedMembers), leave.description, leave.avatarB64,
+            leave.allowMemberInvites, leave.allowMemberSelfRemove,
+            canonicalMemberDetailsString(leave.memberDetails), canonicalMemberHandlesString(leave.memberHandles)
         )
-        val sig = CryptoService.sign(leavePayloadToSign, alice.privateKeyB64)
-        assertTrue(CryptoService.verify(leavePayloadToSign, sig, alice.publicKeyB64))
+        assertTrue(CryptoService.verify(receiverForm, leave.signature, alice.publicKeyB64))
+        assertEquals(listOf(alice.publicKeyB64), leave.removedMembers)
     }
 
     @Test

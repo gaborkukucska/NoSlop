@@ -85,6 +85,57 @@ class MeshSocialRepository(
     private val packetLastAttemptTime = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var outboxWorkerJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * R3 (register R8 / review D05): per outbox entry (keyed by packet id), when it was queued and how
+     * many times it was delivered to the peer without a DM_ACK coming back. Persisted next to the
+     * outbox ("pending_dm_outbox_meta") so the limits survive restarts. Before this, an unanswered
+     * entry was re-sent forever, across restarts.
+     */
+    internal data class OutboxEntryMeta(val enqueuedAt: Long, val unackedDeliveries: Int = 0)
+    private val outboxMeta = java.util.concurrent.ConcurrentHashMap<String, OutboxEntryMeta>()
+    private val outboxSaveMutex = kotlinx.coroutines.sync.Mutex()
+    /** Time source for outbox ageing; replaced only by tests. */
+    internal var outboxClock: () -> Long = { System.currentTimeMillis() }
+
+    companion object {
+        /** An entry not delivered (or, for a DM, not acknowledged) within 7 days is given up. */
+        internal const val OUTBOX_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
+        /** A DM delivered this many times with no DM_ACK is given up (the peer never acknowledges). */
+        internal const val OUTBOX_MAX_UNACKED_DELIVERIES = 50
+        /** Event-triggered flushes (peer seen, chat opened) ignore the backoff but not this spacing. */
+        internal const val OUTBOX_EVENT_MIN_INTERVAL_MS = 15_000L
+        /** chat_messages.deliveryStatus of a DM the outbox gave up on; the chat offers a retry. */
+        const val DELIVERY_FAILED = "FAILED"
+
+        /** {packetId: [enqueuedAt, unackedDeliveries]} — plain JSON, no reflection, so R8 cannot break it. */
+        internal fun encodeOutboxMeta(meta: Map<String, OutboxEntryMeta>): String {
+            val obj = com.google.gson.JsonObject()
+            meta.forEach { (id, m) ->
+                obj.add(id, com.google.gson.JsonArray().apply { add(m.enqueuedAt); add(m.unackedDeliveries) })
+            }
+            return obj.toString()
+        }
+
+        internal fun decodeOutboxMeta(json: String?): Map<String, OutboxEntryMeta> {
+            if (json.isNullOrBlank()) return emptyMap()
+            val out = mutableMapOf<String, OutboxEntryMeta>()
+            val obj = com.google.gson.JsonParser.parseString(json).asJsonObject
+            for ((id, el) in obj.entrySet()) {
+                val arr = el.asJsonArray
+                if (arr.size() >= 2) out[id] = OutboxEntryMeta(arr[0].asLong, arr[1].asInt)
+            }
+            return out
+        }
+
+        /** The outbox bookkeeping key of a packet: its id (a DM's id is its message id). */
+        internal fun outboxKey(packet: com.noslop.app.mesh.NetworkPacket): String =
+            packet.id ?: (try { packet.getMessagePayload()?.id } catch (_: Exception) { null }) ?: ""
+
+        /** Only a 1:1 MESSAGE is acknowledged (DM_ACK). Group fan-out legs are never acknowledged. */
+        internal fun awaitsDmAck(packet: com.noslop.app.mesh.NetworkPacket): Boolean =
+            packet.type == "MESSAGE" && (try { packet.getMessagePayload()?.groupId } catch (_: Exception) { null }).isNullOrBlank()
+    }
+
     init {
         loadPersistedOutbox()
         startOutboxWorker()
@@ -114,6 +165,18 @@ class MeshSocialRepository(
                     val total = pendingOutboxMessages.values.sumOf { it.size }
                     Logger.info(TAG, "Restored $total pending DM(s) from persistent outbox")
                 }
+                // R3: restore the entry ages / unacknowledged delivery counts. Stored as
+                // {packetId: [enqueuedAt, unackedDeliveries]} (plain JSON, no reflection, R8-safe).
+                // Entries queued by an older build have no record and start their clock now.
+                try {
+                    outboxMeta.putAll(decodeOutboxMeta(db.appSettingDao().getSetting("pending_dm_outbox_meta")))
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Ignoring unreadable outbox metadata: ${e.message}")
+                }
+                val now = outboxClock()
+                pendingOutboxMessages.values.forEach { list ->
+                    synchronized(list) { list.forEach { outboxMeta.putIfAbsent(outboxKey(it), OutboxEntryMeta(now)) } }
+                }
             } catch (e: Exception) {
                 Logger.error(TAG, "Failed to load persisted outbox: ${e.message}")
             }
@@ -121,24 +184,132 @@ class MeshSocialRepository(
     }
 
     private fun savePersistedOutbox() {
+        repositoryScope.launch(Dispatchers.IO) { persistOutboxNow() }
+    }
+
+    /**
+     * Writes the outbox and its metadata. R3: the snapshot is taken under a lock, so concurrent saves
+     * can no longer land out of order and leave an older outbox on disk than in memory.
+     */
+    internal suspend fun persistOutboxNow() {
         try {
-            val copy = mutableMapOf<String, List<com.noslop.app.mesh.NetworkPacket>>()
-            pendingOutboxMessages.forEach { (peerPub, list) ->
-                val snapshot = synchronized(list) { list.toList() }
-                if (snapshot.isNotEmpty()) {
-                    copy[peerPub] = snapshot
+            outboxSaveMutex.lock()
+            try {
+                val copy = mutableMapOf<String, List<com.noslop.app.mesh.NetworkPacket>>()
+                pendingOutboxMessages.forEach { (peerPub, list) ->
+                    val snapshot = synchronized(list) { list.toList() }
+                    if (snapshot.isNotEmpty()) {
+                        copy[peerPub] = snapshot
+                    }
                 }
-            }
-            val json = com.noslop.app.util.Json.gson.toJson(copy)
-            repositoryScope.launch(Dispatchers.IO) {
+                val liveIds = copy.values.flatten().map { outboxKey(it) }.toSet()
+                outboxMeta.keys.retainAll(liveIds)
+                val json = com.noslop.app.util.Json.gson.toJson(copy)
                 db.appSettingDao().insertSetting(AppSetting("pending_dm_outbox", json))
+                db.appSettingDao().insertSetting(AppSetting("pending_dm_outbox_meta", encodeOutboxMeta(outboxMeta.toMap())))
+            } finally {
+                outboxSaveMutex.unlock()
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to save outbox: ${e.message}")
         }
     }
 
-    private fun enqueuePendingDm(recipientPub: String, packet: com.noslop.app.mesh.NetworkPacket) {
+    /** Test/diagnostic view of what is queued for a peer. */
+    internal fun pendingOutboxFor(recipientPub: String): List<com.noslop.app.mesh.NetworkPacket> =
+        pendingOutboxMessages[recipientPub]?.let { synchronized(it) { it.toList() } } ?: emptyList()
+
+    internal fun outboxMetaFor(packetId: String): OutboxEntryMeta? = outboxMeta[packetId]
+
+    /** Counts one delivery of a 1:1 DM that has not been acknowledged yet (see [expireOutbox]). */
+    internal fun recordUnackedDelivery(packetId: String) {
+        outboxMeta.computeIfPresent(packetId) { _, m -> m.copy(unackedDeliveries = m.unackedDeliveries + 1) }
+    }
+
+    /**
+     * R3: gives up on entries older than [OUTBOX_MAX_AGE_MS], and on DMs delivered
+     * [OUTBOX_MAX_UNACKED_DELIVERIES] times without an ACK. A DM given up on is marked
+     * [DELIVERY_FAILED] (unless an ACK already marked it DELIVERED); the chat offers "retry".
+     * Returns the number of entries removed.
+     */
+    internal suspend fun expireOutbox(): Int {
+        val now = outboxClock()
+        val expired = mutableListOf<com.noslop.app.mesh.NetworkPacket>()
+        pendingOutboxMessages.values.forEach { list ->
+            synchronized(list) {
+                val iter = list.iterator()
+                while (iter.hasNext()) {
+                    val packet = iter.next()
+                    val key = outboxKey(packet)
+                    val meta = outboxMeta[key] ?: OutboxEntryMeta(now).also { m -> outboxMeta[key] = m }
+                    val tooOld = now - meta.enqueuedAt > OUTBOX_MAX_AGE_MS
+                    val neverAcked = awaitsDmAck(packet) && meta.unackedDeliveries >= OUTBOX_MAX_UNACKED_DELIVERIES
+                    if (tooOld || neverAcked) {
+                        iter.remove()
+                        expired.add(packet)
+                    }
+                }
+            }
+        }
+        if (expired.isEmpty()) return 0
+        for (packet in expired) {
+            val msgId = packet.getMessagePayload()?.id ?: outboxKey(packet)
+            outboxMeta.remove(outboxKey(packet))
+            packetRetryAttempts.remove(msgId)
+            packetLastAttemptTime.remove(msgId)
+            if (awaitsDmAck(packet)) {
+                val current = messageDao.getMessageById(msgId)
+                if (current != null && current.deliveryStatus != "DELIVERED") {
+                    messageDao.updateDeliveryStatus(msgId, DELIVERY_FAILED)
+                }
+            }
+            Logger.warn(TAG, "Outbox gave up on ${packet.type} ${packet.id} for ${packet.targetUserId?.take(12)}")
+        }
+        persistOutboxNow()
+        return expired.size
+    }
+
+    /**
+     * R3: re-sends a DM the outbox gave up on, byte-for-byte (same id, nonce and ciphertext), so the
+     * receiver's de-duplication and ACK work exactly as for the first send. Only for our own 1:1 DMs.
+     */
+    suspend fun retryFailedDirectMessage(msgId: String): Boolean = withContext(Dispatchers.IO) {
+        val (onion, packet) = requeueFailedDirectMessage(msgId) ?: return@withContext false
+        dispatchPacket(onion, packet)
+        true
+    }
+
+    /** The queueing half of [retryFailedDirectMessage]: returns the peer's onion and the re-queued packet. */
+    internal suspend fun requeueFailedDirectMessage(msgId: String): Pair<String, com.noslop.app.mesh.NetworkPacket>? {
+        val msg = messageDao.getMessageById(msgId) ?: return null
+        if (msg.deliveryStatus != DELIVERY_FAILED) return null
+        val main = getLocalIdentity() ?: return null
+        val burnable = getBurnableIdentity()
+        if (msg.senderPub != main.publicKeyB64 && msg.senderPub != burnable?.publicKeyB64) return null
+        if (db.groupChatDao().getGroupChatById(msg.chatWithPeerPub) != null) return null
+        val peer = peerDao.getPeerByPublicKey(msg.chatWithPeerPub) ?: return null
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = msg.id,
+            hops = 3,
+            senderId = msg.senderPub,
+            targetUserId = msg.chatWithPeerPub,
+            type = "MESSAGE",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(
+                com.noslop.app.mesh.EncryptedPayload(
+                    id = msg.id, nonce = msg.nonce, ciphertext = msg.ciphertext, timestamp = msg.timestamp, v = 2
+                )
+            )
+        )
+        messageDao.updateDeliveryStatus(msgId, "SENDING")
+        packetRetryAttempts.remove(msgId)
+        packetLastAttemptTime.remove(msgId)
+        outboxMeta.remove(outboxKey(packet))
+        enqueuePendingDm(msg.chatWithPeerPub, packet)
+        Logger.info(TAG, "Retrying DM $msgId to ${peer.handle} after the outbox gave up on it")
+        return peer.onionAddress to packet
+    }
+
+    internal fun enqueuePendingDm(recipientPub: String, packet: com.noslop.app.mesh.NetworkPacket) {
         val list = pendingOutboxMessages.getOrPut(recipientPub) { 
             java.util.Collections.synchronizedList(mutableListOf()) 
         }
@@ -147,11 +318,18 @@ class MeshSocialRepository(
                 list.add(packet)
             }
         }
+        outboxMeta.putIfAbsent(outboxKey(packet), OutboxEntryMeta(outboxClock()))
         savePersistedOutbox()
         Logger.info(TAG, "Enqueued message ${packet.id} for $recipientPub in persistent outbox (pending: ${list.size})")
     }
 
-    fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
+    /**
+     * [force] marks an event-triggered flush (the peer was just seen, the chat was opened, Tor came
+     * up). R3 (register R8): such a flush skips the exponential backoff (but still spaces attempts by
+     * [OUTBOX_EVENT_MIN_INTERVAL_MS]); before, a DM that had backed off to 5 minutes waited them out
+     * even though the peer had just announced itself. The periodic worker keeps the backoff.
+     */
+    fun flushOutboxForPeer(recipientPub: String, onionAddress: String, force: Boolean = false) {
         if (onionAddress.isBlank()) return
         val list = pendingOutboxMessages[recipientPub]
         val hasHandshake = list?.any { it.type == "CONNECTION_REQUEST" || it.type == "USER_HANDSHAKE" } == true
@@ -174,7 +352,8 @@ class MeshSocialRepository(
                             val lastAttempt = packetLastAttemptTime.getOrDefault(msgId, 0L)
                             // C18: Exponential backoff retry: 10s * 2^attempts, capped at 5 minutes
                             val backoffMs = if (attempts <= 0) 0L else (10_000L * (1L shl (attempts - 1).coerceAtMost(5))).coerceAtMost(300_000L)
-                            if (attempts > 0 && now - lastAttempt < backoffMs) {
+                            val waitMs = if (force) minOf(backoffMs, OUTBOX_EVENT_MIN_INTERVAL_MS) else backoffMs
+                            if (attempts > 0 && now - lastAttempt < waitMs) {
                                 continue
                             }
 
@@ -183,7 +362,9 @@ class MeshSocialRepository(
 
                             val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                             if (success) {
-                                if (packet.type == "MESSAGE") {
+                                // R3: only a 1:1 DM waits for its DM_ACK. Group fan-out legs (also type
+                                // MESSAGE) are never acknowledged and were re-sent forever.
+                                if (awaitsDmAck(packet)) {
                                     if (msgId.isNotBlank()) {
                                         val current = messageDao.getMessageById(msgId)
                                         if (current != null && current.deliveryStatus != "DELIVERED") {
@@ -191,6 +372,8 @@ class MeshSocialRepository(
                                             meshTransport.repository.triggerDmSync()
                                         }
                                     }
+                                    recordUnackedDelivery(outboxKey(packet))
+                                    savePersistedOutbox()
                                     Logger.info(TAG, "Sent outbox DM $msgId to $onionAddress (awaiting ACK)")
                                 } else {
                                     list.remove(packet)
@@ -217,23 +400,9 @@ class MeshSocialRepository(
             try {
                 val pendingGroupMsgs = db.pendingGroupMessageDao().getPendingForMember(recipientPub)
                 if (pendingGroupMsgs.isNotEmpty()) {
-                    val myKeys = getLocalIdentity() ?: return@launch
                     Logger.info(TAG, "Flushing ${pendingGroupMsgs.size} pending group message(s) to $onionAddress")
                     for (pending in pendingGroupMsgs) {
-                        val msgPayload = com.noslop.app.mesh.EncryptedPayload(
-                            id = pending.msgId,
-                            ciphertext = pending.ciphertext,
-                            nonce = pending.nonce,
-                            groupId = pending.groupId,
-                            timestamp = pending.createdAt
-                        )
-                        val packet = com.noslop.app.mesh.NetworkPacket(
-                            id = java.util.UUID.randomUUID().toString(),
-                            senderId = myKeys.publicKeyB64,
-                            targetUserId = recipientPub,
-                            type = "MESSAGE",
-                            payload = com.noslop.app.util.Json.gson.toJsonTree(msgPayload)
-                        )
+                        val packet = pendingGroupPacket(pending) ?: continue
                         val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                         if (success) {
                             db.pendingGroupMessageDao().delete(pending.groupId, pending.memberPub, pending.msgId)
@@ -249,11 +418,46 @@ class MeshSocialRepository(
         }
     }
 
+    /**
+     * R3: the wire packet for a queued group message. It must name the identity that encrypted it:
+     * the v2 AAD binds the sender key, and sendGroupMessage may send as the burnable identity. The
+     * flush used to always send as the main identity (and as v1), so every queued message from a
+     * burnable-identity member failed to decrypt at the recipient. The sender is the local echo's
+     * senderPub; without the echo (deleted locally) the main identity is used as before.
+     */
+    internal suspend fun pendingGroupPacket(pending: PendingGroupMessage): com.noslop.app.mesh.NetworkPacket? {
+        val main = getLocalIdentity() ?: return null
+        val burnable = getBurnableIdentity()
+        val echoSender = messageDao.getMessageById(pending.msgId)?.senderPub
+        val senderPub = if (echoSender != null && (echoSender == main.publicKeyB64 || echoSender == burnable?.publicKeyB64)) {
+            echoSender
+        } else {
+            main.publicKeyB64
+        }
+        val msgPayload = com.noslop.app.mesh.EncryptedPayload(
+            id = pending.msgId,
+            ciphertext = pending.ciphertext,
+            nonce = pending.nonce,
+            groupId = pending.groupId,
+            timestamp = pending.createdAt,
+            v = 2
+        )
+        return com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = senderPub,
+            targetUserId = pending.memberPub,
+            type = "MESSAGE",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(msgPayload)
+        )
+    }
+
     private fun startOutboxWorker() {
         if (outboxWorkerJob?.isActive == true) return
         outboxWorkerJob = repositoryScope.launch(Dispatchers.IO) {
             while (isActive) {
                 kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
+                // R3: give up on entries past their age / unacknowledged-delivery limits.
+                try { expireOutbox() } catch (e: Exception) { Logger.warn(TAG, "Outbox expiry failed: ${e.message}") }
                 // Do not flush outbox if Tor is not ready. R3 (regression restore): the outbox is no longer
                 // paused while a video player is mounted (679a5a1) — DMs, handshakes and group messages
                 // waited indefinitely because those flags are often never cleared.
@@ -1137,7 +1341,7 @@ class MeshSocialRepository(
     suspend fun requestAllPeersDmSync() = withContext(Dispatchers.IO) {
         val peers = peerDao.getAllPeersList().filter { it.isTrusted && it.onionAddress.isNotBlank() }
         for (peer in peers) {
-            flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+            flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress, force = true)
             requestDmSync(peer)
         }
     }
@@ -1367,10 +1571,15 @@ class MeshSocialRepository(
         val list = pendingOutboxMessages[senderPub]
         if (list != null) {
             synchronized(list) {
-                list.removeAll { it.id == msgId || it.getMessagePayload()?.id == msgId }
+                list.removeAll {
+                    val match = it.id == msgId || it.getMessagePayload()?.id == msgId
+                    if (match) outboxMeta.remove(outboxKey(it))
+                    match
+                }
             }
             savePersistedOutbox()
         }
+        outboxMeta.remove(msgId)
         packetRetryAttempts.remove(msgId)
         packetLastAttemptTime.remove(msgId)
         meshTransport.repository.triggerDmSync()
@@ -1829,12 +2038,12 @@ class MeshSocialRepository(
         val parsedMembers: List<String> = try {
             com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
-        val senderKeys = if (burnableKeys != null && (parsedMembers.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) {
-            burnableKeys
-        } else if (group.allowMemberInvites && burnableKeys != null) {
+        // R3: the identity that is actually a member (see NoSlopRepository.groupMemberIdentity). An open
+        // group no longer switches to the burnable identity when the main key is the member key.
+        val senderKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) {
             burnableKeys
         } else {
-            myKeys
+            NoSlopRepository.groupMemberIdentity(parsedMembers, group.allowMemberInvites, myKeys, burnableKeys)
         }
 
         val reactionId = "${messageId}_${senderKeys.publicKeyB64}_$reactionType"

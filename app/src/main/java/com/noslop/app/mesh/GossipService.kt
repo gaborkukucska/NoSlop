@@ -188,6 +188,23 @@ object GossipService {
         return true
     }
 
+    /**
+     * R3: true when [packet] is a MESSAGE for a group we have stored and [senderId] is one of its
+     * members or its admin. Used only to exempt such messages from the untrusted-DM rate limit.
+     */
+    internal suspend fun isFromMemberOfStoredGroup(packet: NetworkPacket, senderId: String): Boolean {
+        if (packet.type != "MESSAGE") return false
+        val groupId = try { packet.getMessagePayload()?.groupId } catch (_: Exception) { null }
+        if (groupId.isNullOrBlank()) return false
+        return try {
+            val group = transport?.repository?.getGroupChatById(groupId) ?: return false
+            val members: List<String> = try {
+                com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java)?.toList() ?: emptyList()
+            } catch (_: Exception) { emptyList() }
+            senderId == group.adminPublicKeyB64 || senderId in members
+        } catch (_: Exception) { false }
+    }
+
     fun resetForTesting() {
         resetAllState()
         clock = { System.currentTimeMillis() }
@@ -484,7 +501,10 @@ object GossipService {
         // Dedicated rate limit for untrusted incoming directed DMs (max 10 per 60s per sender, 30 per 60s globally)
         if (isDirectedMessageForUs) {
             val isTrusted = peerDao?.getPeerByPublicKey(senderId)?.isTrusted == true
-            if (!isTrusted) {
+            // R3 (register R7c): a group message from a member of that group is not stranger traffic.
+            // Group members are usually not contacts (D01 keeps them at relationship NONE), group
+            // messages carry no ACK, and this limiter silently lost every message past 10/min.
+            if (!isTrusted && !isFromMemberOfStoredGroup(packet, senderId)) {
                 val now = System.currentTimeMillis()
                 synchronized(this) {
                     if (now - globalUntrustedDmWindowStart > 60_000L) {

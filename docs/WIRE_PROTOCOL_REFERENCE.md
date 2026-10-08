@@ -30,7 +30,9 @@ to look up any packet's shape.
 > **2026-10-07/08 additions** (no other envelope or payload changes):
 > the handshake reply path (§3.1), `media_metadata` on `CommentSyncData`
 > and v2 (media-hash) signature acceptance in `SYNC_RESPONSE` (§3, §4.3),
-> and the 256 KB chunk window (§6).
+> and the 256 KB chunk window (§6). 2026-10-08 (round R3): the group leave
+> signature, the member signing identity and the `GROUP_SYNC` timestamp rules
+> (§3 GROUP_UPDATE / GROUP_SYNC), and the DM outbox limits (§3 DM_ACK).
 
 ---
 
@@ -275,6 +277,16 @@ packet is dropped. Accepted group messages are stored with
 and with the *decrypted* text in the `ciphertext` column, because a group
 thread has no single counterparty key for the chat screen to decrypt against
 at render time.
+
+The sender of every leg is the member identity listed in the group (see
+GROUP_UPDATE, "Signing identity"); the v2 AAD binds it, so a leg sent under
+another key cannot be decrypted. Legs queued for members without a known onion
+(`pending_group_messages`) are flushed later under the identity of the local
+echo's `senderPub` and as `v = 2` (until 2026-10-08 they were flushed as the
+main identity and `v = 1`, which failed for burnable-identity senders). Group
+legs from a member of a stored group are exempt from the untrusted-sender DM
+limit (10/min per sender, 30/min overall), which still applies to everyone
+else.
 
 ### CONNECTION_REQUEST / USER_HANDSHAKE
 **Type:** `CONNECTION_REQUEST` or `USER_HANDSHAKE` · class `PeerHandshakePayload` (shared, unified type per milestone 56)
@@ -550,7 +562,23 @@ packet can never reassign a group's admin.
 | `allow_member_invites`? | Boolean | Updated invite permission flag (admin only) |
 | `allow_member_self_remove`? | Boolean | Updated self-remove permission flag (admin only) |
 | `timestamp` | Long | Epoch milliseconds |
-| `signature` | String | Signature over `groupId|title|signerPublicKeyB64|timestamp` |
+| `signature` | String | Canonical 13-field `canonicalGroupUpdatePayload` (§7), signed by the admin or by the member's own group identity |
+
+**Leaving a group** is a `GROUP_UPDATE` from the leaving member with only
+`group_id`, `removed_members = [own key]`, `timestamp` and `signature` set,
+signed with the same 13-field form as every other update (absent fields
+encoded `ABSENT`, empty directory strings) — `NoSlopRepository.groupLeavePayload`.
+Until 2026-10-08 the leave was signed as an 11-field `encodeForSigning` with
+`""` for the absent fields; no receiver could verify it, so leaves never
+propagated (regression register R7a).
+
+**Signing identity (2026-10-08).** A member signs (and sends, invites and
+reacts) as the key that is actually listed in the group:
+`NoSlopRepository.groupMemberIdentity` — the burnable key if it is a member,
+else the main key if it is a member, else (not listed yet) burnable for open
+groups and main for closed ones. Previously an open group made a member sign
+with its burnable identity even when it had been invited under its main key,
+and receivers rejected the packet (no member matched).
 
 `added_members` / `removed_members` are genuine deltas computed by
 `NoSlopRepository.updateGroupChat` against the stored member list. They were
@@ -589,6 +617,24 @@ signer is recovered and what each role is permitted to change.
 | `member_details`? | Map<String, GroupMemberInfo> | Directory of member handles, onion addresses, and X25519 encryption keys |
 | `timestamp` | Long | Epoch milliseconds |
 | `signature` | String | Signature over `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` |
+
+**`timestamp` semantics (2026-10-08, register R7b).** Any member that has the
+group answers a `GROUP_QUERY` with a `GROUP_SYNC`:
+
+- the **admin** stamps the answer with its **signing time**
+  (`groupSyncTimestamp(..., answeringAsAdmin = true, now)`);
+- a **member** stamps it with the state revision `max(createdAt, revision)`,
+  as before, so a possibly stale member copy does not pass the freshness gate.
+
+Receiver rules (`handleGroupSync`): drop when `timestamp <= stored revision`;
+for an admin-signed sync also drop when `timestamp <=` the last applied admin
+sync (`app_settings["group_admin_sync_ts_<groupId>"]`, replay protection).
+Applying an admin sync sets the stored revision to the **state's** revision
+(from the signed `group_chat_json`), not to the signing time, so member updates
+signed after that state (e.g. a leave still in flight) are still accepted.
+Before, the answer was stamped with the state revision, and because
+member-initiated changes (leaves, member invites) never advance the revision,
+a member that missed one could never catch up through `GROUP_QUERY`.
 
 ### EDIT_COMMENT
 **Type:** `EDIT_COMMENT` · class `EditCommentPayload`
@@ -637,6 +683,15 @@ signer is recovered and what each role is permitted to change.
 | `v` | Int | Protocol version (defaults to 2) |
 
 Carries authenticated delivery confirmation from the recipient back to the message author. Keyed using the counterparty's directional key (`k_dir = HKDF-SHA256(X25519, recipient -> sender)`), guaranteeing receipt cannot be forged or reflected by network intermediaries.
+
+Only 1:1 messages are acknowledged; group fan-out legs (`MESSAGE` with
+`group_id`) never are. The sender keeps a 1:1 `MESSAGE` in its persistent
+outbox until the ACK arrives, re-sending it (same `id`, `nonce`,
+`ciphertext`) with backoff; since 2026-10-08 it gives up after **7 days** or
+**50 deliveries without an ACK** and marks the message `FAILED` (the chat
+offers a retry, which re-sends the identical packet). The receiver
+de-duplicates by message id and echoes the ACK for a duplicate. Review finding
+D05's v1 latch and ACK domain separation remain open.
 
 ### TYPING
 **Type:** `TYPING` · class `TypingPayload` · **unsigned**

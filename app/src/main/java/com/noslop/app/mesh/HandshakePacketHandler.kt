@@ -7,6 +7,15 @@ import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import java.util.UUID
 
+/**
+ * R3 (register R7b): the timestamp a GROUP_SYNC answer is signed with. The admin uses its signing
+ * time, so members already at the same state revision still apply it (member-initiated changes
+ * never advance the revision); a member answer keeps the state revision, so a stale member copy
+ * never passes the receiver's freshness gate.
+ */
+internal fun groupSyncTimestamp(group: GroupChat, answeringAsAdmin: Boolean, now: Long): Long =
+    if (answeringAsAdmin) maxOf(now, group.createdAt, group.revision) else maxOf(group.createdAt, group.revision)
+
 class HandshakePacketHandler(
     private val repo: NoSlopRepository,
     private val db: NoSlopDatabase
@@ -585,7 +594,8 @@ class HandshakePacketHandler(
             ))
             if (peer.isTrusted) {
                 // Instantly flush any pending outbox DMs and request missed messages
-                repo.flushOutboxForPeer(peer.publicKeyB64, newOnion)
+                // R3: the peer just announced itself — retry now, not after the backoff.
+                repo.flushOutboxForPeer(peer.publicKeyB64, newOnion, force = true)
                 repo.requestDmSync(peer)
                 if (wasOffline) {
                     repo.requestInventorySync(peer)
@@ -1176,7 +1186,13 @@ class HandshakePacketHandler(
         val signingKey = if (burnableKeys != null && (members.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
 
         val groupJson = com.noslop.app.util.Json.gson.toJson(group)
-        val stateTimestamp = maxOf(group.createdAt, group.revision)
+        // R3 (register R7b): the admin answers with the time it signed its current state. Stamped with
+        // the state revision (as before), the answer was ignored by every member already at that
+        // revision, and member-initiated changes (leaves, member invites) never advance the revision,
+        // so a member that missed one could never catch up. A member's answer keeps the state
+        // revision: its copy is not authoritative and must not pass the receiver's freshness gate.
+        val answeringAsAdmin = signingKey.publicKeyB64 == group.adminPublicKeyB64
+        val stateTimestamp = groupSyncTimestamp(group, answeringAsAdmin, System.currentTimeMillis())
 
         val allMembers = parseMembers(group.membersJson) + group.adminPublicKeyB64
         val memberDetails = allMembers.distinct().mapNotNull { pub ->
@@ -1266,6 +1282,16 @@ class HandshakePacketHandler(
             Logger.debug(TAG, "Ignoring stale GROUP_SYNC for ${group.groupId} (sync ts ${sync.timestamp} <= existing revision ${existing.revision})")
             return true
         }
+        // R3: an admin GROUP_SYNC is stamped with its signing time; never apply one older than (or as
+        // old as) the newest admin sync already applied, so a replayed snapshot cannot roll state back.
+        val adminSyncKey = "group_admin_sync_ts_${group.groupId}"
+        if (existing != null && signerIsAdmin) {
+            val lastAdminSync = db.appSettingDao().getSetting(adminSyncKey)?.toLongOrNull() ?: 0L
+            if (sync.timestamp <= lastAdminSync) {
+                Logger.debug(TAG, "Ignoring replayed GROUP_SYNC for ${group.groupId} (sync ts ${sync.timestamp} <= last applied admin sync $lastAdminSync)")
+                return true
+            }
+        }
 
         if (existing != null && signerIsAdmin && !meInGroup) {
             Logger.info(TAG, "Authoritative admin GROUP_SYNC for ${group.groupId} excluded us — applying removal and deleting group locally")
@@ -1283,7 +1309,10 @@ class HandshakePacketHandler(
             val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${group.groupId}") != null
             if (isMyGroup) {
                 syncMemberPeers(sync.memberDetails)
-                db.groupChatDao().insertGroupChat(group.copy(revision = sync.timestamp))
+                // R3: the stored revision is the state's own (signed) revision; the sync stamp is the
+                // signing time and is remembered separately for replay protection.
+                db.groupChatDao().insertGroupChat(group.copy(revision = maxOf(group.revision, group.createdAt)))
+                if (signerIsAdmin) db.appSettingDao().insertSetting(AppSetting(adminSyncKey, sync.timestamp.toString()))
                 Logger.info(TAG, "Received own group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
                 return true
             } else if (hasPendingInvite) {
@@ -1323,7 +1352,9 @@ class HandshakePacketHandler(
                 membersJson = com.noslop.app.util.Json.gson.toJson(mergedMembers),
                 memberHandlesJson = com.noslop.app.util.Json.gson.toJson(mergedHandles),
                 bannedMembersJson = com.noslop.app.util.Json.gson.toJson(bannedSet.toList()),
-                revision = maxOf(existing.revision, sync.timestamp)
+                // R3: advance to the admin's state revision, not the signing time, so member updates
+                // signed after that state (e.g. a leave still in flight) are still accepted afterwards.
+                revision = maxOf(existing.revision, group.revision)
             )
         } else {
             existing.copy(
@@ -1334,6 +1365,7 @@ class HandshakePacketHandler(
         }
 
         db.groupChatDao().insertGroupChat(mergedGroup)
+        if (signerIsAdmin) db.appSettingDao().insertSetting(AppSetting(adminSyncKey, sync.timestamp.toString()))
         Logger.info(TAG, "Synced and merged group chat '${mergedGroup.title}' (${group.groupId}) via GROUP_SYNC (members: ${mergedMembers.size})")
         return true
     }

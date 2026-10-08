@@ -706,6 +706,15 @@ fun ChatThreadScreen(
                                                         modifier = Modifier.size(12.dp)
                                                     )
                                                 }
+                                                "FAILED" -> {
+                                                    // R3: the outbox gave up (7 days, or 50 deliveries with no ACK). Tap to send again.
+                                                    Icon(
+                                                        imageVector = Icons.Default.ErrorOutline,
+                                                        contentDescription = "Not delivered. Tap to retry".tr,
+                                                        tint = DestructiveRed,
+                                                        modifier = Modifier.size(12.dp).clickable { viewModel.retryFailedMessage(msg.id) }
+                                                    )
+                                                }
                                             }
                                         }
                                         Spacer(modifier = Modifier.width(6.dp))
