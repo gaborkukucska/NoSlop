@@ -4,11 +4,10 @@ package com.noslop.app.ui.tabs
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -42,26 +41,9 @@ fun CreatorStudioTab(
     viewModel: NoSlopViewModel,
     onBack: (() -> Unit)? = null
 ) {
-    var queuedItems by remember {
-        mutableStateOf(
-            listOf(
-                StudioItem(
-                    id = "studio_1",
-                    title = "Decentralized P2P Mesh Architecture Overview",
-                    description = "AI Auto-Tagged: Deep dive into sovereign network topology and Tor v3 routing.",
-                    tags = listOf("Privacy", "Mesh", "Architecture"),
-                    mediaType = "video"
-                ),
-                StudioItem(
-                    id = "studio_2",
-                    title = "Building Serverless Encryption Pipelines",
-                    description = "AI Auto-Tagged: Discussion on X25519 key exchange and ChaCha20-Poly1305 DMs.",
-                    tags = listOf("Cryptography", "Security", "OpenSource"),
-                    mediaType = "audio"
-                )
-            )
-        )
-    }
+    // The queue starts empty: items arrive from Home Hub AI auto-tagging. (The two hard-coded demo
+    // cards that used to seed it were removed - publishing one broadcast fake content to the mesh.)
+    var queuedItems by remember { mutableStateOf(emptyList<StudioItem>()) }
 
     var isRefreshing by remember { mutableStateOf(false) }
     var showCreatorIdSheet by remember { mutableStateOf(false) }
@@ -75,6 +57,9 @@ fun CreatorStudioTab(
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    // A full-screen dialog over the studio, so the editor always gets the whole screen whatever
+    // container Creator Studio is shown in. (As an in-place screen it inherited the host's unbounded
+    // height and the weighted form collapsed to nothing, leaving only the Save button.)
     if (showProfileEditor) {
         CreatorProfileEditor(
             current = creatorProfile,
@@ -84,12 +69,19 @@ fun CreatorStudioTab(
             },
             onBack = { showProfileEditor = false }
         )
-        return
     }
 
+    // Creator Studio has two hosts: a full-screen settings screen (onBack != null, bounded height)
+    // and an item inside the Settings LazyColumn (onBack == null, unbounded height). Nothing here may
+    // use weight(), and only the full-screen host scrolls itself - a nested vertical scroll inside a
+    // LazyColumn item would crash, and the LazyColumn already scrolls the embedded studio.
+    val studioModifier = if (onBack != null) {
+        Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState())
+    } else {
+        Modifier.fillMaxWidth()
+    }
     Column(
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = studioModifier
             .background(PrimaryBlack)
             .padding(16.dp)
     ) {
@@ -197,8 +189,8 @@ fun CreatorStudioTab(
         if (queuedItems.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .padding(vertical = 32.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -209,28 +201,27 @@ fun CreatorStudioTab(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(queuedItems, key = { it.id }) { item ->
-                    StudioItemCard(
-                        item = item,
-                        onPublish = { publishedItem ->
-                            val tagsStr = if (publishedItem.tags.isNotEmpty()) "\n\n" + publishedItem.tags.joinToString(" ") { "#$it" } else ""
-                            val fullPostContent = (publishedItem.title + "\n\n" + publishedItem.description + tagsStr).trim()
-                            viewModel.composeAndBroadcastPost(
-                                content = fullPostContent,
-                                mediaMetadata = null,
-                                privacy = "public"
-                            )
-                            queuedItems = queuedItems.filter { it.id != publishedItem.id }
-                            android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Published '{title}' to Mesh!").replace("{title}", publishedItem.title), android.widget.Toast.LENGTH_SHORT).show()
-                        },
-                        onDiscard = { discardedId ->
-                            queuedItems = queuedItems.filter { it.id != discardedId }
-                        }
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                queuedItems.forEach { item ->
+                    key(item.id) {
+                        StudioItemCard(
+                            item = item,
+                            onPublish = { publishedItem ->
+                                val tagsStr = if (publishedItem.tags.isNotEmpty()) "\n\n" + publishedItem.tags.joinToString(" ") { "#$it" } else ""
+                                val fullPostContent = (publishedItem.title + "\n\n" + publishedItem.description + tagsStr).trim()
+                                viewModel.composeAndBroadcastPost(
+                                    content = fullPostContent,
+                                    mediaMetadata = null,
+                                    privacy = "public"
+                                )
+                                queuedItems = queuedItems.filter { it.id != publishedItem.id }
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Published '{title}' to Mesh!").replace("{title}", publishedItem.title), android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            onDiscard = { discardedId ->
+                                queuedItems = queuedItems.filter { it.id != discardedId }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -383,6 +374,20 @@ private fun CreatorProfileEditor(
     var avatarB64 by remember { mutableStateOf(current.avatarB64) }
     var cropUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        cropUri = uri
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onBack,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = PrimaryBlack) {
     if (cropUri != null) {
         com.noslop.app.ui.components.AvatarCropper(
             uri = cropUri!!,
@@ -392,16 +397,8 @@ private fun CreatorProfileEditor(
             },
             onCancel = { cropUri = null }
         )
-        return
-    }
-
-    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri: android.net.Uri? ->
-        cropUri = uri
-    }
-
-    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
+    } else {
+    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         Row(
             modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -420,6 +417,7 @@ private fun CreatorProfileEditor(
         Column(
             modifier = Modifier
                 .weight(1f)
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
                 .padding(16.dp)
         ) {
             Box(modifier = Modifier.clickable { launcher.launch("image/*") }) {
@@ -471,6 +469,9 @@ private fun CreatorProfileEditor(
         ) {
             Text("Save Creator Profile".tr, fontWeight = FontWeight.Bold)
         }
+    }
+    }
+    }
     }
 }
 

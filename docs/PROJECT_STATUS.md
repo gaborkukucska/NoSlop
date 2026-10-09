@@ -20,7 +20,7 @@ This round closes review finding D04: the creator (burnable) identity could be l
 
 ### Fix
 
-* **Creator profile** (`creator_profile` setting): handle, bio and avatar, edited in Creator Studio. The default handle is `Creator`, never the personal handle. *Burn ID* clears it, and changes go to creator contacts as a creator-signed `IDENTITY_UPDATE`.
+* **Creator profile** (`creator_profile` setting): handle, bio and avatar, edited in Creator Studio (a full-screen dialog; the first build drew it in place, where it inherited the host's height and only the Save button showed). The default handle is `Creator`, never the personal handle. *Burn ID* clears it, and changes go to creator contacts as a creator-signed `IDENTITY_UPDATE`.
 * **`IdentityRouter`** (`data/IdentityRouter.kt`) is the single rule: binding first, then the addressed identity, then temporary-and-not-accepted. It picks the identity and profile for every per-peer send listed above, and returns nothing (rather than the personal identity) for a creator contact without a creator identity. `MediaManager.requesterIdentity`/`responderIdentity` use the same rule.
 * **`GossipService.outboundFor`**: personal-authored originals are not sent to creator contacts. Creator-authored originals reach friends exactly in relay form. Presence, profile, exit, follow and removal packets never cross identities. Relays to creator contacts carry the creator key.
 * **Sync** to a creator contact leaves out everything written by the personal identity. Answers use the routed identity.
@@ -38,6 +38,7 @@ This round closes review finding D04: the creator (burnable) identity could be l
 * Friends receive our creator posts in relay form (hop count one lower). Creator contacts no longer receive our personal posts directly; they can still reach them through other relays.
 * Comments on our own creator posts, and on posts by creator contacts, are made as the creator identity.
 * After creator mode is turned off, DMs, typing and syncs to former creator contacts are no longer sent at all. Before, they went out under the personal key, which those contacts don't know.
+* **Creator Studio layout and demo cards.** The AI Approval Queue no longer starts with two hard-coded demo cards; publishing one broadcast fake content to the mesh. It now starts empty until Home Hub auto-tagging supplies items. The studio is shown in two places: a full-screen settings screen and an item inside the Settings list. In the list item the height is unbounded, so the `weight(1f)` queue and empty state collapsed to nothing. Neither uses `weight` now, the queue is a plain keyed `Column`, and only the full-screen host scrolls itself.
 
 ### Still open (D04)
 
