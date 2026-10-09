@@ -59,7 +59,7 @@ class IdentityRoutingTest {
         db.close()
     }
 
-    private fun row(keys: CryptoService.IdentityKeys, relationship: PeerRelationship, isTemporary: Boolean) = Peer(
+    private fun row(keys: CryptoService.IdentityKeys, relationship: String, isTemporary: Boolean) = Peer(
         publicKeyB64 = keys.publicKeyB64, handle = keys.displayName, tripcode = keys.tripcode,
         onionAddress = keys.onionAddress, encPublicKeyB64 = keys.encPublicKeyB64,
         relationship = relationship, isTemporary = isTemporary

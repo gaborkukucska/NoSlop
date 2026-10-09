@@ -89,13 +89,14 @@ class CreatorIdentityCaptureTest {
         db.close()
     }
 
-    private fun peer(keys: CryptoService.IdentityKeys, relationship: PeerRelationship, isTemporary: Boolean) = Peer(
+    private fun peer(keys: CryptoService.IdentityKeys, relationship: String, isTemporary: Boolean) = Peer(
         publicKeyB64 = keys.publicKeyB64, handle = keys.displayName, tripcode = keys.tripcode,
         onionAddress = keys.onionAddress, encPublicKeyB64 = keys.encPublicKeyB64,
         relationship = relationship, isTemporary = isTemporary
     )
 
-    private fun to(keys: CryptoService.IdentityKeys) = synchronized(sent) { sent.filter { it.first == keys.onionAddress }.map { it.second } }
+    // Not named `to`: inside runBlocking that resolves to the stdlib Pair builder on CoroutineScope.
+    private fun sentTo(keys: CryptoService.IdentityKeys) = synchronized(sent) { sent.filter { it.first == keys.onionAddress }.map { it.second } }
 
     private suspend fun waitFor(what: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000
@@ -138,13 +139,13 @@ class CreatorIdentityCaptureTest {
         repo.handleIncomingPacket(packetFrom(fan, creator.publicKeyB64, "DM_SYNC_REQUEST", DmSyncRequestPayload(since = 0L)))
 
         waitFor("creator post, comment, DM, sync answer, presence and profile at the follower") {
-            val types = to(fan).map { it.type }.toSet()
+            val types = sentTo(fan).map { it.type }.toSet()
             types.containsAll(setOf("POST", "COMMENT", "MESSAGE", "TYPING", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "SYNC_RESPONSE"))
         }
-        waitFor("handshake to the new follower") { to(newFan).any { it.type == "USER_HANDSHAKE" } }
+        waitFor("handshake to the new follower") { sentTo(newFan).any { it.type == "USER_HANDSHAKE" } }
         delay(500) // let any other queued sends land before checking what must NOT have been sent
 
-        val creatorContactPackets = to(fan) + to(newFan)
+        val creatorContactPackets = sentTo(fan) + sentTo(newFan)
         val forbidden = listOf(alice.publicKeyB64, alice.onionAddress, PERSONAL_HANDLE, PERSONAL_BIO, PERSONAL_AVATAR)
         for (packet in creatorContactPackets) {
             val json = plainGson.toJson(packet)
@@ -155,17 +156,17 @@ class CreatorIdentityCaptureTest {
         }
 
         // Positive: the creator side carries the creator profile.
-        val handshake = to(newFan).first { it.type == "USER_HANDSHAKE" }.getUserHandshakePayload()!!
+        val handshake = sentTo(newFan).first { it.type == "USER_HANDSHAKE" }.getUserHandshakePayload()!!
         assertEquals(CREATOR_HANDLE, handshake.fromUsername)
         assertEquals(CREATOR_BIO, handshake.bio)
         assertEquals(CREATOR_AVATAR, handshake.authorAvatarB64)
-        val comment = to(fan).first { it.type == "COMMENT" }.getCommentPayload()!!.comment
+        val comment = sentTo(fan).first { it.type == "COMMENT" }.getCommentPayload()!!.comment
         assertEquals(creator.publicKeyB64, comment.authorId)
         assertEquals(CREATOR_HANDLE, comment.authorName)
-        val syncPosts = to(fan).filter { it.type == "SYNC_RESPONSE" }.flatMap { it.getSyncResponsePayload()!!.posts }
+        val syncPosts = sentTo(fan).filter { it.type == "SYNC_RESPONSE" }.flatMap { it.getSyncResponsePayload()!!.posts }
         assertTrue("the creator post is synced", syncPosts.any { it.id == creatorPost.id })
         assertFalse("the personal post is not synced to a follower", syncPosts.any { it.id == personalPost.id })
-        assertTrue("the DM catch-up resends our DM", to(fan).count { it.type == "MESSAGE" } >= 2)
+        assertTrue("the DM catch-up resends our DM", sentTo(fan).count { it.type == "MESSAGE" } >= 2)
     }
 
     @Test
@@ -176,17 +177,17 @@ class CreatorIdentityCaptureTest {
         repo.meshSocialRepository.announceCreatorPresence()
         repo.saveCreatorProfile(UserProfile(displayName = CREATOR_HANDLE, bio = "new bio"))
 
-        waitFor("both posts at the friend") { to(bob).count { it.type == "POST" } >= 2 }
+        waitFor("both posts at the friend") { sentTo(bob).count { it.type == "POST" } >= 2 }
         delay(500)
 
-        val relayed = to(bob).first { it.type == "POST" && it.getPostPayload()!!.id == creatorPost.id }
+        val relayed = sentTo(bob).first { it.type == "POST" && it.getPostPayload()!!.id == creatorPost.id }
         assertEquals("looks like a relay by our personal node", alice.publicKeyB64, relayed.senderId)
         assertEquals("one hop fewer, like a relay", 5, relayed.hops)
-        val own = to(bob).first { it.type == "POST" && it.getPostPayload()!!.id == personalPost.id }
+        val own = sentTo(bob).first { it.type == "POST" && it.getPostPayload()!!.id == personalPost.id }
         assertEquals(alice.publicKeyB64, own.senderId)
         assertTrue("no creator presence or profile to a friend",
-            to(bob).none { (it.type == "ANNOUNCE_PEER" || it.type == "IDENTITY_UPDATE") && plainGson.toJson(it).contains(creator.publicKeyB64) })
-        assertTrue("friends-only post never reaches the follower", to(fan).none { it.type == "POST" && it.getPostPayload()!!.id == personalPost.id })
+            sentTo(bob).none { (it.type == "ANNOUNCE_PEER" || it.type == "IDENTITY_UPDATE") && plainGson.toJson(it).contains(creator.publicKeyB64) })
+        assertTrue("friends-only post never reaches the follower", sentTo(fan).none { it.type == "POST" && it.getPostPayload()!!.id == personalPost.id })
     }
 
     @Test
@@ -209,8 +210,8 @@ class CreatorIdentityCaptureTest {
             NetworkPacket(id = UUID.randomUUID().toString(), hops = 6, senderId = bob.publicKeyB64, type = "POST",
                 payload = com.noslop.app.util.Json.gson.toJsonTree(post), signature = sig)
         )
-        waitFor("relay to the follower and to carol") { to(fan).any { it.type == "POST" } && to(carol).any { it.type == "POST" } }
-        assertEquals(creator.publicKeyB64, to(fan).first { it.type == "POST" }.senderId)
-        assertEquals(alice.publicKeyB64, to(carol).first { it.type == "POST" }.senderId)
+        waitFor("relay to the follower and to carol") { sentTo(fan).any { it.type == "POST" } && sentTo(carol).any { it.type == "POST" } }
+        assertEquals(creator.publicKeyB64, sentTo(fan).first { it.type == "POST" }.senderId)
+        assertEquals(alice.publicKeyB64, sentTo(carol).first { it.type == "POST" }.senderId)
     }
 }

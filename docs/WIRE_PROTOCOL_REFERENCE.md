@@ -373,8 +373,9 @@ No field or signature changed.
 `encodeForSigning(user_id, handle, timestamp, author_avatar_b64, bio)`
 (absent avatar or bio = `"0:"`). Receivers only checked the older pipe form
 `user_id|handle|timestamp[|avatar][|bio]`, so no update was ever accepted.
-Both forms are accepted now. Older receivers still ignore updates from any
-sender, as before.
+Both forms are accepted now, by the handler and by the pre-relay check
+`MeshPacketVerifier` (which had the same pipe-only copy). Older receivers still
+ignore updates from any sender, as before.
 
 **No broadcast handshakes (2026-10-09).** `USER_HANDSHAKE` is only ever sent to
 one peer, naming it in `targetUserId`. `NoSlopRepository.updateOnionAddress`

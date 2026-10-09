@@ -30,8 +30,8 @@ This round closes review finding D04: the creator (burnable) identity could be l
 ### `IDENTITY_UPDATE` was never accepted
 
 * **Cause.** Senders sign with `encodeForSigning`, but receivers only verified the older pipe-joined string. Profile changes therefore never reached contacts.
-* **Fix.** Both forms are accepted. A forged update is still refused.
-* Tested (unit: `IdentityRoutingTest`).
+* **Fix.** Both forms are accepted, in the handler and in `MeshPacketVerifier` (the pre-relay signature gate, which had the same pipe-only copy and dropped every update before the handler). A forged update is still refused.
+* Tested (unit: `IdentityRoutingTest`, `MeshPacketVerifierTest`).
 
 ### Behaviour changes to watch on device
 
@@ -1745,7 +1745,7 @@ same-device backup export/import. Multi-device testing is next.
 | **R4d** | — | Handshake budget | **Open** | — |
 | **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
 | **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
-| **IU1** | — | `IDENTITY_UPDATE` signed with `encodeForSigning` but verified only in pipe form; never accepted (2026-10-09) | **Resolved** (not yet device-verified) | `IdentityRoutingTest` |
+| **IU1** | — | `IDENTITY_UPDATE` signed with `encodeForSigning` but verified only in pipe form (handler and `MeshPacketVerifier`); never accepted (2026-10-09) | **Resolved** (not yet device-verified) | `IdentityRoutingTest`, `MeshPacketVerifierTest` |
 | **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `OnionAddressUpdateTest` |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session

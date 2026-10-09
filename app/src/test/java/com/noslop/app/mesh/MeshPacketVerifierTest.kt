@@ -197,6 +197,23 @@ class MeshPacketVerifierTest {
     }
 
     @Test
+    fun identityUpdate_acceptsTheEncodeForSigningFormSendersUse() {
+        // MeshSocialRepository.broadcastIdentityUpdate: encodeForSigning(userId, handle, ts, avatar, bio),
+        // where a blank bio is signed as "" and sent as null (both encode as "0:").
+        val s = CryptoService.encodeForSigning(alice.publicKeyB64, "newhandle", "11", null, "")
+        val p = IdentityUpdatePayload(userId = alice.publicKeyB64, handle = "newhandle", authorAvatarB64 = null, bio = null, timestamp = 11L, signature = sign(s))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("IDENTITY_UPDATE", p)))
+
+        val withAll = CryptoService.encodeForSigning(alice.publicKeyB64, "newhandle", "12", "AV", "my bio")
+        val p2 = IdentityUpdatePayload(userId = alice.publicKeyB64, handle = "newhandle", authorAvatarB64 = "AV", bio = "my bio", timestamp = 12L, signature = sign(withAll))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("IDENTITY_UPDATE", p2)))
+
+        // A changed handle, or the claim to be someone else, does not verify.
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("IDENTITY_UPDATE", p2.copy(handle = "evil"))))
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("IDENTITY_UPDATE", p2.copy(userId = mallory.publicKeyB64))))
+    }
+
+    @Test
     fun groupInvite_canonicalSignature_verified() {
         val members = listOf(alice.publicKeyB64, mallory.publicKeyB64).sorted()
         val s = canonicalGroupInvitePayload(

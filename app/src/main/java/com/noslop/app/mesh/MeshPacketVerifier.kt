@@ -344,11 +344,21 @@ object MeshPacketVerifier {
             Signed(matched, sig, signer)
         }
 
+        // Senders (MeshSocialRepository.broadcastIdentityUpdate / broadcastCreatorIdentityUpdate) sign
+        // the encodeForSigning form; HandshakePacketHandler.handleIdentityUpdate accepts it and the older
+        // pipe form (2026-10-09). This copy used to check the pipe form only, so every IDENTITY_UPDATE was
+        // INVALID here and dropped before reaching the handler.
         "IDENTITY_UPDATE" -> packet.getIdentityUpdatePayload()?.let { p ->
-            var s = "${p.userId}|${p.handle}|${p.timestamp}"
-            if (p.authorAvatarB64 != null) s += "|${p.authorAvatarB64}"
-            if (!p.bio.isNullOrBlank()) s += "|${p.bio}"
-            Signed(s, p.signature, p.userId)
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.userId, p.handle, p.timestamp.toString(), p.authorAvatarB64, p.bio
+            )
+            var pipe = "${p.userId}|${p.handle}|${p.timestamp}"
+            if (p.authorAvatarB64 != null) pipe += "|${p.authorAvatarB64}"
+            if (!p.bio.isNullOrBlank()) pipe += "|${p.bio}"
+            val sig = p.signature
+            val signer = p.userId
+            val matched = if (com.noslop.app.crypto.CryptoService.verify(enc, sig, signer)) enc else pipe
+            Signed(matched, sig, signer)
         }
 
         "USER_EXIT" -> packet.getUserExitPayload()?.let { p ->
