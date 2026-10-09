@@ -1,5 +1,44 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-10) — Round D05: DM v1 Latch and DM_ACK Domain Separation (v0.7.0-alpha)
+
+This round closes the two open parts of review finding D05. The outbox expiry part was already done in R3. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** No Room schema change. `MESSAGE` is unchanged. `DM_ACK` gains two optional fields and `v: 3`. Earlier builds keep working in both directions (see below).
+
+### v1 DMs were accepted from any peer
+
+* **Cause.** `handleDirectMessage` fell back to v1 (`decryptDM`, no AAD) for every non-group message whose v2 decryption failed. v1 binds neither the message id nor the direction, so a relay could reflect a captured v1 message back to its sender under a new id. C08's reflection fix held only for v2 traffic.
+* **Fix (latch).** A key is marked as speaking v2 (`app_settings["dm_v2_seen_<key>"]`) on its first v2 message, its first authenticated `DM_ACK`, or a v2-signed `CONNECTION_REQUEST` / `USER_HANDSHAKE`. Since the D07 hard break, every handshake is v2, so every contact that connects on this build is marked. After that, a non-group message from that key that fails v2 is refused. v1 is still read from a key never seen speaking v2 (an older client accepted before D07); it stays flagged `isLegacy`.
+* **Why app settings, not a `Peer` column.** The review suggested `Peer.dmV2Seen` with a migration. Some write paths still rewrite peer rows wholesale (D06), and any one of them would reset the latch and reopen v1. A setting keyed by the public key can't be reset that way and needs no migration. It also survives removing and re-adding the contact: the key still speaks v2.
+* **Own messages still in v1 form.** Messages written in the Hub web UI were sealed as v1 and pushed to the mesh labelled as plain `MESSAGE`s, and DM sync re-sent stored v1 messages labelled `v: 2`. A v2 peer would now refuse both. `NoSlopRepository.sealHubDm` seals our own Hub messages as v2 (us → peer, same id and timestamp), and the pushed packet says `v: 2`. DM sync re-seals any stored v1 message of ours as v2 before re-sending it (`DmPacketHandler.resendableCiphertext`). Messages *from* the peer pulled from the Hub keep their v1 at-rest form; they are only read locally.
+* Tested (unit: `DmProtocolD05Test`).
+
+### DM_ACK could be confused with MESSAGE
+
+* **Cause.** A `DM_ACK` was "ACK" sealed exactly like a `MESSAGE` (same directional key, same AAD label `noslop-dm-v2`, group id empty), and `handleDmAck` never checked the plaintext. A captured message could be re-labelled as an acknowledgement for its own id. An ACK also settled any message id, including one in another chat.
+* **Fix.**
+  * New AAD label `noslop-dm-ack-v3` (`CryptoService.DM_AAD_ACK`; `canonicalDmAadV2`, `encryptDMV2` and `decryptDMV2` take a `domain`). Messages keep `noslop-dm-v2` (`DM_AAD_MESSAGE`), so they stay readable by earlier builds.
+  * `sendDmAck` sends `v: 3` with the acknowledgement under the new label in `ack_nonce` / `ack_ciphertext`. Earlier builds only read `nonce` / `ciphertext`, so the old form rides along in the same packet until the peer has sent us a new-form ACK itself (`app_settings["dm_ack_v3_<key>"]`). From then on the old fields are empty.
+  * `handleDmAck` tries the new form first. It accepts the old form only from a peer that has never sent the new one, and only if the plaintext is exactly `"ACK"`. Either form must open to `"ACK"`.
+  * An ACK is refused for a message that isn't in the sender's own chat.
+* **Why not mark "Sent" final for v1 peers.** The review also proposed skipping the ACK wait for peers known to be on v1. Since D07, such a peer can't read our v2 messages at all, so showing "Sent" would hide a message it never could read. The outbox keeps marking them `FAILED` after 7 days or 50 deliveries (R3), which is honest.
+* Tested (unit: `DmProtocolD05Test`).
+
+### Behaviour to watch on device
+
+* DMs and ACKs between two nodes on this build: the first ACK each way carries both forms, later ones only the new form. Delivery ticks should behave exactly as before.
+* With one node still on the previous build: its ACKs (old form, "ACK") are accepted; ours carry the old form it reads.
+* A contact running a pre-v2 client (accepted before D07) can still send v1 DMs, until it ever speaks v2.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `DmProtocolD05Test` | v1 accepted from a never-v2 peer (flagged legacy); latch set by a v2 message, an authenticated ACK and a v2-signed connection request; v1 refused after the latch while v2 still works; old-form ACK accepted from an earlier build; a re-labelled message refused as an ACK (plaintext not "ACK"); "ACK" sealed as a message refused in the ACK field; an ACK-domain ciphertext refused as a message; new-form ACK accepted, after which the old form from that peer is refused; ACK for another chat's message refused; outgoing ACK carries both forms until the peer is known, then only the new one; DM sync re-seals a stored v1 own message as v2 |
+
+---
+
 ## Completed Changes (2026-10-09) — Round C: Creator Identity Separation (D04) (v0.7.0-alpha)
 
 This round closes review finding D04: the creator (burnable) identity could be linked to the personal one. It also fixes `IDENTITY_UPDATE` verification, which turned up on the way. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
@@ -1689,7 +1728,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
 | **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Partial** — internal staging ✔; plaintext zip still written; no `secureDelete()` exists (D10/D12) | `BackupManagerTest` |
 | **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** | `BackupManagerTest` |
-| **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Partial** — v2 ✔; unconditional v1 fallback, no ACK domain label (D05) | `CryptoServiceRobolectricTest` |
+| **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** with D05 (2026-10-10) — v1 latched per key, ACK has its own AAD label | `CryptoServiceRobolectricTest`, `DmProtocolD05Test` |
 | **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
 | **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** with D04 (Round C, 2026-10-09) — see D04 | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
 | **C11** | P1 | 20-character visual safety fingerprint derivation | **Partial** — derivation ✔; no caller, not shown in any screen (D10) | `CryptoServiceRobolectricTest` |
@@ -1725,7 +1764,7 @@ same-device backup export/import. Multi-device testing is next.
 | **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Resolved** (Round B) — index-only, deny by default; `accessKey` deliberately not issued (see TECHNICAL_REFERENCE §6.1.1) | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
 | **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Resolved** (Round B) — relay removed; one-hop recovery behind the ACL | `MediaAccessRoundBTest` |
 | **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Resolved** (Round C, 2026-10-09; not yet device-verified) — creator profile, `IdentityRouter`, `outboundFor`, sync exclusion; reactions/votes and Hub relaying still open | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
-| **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Partial** — outbox expiry + FAILED/retry ✔ (R3); v1 latch and ACK domain separation open | `OutboxExpiryTest` |
+| **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Resolved** (2026-10-10; not yet device-verified) — outbox expiry + FAILED/retry (R3); v1 latch, ACK domain label + "ACK" check (Round D05). "Sent final for v1 peers" deliberately not done (see Round D05) | `OutboxExpiryTest`, `DmProtocolD05Test` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
 | **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Partial** — sync path fixed (R2); live POST/EDIT path and `insertPostSafely` match open | `MediaSyncAndAclRestoreTest` |

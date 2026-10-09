@@ -223,6 +223,14 @@ ciphertext    = ChaCha20-Poly1305(chacha_key, nonce, plaintext_utf8)
 
 `decryptDM` mirrors this; returns `null` on any failure (never throws).
 
+This is the legacy v1 form. Current senders use `encryptDMV2` (directional
+HKDF key, AAD binding sender, recipient, message id, group id and timestamp;
+see WIRE_PROTOCOL_REFERENCE §3 MESSAGE). Since 2026-10-10 (review D05) a
+receiver reads v1 only from a key never seen speaking v2
+(`app_settings["dm_v2_seen_<key>"]`, set by `DmPacketHandler.markDmV2Seen`).
+`DM_ACK` uses AAD label `CryptoService.DM_AAD_ACK` (`noslop-dm-ack-v3`),
+distinct from `DM_AAD_MESSAGE` (`noslop-dm-v2`), and must open to `"ACK"`.
+
 If a DM carries media, the plaintext is actually a JSON object
 `{"content": "<text>", "media": <MediaMetadata>}` before encryption — see
 `sendDirectMessage` and `MeshPacketHandler.handleDirectMessage`, which

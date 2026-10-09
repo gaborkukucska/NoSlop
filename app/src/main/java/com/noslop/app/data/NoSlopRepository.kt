@@ -432,7 +432,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         map["media"] = metadata
                     }
                     val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
-                    val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
+                    val dmTimestamp = dm.optLong("timestamp", System.currentTimeMillis())
+                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, myKeys, dmTimestamp)
                     
                     if (ciphertext != null && nonce != null) {
                         val localMsg = com.noslop.app.data.ChatMessage(
@@ -441,7 +442,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             senderPub = sender,
                             ciphertext = ciphertext,
                             nonce = nonce,
-                            timestamp = dm.optLong("timestamp", System.currentTimeMillis()),
+                            timestamp = dmTimestamp,
                             mediaId = mediaId,
                             mediaType = mediaType,
                             replyToMessageId = null
@@ -524,6 +525,35 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     private var lastDmSyncTimestamp: Long = 0
 
+    /**
+     * D05: seals a DM pulled from the Hub for local storage. Our own messages are sealed as v2
+     * (us -> peer, bound to the message id and timestamp), exactly as a mesh send would, because they
+     * may be pushed back over Tor or re-sent by DM sync, and a v2 peer refuses v1. Messages from the
+     * peer keep the v1 at-rest form they always had; they are only ever read locally.
+     */
+    private fun sealHubDm(
+        content: String,
+        msgId: String,
+        senderPub: String,
+        peerPub: String,
+        peerEncPub: String,
+        myKeys: CryptoService.IdentityKeys,
+        timestamp: Long
+    ): Pair<String, String> = if (senderPub == myKeys.publicKeyB64) {
+        CryptoService.encryptDMV2(
+            plaintext = content,
+            theirEncPubB64 = peerEncPub,
+            myEncPrivB64 = myKeys.encPrivateKeyB64,
+            senderEdPub = myKeys.publicKeyB64,
+            recipientEdPub = peerPub,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+    } else {
+        CryptoService.encryptDM(content, peerEncPub, myKeys.encPrivateKeyB64)
+    }
+
     private suspend fun syncPullIncrementalDMsFromHub() = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext
         val args = JSONObject().put("since", lastDmSyncTimestamp)
@@ -563,7 +593,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         )
                     }
                     val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
-                    val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
+                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, myKeys, timestamp)
                     
                     if (ciphertext != null && nonce != null) {
                         val localMsg = com.noslop.app.data.ChatMessage(
@@ -581,12 +611,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         
                         // If WE sent this DM (via Hub Web UI), we must push it back to the Hub so it routes over Tor!
                         if (sender == myKeys.publicKeyB64) {
+                            // D05: sealed as v2 by sealHubDm; it used to go out as v1, which a v2 peer refuses.
                             val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
                                 com.noslop.app.mesh.EncryptedPayload(
                                     id = id,
                                     nonce = nonce,
                                     ciphertext = ciphertext,
-                                    timestamp = timestamp
+                                    timestamp = timestamp,
+                                    v = 2
                                 )
                             )
                             val packet = com.noslop.app.mesh.NetworkPacket(

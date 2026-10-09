@@ -146,6 +146,8 @@ class HandshakePacketHandler(
             }
             return false
         }
+        // D05: a key that signs v2 handshakes runs a client that speaks DM v2; its v1 DMs are refused.
+        DmPacketHandler.markDmV2Seen(db, connPay.fromUserId)
 
         val existingPeer = peerDao.getPeerByPublicKey(connPay.fromUserId)
         val isOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 5 * 60 * 1000L
@@ -368,6 +370,8 @@ class HandshakePacketHandler(
             }
             return false
         }
+        // D05: a key that signs v2 handshakes runs a client that speaks DM v2; its v1 DMs are refused.
+        DmPacketHandler.markDmV2Seen(db, handPay.fromUserId)
 
         var peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
         if (peer == null) {

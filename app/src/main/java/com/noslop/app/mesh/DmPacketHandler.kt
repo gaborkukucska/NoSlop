@@ -36,6 +36,42 @@ class DmPacketHandler(
                 }
             )
         )
+
+        /**
+         * D05: AppSetting prefix marking a key that has proved it speaks DM v2 (a v2 message or an
+         * authenticated DM_ACK from it, or a v2-signed handshake). Legacy v1 DMs from such a key are
+         * refused: v1 binds neither the message id nor the direction, so a relay could reflect or
+         * re-label captured traffic. Kept in app settings rather than on the peer row so no peer
+         * rewrite can reset it.
+         */
+        const val DM_V2_SEEN_PREFIX = "dm_v2_seen_"
+
+        /** D05: AppSetting prefix marking a key that sent us a domain-separated DM_ACK (so it reads them). */
+        const val DM_ACK_V3_PREFIX = "dm_ack_v3_"
+
+        /** The plaintext every DM_ACK carries; anything else is not an acknowledgement. */
+        internal const val ACK_PLAINTEXT = "ACK"
+
+        suspend fun markDmV2Seen(db: NoSlopDatabase, peerPub: String) {
+            if (peerPub.isBlank()) return
+            val key = DM_V2_SEEN_PREFIX + peerPub
+            if (db.appSettingDao().getSetting(key) == null) {
+                db.appSettingDao().insertSetting(AppSetting(key, System.currentTimeMillis().toString()))
+            }
+        }
+
+        suspend fun isDmV2Seen(db: NoSlopDatabase, peerPub: String): Boolean =
+            db.appSettingDao().getSetting(DM_V2_SEEN_PREFIX + peerPub) != null
+
+        suspend fun markAckV3Peer(db: NoSlopDatabase, peerPub: String) {
+            val key = DM_ACK_V3_PREFIX + peerPub
+            if (db.appSettingDao().getSetting(key) == null) {
+                db.appSettingDao().insertSetting(AppSetting(key, System.currentTimeMillis().toString()))
+            }
+        }
+
+        suspend fun isAckV3Peer(db: NoSlopDatabase, peerPub: String): Boolean =
+            db.appSettingDao().getSetting(DM_ACK_V3_PREFIX + peerPub) != null
     }
 
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
@@ -135,6 +171,11 @@ class DmPacketHandler(
         }
 
         // C08: Accept v1 only when groupId is null; reject legacy v1 group messages
+        // D05: ...and only from a key that has never shown it speaks v2 (see DM_V2_SEEN_PREFIX).
+        if (plaintext == null && msgPay.groupId.isNullOrBlank() && isDmV2Seen(db, packet.senderId)) {
+            Logger.warn(TAG, "Rejected DM ${msgPay.id} from ${packet.senderId.take(12)}: not v2-authenticated, and this sender speaks v2 (legacy v1 refused)")
+            return false
+        }
         if (plaintext == null) {
             if (msgPay.groupId.isNullOrBlank()) {
                 plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
@@ -164,6 +205,8 @@ class DmPacketHandler(
 
         if (!isLegacy) {
             seenV2Messages.add(seenKey)
+            // D05: from now on this sender's v1 traffic is refused.
+            markDmV2Seen(db, packet.senderId)
         }
         if (plaintext != null) {
             // Once cryptographically authenticated: remember that this sender reached our burnable identity,
@@ -420,12 +463,13 @@ class DmPacketHandler(
 
         Logger.info(TAG, "DM_SYNC_REQUEST from ${peer.handle}: catching up ${missedMessages.size} missed message(s)")
         for (msg in missedMessages) {
+            val (resendCiphertext, resendNonce) = resendableCiphertext(msg, me, peer)
             val msgPay = EncryptedPayload(
                 id = msg.id,
-                nonce = msg.nonce,
-                ciphertext = msg.ciphertext,
+                nonce = resendNonce,
+                ciphertext = resendCiphertext,
                 timestamp = msg.timestamp,
-                v = if (msg.isLegacy) 1 else 2
+                v = 2
             )
             val packetToSend = NetworkPacket(
                 id = UUID.randomUUID().toString(),
@@ -441,6 +485,41 @@ class DmPacketHandler(
         return true
     }
 
+    /**
+     * D05: the wire form of one of our own messages for a DM sync answer. A message is normally stored
+     * as the v2 ciphertext it was sent as, and goes out unchanged. A message stored as v1 (one written
+     * via the Hub web UI before this round) is re-sealed as v2 under the same id and timestamp, since a
+     * v2 peer refuses v1. (It used to go out as v1 labelled v2.) If it can't be read, it goes out as stored.
+     */
+    private fun resendableCiphertext(msg: ChatMessage, me: CryptoService.IdentityKeys, peer: Peer): Pair<String, String> {
+        val peerEnc = peer.encPublicKeyB64.takeIf { it.isNotBlank() } ?: return msg.ciphertext to msg.nonce
+        val asV2 = CryptoService.decryptDMV2(
+            ciphertextB64 = msg.ciphertext,
+            nonceB64 = msg.nonce,
+            theirEncPubB64 = peerEnc,
+            myEncPrivB64 = me.encPrivateKeyB64,
+            senderEdPub = me.publicKeyB64,
+            recipientEdPub = peer.publicKeyB64,
+            msgId = msg.id,
+            groupId = null,
+            timestamp = msg.timestamp
+        )
+        if (asV2 != null) return msg.ciphertext to msg.nonce
+        val plain = CryptoService.decryptDM(msg.ciphertext, msg.nonce, peerEnc, me.encPrivateKeyB64)
+            ?: return msg.ciphertext to msg.nonce
+        Logger.info(TAG, "Re-sealing stored v1 message ${msg.id} as v2 for DM sync")
+        return CryptoService.encryptDMV2(
+            plaintext = plain,
+            theirEncPubB64 = peerEnc,
+            myEncPrivB64 = me.encPrivateKeyB64,
+            senderEdPub = me.publicKeyB64,
+            recipientEdPub = peer.publicKeyB64,
+            msgId = msg.id,
+            groupId = null,
+            timestamp = msg.timestamp
+        )
+    }
+
     suspend fun sendDmAck(
         msgId: String,
         recipientPub: String,
@@ -451,18 +530,36 @@ class DmPacketHandler(
         val onion = peer.onionAddress.takeIf { it.isNotBlank() } ?: return
         val now = System.currentTimeMillis()
 
-        val (ciphertext, nonce) = CryptoService.encryptDMV2(
-            plaintext = "ACK",
+        // D05: the acknowledgement proper, under its own AAD label.
+        val (ackCiphertext, ackNonce) = CryptoService.encryptDMV2(
+            plaintext = ACK_PLAINTEXT,
             theirEncPubB64 = recipientEncPub,
             myEncPrivB64 = myKeys.encPrivateKeyB64,
             senderEdPub = myKeys.publicKeyB64,
             recipientEdPub = recipientPub,
             msgId = msgId,
             groupId = null,
-            timestamp = now
+            timestamp = now,
+            domain = CryptoService.DM_AAD_ACK
         )
+        // Earlier builds only read the legacy form (sealed like a message), so it rides along until
+        // this peer has shown it reads the new one.
+        val (ciphertext, nonce) = if (isAckV3Peer(db, recipientPub)) {
+            "" to ""
+        } else {
+            CryptoService.encryptDMV2(
+                plaintext = ACK_PLAINTEXT,
+                theirEncPubB64 = recipientEncPub,
+                myEncPrivB64 = myKeys.encPrivateKeyB64,
+                senderEdPub = myKeys.publicKeyB64,
+                recipientEdPub = recipientPub,
+                msgId = msgId,
+                groupId = null,
+                timestamp = now
+            )
+        }
 
-        if (ciphertext.isBlank() || nonce.isBlank()) {
+        if (ackCiphertext.isBlank() || ackNonce.isBlank()) {
             Logger.error(TAG, "Failed to encrypt DM_ACK for $msgId")
             return
         }
@@ -472,7 +569,9 @@ class DmPacketHandler(
             nonce = nonce,
             ciphertext = ciphertext,
             timestamp = now,
-            v = 2
+            v = 3,
+            ackNonce = ackNonce,
+            ackCiphertext = ackCiphertext
         )
 
         val packet = NetworkPacket(
@@ -498,7 +597,7 @@ class DmPacketHandler(
     suspend fun handleDmAck(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val ackPay = packet.getDmAckPayload() ?: return false
         val burnableKeys = repo.getBurnableIdentity()
-        var myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
+        val myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
             localKeys
         } else if (burnableKeys != null && packet.targetUserId == burnableKeys.publicKeyB64) {
             burnableKeys
@@ -512,38 +611,52 @@ class DmPacketHandler(
         val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: return false
         val effectiveTimestamp = ackPay.timestamp ?: System.currentTimeMillis()
 
-        var plaintext = CryptoService.decryptDMV2(
-            ciphertextB64 = ackPay.ciphertext,
-            nonceB64 = ackPay.nonce,
-            theirEncPubB64 = opponentEncPub,
-            myEncPrivB64 = myKeys.encPrivateKeyB64,
-            senderEdPub = packet.senderId,
-            recipientEdPub = myKeys.publicKeyB64,
-            msgId = ackPay.msgId,
-            groupId = null,
-            timestamp = effectiveTimestamp
-        )
-
-        if (plaintext == null && burnableKeys != null) {
-            val altKeys = if (myKeys.publicKeyB64 == localKeys.publicKeyB64) burnableKeys else localKeys
-            plaintext = CryptoService.decryptDMV2(
-                ciphertextB64 = ackPay.ciphertext,
-                nonceB64 = ackPay.nonce,
-                theirEncPubB64 = opponentEncPub,
-                myEncPrivB64 = altKeys.encPrivateKeyB64,
-                senderEdPub = packet.senderId,
-                recipientEdPub = altKeys.publicKeyB64,
-                msgId = ackPay.msgId,
-                groupId = null,
-                timestamp = effectiveTimestamp
-            )
-            if (plaintext != null) {
-                myKeys = altKeys
+        // Opens [ciphertext] as an ACK from the sender to whichever of our identities it was sealed for.
+        fun openAck(ciphertext: String?, nonce: String?, domain: String): String? {
+            if (ciphertext.isNullOrBlank() || nonce.isNullOrBlank()) return null
+            val keySets = listOfNotNull(myKeys, burnableKeys?.let { if (myKeys.publicKeyB64 == localKeys.publicKeyB64) it else localKeys })
+            for (keys in keySets.distinctBy { it.publicKeyB64 }) {
+                val opened = CryptoService.decryptDMV2(
+                    ciphertextB64 = ciphertext,
+                    nonceB64 = nonce,
+                    theirEncPubB64 = opponentEncPub,
+                    myEncPrivB64 = keys.encPrivateKeyB64,
+                    senderEdPub = packet.senderId,
+                    recipientEdPub = keys.publicKeyB64,
+                    msgId = ackPay.msgId,
+                    groupId = null,
+                    timestamp = effectiveTimestamp,
+                    domain = domain
+                )
+                if (opened != null) return opened
             }
+            return null
         }
 
-        if (plaintext == null) {
+        // D05: the domain-separated form first. The legacy form (sealed exactly like a MESSAGE) is
+        // accepted only from a peer that has never sent the new one, and only if it says "ACK".
+        val viaAckDomain = openAck(ackPay.ackCiphertext, ackPay.ackNonce, CryptoService.DM_AAD_ACK)
+        val authenticated = if (viaAckDomain != null) {
+            viaAckDomain == ACK_PLAINTEXT
+        } else if (isAckV3Peer(db, packet.senderId)) {
+            Logger.warn(TAG, "Rejected DM_ACK for ${ackPay.msgId}: legacy form from a peer that sends domain-separated ACKs")
+            return false
+        } else {
+            openAck(ackPay.ciphertext, ackPay.nonce, CryptoService.DM_AAD_MESSAGE) == ACK_PLAINTEXT
+        }
+
+        if (!authenticated) {
             Logger.warn(TAG, "Rejected DM_ACK for ${ackPay.msgId}: authentication failed")
+            return false
+        }
+        if (viaAckDomain != null) markAckV3Peer(db, packet.senderId)
+        // Only builds that speak DM v2 send DM_ACKs at all.
+        markDmV2Seen(db, packet.senderId)
+
+        // D05: an ACK settles only a message in this sender's own chat, never one in another chat.
+        val acked = messageDao.getMessageById(ackPay.msgId)
+        if (acked != null && (acked.chatWithPeerPub != packet.senderId || acked.senderPub == packet.senderId)) {
+            Logger.warn(TAG, "Rejected DM_ACK for ${ackPay.msgId}: not a message sent to ${packet.senderId.take(12)}")
             return false
         }
 

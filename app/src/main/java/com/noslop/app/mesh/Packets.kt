@@ -500,10 +500,18 @@ data class GroupMessagePayload(
 @Keep
 data class DmAckPayload(
     @SerializedName("msg_id") val msgId: String,
+    /**
+     * The legacy acknowledgement: "ACK" sealed exactly like a MESSAGE (same AAD label). Still sent
+     * to peers not yet known to read [ackCiphertext], since earlier builds only check this one;
+     * blank once the peer has sent us a domain-separated ACK itself (D05).
+     */
     val nonce: String,
     val ciphertext: String,
     val timestamp: Long? = null,
-    @SerializedName("v") val v: Int = 2
+    @SerializedName("v") val v: Int = 2,
+    /** D05: "ACK" sealed under the acknowledgement AAD label (CryptoService.DM_AAD_ACK). */
+    @SerializedName("ack_nonce") val ackNonce: String? = null,
+    @SerializedName("ack_ciphertext") val ackCiphertext: String? = null
 )
 
 @Keep

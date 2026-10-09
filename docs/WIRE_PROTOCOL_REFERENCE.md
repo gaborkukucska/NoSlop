@@ -33,6 +33,9 @@ to look up any packet's shape.
 > and the 256 KB chunk window (§6). 2026-10-08 (round R3): the group leave
 > signature, the member signing identity and the `GROUP_SYNC` timestamp rules
 > (§3 GROUP_UPDATE / GROUP_SYNC), and the DM outbox limits (§3 DM_ACK).
+> 2026-10-10 (review D05): `DM_ACK` `v: 3` with `ack_nonce` / `ack_ciphertext`
+> under its own AAD label, and the per-key v1 latch for `MESSAGE` (§3 MESSAGE,
+> §3 DM_ACK). `MESSAGE` itself is unchanged.
 
 ---
 
@@ -114,7 +117,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | # | `type` | Payload class | Signed string format | Handler (class.method) | Persistence |
 |---|---|---|---|---|---|
 | 1 | `POST` | `PostPayload` | `id\|authorId\|content\|timestamp` (+`\|authorAvatarB64` if set) | `PostPacketHandler.handlePost` | `postDao.insertPost`; triggers media auto-download |
-| 2 | `MESSAGE` | `EncryptedPayload` | Pairwise directional ChaCha20-Poly1305 with AAD (`v: 2`); fallback v1 unauthenticated | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; outbox retry until `DM_ACK` |
+| 2 | `MESSAGE` | `EncryptedPayload` | Pairwise directional ChaCha20-Poly1305 with AAD (`v: 2`); v1 (unauthenticated) only from a key never seen speaking v2 | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; outbox retry until `DM_ACK` |
 | 3 | `CONNECTION_REQUEST` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleConnectionRequest` | inserts untrusted `Peer`, sets `_incomingRequestFlow` |
 | 4 | `USER_HANDSHAKE` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleUserHandshake` | upserts `Peer` with `isTrusted = true` |
 | 5 | `SYNC_REQUEST` | `SyncRequestPayload` | n/a | `SyncPacketHandler.handleSyncRequest` | none — replies `SYNC_RESPONSE` |
@@ -261,6 +264,16 @@ is then removed before auto-download (2026-10-08); the live `POST` /
 | `ciphertext` | String | Encrypted payload (Base64) |
 | `group_id`? | String | Set when this DM is one fan-out leg of a group message; the receiver files it under this group's thread instead of a 1:1 thread. `null` for ordinary DMs. |
 | `timestamp`? | Long | Epoch timestamp |
+| `v` | Int | `2` = directional key + AAD `encodeForSigning("noslop-dm-v2", senderEdPub, recipientEdPub, id, group_id ?: "", timestamp)`; `1` = legacy (SHA3-256 of the X25519 secret, no AAD). Not authenticated; receivers always try v2 first |
+
+**v1 latch (D05, 2026-10-10).** A receiver tries v2 first. It falls back to v1
+only for a 1:1 message, and only if the sender's key has never been seen
+speaking v2: a v2 message, an authenticated `DM_ACK`, or a v2-signed
+`CONNECTION_REQUEST` / `USER_HANDSHAKE` from that key sets
+`app_settings["dm_v2_seen_<key>"]` for good. v1 binds neither id nor direction,
+so a relay could otherwise reflect captured v1 traffic under a new id. Group
+legs are v2 only. Senders never produce v1: DMs written in the Hub web UI and
+DM sync re-sends are sealed as v2 too.
 
 If a DM carries media, the decrypted plaintext is a JSON object
 `{"content": "<text>", "media": <MediaMetadata>}` rather than raw text;
@@ -705,10 +718,12 @@ a member that missed one could never catch up through `GROUP_QUERY`.
 | Field | Type | Description |
 |---|---|---|
 | `msg_id` | String | ID of the acknowledged message |
-| `nonce` | String | ChaCha20-Poly1305 initialization vector |
-| `ciphertext` | String | AEAD ciphertext encrypting `"ACK"` |
-| `timestamp`? | Long | Epoch timestamp |
-| `v` | Int | Protocol version (defaults to 2) |
+| `nonce` | String | Legacy form: IV. Empty once the peer is known to read `ack_*` |
+| `ciphertext` | String | Legacy form: `"ACK"` sealed exactly like a `MESSAGE` (AAD label `noslop-dm-v2`). Empty once the peer is known to read `ack_*` |
+| `timestamp`? | Long | Epoch timestamp (bound by the AAD) |
+| `v` | Int | `3` since 2026-10-10 (`2` from earlier builds). Informational |
+| `ack_nonce`? | String | D05: IV of `ack_ciphertext` |
+| `ack_ciphertext`? | String | D05: `"ACK"` sealed with the same directional key under AAD `encodeForSigning("noslop-dm-ack-v3", ackSenderEdPub, ackRecipientEdPub, msg_id, "", timestamp)` |
 
 Carries authenticated delivery confirmation from the recipient back to the message author. Keyed using the counterparty's directional key (`k_dir = HKDF-SHA256(X25519, recipient -> sender)`), guaranteeing receipt cannot be forged or reflected by network intermediaries.
 
@@ -718,8 +733,17 @@ outbox until the ACK arrives, re-sending it (same `id`, `nonce`,
 `ciphertext`) with backoff; since 2026-10-08 it gives up after **7 days** or
 **50 deliveries without an ACK** and marks the message `FAILED` (the chat
 offers a retry, which re-sends the identical packet). The receiver
-de-duplicates by message id and echoes the ACK for a duplicate. Review finding
-D05's v1 latch and ACK domain separation remain open.
+de-duplicates by message id and echoes the ACK for a duplicate.
+
+**Domain separation (D05, 2026-10-10).** An ACK must open to exactly `"ACK"`.
+The receiver tries `ack_ciphertext` (label `noslop-dm-ack-v3`) first; success
+records `app_settings["dm_ack_v3_<key>"]`. The legacy `ciphertext` (label
+`noslop-dm-v2`, the `MESSAGE` label) is accepted only from a key not so
+recorded. The sender includes the legacy form until the peer has sent it a
+new-form ACK, so earlier builds (which read only `ciphertext`) still see their
+messages delivered. An ACK is refused for a message that isn't in the
+sender's own chat. Distinct labels mean an ACK can't be passed off as a message
+or the other way round.
 
 ### TYPING
 **Type:** `TYPING` · class `TypingPayload` · **unsigned**
@@ -1025,7 +1049,7 @@ and still accurate.
 | `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
-| `DM_ACK` | AEAD authenticated with directional key `HKDF-SHA256(sharedSecret, recipientEdPub -> senderEdPub)` and AAD `encodeForSigning("noslop-dm-v2", recipientEdPub, senderEdPub, msgId, "", timestamp)` |
+| `DM_ACK` | AEAD authenticated with directional key `HKDF-SHA256(sharedSecret, recipientEdPub -> senderEdPub)` and AAD `encodeForSigning("noslop-dm-ack-v3", recipientEdPub, senderEdPub, msgId, "", timestamp)` in `ack_ciphertext`; legacy form with label `"noslop-dm-v2"` in `ciphertext` (accepted only until the peer sends the new form; plaintext must be `"ACK"`) |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
 | `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
 | `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) (supporting encodeForSigning and pipe) |

@@ -313,17 +313,27 @@ object CryptoService {
     }
 
     /**
+     * D05: AAD domain labels. A `MESSAGE` keeps the label it always had (so peers on earlier builds
+     * still read it); a `DM_ACK` has its own, so an acknowledgement can never be passed off as a
+     * message under the same id, or the other way round.
+     */
+    const val DM_AAD_MESSAGE = "noslop-dm-v2"
+    const val DM_AAD_ACK = "noslop-dm-ack-v3"
+
+    /**
      * C08: Authenticated Additional Data (AAD) binding sender, recipient, message ID, group ID, and timestamp.
+     * D05: [domain] separates messages from acknowledgements (see [DM_AAD_ACK]).
      */
     fun canonicalDmAadV2(
         senderEdPub: String,
         recipientEdPub: String,
         msgId: String,
         groupId: String?,
-        timestamp: Long
+        timestamp: Long,
+        domain: String = DM_AAD_MESSAGE
     ): ByteArray {
         val aadStr = encodeForSigning(
-            "noslop-dm-v2",
+            domain,
             senderEdPub,
             recipientEdPub,
             msgId,
@@ -413,12 +423,13 @@ object CryptoService {
         recipientEdPub: String,
         msgId: String,
         groupId: String? = null,
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        domain: String = DM_AAD_MESSAGE
     ): Pair<String, String> {
         val sharedSecret = calculateX25519SharedSecret(myEncPrivB64, theirEncPubB64)
         val chachaKey = deriveDirectionalKeyV2(sharedSecret, senderEdPub, recipientEdPub)
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-        val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp)
+        val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp, domain)
         val ciphertext = chacha20Poly1305Encrypt(chachaKey, iv, plaintext.toByteArray(Charsets.UTF_8), aad)
 
         return Pair(
@@ -439,13 +450,14 @@ object CryptoService {
         recipientEdPub: String,
         msgId: String,
         groupId: String? = null,
-        timestamp: Long
+        timestamp: Long,
+        domain: String = DM_AAD_MESSAGE
     ): String? {
         return try {
             val sharedSecret = calculateX25519SharedSecret(myEncPrivB64, theirEncPubB64)
             val chachaKey = deriveDirectionalKeyV2(sharedSecret, senderEdPub, recipientEdPub)
             val iv = Base64.decode(nonceB64, Base64.DEFAULT)
-            val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp)
+            val aad = canonicalDmAadV2(senderEdPub, recipientEdPub, msgId, groupId, timestamp, domain)
             val decrypted = chacha20Poly1305Decrypt(chachaKey, iv, Base64.decode(ciphertextB64, Base64.DEFAULT), aad)
             String(decrypted, Charsets.UTF_8)
         } catch (e: Exception) {
