@@ -21,16 +21,11 @@ object GossipService {
     @Volatile private var globalUntrustedDmCount = 0
     @Volatile private var globalUntrustedDmWindowStart = 0L
 
-    private val relayStates = ConcurrentHashMap<String, RelayState>()
-
-    data class RelayState(
-        val mediaId: String,
-        val listeners: MutableSet<String> = ConcurrentHashMap.newKeySet(),
-        var sourceNode: String? = null,
-        val metadata: MediaMetadata? = null,
-        val establishedAt: Long = System.currentTimeMillis(),
-        var lastActivity: Long = System.currentTimeMillis()
-    )
+    // Round B (D03): the media relay-listener registry is gone. A relay node forwarded every chunk it
+    // received for a media id (i.e. its own downloads) to whoever had registered for that id, with no
+    // access check, and multi-hop recovery could never complete anyway (the holder can only answer
+    // requesters it can reach). Recovery is now a direct-peer query answered under the media ACL
+    // (MediaManager.handleRecoveryRequest).
 
     private val firewallBuffer = ConcurrentHashMap<String, MutableList<NetworkPacket>>()
     private val senderMediaBytes = ConcurrentHashMap<String, Long>()
@@ -205,6 +200,9 @@ object GossipService {
         } catch (_: Exception) { false }
     }
 
+    /** Round B: media packet types that travel only between the two nodes involved. */
+    internal fun isPointToPointMediaType(type: String): Boolean = type.startsWith("MEDIA_")
+
     fun resetForTesting() {
         resetAllState()
         clock = { System.currentTimeMillis() }
@@ -226,25 +224,12 @@ object GossipService {
         dmRateLimits.clear()
         globalUntrustedDmCount = 0
         globalUntrustedDmWindowStart = 0L
-        relayStates.clear()
         firewallBuffer.clear()
         senderMediaBytes.clear()
         recentlyDeletedPeers.clear()
         peerSendFailures.clear()
     }
 
-    fun removePeerFromRelays(publicKeyB64: String) {
-        val iterator = relayStates.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (entry.value.listeners.remove(publicKeyB64)) {
-                Logger.info(TAG, "Removed deleted peer $publicKeyB64 from relay listeners for media ${entry.key}")
-                if (entry.value.listeners.isEmpty()) {
-                    iterator.remove()
-                }
-            }
-        }
-    }
 
     fun flushFirewallBuffer(senderId: String) {
         val buffer = firewallBuffer.remove(senderId)
@@ -292,7 +277,6 @@ object GossipService {
         cleanupJob = scope.launch {
             while (isActive) {
                 delay(60_000)
-                cleanupStaleRoutes()
                 cleanupFailureTracking()
                 cleanupRateLimitsAndFirewall()
             }
@@ -307,18 +291,6 @@ object GossipService {
         }
     }
 
-    private fun cleanupStaleRoutes() {
-        val now = System.currentTimeMillis()
-        val timeoutMs = 5 * 60 * 1000L // 5 minutes timeout
-        val iterator = relayStates.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (now - entry.value.lastActivity > timeoutMs) {
-                iterator.remove()
-                Logger.info(TAG, "Cleaned up stale relay state for media ${entry.key}")
-            }
-        }
-    }
 
     private fun cleanupRateLimitsAndFirewall() {
         val now = System.currentTimeMillis()
@@ -384,40 +356,6 @@ object GossipService {
         }
     }
 
-    suspend fun forwardRelayChunk(mediaId: String, packet: NetworkPacket): Boolean {
-        if (!MediaManager.isValidMediaId(mediaId)) return false
-        val state = relayStates[mediaId] ?: return false
-        state.lastActivity = System.currentTimeMillis()
-        
-        val tx = transport ?: return false
-        val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
-        if (!hubStatus.isNullOrBlank()) return true // Hub handles chunk forwarding
-
-        var forwarded = false
-        
-        // Forward the exact chunk packet to all listeners
-        state.listeners.forEach { listenerId ->
-            if (listenerId != localPublicKeyB64 && listenerId != packet.senderId) {
-                scope.launch {
-                    val peer = peerDao?.getPeerByPublicKey(listenerId)
-                    if (peer != null) {
-                        // Create a shallow copy with decremented hops
-                        val currentHops = packet.hops ?: DEFAULT_MAX_HOPS
-                        if (currentHops > 1) {
-                            val relayedPacket = packet.copy(
-                                id = UUID.randomUUID().toString(), // Give it a new ID to bypass dedup on the next node
-                                hops = currentHops - 1,
-                                senderId = localPublicKeyB64
-                            )
-                            tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, relayedPacket)
-                        }
-                    }
-                }
-                forwarded = true
-            }
-        }
-        return forwarded
-    }
 
     /**
      * Process an incoming packet: validate, dedup, firewall, and then trigger forwarding.
@@ -614,7 +552,13 @@ object GossipService {
             }
         } else if (isMediaRelayPacket) {
             val dao = peerDao
-            if (dao != null) {
+            // Round B: chunks of a download we started ourselves are not stranger traffic. Group members
+            // and public-media holders are usually not contacts, and capping their replies at 2 MB/min
+            // dropped the rest of any larger file (each drop costing a 90 s chunk timeout).
+            val isChunkWeAskedFor = packet.type == "MEDIA_CHUNK" &&
+                (try { packet.getMediaChunkPayload()?.mediaId } catch (_: Exception) { null })
+                    ?.let { MediaManager.isMediaDownloadingOrRecovering(it) } == true
+            if (dao != null && !isChunkWeAskedFor) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 if (peer == null || !peer.isTrusted) {
                     // P1-6: UTF-8 byte count instead of UTF-16 character length
@@ -745,6 +689,27 @@ object GossipService {
             }
         }
 
+        // Round B: media packets are point-to-point. They are never gossiped: an untargeted
+        // MEDIA_REQUEST used to be processed by every node that saw it and re-broadcast to all of its
+        // peers ("MEDIA_REQUEST for unknown media" everywhere), and a MEDIA_RELAY_REQUEST went 6 hops,
+        // publishing media ids mesh-wide (D02/D03). A media packet addressed to someone else is dropped.
+        if (isPointToPointMediaType(packet.type)) {
+            val target = packet.targetUserId
+            if (target != null) {
+                val isForUs = checkIsLocalUser?.invoke(target) ?: (target == localPublicKeyB64)
+                if (!isForUs) {
+                    Logger.debug(TAG, "Dropping ${packet.type} $packetId addressed to another node (media is never relayed)")
+                    return false
+                }
+            }
+            if (packet.type == "MEDIA_RELAY_REQUEST") {
+                val relayReq = packet.getMediaRelayRequestPayload()
+                if (relayReq != null) MediaManager.handleRecoveryRequest(senderId, relayReq)
+                return false
+            }
+            return true
+        }
+
         // 5. If it is a directed message (has targetUserId), check if it is for us
         if (packet.targetUserId != null) {
             val isForUs = checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64)
@@ -775,16 +740,6 @@ object GossipService {
                 pushToHubIfLinked(packet)
                 forwardPacket(packet, postContext.isFriendsOnly)
             }
-        } else if (packet.type == "MEDIA_RELAY_REQUEST") {
-            handleRelayRequest(senderId, packet)
-            pushToHubIfLinked(packet) // Also forward to others
-            forwardPacket(packet, postContext.isFriendsOnly)
-            return false
-        } else if (packet.type == "MEDIA_RECOVERY_FOUND") {
-            handleRecoveryFound(senderId, packet)
-            pushToHubIfLinked(packet)
-            // Do not automatically forward RECOVERY_FOUND, it follows the chain back
-            return true
         } else {
             // Public message/post, process locally AND forward to other peers
             pushToHubIfLinked(packet)
@@ -803,105 +758,8 @@ object GossipService {
         return true
     }
 
-    private fun handleRelayRequest(senderId: String, packet: NetworkPacket) {
-        val payload = packet.getMediaRelayRequestPayload() ?: return
-        val mediaId = payload.mediaId
-        if (!MediaManager.isValidMediaId(mediaId)) {
-            Logger.warn(TAG, "Relay: Rejected invalid mediaId in MEDIA_RELAY_REQUEST: $mediaId")
-            return
-        }
 
-        // 1. Do we have it?
-        val localMedia = MediaManager.getLocalFile(mediaId)
-        if (localMedia != null && localMedia.exists()) {
-            Logger.info(TAG, "Relay: We have media $mediaId. Responding to $senderId")
-            scope.launch {
-                val isTargetTemp = peerDao?.getPeerByPublicKey(senderId)?.isTemporary == true
-                val mySenderId = if (isTargetTemp) transport?.repository?.getBurnableIdentity()?.publicKeyB64 ?: localPublicKeyB64 else localPublicKeyB64
-                val myOnion = transport?.repository?.getLocalIdentity()?.onionAddress
-                val foundPacket = NetworkPacket(
-                    id = UUID.randomUUID().toString(),
-                    hops = 3,
-                    senderId = mySenderId,
-                    targetUserId = senderId,
-                    type = "MEDIA_RECOVERY_FOUND",
-                    payload = com.noslop.app.util.Json.gson.toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
-                )
-                transport?.sendPacket(senderId, Constants.MESH_PORT, foundPacket)
-            }
-            return
-        }
 
-        // 2. We don't have it, register as a listener for this media
-        val state = relayStates.getOrPut(mediaId) { RelayState(mediaId, metadata = payload.metadata) }
-        state.listeners.add(senderId)
-        Logger.info(TAG, "Relay: Registered $senderId as listener for $mediaId")
-    }
-
-    fun delegateUnknownMediaRequest(senderId: String, mediaId: String) {
-        if (!MediaManager.isValidMediaId(mediaId)) return
-        val state = relayStates.getOrPut(mediaId) { RelayState(mediaId) }
-        if (!state.listeners.contains(senderId)) {
-            state.listeners.add(senderId)
-            Logger.info(TAG, "Relay: Registered $senderId as listener for unknown media $mediaId (delegated)")
-        }
-
-        scope.launch {
-            val payload = MediaRelayRequestPayload(
-                mediaId = mediaId,
-                originNode = null,
-                ownerId = null,
-                accessKey = null,
-                metadata = state.metadata
-            )
-            val packet = NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 6,
-                senderId = localPublicKeyB64,
-                type = "MEDIA_RELAY_REQUEST",
-                payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
-            )
-            broadcast(packet)
-        }
-    }
-
-    private fun handleRecoveryFound(senderId: String, packet: NetworkPacket) {
-        val payload = packet.getMediaRecoveryFoundPayload() ?: return
-        val mediaId = payload.mediaId
-
-        val state = relayStates[mediaId] ?: return
-        state.sourceNode = senderId
-
-        Logger.info(TAG, "Relay: Found source $senderId for $mediaId. Notifying ${state.listeners.size} listeners.")
-
-        // Notify all listeners
-        state.listeners.forEach { listenerId ->
-            if (listenerId != localPublicKeyB64) {
-                scope.launch {
-                    val peer = peerDao?.getPeerByPublicKey(listenerId)
-                    if (peer != null) {
-                        val isTargetTemp = peer.isTemporary
-                        val mySenderId = if (isTargetTemp) transport?.repository?.getBurnableIdentity()?.publicKeyB64 ?: localPublicKeyB64 else localPublicKeyB64
-                        
-                        val myOnion = transport?.repository?.getLocalIdentity()?.onionAddress
-                        val foundPacket = NetworkPacket(
-                            id = UUID.randomUUID().toString(),
-                            hops = 3,
-                            senderId = mySenderId,
-                            targetUserId = listenerId,
-                            type = "MEDIA_RECOVERY_FOUND",
-                            payload = com.noslop.app.util.Json.gson.toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
-                        )
-                        
-                        val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
-                        if (hubStatus.isNullOrBlank()) {
-                            transport?.sendPacket(peer.onionAddress, Constants.MESH_PORT, foundPacket)
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     /**
      * Forward to all connected peers except sender, with hops decremented by 1

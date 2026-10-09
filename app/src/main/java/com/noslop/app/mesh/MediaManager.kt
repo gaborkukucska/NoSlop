@@ -80,6 +80,7 @@ object MediaManager {
     // throughput, so a single 5+ MB video tripped it mid-transfer; requests over the cap are dropped
     // silently and the requester only retries after its 90 s chunk timeout.
     private const val MAX_OUTBOUND_BYTES_PER_WINDOW = 16L * 1024 * 1024
+    private const val OUTBOUND_WINDOW_MS = 60_000L
 
     // C03: Long-lived CoroutineExceptionHandler preventing unhandled exceptions from crashing the process
     private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
@@ -99,6 +100,7 @@ object MediaManager {
         activeDownloads.clear()
         _downloadProgress.value = emptyMap()
         outboundMediaBytes.clear()
+        seenStrangerRequests.clear()
     }
 
     fun initialize(repo: NoSlopRepository) {
@@ -457,55 +459,14 @@ object MediaManager {
         val mediaDir = getMediaDirectory(metadata.type)
         val dl = ActiveDownload(metadata, peerOnion, mediaDir)
         
+        // Round B (R6b): no more ANNOUNCE_DISCOVERABLE before downloading from a non-contact. It made us a
+        // "discoverable node" in their list just to give them an address to reply to; requests are now
+        // signed, and a holder replies to a requester it does not know at the onion derived from the
+        // requester's verified key (see replyOnionFor).
         if (peerOnion == null) {
             dl.status = ActiveDownload.Status.RECOVERING
-        } else {
-            scope.launch {
-                val repo = repository ?: return@launch
-                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peerOnion }
-                // R3b: group members already know each other from the signed group directory. Announcing
-                // our burnable identity to them as "discoverable" listed us as a stranger next to the
-                // contact they already have, so skip it for group media.
-                val isGroupMedia = try {
-                    repo.mediaOwnerDao.getOwners(metadata.id).any { it.ownerType == MediaOwner.TYPE_GROUP }
-                } catch (_: Exception) { false }
-                if (!isGroupMedia && (targetPeer == null || !targetPeer.isTrusted)) {
-                    val burnable = repo.getBurnableIdentity()
-                    if (burnable != null) {
-                        val handle = repo.getLocalHandle()
-                        val isCreator = repo.getAppSetting("is_creator_enabled") == "true"
-                        val link = repo.getAppSetting("creator_fundme_link")
-                        val bio = repo.getUserProfile().bio
-                        val timestamp = System.currentTimeMillis()
-                        val msgToSign = "${burnable.publicKeyB64}:${handle}:${burnable.onionAddress}:${burnable.encPublicKeyB64}:${isCreator}:${link ?: ""}::${bio ?: ""}:${timestamp}"
-                        val signature = CryptoService.sign(msgToSign, burnable.privateKeyB64)
-                        val payload = AnnounceDiscoverablePayload(
-                            authorId = burnable.publicKeyB64,
-                            handle = handle,
-                            onionAddress = burnable.onionAddress,
-                            encPublicKey = burnable.encPublicKeyB64,
-                            isCreator = isCreator,
-                            fundMeLink = link,
-                            authorAvatarB64 = null,
-                            bio = bio,
-                            timestamp = timestamp,
-                            signature = signature
-                        )
-                        val packet = NetworkPacket(
-                            id = UUID.randomUUID().toString(),
-                            hops = 1,
-                            senderId = burnable.publicKeyB64,
-                            targetUserId = targetPeer?.publicKeyB64,
-                            type = "ANNOUNCE_DISCOVERABLE",
-                            payload = com.noslop.app.util.Json.gson.toJsonTree(payload),
-                            signature = signature
-                        )
-                        repo.meshTransport.sendPacket(peerOnion, Constants.MESH_PORT, packet)
-                    }
-                }
-            }
         }
-        
+
         if (dl.partFile.exists()) {
             val existingBytes = dl.partFile.length()
             if (existingBytes > 0 && (dl.totalBytes == 0L || existingBytes < dl.totalBytes)) {
@@ -663,17 +624,21 @@ object MediaManager {
                     byteOffset = offset,
                     byteLength = length,
                     accessKey = dl.metadata.accessKey,
-                    originOnion = myOnion
+                    originOnion = myOnion,
+                    timestamp = System.currentTimeMillis()
                 )
-                val targetPubKey = targetPeer?.publicKeyB64
+                // Round B: always address the holder (media is never relayed), and sign the request so a
+                // holder that does not know us can still verify who asked (R6b).
+                val targetPubKey = targetPeer?.publicKeyB64 ?: dl.metadata.ownerId?.takeIf { it.isNotBlank() }
                 val mySenderId = me?.publicKeyB64 ?: ""
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 3,
+                    hops = 1,
                     senderId = mySenderId,
                     targetUserId = targetPubKey,
                     type = "MEDIA_REQUEST",
-                    payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(payload),
+                    signature = me?.let { CryptoService.sign(mediaRequestSigningString(mySenderId, targetPubKey, payload), it.privateKeyB64) }
                 )
                 val success = repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
                 if (!success) {
@@ -851,36 +816,83 @@ object MediaManager {
         }
     }
 
+    /**
+     * Round B (D03): asks our direct peers whether one of them holds this media. Only the media id is
+     * sent (no metadata), to direct peers only (hops = 1), each under the identity that peer knows us
+     * by. A holder answers with MEDIA_RECOVERY_FOUND only if its own media ACL authorises us; we then
+     * download from it directly. (Before: one 6-hop broadcast under the main key, carrying the full
+     * metadata, and relay nodes that streamed their own downloads to anyone who asked.)
+     */
     private suspend fun attemptMeshRecovery(dl: ActiveDownload) {
         val repo = repository ?: return
-        val myIdentity = repo.getLocalIdentity() ?: return
-        
-        val payload = MediaRelayRequestPayload(
-            mediaId = dl.metadata.id,
-            originNode = dl.metadata.originNode,
-            ownerId = dl.metadata.ownerId,
-            accessKey = dl.metadata.accessKey,
-            metadata = dl.metadata
-        )
-        
-        val packet = NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 6,
-            senderId = myIdentity.publicKeyB64,
-            type = "MEDIA_RELAY_REQUEST",
-            payload = com.noslop.app.util.Json.gson.toJsonTree(payload)
-        )
-        
-        Logger.info(TAG, "Attempting mesh recovery for ${dl.metadata.id}")
-        GossipService.broadcast(packet)
+        val main = repo.getLocalIdentity() ?: return
+        val burnable = repo.getBurnableIdentity()
+        val owners = try { repo.mediaOwnerDao.getOwners(dl.metadata.id) } catch (_: Exception) { emptyList() }
+        val groupMembers = owners.filter { it.ownerType == MediaOwner.TYPE_GROUP }.flatMap { owner ->
+            val group = repo.getGroupChatById(owner.ownerId) ?: return@flatMap emptyList<String>()
+            (try { com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java)?.toList() } catch (_: Exception) { null }
+                ?: emptyList()) + group.adminPublicKeyB64
+        }.toSet()
+        val candidates = repo.peerDao.getAllPeersList().filter {
+            it.onionAddress.isNotBlank() && it.relationship != com.noslop.app.data.PeerRelationship.BLOCKED &&
+                (it.isTrusted || it.publicKeyB64 in groupMembers) &&
+                it.publicKeyB64 != main.publicKeyB64 && it.publicKeyB64 != burnable?.publicKeyB64
+        }
+        Logger.info(TAG, "Attempting recovery for ${dl.metadata.id} from ${candidates.size} direct peer(s)")
+        for (peer in candidates) {
+            val me = if (peer.publicKeyB64 in groupMembers) {
+                requesterIdentity(repo, dl.metadata.id, peer) ?: main
+            } else {
+                responderIdentity(repo, peer.publicKeyB64, null) ?: main
+            }
+            val packet = NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = me.publicKeyB64,
+                targetUserId = peer.publicKeyB64,
+                type = "MEDIA_RELAY_REQUEST",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(MediaRelayRequestPayload(mediaId = dl.metadata.id))
+            )
+            scope.launch { repo.meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet) }
+        }
+    }
+
+    /**
+     * Round B (D03): a direct peer asks whether we hold [payload].mediaId. We answer only when we have
+     * the complete file, the ACL authorises the asker, and we know the asker's onion. The answer names
+     * the onion of the identity the asker knows us by (never the main onion to a burnable contact).
+     */
+    fun handleRecoveryRequest(senderId: String, payload: MediaRelayRequestPayload) {
+        val repo = repository ?: return
+        if (!isValidMediaId(payload.mediaId)) return
+        scope.launch {
+            if (findLocalFile(repo, payload.mediaId) == null) return@launch
+            val onion = repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() } ?: return@launch
+            if (!isMediaAuthorizedForSender(repo, payload.mediaId, senderId, null)) {
+                Logger.info(TAG, "Not answering recovery request for ${payload.mediaId} from ${senderId.take(12)}: not authorised")
+                return@launch
+            }
+            val me = responderIdentity(repo, senderId, null) ?: return@launch
+            val packet = NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = me.publicKeyB64,
+                targetUserId = senderId,
+                type = "MEDIA_RECOVERY_FOUND",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(MediaRecoveryFoundPayload(mediaId = payload.mediaId, onionAddress = me.onionAddress))
+            )
+            repo.meshTransport.sendPacket(onion, Constants.MESH_PORT, packet)
+        }
     }
 
     fun handleRecoveryFound(senderId: String, mediaId: String, foundOnion: String? = null) {
         val dl = activeDownloads[mediaId] ?: return
         if (dl.status == ActiveDownload.Status.RECOVERING) {
             scope.launch {
+                // Round B: download only from the stored onion of the peer that answered. The onion in
+                // the payload is unsigned and could otherwise redirect our download to any address.
                 val recoveryPeer = repository?.peerDao?.getPeerByPublicKey(senderId)
-                val onion = foundOnion?.takeIf { it.endsWith(".onion") } ?: recoveryPeer?.onionAddress
+                val onion = recoveryPeer?.onionAddress?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
                 if (onion != null) {
                     Logger.info(TAG, "Media $mediaId found at $senderId (onion: $onion)")
                     dl.peerOnion = onion
@@ -960,15 +972,83 @@ object MediaManager {
         owners.firstOrNull { it.ownerType == MediaOwner.TYPE_DM }?.let { owner ->
             return if (burnable != null && repo.getAppSetting("contact_identity_${owner.ownerId}") == "burnable") burnable else main
         }
-        return if (targetPeer?.isTemporary == true) burnable ?: main else main
+        // Round B: a holder we have no peer row for (e.g. the author of a public post relayed to us) is a
+        // stranger: ask as the burnable identity when we have one, so our personal key is not handed out.
+        if (targetPeer == null) return burnable ?: main
+        return if (targetPeer.isTemporary || repo.getAppSetting("contact_identity_${targetPeer.publicKeyB64}") == "burnable") burnable ?: main else main
+    }
+
+    /**
+     * Round B: the identity we answer a peer as (MEDIA_CHUNK, MEDIA_RECOVERY_FOUND, metadata). The
+     * identity the request was addressed to when that is one of ours; otherwise the identity bound to
+     * that contact. (Before: the main key unless the requester was a temporary contact — so a stranger
+     * asking our creator identity for a public file got the answer from our personal key.)
+     */
+    internal suspend fun responderIdentity(
+        repo: NoSlopRepository,
+        requesterId: String,
+        addressedTo: String?
+    ): CryptoService.IdentityKeys? {
+        val main = repo.getLocalIdentity() ?: return null
+        val burnable = repo.getBurnableIdentity()
+        if (addressedTo != null) {
+            if (addressedTo == main.publicKeyB64) return main
+            if (burnable != null && addressedTo == burnable.publicKeyB64) return burnable
+        }
+        val peer = repo.peerDao.getPeerByPublicKey(requesterId)
+        val bound = repo.getAppSetting("contact_identity_$requesterId") == "burnable"
+        return if (burnable != null && (bound || peer?.isTemporary == true)) burnable else main
+    }
+
+    /** Round B: the canonical string a MEDIA_REQUEST is signed over (envelope `signature`). */
+    internal fun mediaRequestSigningString(senderId: String, targetUserId: String?, p: MediaRequestPayload): String =
+        CryptoService.encodeForSigning(
+            "noslop-media-req-v1", senderId, targetUserId ?: "", p.mediaId,
+            p.chunkIndex.toString(), p.chunkSize.toString(),
+            (p.byteOffset ?: -1L).toString(), (p.byteLength ?: -1).toString(),
+            (p.timestamp ?: 0L).toString()
+        )
+
+    /** How long a signed request from a requester we do not know stays valid. */
+    internal const val SIGNED_REQUEST_MAX_SKEW_MS = 5 * 60 * 1000L
+    private val seenStrangerRequests: MutableSet<String> = java.util.Collections.synchronizedSet(
+        java.util.Collections.newSetFromMap(object : java.util.LinkedHashMap<String, Boolean>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > 4096
+        })
+    )
+
+    /**
+     * Round B (R6b): where to send our answer to a MEDIA_REQUEST. A known peer: its stored onion (C03,
+     * never the attacker-chosen originOnion). A requester we do not know: only when the request is
+     * signed by the requester's key, fresh and not replayed — then the onion derived from that key (a
+     * NoSlop onion address *is* the requester's public key), so nobody can aim our answer at a third
+     * party. Returns null when there is nowhere safe to answer.
+     */
+    internal suspend fun replyOnionFor(
+        repo: NoSlopRepository,
+        senderId: String,
+        targetUserId: String?,
+        payload: MediaRequestPayload,
+        signature: String?
+    ): String? {
+        repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let { return it }
+        if (signature.isNullOrBlank()) return null
+        val ts = payload.timestamp ?: return null
+        if (Math.abs(System.currentTimeMillis() - ts) > SIGNED_REQUEST_MAX_SKEW_MS) return null
+        if (!CryptoService.verify(mediaRequestSigningString(senderId, targetUserId, payload), signature, senderId)) return null
+        if (!seenStrangerRequests.add(signature)) return null
+        return try {
+            CryptoService.deriveOnionAddress(Base64.decode(senderId, Base64.DEFAULT))
+        } catch (_: Exception) { null }
     }
 
     internal suspend fun isAuthorizedByOwnerIndex(repo: NoSlopRepository, mediaId: String, senderId: String): Boolean {
         val owners = try { repo.mediaOwnerDao.getOwners(mediaId) } catch (_: Exception) { emptyList() }
         if (owners.isEmpty()) return false
         val peer = repo.peerDao.getPeerByPublicKey(senderId)
-        val isDirectFriend = peer != null && peer.isTrusted && !peer.isTemporary &&
-            repo.getAppSetting("contact_identity_$senderId") != "burnable"
+        if (peer?.relationship == com.noslop.app.data.PeerRelationship.BLOCKED) return false
+        // D01 friend rule (Peer.isFriend), plus the bound contact identity.
+        val isDirectFriend = peer?.isFriend == true && repo.getAppSetting("contact_identity_$senderId") != "burnable"
         for (owner in owners) {
             when (owner.ownerType) {
                 MediaOwner.TYPE_POST, MediaOwner.TYPE_COMMENT -> when (owner.privacy) {
@@ -982,6 +1062,7 @@ object MediaManager {
                     val members = try {
                         com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
                     } catch (_: Exception) { emptyList() }
+                    if (senderId in group.getBannedMembers()) continue
                     if (senderId in members || senderId == group.adminPublicKeyB64) return true
                 }
             }
@@ -989,6 +1070,18 @@ object MediaManager {
         return false
     }
 
+    /**
+     * Round B (D02): the media ACL is decisive and deny-by-default. Our own identities are always
+     * allowed; otherwise the media_owner index decides (isAuthorizedByOwnerIndex), and media that is not
+     * attached to any post, comment, DM or group message we know is refused.
+     *
+     * Removed: the full-table post scan with a substring match on every chunk request, the DM / group
+     * scans (subsumed by the index), the accessKey comparison (no key was ever issued; the decision is
+     * by identity), and the final "any trusted contact" fallback, which let any trusted peer — including
+     * temporary creator followers — fetch friends-only media and media from other people's DMs.
+     * [accessKey] is kept in the signature for callers and ignored.
+     */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun isMediaAuthorizedForSender(
         repo: NoSlopRepository,
         mediaId: String,
@@ -1000,88 +1093,26 @@ object MediaManager {
         if (senderId == myKeys?.publicKeyB64 || (burnable != null && senderId == burnable.publicKeyB64)) {
             return@withContext true
         }
-
-        // 0. R2: the media_owner index (maintained by the DAOs since migration 18->19) knows every post,
-        //    comment, DM and group message a media item belongs to. Comment media had no allow path at
-        //    all since 5f9a127 (.mine files were refused), so GIFs/images in comments never loaded.
-        if (isAuthorizedByOwnerIndex(repo, mediaId, senderId)) {
-            return@withContext true
-        }
-
-        // 1. Check if attached to any MeshPost
-        val posts = repo.postDao.getAllPostsList().filter { 
-            it.mediaUrl?.contains(mediaId) == true || (it.clearnetUrl != null && it.clearnetUrl.contains(mediaId))
-        }
-        for (post in posts) {
-            if (post.privacy == "public") {
-                return@withContext true
-            }
-            if (post.privacy == "friends") {
-                val peer = repo.peerDao.getPeerByPublicKey(senderId)
-                val contactSetting = repo.getAppSetting("contact_identity_$senderId")
-                val isDirectFriend = peer != null && peer.isTrusted && !peer.isTemporary && contactSetting != "burnable"
-                if (isDirectFriend || senderId == post.authorPublicKeyB64) {
-                    return@withContext true
-                }
-            }
-        }
-
-        // 2. Check if attached to any direct ChatMessage with this sender
-        val dms = repo.context.let { ctx ->
-            NoSlopDatabase.getDatabase(ctx).messageDao()
-        }.getMessagesWithPeerList(senderId).filter { it.mediaId == mediaId }
-        if (dms.isNotEmpty()) {
-            return@withContext true
-        }
-
-        // 3. Check if attached to any GroupChat message where sender is a member
-        val groupChats = repo.context.let { ctx ->
-            NoSlopDatabase.getDatabase(ctx).groupChatDao()
-        }.getAllGroupChatsList()
-        for (group in groupChats) {
-            val members = try {
-                com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
-            } catch (_: Exception) { emptyList() }
-            if (senderId in members || senderId == group.adminPublicKeyB64) {
-                val groupMsgWithMedia = repo.context.let { ctx ->
-                    NoSlopDatabase.getDatabase(ctx).messageDao()
-                }.getMessagesWithPeerList(group.groupId).any { it.mediaId == mediaId }
-                if (groupMsgWithMedia) {
-                    return@withContext true
-                }
-            }
-        }
-
-        // 4. If access key provided, compare in constant time against metadata
-        val metadata = getMetadataSync(mediaId)
-        if (metadata?.accessKey != null && !accessKey.isNullOrBlank()) {
-            val expected = metadata.accessKey.toByteArray(Charsets.UTF_8)
-            val provided = accessKey.toByteArray(Charsets.UTF_8)
-            if (MessageDigest.isEqual(expected, provided)) {
-                return@withContext true
-            }
-        }
-
-        // If local file is user-owned (.mine) and not attached to a public post, reject
-        val mineSentinel = getLocalFile(mediaId)?.let { File(it.parentFile, "$mediaId.mine").exists() } ?: false
-        if (mineSentinel) {
-            return@withContext false
-        }
-
-        // Otherwise allow if peer is a trusted contact
-        val peer = repo.peerDao.getPeerByPublicKey(senderId)
-        peer?.isTrusted == true
+        isAuthorizedByOwnerIndex(repo, mediaId, senderId)
     }
 
-    suspend fun handleMediaRequest(senderId: String, payload: MediaRequestPayload) {
+    suspend fun handleMediaRequest(
+        senderId: String,
+        payload: MediaRequestPayload,
+        targetUserId: String? = null,
+        signature: String? = null
+    ) {
         val repo = repository ?: return
         scope.launch {
-            // C03: Reply target MUST be resolved from stored peerDao, never attacker-chosen originOnion
-            val targetOnion = repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress
+            // C03: the reply never goes to the attacker-chosen originOnion. Round B (R6b): a known peer's
+            // stored onion, or — for a requester we do not know — the onion derived from its key when the
+            // request is signed by that key (replyOnionFor).
+            val targetOnion = replyOnionFor(repo, senderId, targetUserId, payload, signature)
             if (targetOnion.isNullOrBlank()) {
-                Logger.warn(TAG, "Cannot resolve targetOnion for sender $senderId to return MEDIA_CHUNK (originOnion reply rejected)")
+                Logger.warn(TAG, "Not answering MEDIA_REQUEST for ${payload.mediaId} from ${senderId.take(12)}: unknown requester and no valid signature")
                 return@launch
             }
+            val replyAs = responderIdentity(repo, senderId, targetUserId)
 
             // C03: Bounds validation on chunk sizes and byte offsets
             val isMetadataReq = payload.chunkSize == 0 && (payload.byteLength == null || payload.byteLength == 0)
@@ -1104,8 +1135,8 @@ object MediaManager {
                     val metadata = getMetadataSync(payload.mediaId)
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 3,
-                        senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        hops = 1,
+                        senderId = replyAs?.publicKeyB64 ?: "",
                         targetUserId = senderId,
                         type = "MEDIA_METADATA_RESPONSE", 
                         payload = com.noslop.app.util.Json.gson.toJsonTree(metadata)
@@ -1128,19 +1159,33 @@ object MediaManager {
                     Math.min(reqLength.toLong(), totalSize - offset).toInt().coerceIn(0, MAX_CHUNK_BYTES)
                 }
 
-                // C03: Outbound byte rate limit check
-                val now = System.currentTimeMillis()
-                synchronized(outboundMediaBytes) {
-                    if (now - outboundBytesWindowStart > 60_000L) {
-                        outboundBytesWindowStart = now
-                        outboundMediaBytes.clear()
+                // C03: Outbound byte rate limit per requester. Round B (R6c): a request over the limit
+                // waits for the next window (at most two) instead of being dropped silently, which cost
+                // the requester a 90 s timeout and halved its window each time.
+                var admitted = false
+                for (attempt in 0..2) {
+                    val waitMs = synchronized(outboundMediaBytes) {
+                        val now = System.currentTimeMillis()
+                        if (now - outboundBytesWindowStart > OUTBOUND_WINDOW_MS) {
+                            outboundBytesWindowStart = now
+                            outboundMediaBytes.clear()
+                        }
+                        val currentSent = outboundMediaBytes.getOrDefault(senderId, 0L)
+                        if (currentSent + actualLength <= MAX_OUTBOUND_BYTES_PER_WINDOW) {
+                            outboundMediaBytes[senderId] = currentSent + actualLength
+                            admitted = true
+                            0L
+                        } else {
+                            (outboundBytesWindowStart + OUTBOUND_WINDOW_MS - now).coerceAtLeast(1L)
+                        }
                     }
-                    val currentSent = outboundMediaBytes.getOrDefault(senderId, 0L)
-                    if (currentSent + actualLength > MAX_OUTBOUND_BYTES_PER_WINDOW) {
-                        Logger.warn(TAG, "Outbound media rate limit exceeded for $senderId (${currentSent + actualLength} > $MAX_OUTBOUND_BYTES_PER_WINDOW)")
-                        return@launch
-                    }
-                    outboundMediaBytes[senderId] = currentSent + actualLength
+                    if (admitted) break
+                    Logger.info(TAG, "Outbound media limit reached for ${senderId.take(12)}; serving ${payload.mediaId}@$offset in ${waitMs / 1000}s")
+                    delay(waitMs)
+                }
+                if (!admitted) {
+                    Logger.warn(TAG, "Outbound media limit still exceeded for ${senderId.take(12)}; dropping ${payload.mediaId}@$offset")
+                    return@launch
                 }
 
                 val buffer = ByteArray(actualLength)
@@ -1155,8 +1200,7 @@ object MediaManager {
                     }
                 }
 
-                val isTargetTemp = repo.peerDao.getPeerByPublicKey(senderId)?.isTemporary == true
-                val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
+                val mySenderId = replyAs?.publicKeyB64 ?: ""
 
                 val chunkPay = MediaChunkPayload(
                     mediaId = payload.mediaId,
@@ -1169,7 +1213,7 @@ object MediaManager {
 
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 3,
+                    hops = 1,
                     senderId = mySenderId,
                     targetUserId = senderId,
                     type = "MEDIA_CHUNK",
@@ -1181,11 +1225,6 @@ object MediaManager {
                 Logger.warn(TAG, "Received MEDIA_REQUEST for unknown media ${payload.mediaId}. Request dropped.")
             }
         }
-    }
-
-    // C03: Suppress unrestricted mesh-wide broadcast of unknown media requests
-    fun delegateUnknownMediaRequest(senderId: String, mediaId: String) {
-        Logger.warn(TAG, "Suppressed mesh-wide delegation for unknown media $mediaId from $senderId")
     }
 
     private fun updateProgress(id: String, progress: Int) {

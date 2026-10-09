@@ -1479,7 +1479,6 @@ class MeshSocialRepository(
         }
 
         com.noslop.app.mesh.GossipService.recordDeletedPeer(targetPub)
-        com.noslop.app.mesh.GossipService.removePeerFromRelays(targetPub)
 
         // Collect all media IDs associated with this peer to delete from disk
         val mediaIdsToDelete = mutableListOf<String>()

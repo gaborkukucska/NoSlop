@@ -22,7 +22,7 @@ class MediaPacketHandler(
             com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_REQUEST with invalid mediaId: ${mediaReq.mediaId}")
             return false
         }
-        MediaManager.handleMediaRequest(packet.senderId, mediaReq)
+        MediaManager.handleMediaRequest(packet.senderId, mediaReq, packet.targetUserId, packet.signature)
         return true
     }
 
@@ -32,11 +32,8 @@ class MediaPacketHandler(
             com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_CHUNK with invalid mediaId: ${chunk.mediaId}")
             return false
         }
-        
-        // Zero-copy forward if we are acting as a relay
-        GossipService.forwardRelayChunk(chunk.mediaId, packet)
-        
-        // Also process locally if we are the destination/requester
+        // Round B (D03): chunks are never forwarded to other nodes (the relay-listener path streamed our
+        // own downloads to anyone who had registered for the media id, without an access check).
         MediaManager.handleMediaChunk(packet.senderId, chunk)
         return true
     }

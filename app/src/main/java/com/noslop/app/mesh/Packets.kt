@@ -82,7 +82,9 @@ data class MediaRequestPayload(
     @SerializedName("byte_length") val byteLength: Int? = null,
     @SerializedName("access_key") val accessKey: String? = null,
     @SerializedName("hls_file") val hlsFile: String? = null,
-    @SerializedName("origin_onion") val originOnion: String? = null
+    @SerializedName("origin_onion") val originOnion: String? = null,
+    /** Round B: request time, covered by the envelope signature (replay window for unknown requesters). */
+    @SerializedName("timestamp") val timestamp: Long? = null
 )
 
 @Keep

@@ -1,8 +1,70 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-08) — Round B: Media Access Control, Point-to-Point Media & Non-Contact Replies (v0.6.9-alpha)
+
+This round closes review findings D02 and D03 and regression items R6b and R6c. It also stops the "MEDIA_REQUEST for unknown media" flood seen in every device log. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** `MEDIA_REQUEST` gains an optional `timestamp` and is now signed. Older builds ignore both. Requests from older builds are still served when the requester is a stored peer; an unsigned request from a non-contact is refused. Media packets are no longer relayed, so a node on an older build that relied on relay routing or `MEDIA_RELAY_REQUEST` forwarding gets no answer through third parties. No Room schema change.
+
+### Media flood — media packets were gossiped mesh-wide
+
+* **Cause.** A `MEDIA_REQUEST` sent without `targetUserId` was treated as a public broadcast: every node processed it ("MEDIA_REQUEST for unknown media", then a `MEDIA_RELAY_REQUEST` delegation) and re-broadcast it to all its peers. A missing file also triggered `MEDIA_RELAY_REQUEST`s that went 6 hops, and `startDownload` sent an `ANNOUNCE_DISCOVERABLE` to every media source.
+* **Fix.**
+  * Requests are addressed to the source (`targetUserId`, hops=1).
+  * `GossipService.processIncoming` treats every `MEDIA_*` packet as point-to-point (`isPointToPointMediaType`): addressed elsewhere → dropped; otherwise processed locally and never forwarded.
+  * `startDownload` no longer announces itself to media sources.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### D03 — Relay listeners received chunks without an ACL check; the recovery reply was broken
+
+* **Cause.** Any node could send `MEDIA_RELAY_REQUEST` for any media id, register as a listener and be sent a copy of every chunk that passed through (`forwardRelayChunk`), with no ACL check. The recovery reply chain also answered with the wrong identity's onion.
+* **Fix.**
+  * Removed: `RelayState`/`relayStates`, `handleRelayRequest`, `handleRecoveryFound` (GossipService), `forwardRelayChunk`, `delegateUnknownMediaRequest`, `removePeerFromRelays`, the stale-route sweeper.
+  * Recovery is one hop. `attemptMeshRecovery` asks only direct peers that are trusted or members of the owning group, each as the identity that peer knows. `MediaManager.handleRecoveryRequest` answers `MEDIA_RECOVERY_FOUND` only when it holds the file **and** its own ACL authorises the asker, as the identity the asker knows. The asker downloads from the answering peer's stored onion.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### D02 — Media ACL is deny by default
+
+* **Cause.** After the `media_owner` index allowed or fell through, legacy table scans followed and then "any trusted peer" was allowed. So any contact could fetch friends-only, DM or group media they were not entitled to, given the id.
+* **Fix.** `isMediaAuthorizedForSender` decides from the `media_owner` index only:
+  * own identities → allowed; BLOCKED peer → refused;
+  * public post/comment → anyone; private → author; friends-only → author and direct friends (not temporary, not bound to our burnable identity);
+  * DM → the conversation partner; group → members and admin, minus banned members;
+  * no index row → refused.
+* **`accessKey` not added (decision).** D02 also proposed issuing and requiring a per-media key. The identity check already decides every case, and anyone allowed to see the post receives the key with it, so it adds no protection. It would need new fields in signed payloads, back-fill and breaking older clients. `access_key` in requests is ignored. See TECHNICAL_REFERENCE §6.1.1.
+* Tested (unit: `MediaAccessRoundBTest`; existing `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest` unchanged).
+
+### R6b — Media requests from non-contacts were never served
+
+* **Cause.** The holder replied only to a requester stored in its peer table. A reader of a re-shared public post usually isn't, so public media from non-contacts never loaded. A forwarded request also arrived with `senderId` re-stamped to the relay.
+* **Fix.**
+  * `MEDIA_REQUEST` is signed over `noslop-media-req-v1|senderId|targetUserId|mediaId|chunkIndex|chunkSize|byteOffset|byteLength|timestamp`.
+  * `MediaManager.replyOnionFor`: a stored peer gets its stored onion. A stranger is answered at the onion **derived from its public key**, and only with a valid signature, a timestamp within ±5 min and no replay. Only the key holder can host that onion, so the reply cannot be aimed at someone else.
+  * Requests are never forwarded, so `senderId` is always the real requester.
+  * `requesterIdentity` uses the burnable identity (main if none) towards a holder that isn't a contact; `responderIdentity` answers as the identity the request was addressed to.
+  * A `MEDIA_CHUNK` for a download in progress is exempt from the 2 MB/60 s cap on untrusted senders, which otherwise dropped most of any larger file from a non-contact or group member.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### R6c — Media requests were dropped silently
+
+* **Fix.** Every refusal (unauthorised, unknown requester, bad signature, missing file) is logged at WARN with the reason. A requester over the 16 MB/60 s sender limit now waits for the window to reset (up to 3 attempts) instead of being dropped.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### Still open
+
+* `handleMediaChunk` accepts any offset from the source of a download in progress; the C17 whole-file SHA-256 check rejects a corrupted result.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `MediaAccessRoundBTest` | Friends-only vs temporary contacts; DM media refused to third parties; unindexed media refused; public media allowed except BLOCKED; group members allowed, banned and outsiders refused; `replyOnionFor` (known peer, unsigned, signed, replay, forged, stale, tampered); `responderIdentity`; `requesterIdentity` for strangers; media addressed elsewhere dropped, `MEDIA_RELAY_REQUEST` never forwarded |
+
+---
+
 ## Completed Changes (2026-10-08) — Round R3: Group Leave & Catch-up, Group Sender Identity, DM Outbox Limits (v0.6.9-alpha)
 
-This round continues the git-history regression register. It covers the group items R7a–R7c and the DM outbox item R8. While tracing those paths, three more defects turned up in the same code; they're fixed here too. Labels are used as in the entry below: a "Tested" label names a test class that exists and must pass with `./gradlew testGithubDebugUnitTest`. None of this has been verified on device yet.
+This round continues the git-history regression register. It covers the group items R7a–R7c and the DM outbox item R8. While tracing those paths, three more defects turned up in the same code; they're fixed here too. Labels are used as in the entry below: a "Tested" label names a test class that exists and must pass with `./gradlew testGithubDebugUnitTest`. Device-verified 2026-10-08 (three nodes on two devices): group messages, reactions, invites, image/GIF/video media; members no longer listed as discoverable.
 
 **Protocol compatibility.** No packet layout changed. Leaves, `GROUP_SYNC` answers and queued group messages from older builds are handled as before. Receivers on older builds also accept an updated admin's newer `GROUP_SYNC` stamp.
 
@@ -181,7 +243,7 @@ Under heavy load, GIFs can be slow to arrive, but they do arrive.
   * Comment media inherits the visibility of its parent post.
   * Unknown privacy values are stored as `friends` (deny by default).
 * **Write-once secrets.** `MediaOwnerDao.attachSecrets` adds the `accessKey` and `sha256` to a row and never overwrites an existing value.
-* **Still open.** The index is used by the R2 allow path (below), but the ACL isn't deny-by-default yet. The trailing "any trusted peer" fallback is still there, and no `accessKey` is generated yet.
+* **Still open** (closed in Round B, see top entry). The index is used by the R2 allow path (below), but the ACL isn't deny-by-default yet. The trailing "any trusted peer" fallback is still there, and no `accessKey` is generated yet.
 * Tested (unit: `MediaOwnerIndexTest`).
 
 ### Round A2 — Handshake answers come back on the requester's own connection
@@ -1501,7 +1563,7 @@ same-device backup export/import. Multi-device testing is next.
 |---|---|---|---|---|
 | **C01** | P0 | USER_HANDSHAKE relationship state machine & nonce exchange (heal side door closed by D01) | **Resolved** | `HandshakeSecurityTest`, `PeerTrustInvariantTest`, `HandshakeReplyPathTest` |
 | **C02** | P0 | Handshake encryption key binding & destination auth (`noslop-hs-v2`) | **Resolved** | `HandshakeSecurityTest` |
-| **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Partial** — bounds ✔; ACL not deny-by-default, no `accessKey` (D02); relay listeners bypass ACL (D03) | `MediaManagerSecurityTest`, `MediaChunkWindowTest`, `MediaSyncAndAclRestoreTest` |
+| **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Resolved** — bounds ✔; deny-by-default ACL (D02, Round B); relay removed (D03); `accessKey` deliberately not used | `MediaManagerSecurityTest`, `MediaChunkWindowTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
 | **C04** | P0 | Article WebView Tor leak elimination & external browser gating | **Resolved** | `TorLeakArchitectureTest` |
 | **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
 | **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Partial** — internal staging ✔; plaintext zip still written; no `secureDelete()` exists (D10/D12) | `BackupManagerTest` |
@@ -1539,8 +1601,8 @@ same-device backup export/import. Multi-device testing is next.
 | Finding ID | Severity | Description | Status | Validation / Test Suite |
 |---|---|---|---|---|
 | **D01** | P1 | Startup "heal" granted trust without consent; one trust rule (`relationship`, `Peer.isFriend`) | **Resolved** | `PeerTrustInvariantTest`, `Migration18To19Test` |
-| **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Partial** — index ✔ and used as allow path (R2); deny-by-default and `accessKey` open | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest` |
-| **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Open** | — |
+| **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Resolved** (Round B) — index-only, deny by default; `accessKey` deliberately not issued (see TECHNICAL_REFERENCE §6.1.1) | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
+| **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Resolved** (Round B) — relay removed; one-hop recovery behind the ACL | `MediaAccessRoundBTest` |
 | **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Open** | — |
 | **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Partial** — outbox expiry + FAILED/retry ✔ (R3); v1 latch and ACK domain separation open | `OutboxExpiryTest` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
@@ -1556,9 +1618,11 @@ same-device backup export/import. Multi-device testing is next.
 | **VID** | — | Recorded video stuck at 9% (chunk window above sender cap) | **Resolved** (device-verified) | `MediaChunkWindowTest` |
 | **R1–R4c** | — | Cooldown memory, cooldown gate, cooldown clear, blocking ACK, handshake pool, outbox video gate, Tor hidden-service re-registration, background start, offline PROXY_READY | **Resolved** (device-verified) | `PeerCooldownRestoreTest` |
 | **R5, R6a** | — | Sync rejected v2-signed media posts/comments; re-issue stripped hash; comment media never served | **Resolved** (device-verified) | `MediaSyncAndAclRestoreTest` |
-| **R7a–R7c, R8** | — | Group leave signature; group catch-up after member-initiated changes; group members rate-limited; DM outbox backoff/expiry (plus group sender identity and queued group sender) | **Resolved** | `GroupLifecycleRestoreTest`, `OutboxExpiryTest` |
+| **R7a–R7c, R8** | — | Group leave signature; group catch-up after member-initiated changes; group members rate-limited; DM outbox backoff/expiry (plus group sender identity and queued group sender) | **Resolved** (group paths device-verified) |
+| **R3b, R3c** | — | Group media requester identity; "You (admin)" row; group attachment origin; sender-onion download; no discoverable announce for group media | **Resolved** (device-verified) | `GroupLifecycleRestoreTest` | `GroupLifecycleRestoreTest`, `OutboxExpiryTest` |
 | **R7d–R7f** | — | Invitee bootstrap; reinstall recovery; update freshness gate | **Reviewed, no change** (see 2026-10-08 R3 entry) | — |
-| **R4d, R6b, R6c** | — | Handshake budget; non-contact media replies; silent media drops | **Open** | — |
+| **R6b, R6c** | — | Non-contact media replies (signed requests, derived reply onion); silent media drops; media flood | **Resolved** (Round B) | `MediaAccessRoundBTest` |
+| **R4d** | — | Handshake budget | **Open** | — |
 | **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session

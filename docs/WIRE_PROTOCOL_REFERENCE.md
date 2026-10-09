@@ -80,17 +80,19 @@ properties use `camelCase`.
 > The numbered rows below group some families onto one line (row 19 covers
 > six media types), so the row count is not the number of distinct `type`
 > strings. The authoritative list is the `when (packet.type)` block in
-> `MeshPacketHandler.handleIncomingPacket`, plus `MEDIA_RELAY_REQUEST` and
-> `MEDIA_PENDING`, which `GossipService` intercepts before dispatch.
+> `MeshPacketHandler.handleIncomingPacket`, plus `MEDIA_RELAY_REQUEST`, which
+> `GossipService` intercepts before dispatch (Round B: it is handed to
+> `MediaManager.handleRecoveryRequest` and never forwarded).
 
 `Packets.kt`'s `type` field KDoc comment lists 19 non-media type strings;
 together with the 6 `MEDIA_*` types (§5) and `CONNECTION_REJECTED`, that's
 **24 distinct `type` values** total in active use, plus `ANNOUNCE_PEER`'s
 payload class which sits alongside them. `MeshPacketHandler.handlePacket`'s
-`when` block dispatches **21 cases** (not all 24 — `MEDIA_RELAY_REQUEST` and
-`MEDIA_RECOVERY_FOUND`'s relay-forwarding side is intercepted earlier inside
-`GossipService.processIncoming` itself, before reaching the dispatcher; see
-§5 and §6 of TECHNICAL_REFERENCE.md §4.2 for that routing logic).
+`when` block dispatches **21 cases** (not all 24 — `MEDIA_RELAY_REQUEST` is
+intercepted earlier inside `GossipService.processIncoming` itself, before
+reaching the dispatcher; see §6 and TECHNICAL_REFERENCE.md §4.2/§4.3).
+Since Round B (2026-10-08) every `MEDIA_*` packet is point-to-point: it is
+processed only by the node it is addressed to and never gossiped.
 
 **Architecture note**: the per-type handler logic does **not** live inside
 one large `MeshPacketHandler.kt` file. As of a "Phase 0, Stage 0.3"
@@ -856,14 +858,43 @@ format. Accepted items are inserted via `commentDao` / `reactionDao`.
 
 | Type | Payload | Role |
 |---|---|---|
-| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, byte_offset?, byte_length?, access_key?, hls_file?, origin_onion?}` | Requests a byte range of a media item. `chunk_size` and `byte_length` must be in `1..262144` (256 KB, `MAX_CHUNK_BYTES`) and `byte_offset ≥ 0`; `chunk_size = 0` with no `byte_length` is a metadata request. The reply always goes to the requester's **stored** onion (C03); `origin_onion` is not used as a reply target. |
+| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, byte_offset?, byte_length?, access_key?, hls_file?, origin_onion?, timestamp?}` | Requests a byte range of a media item, addressed (`targetUserId`, hops=1) to the media's holder. `chunk_size` and `byte_length` must be in `1..262144` (256 KB, `MAX_CHUNK_BYTES`) and `byte_offset ≥ 0`; `chunk_size = 0` with no `byte_length` is a metadata request. Since Round B the packet is **signed** (see "Signed media requests" below) and carries `timestamp` (ms). The reply goes to the requester's stored onion, or — for a non-contact with a valid signature — to the onion derived from its public key (C03/R6b); `origin_onion` is never used as a reply target. `access_key` is ignored (see "Who is served"). |
 | `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64), total_size?}` | Carries one chunk's bytes. `total_size` (optional Long) communicates the sender's known file size so receivers with indeterminate metadata can compute accurate download progress. |
-| `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id, origin_node?, owner_id?, access_key?, metadata?}` | Broadcast to trusted peers when the direct author is unreachable/unknown |
-| `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id, onion_address?}` | Sent back along the relay chain once the media's source node is located; `onion_address` provides the source's direct Tor onion address. |
+| `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id}` (other fields of the class are no longer populated) | "Do you hold this media?" — sent hops=1, addressed, to each **direct** trusted peer (or member of the owning group) when the author is unreachable. Never forwarded (Round B, D03). |
+| `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id, onion_address?}` | Direct answer (hops=1, addressed) from a peer that holds the file **and** whose own ACL authorises the asker. The receiver downloads from the answering peer's **stored** onion; `onion_address` is informational only. |
 | `MEDIA_PENDING` | `MediaPendingPayload {media_id, chunk_index}` | Signals an in-flight/awaited chunk — used by the AIMD inflight-tracking state in `MediaManager` |
 | `MEDIA_TRANSFER_ACK` | `MediaTransferAckPayload {media_id}` | Transfer-completion acknowledgement |
 
-> **Note on Temporary Contacts and Media Routing:** Media packets exchanged with a peer designated as a "Temporary Contact" (e.g., from a Discoverable connection) must explicitly use the local node's **burnable identity** public key as the `senderId` instead of the main identity. Because the temporary contact's gossip firewall is only aware of the burnable identity that performed the handshake, any media response or chunk request signed by the main identity will be immediately dropped as an unknown sender.
+> **Identities on media packets.** The requester signs as
+> `MediaManager.requesterIdentity`: the group-member identity for group media,
+> the DM identity for DM media, the **burnable** identity for a temporary
+> contact or a contact bound to the burnable identity, the burnable identity
+> (falling back to main) when the holder is not a contact at all, and main
+> otherwise. The responder answers (`MEDIA_METADATA_RESPONSE`, `MEDIA_CHUNK`,
+> `MEDIA_RECOVERY_FOUND`) as `MediaManager.responderIdentity`: the local
+> identity the request was addressed to (`targetUserId`) if it is one of ours,
+> else the burnable identity for a temporary/burnable-bound peer, else main —
+> so the reply always comes from the key the requester's firewall knows.
+
+**Signed media requests (Round B, R6b).** `MEDIA_REQUEST.signature` is
+`Ed25519(encodeForSigning("noslop-media-req-v1", senderId, targetUserId ?: "",
+media_id, chunk_index, chunk_size, byte_offset ?: -1, byte_length ?: -1,
+timestamp ?: 0))` made with the sending identity's key. A holder that has the
+sender stored as a peer replies to the stored onion and does not need the
+signature. For a sender it does not know (e.g. a non-contact fetching public
+post media), `MediaManager.replyOnionFor` requires a valid signature, a
+`timestamp` within ±5 min (`SIGNED_REQUEST_MAX_SKEW_MS`) and a request not seen
+before (LRU of 4096), then replies to `deriveOnionAddress(senderId)`. Because a
+NoSlop onion is derived from the Ed25519 key, the reply can only reach the key
+holder; an attacker cannot point the reply at a victim. Unsigned, stale,
+replayed, forged or tampered requests from strangers are dropped (logged at
+WARN — they used to be dropped silently, R6c).
+
+**Point-to-point only.** `GossipService.processIncoming` drops any `MEDIA_*`
+packet whose `targetUserId` is not a local identity, processes the rest
+locally and never re-broadcasts them. A `MEDIA_CHUNK` for a download in
+progress is exempt from the 2 MB/60 s cap on untrusted senders (a public-media
+holder is often not a contact).
 
 **Chunk window and sender limits (2026-10-07).** The downloader's byte window
 starts at 256 KB, halves on a chunk timeout (down to 128 KB, `MIN_CHUNK_SIZE`)
@@ -872,13 +903,22 @@ and grows back by 32 KB per received chunk, capped at **256 KB**
 1 MB while senders reject anything above 256 KB, which stalled every file
 needing more than two requests (the "video stuck at 9%" bug). Pending ranges
 larger than 256 KB are split without gaps before being requested. Senders
-serve at most **16 MB per requester per 60 s** (previously 5 MB).
+serve at most **16 MB per requester per 60 s** (previously 5 MB). Since
+Round B a sender that hits the limit waits for the window to reset (up to 3
+attempts) instead of silently dropping the request.
 
-**Who is served.** `MediaManager.isMediaAuthorizedForSender` first consults the
-`media_owner` index: public post/comment media → anyone; private → author;
-friends-only → direct friends and the author; DM → the conversation partner;
-group → members and admin. The older per-table checks follow (including the
-"trusted peer" fallback that review finding D02 asks to remove).
+**Who is served (deny by default, Round B, D02).**
+`MediaManager.isMediaAuthorizedForSender` allows the local node's own
+identities and otherwise decides **only** from the `media_owner` index:
+public post/comment media → anyone not BLOCKED; private → the author;
+friends-only → the author and direct friends (accepted, not temporary, not
+bound to our burnable identity); DM → the conversation partner; group →
+members and admin, minus banned members. Media with no index row is refused.
+The legacy per-table scans and the "trusted peer" fallback are removed.
+`access_key` is **not** checked and no key is issued: the identity-based ACL
+already decides every case, and a bearer key would add sync and protocol
+surface without adding protection (anyone who received the key also received
+the post that carries it).
 
 `MediaMetadata` (embedded in `PostPayload.media_metadata`,
 `CommentSyncData.media_metadata`, DM plaintext and
@@ -886,41 +926,28 @@ group → members and admin. The older per-table checks follow (including the
 "image"), mime_type, size, chunk_count, access_key?, filename?, origin_node?,
 owner_id?, thumbnail_b64?, sha256?` (C17 whole-file SHA-256 integrity digest).
 
-### 6.1 Relay Routing (`GossipService`)
+### 6.1 Recovery (direct peers only) — Round B
 
-`MEDIA_RELAY_REQUEST` and `MEDIA_RECOVERY_FOUND` are intercepted inside
-`GossipService.processIncoming` itself (not the `MeshPacketHandler`
-dispatcher table in §2):
+The old relay routing (`relayStates`, `handleRelayRequest`,
+`handleRecoveryFound`, the stale-route sweeper) and zero-copy chunk forwarding
+(`forwardRelayChunk`) were removed in Round B (D03): any node could register
+as a listener for any `media_id` and receive copies of its chunks, and every
+request advertised the media id across up to 6 hops.
 
-- **`handleRelayRequest(senderId, packet)`**: checks the local media
-  directory for a file named `mediaId`. If present, immediately sends
-  `MEDIA_RECOVERY_FOUND` (hops=1) directly back to `senderId`. If absent,
-  registers `senderId` as a listener in `relayStates[mediaId]` (creating the
-  entry with `payload.metadata` if new), then forwards the request along the
-  mesh.
-- **`handleRecoveryFound(senderId, packet)`**: sets
-  `relayStates[mediaId].sourceNode = senderId`, then for each registered
-  listener (excluding self), sends `MEDIA_RECOVERY_FOUND` (hops=1) to that
-  listener's onion address.
+Now, when a download has no reachable source,
+`MediaManager.attemptMeshRecovery` sends `MEDIA_RELAY_REQUEST {media_id}`
+(hops=1, addressed) to each direct peer that has an onion, is not BLOCKED and
+is either trusted or a member of the group owning the media, signed as the
+identity that peer knows. The receiving node
+(`MediaManager.handleRecoveryRequest`) answers `MEDIA_RECOVERY_FOUND` only if
+it holds the file, knows the asker's onion, and its own ACL authorises the
+asker; otherwise it stays silent. The asker then downloads directly from the
+answering peer with normal signed `MEDIA_REQUEST`s.
 
-`RelayState` tracks `establishedAt`/`lastActivity` per `mediaId`; a periodic
-60-second sweeper evicts any entry idle for more than 5 minutes.
+### 6.2 Chunk Forwarding — Removed (Round B)
 
-### 6.2 Zero-Copy Chunk Forwarding — Implemented
-
-When a relay node receives a `MEDIA_CHUNK` packet, `MediaPacketHandler.
-handleMediaChunk` calls `GossipService.forwardRelayChunk(mediaId, packet)`
-**before** also calling `MediaManager.handleMediaChunk` for its own local
-copy. `forwardRelayChunk` looks up `relayStates[mediaId]`, refreshes
-`lastActivity`, and for every registered listener (other than the original
-sender), re-stamps the packet with a fresh `id` (to bypass the next node's
-dedup cache), decrements `hops`, sets `senderId` to the local node's key, and
-sends it on — a live, in-flight forward to all downstream listeners rather
-than a "fetch the whole file, then maybe re-share" model. This closes the
-gap an earlier revision of this documentation flagged as unimplemented (see
-GAP_ANALYSIS.md §6, corrected). Note the relay node *also* runs
-`MediaManager.handleMediaChunk` for itself in the same call, so it is not a
-pure disk-free pass-through — it forwards live **and** retains its own copy.
+Media chunks are no longer forwarded by intermediate nodes. Each chunk travels
+directly from the holder to the requester over Tor.
 
 ### 6.3 AIMD Congestion Control
 

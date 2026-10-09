@@ -408,17 +408,19 @@ processed locally by `MeshPacketHandler`):
    (`now - it > 10000` entries are pruned), max **20** packets per window. If
    exceeded, drop with a `FIREWALL`-tagged warning log.
 4. **Firewall**: For any packet that is **not**
-   `CONNECTION_REQUEST`/`USER_HANDSHAKE` (connection packets) and **not**
-   `MEDIA_RELAY_REQUEST`/`MEDIA_RECOVERY_FOUND` (media relay packets), the
+   `CONNECTION_REQUEST`/`USER_HANDSHAKE` (connection packets) and **not** a
+   `MEDIA_*` packet (plus the other exemptions in the code), the
    sender must exist in `peerDao` **and** have `isTrusted == true`, or the
-   packet is dropped with a `FIREWALL BLOCKED` warning.
+   packet is dropped with a `FIREWALL BLOCKED` warning. `MEDIA_*` packets from
+   an untrusted sender are capped at 2 MB per 60 s, except a `MEDIA_CHUNK` for
+   a download this node has in progress (Round B).
 5. **Routing decision**:
+   - `MEDIA_*` packets (`isPointToPointMediaType`, Round B) are never
+     forwarded: addressed to another node → dropped (`false`);
+     `MEDIA_RELAY_REQUEST` → `MediaManager.handleRecoveryRequest(...)`, return
+     `false`; anything else → return `true` (process locally only).
    - If `packet.targetUserId != null` and `!= localPublicKeyB64` → call
      `forwardPacket(packet)` and return `false` (not for us, just relay).
-   - Else if `type == "MEDIA_RELAY_REQUEST"` → `handleRelayRequest(...)`,
-     also `forwardPacket(packet)`, return `false`.
-   - Else if `type == "MEDIA_RECOVERY_FOUND"` → `handleRecoveryFound(...)`,
-     **does not forward** (follows the reply chain back), return `true`.
    - Else (public broadcast addressed to us or untargeted) → `forwardPacket(packet)`
      **and** return `true` (process locally *and* relay).
 
@@ -442,42 +444,31 @@ processed locally by `MeshPacketHandler`):
 **unmodified** packet to every `isTrusted && publicKeyB64 != localPublicKeyB64`
 peer, each in its own coroutine.
 
-### 4.3 Media Relay State Machine (`GossipService.RelayState`)
+### 4.3 Media Recovery (relay state machine removed, Round B)
 
-```kotlin
-data class RelayState(
-    val mediaId: String,
-    val listeners: MutableSet<String> = ConcurrentHashMap.newKeySet(),
-    var sourceNode: String? = null,
-    val metadata: MediaMetadata? = null,
-    val establishedAt: Long = System.currentTimeMillis(),
-    var lastActivity: Long = System.currentTimeMillis()
-)
-```
-Stored in `relayStates: ConcurrentHashMap<String, RelayState>`. **Has TTL
-cleanup**: a periodic 60-second sweeper evicts any entry whose
-`lastActivity` is more than 5 minutes stale, and `MediaPacketHandler` (the
-extracted media-domain handler, see §4.4) refreshes `lastActivity` on every
-`MEDIA_CHUNK`. This closes the unbounded-memory-growth gap noted in
-[GAP_ANALYSIS.md §6](GAP_ANALYSIS.md#6-trusted-media-relay--conceptually-present-streaming-semantics-differ).
+`GossipService.RelayState`, `relayStates`, `handleRelayRequest`,
+`handleRecoveryFound`, `forwardRelayChunk`, `delegateUnknownMediaRequest`,
+`removePeerFromRelays` and the stale-route sweeper were removed (review
+finding D03). Any node could register as a listener for any media id and be
+sent copies of its chunks, and recovery requests carried the media id 6 hops
+across the mesh.
 
-- **`handleRelayRequest(senderId, packet)`**: checks
-  `File(transport.repository.context.filesDir, "media")` for a file named
-  `mediaId`. If present, immediately sends `MEDIA_RECOVERY_FOUND` (hops=1)
-  directly back to `senderId`. If absent, registers `senderId` as a listener
-  in `relayStates[mediaId]` (creating the entry with `payload.metadata` if
-  new).
-- **`handleRecoveryFound(senderId, packet)`**: sets `relayStates[mediaId].sourceNode
-  = senderId`, then for each listener (excluding self), sends a
-  `MEDIA_RECOVERY_FOUND` packet (hops=1) to that listener's onion address
-  (looked up via `peerDao.getPeerByPublicKey`).
-- **Zero-copy chunk forwarding**: once a relay route is established, incoming
-  `MEDIA_CHUNK` packets for that `mediaId` are live-forwarded to every
-  registered listener via `GossipService.forwardRelayChunk`, in addition to
-  the relay node downloading its own copy — see
-  [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented)
-  for the exact mechanism. This was previously an open gap; it is now
-  implemented.
+Recovery is now one hop:
+- **`MediaManager.attemptMeshRecovery`** (when a download has no reachable
+  source) sends `MEDIA_RELAY_REQUEST {media_id}` (hops=1, `targetUserId` set)
+  to each direct peer that has an onion, is not BLOCKED, and is trusted or a
+  member of the group owning the media. Each request goes out as the identity
+  that peer knows (`requesterIdentity` for group members, `responderIdentity`
+  otherwise).
+- **`MediaManager.handleRecoveryRequest(senderId, payload)`** answers
+  `MEDIA_RECOVERY_FOUND {media_id, onion_address}` (hops=1, as
+  `responderIdentity`) only if the file is held locally, the asker's onion is
+  stored, and `isMediaAuthorizedForSender` allows the asker. Otherwise it is
+  silent.
+- **`MediaManager.handleRecoveryFound`** switches the download to the
+  answering peer's **stored** onion; the onion in the payload is not trusted.
+
+See [WIRE_PROTOCOL_REFERENCE.md §6.1](WIRE_PROTOCOL_REFERENCE.md#61-recovery-direct-peers-only--round-b).
 
 ### 4.4 Incoming Packet Dispatch (`MeshPacketHandler.kt`)
 
@@ -627,32 +618,67 @@ For full detail see
 
 ### 6.1.1 Media Access Control (`MediaManager.isMediaAuthorizedForSender`)
 
-Evaluated for every `MEDIA_REQUEST`. Own identities (main and burnable) are
-always allowed. Then, in order:
+Evaluated for every `MEDIA_REQUEST` and every recovery request. **Deny by
+default (Round B, D02).** Own identities (main and burnable) are always
+allowed. Everyone else is decided only by the `media_owner` index
+(`isAuthorizedByOwnerIndex`); a BLOCKED peer is refused outright. For each
+owner row of the media id:
+- `POST`/`COMMENT` with privacy `public` → anyone;
+- `private` → the author only;
+- anything else (friends) → the author and direct friends (`isFriend`:
+  accepted and not temporary, and the contact is not bound to our burnable
+  identity);
+- `DM` → `ownerId == sender`;
+- `GROUP` → members and admin of that group, minus `getBannedMembers()`.
 
-0. **`media_owner` index** (`isAuthorizedByOwnerIndex`, 2026-10-08): for each
-   owner row of the media id — `POST`/`COMMENT` with privacy `public` →
-   anyone; `private` → the author only; anything else (friends) → direct
-   friends (trusted, not temporary, contact identity not `burnable`) and the
-   author; `DM` → `ownerId == sender`; `GROUP` → members and admin of that
-   group. A match allows; no match falls through.
-1. Posts whose `mediaUrl`/`clearnetUrl` contains the id (full scan).
-2. DMs with the requester. 3. Group messages where the requester is a member.
-4. Constant-time `accessKey` compare (no code issues an `accessKey` yet).
-5. Files with a `.mine` sentinel are refused; otherwise any trusted peer is
-   allowed.
+Any match allows. Media with no owner row is refused. The legacy post, DM and
+group table scans, the `.mine` sentinel check and the "any trusted peer"
+fallback were removed; the index already covers every attachment the DAOs
+store. Comment media had no allow path from `5f9a127` until the index.
 
-**Requesting side (2026-10-08).** `MediaManager.requesterIdentity` picks the identity a `MEDIA_REQUEST`, its `origin_onion` and the final `MEDIA_TRANSFER_ACK` are sent as:
+**`accessKey` decision.** D02 also suggested issuing and requiring a per-media
+`accessKey`. This is deliberately not done. Every request is now decided by
+who the requester is, and a bearer key would not narrow that: anyone allowed
+to see the post or message already receives the key with it, and anyone not
+allowed is refused by identity regardless. Adding it would mean a new field in
+signed post/comment/DM payloads, back-fill for existing media, and refusing
+older clients' requests, for no extra protection. `MediaRequestPayload.access_key`
+is accepted and ignored; `MediaOwnerDao.attachSecrets` still stores a key if
+one ever arrives.
+
+**Who the reply goes to (`replyOnionFor`, R6b/C03).** A requester stored as a
+peer gets the reply at its stored onion. A requester that is not a contact
+(e.g. a reader of a public post re-shared by someone else) is served only if
+its `MEDIA_REQUEST` is signed (`mediaRequestSigningString`, domain
+`noslop-media-req-v1`, see WIRE §6), the `timestamp` is within ±5 min, the
+request has not been seen before (LRU of 4096), and the signature verifies
+against `senderId`. The reply then goes to `deriveOnionAddress(senderId)`,
+which only the key holder can host. Every refusal is logged at WARN (R6c).
+
+**Which identity answers (`responderIdentity`).** Metadata, chunks and
+`MEDIA_RECOVERY_FOUND` are sent as the local identity the request was
+addressed to (`targetUserId`), else the burnable identity for a temporary or
+burnable-bound peer, else main. The responder rate limit (16 MB per requester
+per 60 s) now waits for the window to reset, up to 3 attempts, instead of
+dropping the request.
+
+**Requesting side.** `MediaManager.requesterIdentity` picks the identity a `MEDIA_REQUEST`, its `origin_onion` and the final `MEDIA_TRANSFER_ACK` are sent as:
 - group media → our member key in that group (`groupMemberIdentity`);
 - DM media → the identity bound to the contact (`contact_identity_*`);
-- anything else → the burnable key towards a temporary contact, else the main key.
+- holder is not a peer at all → the burnable key (main if none);
+- anything else → the burnable key towards a temporary or burnable-bound contact, else the main key.
 
-Requests for open-group media used to go out under the main key, which isn't a member, so they were refused. The download address for message media is the authenticated sender's peer onion, falling back to `originNode`. Group attachments are stamped with the sender's member identity (`groupSenderIdentity`). `startDownload` sends no `ANNOUNCE_DISCOVERABLE` for group media.
+Requests are addressed (`targetUserId` = the source peer, or the media's
+`ownerId`) with hops=1 and are never gossiped. `startDownload` no longer sends
+`ANNOUNCE_DISCOVERABLE` for any media; when no source onion is known it goes
+straight to recovery. The download address for message media is the
+authenticated sender's peer onion, falling back to `originNode`. Group
+attachments are stamped with the sender's member identity
+(`groupSenderIdentity`).
 
-Steps 1–5 predate the index. Review finding **D02** (open) asks for
-deny-by-default: refuse when a non-public owner exists and the requester is
-not authorised for it, remove step 5, and issue/require `accessKey`. Comment
-media had no allow path at all from `5f9a127` until step 0 was added.
+**Still open.** `handleMediaChunk` accepts any offset of a download in
+progress from the source; the C17 whole-file SHA-256 check is what rejects a
+corrupted result.
 
 The `media_owner` table is maintained by the DAOs (`PostDao.insertPost`,
 `CommentDao.insertComment`, `MessageDao.insertMessage`, edit/orphan/delete
@@ -1217,11 +1243,9 @@ is traceable rather than silently disappearing:
     timeout sweep, contrary to a prior claim that Room was never written back
     to on timeout.
 11. ~~GAP_ANALYSIS.md §6 stated relay nodes have no zero-copy chunk
-    forwarding and would "download the whole file rather than acting as a
-    pass-through."~~ **Fixed** — `MediaPacketHandler.handleMediaChunk` calls
-    `GossipService.forwardRelayChunk`, which live-forwards each chunk to all
-    registered relay listeners. See
-    [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented).
+    forwarding.~~ Chunk forwarding was later implemented and then **removed
+    in Round B** (D03): media is now point-to-point only. See
+    [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-chunk-forwarding--removed-round-b).
 12. ~~`GossipService.broadcast` discards the return value of `pushPacketToHub`
     and has no direct-Tor fallback.~~ **Fixed** — `GossipService.broadcast`
     checks `pushed` from `pushPacketToHub` and explicitly logs a warning and
