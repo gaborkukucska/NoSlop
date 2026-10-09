@@ -2,7 +2,9 @@
 
 ## Completed Changes (2026-10-09) — Mesh Feed: Missing and Repeating Posts; No Startup Handshake Broadcast (v0.7.0-alpha)
 
-Device report: switching between All and Mesh sometimes left new mesh posts out, even after "See Old Posts", and sometimes kept showing old posts. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+Device report: switching between All and Mesh sometimes left new mesh posts out, even after "See Old Posts", and sometimes kept showing old posts. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-09).** `./gradlew testGithubDebugUnitTest --rerun-tasks` passed on the developer machine, including the three new test classes. The build was installed on the test devices and the app is working normally so far; the individual scenarios below were not reported one by one, so a regression in them should still be watched for.
 
 **Protocol compatibility.** No packet layout, signature or Room schema change. Nodes stop sending one packet that every receiver already rejected.
 
@@ -1686,8 +1688,8 @@ same-device backup export/import. Multi-device testing is next.
 | **R6b, R6c** | — | Non-contact media replies (signed requests, derived reply onion); silent media drops; media flood | **Resolved** (Round B) | `MediaAccessRoundBTest` |
 | **R4d** | — | Handshake budget | **Open** | — |
 | **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
-| **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (not yet device-verified) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
-| **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (not yet device-verified) | `OnionAddressUpdateTest` |
+| **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
+| **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `OnionAddressUpdateTest` |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
 
