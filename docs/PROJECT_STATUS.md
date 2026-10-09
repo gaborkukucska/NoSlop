@@ -1,5 +1,67 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-09) — Mesh Feed: Missing and Repeating Posts; No Startup Handshake Broadcast (v0.7.0-alpha)
+
+Device report: switching between All and Mesh sometimes left new mesh posts out, even after "See Old Posts", and sometimes kept showing old posts. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** No packet layout, signature or Room schema change. Nodes stop sending one packet that every receiver already rejected.
+
+### Posts marked seen that the user never saw
+
+* **Cause.** `UnifiedFeedTab` marked "swiped past" slides by page index (`lastSettledPage` up to the settled page). Whenever the list changed under the pager, that range covered other posts:
+  * a mesh post arriving at the top moved the current post down a page, and the new post was marked;
+  * a replaced list (mode switch, refresh, the next Mesh batch) followed by a jump to the top marked every post between the top and the old page. `logs-2` shows five posts "swiped away" within 10 ms at 10:02:55.
+  * Marked posts are excluded from Mesh by `cachedViewedIds`, so they were gone for good.
+* **Fix.** The settled item is tracked by id, with the list's ids at that moment. `itemsSwipedPast` marks everything passed over an unchanged list, only a directly adjacent item after a list change, and nothing after a jump to the top or a mode switch. The 4 s dwell is keyed on the item id too.
+* Tested (unit: `FeedSwipeMarkingTest`).
+
+### Mesh infinite scroll replaced the list
+
+* **Cause.** In the specific-filter path of `loadMoreFeedItems` (Mesh, My Content, Videos, Images, Audio, Articles, search) every batch replaced the list and scrolled to the top. With more than one batch of mesh posts, nearing the end swapped in the next batch with no way back, and the jump marked posts as above.
+* **Fix.** Only the first batch of a mode fills the list and scrolls to the top; later batches are appended.
+* Implemented (untested): ViewModel feed paths have no unit harness.
+
+### A pager load could switch mode halfway
+
+* **Cause.** `loadMoreFeedItems(mode)` for a different mode only emptied the list and set the mode. When the pager's load ran before the screen's `syncFilterMode(mode)`, the latter became a no-op. The All feed's `sessionLoadedIds` then stayed in place and hid mesh posts that had been loaded into All but never reached; "See Old Posts" and the mode flow weren't reset either.
+* **Fix.** That branch now does what `syncFilterMode` does: cache the Live Feed, empty the list, clear `sessionLoadedIds`, reset "See Old Posts" for Mesh, update `currentFilterModeFlow`.
+* Implemented (untested).
+
+### Image, GIF and audio posts were never marked seen
+
+* **Cause.** `markItemViewed`/`recordItemSwiped` skip a mesh post with media until it is downloaded **and** `markMeshMediaPlaybackStarted` was called. Only `VideoPlayer` called it. Image, GIF and audio posts were never marked seen and came back in Mesh as new every time. A post with a media type but no media id, and file posts that weren't downloaded, were held back for good.
+* **Fix.**
+  * `FullScreenMeshCardV2` reports a downloaded image or GIF once it is on screen; `AudioPlayer` gains `onPlaybackStarted`, called when audio starts playing.
+  * `isMeshMediaUnseen` applies the check only to posts with a mesh media id, and not to file attachments.
+  * The "Media shown for mesh post" log line is written once per post per session (it used to repeat every few seconds while a video looped).
+* Implemented (untested): Compose UI.
+
+### Text posts that began alike hid each other
+
+* **Cause.** `getCanonicalItemKey` keyed a mesh post without a URL by its first 80 characters (`mesh_title_…`). The feed de-duplicates by that key and stores it with viewed/swiped records, so two test posts with similar wording showed as one, and seeing one hid the other.
+* **Fix.** Such posts are keyed by their id. Clearnet shares stay keyed by URL (one link shared by several peers shows once); mesh media posts by their media URL. Existing `mesh_title_…` records are left in place and no longer match anything.
+* Tested (unit: `MeshCanonicalKeyTest`).
+
+### Untargeted USER_HANDSHAKE on every start
+
+* **Cause.** `NoSlopRepository.updateOnionAddress` runs on every app start. It broadcast a legacy-signed `USER_HANDSHAKE` with no `targetUserId` (6 hops), whether or not the address had changed. Since C02/D07 every receiver rejects it ("targetUserId null is not a local identity", in every node's log). It only spent Tor circuits right after a restart, when connections are hardest to build.
+* **Fix.** Nothing is broadcast. The address is stored only when it changed (and never as blank). Peers learn our onion from the `ANNOUNCE_PEER` heartbeat. Signing `onion_address` in `ANNOUNCE_PEER` remains open (S2).
+* Tested (unit: `OnionAddressUpdateTest`).
+
+### Not changed
+
+* Switching back to All restores the cached All feed and position on purpose, so it shows the posts it had before. New mesh posts reach All through the normal interleaving on the next load.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `FeedSwipeMarkingTest` | Forward and backward swipes over an unchanged list; a post prepended at the top; a replaced list with a jump to the top; a deleted post above; unknown or missing previous item |
+| `MeshCanonicalKeyTest` | Text posts that begin alike get different keys; the same clearnet link shares one key; mesh media posts keyed by media |
+| `OnionAddressUpdateTest` | No `USER_HANDSHAKE` broadcast on a start with the current address or with a changed one; the identity flow still fires; a blank address isn't stored |
+
+---
+
 ## Completed Changes (2026-10-08) — Round B: Media Access Control, Point-to-Point Media & Non-Contact Replies (v0.6.9-alpha)
 
 This round closes review findings D02 and D03 and regression items R6b and R6c. It also stops the "MEDIA_REQUEST for unknown media" flood seen in every device log. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
@@ -1624,6 +1686,8 @@ same-device backup export/import. Multi-device testing is next.
 | **R6b, R6c** | — | Non-contact media replies (signed requests, derived reply onion); silent media drops; media flood | **Resolved** (Round B) | `MediaAccessRoundBTest` |
 | **R4d** | — | Handshake budget | **Open** | — |
 | **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
+| **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (not yet device-verified) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
+| **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (not yet device-verified) | `OnionAddressUpdateTest` |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
 

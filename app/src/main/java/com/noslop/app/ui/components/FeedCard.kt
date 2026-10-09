@@ -566,7 +566,12 @@ fun FullScreenMeshCardV2(
 
                     if (canPlay) {
                         val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
-                        AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
+                        AudioPlayer(
+                            url = resolvedUrl,
+                            isVisible = isVisible,
+                            stableKey = stableKeyForRestore,
+                            onPlaybackStarted = { viewModel?.markMeshMediaPlaybackStarted(post.id) }
+                        )
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -628,6 +633,11 @@ fun FullScreenMeshCardV2(
                     if (canShow) {
                         val imageUrl = if (post.mediaUrl == null && post.clearnetThumbnailUrl != null) post.clearnetThumbnailUrl else resolvedUrl
                         BlurredImageBackground(url = imageUrl ?: "", thumbnailB64 = post.thumbnailB64, fallbackUrl = post.clearnetThumbnailUrl)
+                        // An image or GIF is "played" once it is on screen. Without this the post was
+                        // never marked seen (only video reported playback) and kept returning in Mesh.
+                        if (isVisible) {
+                            LaunchedEffect(post.id) { viewModel?.markMeshMediaPlaybackStarted(post.id) }
+                        }
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0

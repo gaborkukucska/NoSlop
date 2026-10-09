@@ -358,6 +358,13 @@ connection:
 The normal (separate-connection) delivery of `USER_HANDSHAKE` and
 `CONNECTION_REJECTED` still happens as before; the reply path is an addition.
 
+**No broadcast handshakes (2026-10-09).** `USER_HANDSHAKE` is only ever sent to
+one peer, naming it in `targetUserId`. `NoSlopRepository.updateOnionAddress`
+used to broadcast an untargeted, legacy-signed `USER_HANDSHAKE` (6 hops) on
+every app start; every receiver relayed it and then rejected it ("targetUserId
+null is not a local identity"). It no longer sends anything. Peers learn our
+onion address from the `ANNOUNCE_PEER` presence heartbeat (`onion_address`).
+
 ### ANNOUNCE_PEER
 **Type:** `ANNOUNCE_PEER` · class `AnnouncePeerPayload`
 

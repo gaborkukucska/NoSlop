@@ -21,8 +21,16 @@ import com.noslop.app.ui.PreloadManager
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = null) {
+fun AudioPlayer(
+    url: String,
+    isVisible: Boolean = true,
+    stableKey: String? = null,
+    // Called each time playback actually starts, like VideoPlayer's onPlaybackStarted; mesh audio posts
+    // use it to count as seen.
+    onPlaybackStarted: (() -> Unit)? = null
+) {
     val actualKey = stableKey ?: url
+    val currentOnPlaybackStarted by rememberUpdatedState(onPlaybackStarted)
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     // --- NOSLOP_MEDIA_PEERS_V1 ---
@@ -60,6 +68,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                             isPlaying = playing
                             // --- NOSLOP_AUDIO_SPINNER_V1 --- audio is audibly flowing; never show a spinner
                             if (playing) isBuffering = false
+                            if (playing) currentOnPlaybackStarted?.invoke()
                         }
                         override fun onPlaybackStateChanged(state: Int) {
                             val stateStr = when(state) {
@@ -127,6 +136,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                                 isPlaying = playing
                                 // --- NOSLOP_AUDIO_SPINNER_V1 --- audio is audibly flowing; never show a spinner
                                 if (playing) isBuffering = false
+                                if (playing) currentOnPlaybackStarted?.invoke()
                             }
                             override fun onPlaybackStateChanged(state: Int) {
                                 val stateStr = when(state) {

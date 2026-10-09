@@ -1674,43 +1674,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         identityRepository.clearBurnableIdentity()
         _identityUpdateFlow.emit(Unit)
     }
+
+    /**
+     * Stores our onion address when it changed, and refreshes the identity flows. The ViewModel calls
+     * this on every start with the current address, which is also what gives `localKeys` its first value.
+     *
+     * It used to broadcast an untargeted USER_HANDSHAKE (6 hops) on every call, changed or not. Since
+     * C02/D07 every receiver rejects a handshake that doesn't name one of its identities ("Rejected
+     * USER_HANDSHAKE: targetUserId null is not a local identity"), and it wasn't signed in the v2 form
+     * receivers check either, so all it did was spend Tor circuits across the mesh right after each
+     * restart. Peers learn our onion address from the ANNOUNCE_PEER presence heartbeat.
+     */
     suspend fun updateOnionAddress(address: String) {
-        identityRepository.updateOnionAddress(address)
-        _identityUpdateFlow.emit(Unit)
-        
-        // Broadcast the new identity so peers know the new onion address!
-        val myKeys = getLocalIdentity()
-        if (myKeys != null) {
-            val timestamp = System.currentTimeMillis()
-            val userProfile = getUserProfile()
-            val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
-            val bio = userProfile.bio?.takeIf { it.isNotBlank() }
-            val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                myKeys.publicKeyB64, myKeys.displayName, address, timestamp.toString(), avatarB64, bio
-            )
-            val signature = com.noslop.app.crypto.CryptoService.sign(payload, myKeys.privateKeyB64)
-            val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
-                id = java.util.UUID.randomUUID().toString(),
-                fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName,
-                fromDisplayName = myKeys.displayName,
-                authorAvatarB64 = avatarB64,
-                bio = bio,
-                fromHomeNode = address,
-                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                timestamp = timestamp,
-                signature = signature
-            )
-            val syncPacket = com.noslop.app.mesh.NetworkPacket(
-                id = java.util.UUID.randomUUID().toString(),
-                hops = 6,
-                senderId = myKeys.publicKeyB64,
-                type = "USER_HANDSHAKE",
-                payload = com.noslop.app.util.Json.gson.toJsonTree(syncReq),
-                signature = signature
-            )
-            com.noslop.app.mesh.GossipService.broadcast(syncPacket)
+        if (address.isNotBlank() && getLocalIdentity()?.onionAddress != address) {
+            identityRepository.updateOnionAddress(address)
         }
+        _identityUpdateFlow.emit(Unit)
     }
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {

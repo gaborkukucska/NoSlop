@@ -96,15 +96,17 @@ fun getCanonicalItemKey(item: com.noslop.app.ui.UnifiedItem): String {
             }
         }
         is com.noslop.app.ui.UnifiedItem.Mesh -> {
+            // A clearnet share is keyed by its URL, so the same link shared by several peers shows once;
+            // a post with mesh media by its media URL. Any other mesh post (text) is its own item and is
+            // keyed by its id. It used to be keyed by its first 80 characters, so two text posts that
+            // began alike hid each other, and seeing one marked the other as seen too.
             val post = item.post
             val rawUrl = post.clearnetUrl ?: post.mediaUrl ?: ""
             val normUrl = normalizeUrlKey(rawUrl)
             if (normUrl.isNotBlank()) {
                 "mesh_url_$normUrl"
             } else {
-                val titleKey = (post.clearnetTitle ?: post.content).take(80).trim().lowercase(java.util.Locale.US).replace(Regex("[^a-z0-9]"), "")
-                if (titleKey.length > 10) "mesh_title_$titleKey"
-                else item.id
+                item.id
             }
         }
         is com.noslop.app.ui.UnifiedItem.Tutorial -> item.id

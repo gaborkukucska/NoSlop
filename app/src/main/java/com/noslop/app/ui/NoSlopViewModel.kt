@@ -1187,8 +1187,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         try {
             val actualFilter = filterMode ?: currentFilterMode
         if (currentFilterMode != actualFilter) {
+            // A load for another mode switches the mode, so it does what syncFilterMode does. The feed
+            // screen calls syncFilterMode(mode) right after the user picks a mode, but that call is a
+            // no-op once the mode already matches. When the pager's load got in first, the previous
+            // mode's session ids stayed behind (hiding mesh posts that had been loaded into the All feed
+            // but never seen), together with a stale "See Old Posts" state and mode flow.
+            if (currentFilterMode == "Live Feed" && _unifiedFeed.value.isNotEmpty() && !isSearchModeActive) {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
             _unifiedFeed.value = emptyList()
+            sessionLoadedIds.clear()
+            if (actualFilter == "Mesh") _showOldMeshPosts.value = false
             currentFilterMode = actualFilter
+            _currentFilterModeFlow.value = actualFilter
         }
 
         if (actualFilter == "History") {
@@ -1538,15 +1549,21 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                // If switching filters or searching, replace feed directly with new batch rather than appending
-                _unifiedFeed.value = if (isSearchActive || actualFilter == "Mesh" || actualFilter == "My Content" || currentFilterMode != "Live Feed") {
+                // The first batch of a mode or search fills the empty list (every mode switch, search and
+                // "See Old Posts" empties it first) and scrolls to the top. Later batches come from the
+                // pager's infinite scroll and are appended. They used to replace the list and jump to the
+                // top: in Mesh with more than one batch of posts, nearing the end swapped in the next batch
+                // with no way back, and the jump marked the posts in between as seen.
+                _unifiedFeed.value = if (isInitialLoad) {
                     batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
                 } else {
                     (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
                 }
-                viewModelScope.launch {
-                    kotlinx.coroutines.delay(150)
-                    _scrollToTopEvent.emit(Unit)
+                if (isInitialLoad) {
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(150)
+                        _scrollToTopEvent.emit(Unit)
+                    }
                 }
             }
             return
@@ -2248,22 +2265,8 @@ fun toggleAggregator() {
             val item = _unifiedFeed.value.find { it.id == itemId }
                 ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
 
-            // Do NOT mark mesh post as viewed if attached media has not finished downloading or hasn't started playing
-            if (item is UnifiedItem.Mesh) {
-                val post = item.post
-                val hasMedia = !post.mediaUrl.isNullOrBlank() || (!post.mediaType.isNullOrBlank() && post.mediaType != "text")
-                if (hasMedia) {
-                    val rawMediaId = post.mediaUrl?.substringAfterLast("/") ?: ""
-                    val isDownloaded = if (rawMediaId.isNotBlank()) {
-                        com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType)
-                    } else false
-
-                    val hasPlayed = playedMeshPostIds.contains(post.id)
-                    if (!isDownloaded || !hasPlayed) {
-                        return@launch
-                    }
-                }
-            }
+            // Do NOT mark mesh post as viewed if attached media has not finished downloading or hasn't been shown
+            if (item is UnifiedItem.Mesh && isMeshMediaUnseen(item.post)) return@launch
 
             val (url, cKey) = when (item) {
                 is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
@@ -2280,22 +2283,8 @@ fun toggleAggregator() {
             val item = _unifiedFeed.value.find { it.id == itemId }
                 ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
 
-            // Do NOT record as swiped away if mesh media is not yet available or hasn't started playing at least once
-            if (item is UnifiedItem.Mesh) {
-                val post = item.post
-                val hasMedia = !post.mediaUrl.isNullOrBlank() || (!post.mediaType.isNullOrBlank() && post.mediaType != "text")
-                if (hasMedia) {
-                    val rawMediaId = post.mediaUrl?.substringAfterLast("/") ?: ""
-                    val isDownloaded = if (rawMediaId.isNotBlank()) {
-                        com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType)
-                    } else false
-
-                    val hasPlayed = playedMeshPostIds.contains(post.id)
-                    if (!isDownloaded || !hasPlayed) {
-                        return@launch
-                    }
-                }
-            }
+            // Do NOT record as swiped away if mesh media is not yet available or hasn't been shown at least once
+            if (item is UnifiedItem.Mesh && isMeshMediaUnseen(item.post)) return@launch
 
             val (url, cKey) = when (item) {
                 is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
@@ -2421,9 +2410,31 @@ fun toggleAggregator() {
 
     private val playedMeshPostIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /**
+     * Called by the mesh card once the post's media has actually reached the user: video and audio
+     * when playback starts, images and GIFs when the downloaded picture is on screen. Until then the
+     * post is not marked viewed or swiped (see [isMeshMediaUnseen]). Only the video player used to
+     * call this, so image, GIF and audio posts were never marked seen and kept coming back in Mesh.
+     */
     fun markMeshMediaPlaybackStarted(postId: String) {
-        playedMeshPostIds.add(postId)
-        Logger.info("VM", "Playback started for mesh post: $postId")
+        if (playedMeshPostIds.add(postId)) {
+            Logger.info("VM", "Media shown for mesh post: $postId")
+        }
+    }
+
+    /**
+     * True while a mesh post's own media (a mesh media id in [MeshPost.mediaUrl]) is not downloaded yet
+     * or hasn't been shown this session, so leaving the slide doesn't count as having seen it.
+     *
+     * File attachments are exempt: the card shows the file name and a download button, which is the
+     * whole post, and downloading is optional. Posts without mesh media (text, clearnet shares) are
+     * exempt too; a post with a media type but no media id used to be held back for good.
+     */
+    private fun isMeshMediaUnseen(post: MeshPost): Boolean {
+        val rawMediaId = post.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() } ?: return false
+        if (post.mediaType == "file") return false
+        val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType)
+        return !isDownloaded || !playedMeshPostIds.contains(post.id)
     }
 
     fun getPeerHandle(pubKey: String): String? {

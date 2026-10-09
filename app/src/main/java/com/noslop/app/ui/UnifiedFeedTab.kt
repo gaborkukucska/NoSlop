@@ -666,6 +666,38 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 // UNIFIED FEED TAB (TikTok-style Pager)
 // ==========================================
 
+/**
+ * The items a pager settle from [previousId] to [currentId] moved past, looked up by id in [items]
+ * as the list is now. The feed marks these viewed and swiped.
+ *
+ * When the list is the same as at the previous settle ([sameListAsBefore], compared by item ids) the
+ * user swiped or flung across it, so every item from the previous one up to (not including) the
+ * current one is returned, in either direction. When the list changed in between (new posts arrived,
+ * a post was deleted, a mode switch or refresh replaced it) the page positions no longer tell what was
+ * on screen, so only a previous item directly next to the current one counts. Nothing is returned
+ * when there is no previous item or it has left the list.
+ *
+ * This used to be done with page indices alone. A mesh post arriving at the top moved the current
+ * post down one page and the unseen new post was marked; a replaced list followed by a jump to the
+ * top marked every item between the top and the old page.
+ */
+internal fun itemsSwipedPast(
+    items: List<UnifiedItem>,
+    previousId: String?,
+    currentId: String,
+    sameListAsBefore: Boolean
+): List<UnifiedItem> {
+    val current = items.indexOfFirst { it.id == currentId }
+    if (current < 0 || previousId == null) return emptyList()
+    val previous = items.indexOfFirst { it.id == previousId }
+    if (previous < 0 || previous == current) return emptyList()
+    if (!sameListAsBefore) {
+        return if (kotlin.math.abs(previous - current) == 1) listOf(items[previous]) else emptyList()
+    }
+    val range = if (previous < current) previous until current else (current + 1)..previous
+    return range.map { items[it] }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UnifiedFeedTab(
@@ -688,7 +720,12 @@ fun UnifiedFeedTab(
     val showOldMeshPosts by viewModel.showOldMeshPosts.collectAsState()
 
     var filterMode by remember { mutableStateOf("Live Feed") }
-    var lastSettledPage by remember { mutableStateOf(-1) }
+    // The item the pager last settled on, and the ids of the list at that moment. Kept by item id,
+    // not page index: the list changes under the pager (new mesh posts are prepended, deleted posts
+    // drop out, a mode switch or refresh replaces it), and an index range then marked posts the user
+    // never saw as viewed and swiped, which hides them from the Mesh view for good.
+    var lastSettledItemId by remember { mutableStateOf<String?>(null) }
+    var lastSettledListIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var sharedItem by remember { mutableStateOf<UnifiedItem?>(null) }
     var editingPost by remember { mutableStateOf<MeshPost?>(null) }
@@ -806,7 +843,7 @@ fun UnifiedFeedTab(
     // Pager scroll reset is handled reliably via viewModel.scrollToTopEvent
 
     LaunchedEffect(filterMode) {
-        lastSettledPage = -1
+        lastSettledItemId = null
     }
 
     LaunchedEffect(filterMode, searchQuery) {
@@ -821,6 +858,7 @@ fun UnifiedFeedTab(
 
     LaunchedEffect(unifiedItems) {
         if (forceScrollToTop && unifiedItems.isNotEmpty()) {
+            lastSettledItemId = null // a jump to the top is not a swipe past the items above
             pagerState.scrollToPage(0)
             forceScrollToTop = false
         }
@@ -835,6 +873,7 @@ fun UnifiedFeedTab(
     LaunchedEffect(Unit) {
         viewModel.scrollToTopEvent.collect {
             if (unifiedItems.isNotEmpty()) {
+                lastSettledItemId = null // a jump to the top is not a swipe past the items above
                 pagerState.scrollToPage(0)
             } else {
                 forceScrollToTop = true
@@ -872,7 +911,8 @@ fun UnifiedFeedTab(
             val index = unifiedItems.indexOfFirst { it.id == target }
             if (index >= 0) {
                 pagerState.scrollToPage(index)
-                lastSettledPage = index
+                lastSettledItemId = target
+                lastSettledListIds = unifiedItems.map { it.id }
                 restoreItemId = null // Consumed
             }
         }
@@ -886,16 +926,23 @@ fun UnifiedFeedTab(
                 val index = unifiedItems.indexOfFirst { it.id == target }
                 if (index >= 0) {
                     pagerState.scrollToPage(index)
-                    lastSettledPage = index
+                    lastSettledItemId = target
+                    lastSettledListIds = unifiedItems.map { it.id }
                 }
             }
             hasRestoredInitialPosition = true
         }
     }
 
-    LaunchedEffect(pagerState.settledPage) {
-        if (pagerState.settledPage in unifiedItems.indices) {
-            val currentItem = unifiedItems[pagerState.settledPage]
+    // Keyed on the item on screen, not the page number. When the list changes under the pager the same
+    // page can hold a different item; the 4 s dwell below would then mark the item that used to be
+    // there. A list change that keeps the same item on screen (it only moved to another page) is not a
+    // new slide, so it no longer re-runs this or counts towards the break reminder.
+    val settledItemId = unifiedItems.getOrNull(pagerState.settledPage)?.id
+    LaunchedEffect(settledItemId) {
+        val settledIndex = unifiedItems.indexOfFirst { it.id == settledItemId }
+        if (settledItemId != null && settledIndex >= 0) {
+            val currentItem = unifiedItems[settledIndex]
             
             if (currentItem is UnifiedItem.Tutorial) {
                 viewModel.setFeedTutorialStep(currentItem.step + 1)
@@ -905,7 +952,7 @@ fun UnifiedFeedTab(
 
             if (currentItem !is UnifiedItem.Tutorial && currentItem !is UnifiedItem.BreakReminder) {
                 // Check and dynamically inject break reminder if interval is reached
-                viewModel.onSlideViewed(pagerState.settledPage)
+                viewModel.onSlideViewed(settledIndex)
 
                 // Only save position AFTER initial restore has completed so startup page 0 never clobbers saved state
                 if (hasRestoredInitialPosition && filterMode == "Live Feed" && !searchResultsActive) {
@@ -985,14 +1032,16 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(pagerState.settledPage, hasRestoredInitialPosition) {
-        val currentPage = pagerState.settledPage
-        if (hasRestoredInitialPosition && currentPage in unifiedItems.indices) {
-            val fromPage = if (lastSettledPage >= 0) lastSettledPage else currentPage
-            val range = if (fromPage <= currentPage) fromPage until currentPage else (currentPage + 1)..fromPage
-            for (p in range) {
-                if (p in unifiedItems.indices && filterMode != "History" && filterMode != "Saved" && filterMode != "Liked") {
-                    val itemToMark = unifiedItems[p]
+    LaunchedEffect(settledItemId, hasRestoredInitialPosition) {
+        if (settledItemId == null) {
+            lastSettledItemId = null // empty list: the next item shown is not reached by swiping
+            return@LaunchedEffect
+        }
+        if (hasRestoredInitialPosition && unifiedItems.any { it.id == settledItemId }) {
+            val listIds = unifiedItems.map { it.id }
+            val passed = itemsSwipedPast(unifiedItems, lastSettledItemId, settledItemId, sameListAsBefore = listIds == lastSettledListIds)
+            for (itemToMark in passed) {
+                if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked") {
                     if (itemToMark is UnifiedItem.Feed) {
                         viewModel.markItemReadState(itemToMark.item.id, true)
                         viewModel.markItemViewed(itemToMark.id, isMesh = false)
@@ -1003,7 +1052,8 @@ fun UnifiedFeedTab(
                     }
                 }
             }
-            lastSettledPage = currentPage
+            lastSettledItemId = settledItemId
+            lastSettledListIds = listIds
         }
     }
 
@@ -1241,7 +1291,7 @@ fun UnifiedFeedTab(
                                 .background(if (!isMeshOnly) AccentGreen else Color.Transparent)
                                 .clickable {
                                     if (isActiveTab && filterMode != "Live Feed") {
-                                        lastSettledPage = -1
+                                        lastSettledItemId = null
                                         filterMode = "Live Feed"
                                     }
                                 }
@@ -1265,7 +1315,7 @@ fun UnifiedFeedTab(
                                         if (filterMode == "Live Feed" && pagerState.currentPage in unifiedItems.indices) {
                                             viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                                         }
-                                        lastSettledPage = -1
+                                        lastSettledItemId = null
                                         filterMode = "Mesh"
                                     }
                                 }
@@ -1312,7 +1362,7 @@ fun UnifiedFeedTab(
                                     .size(14.dp)
                                     .clickable {
                                         if (isActiveTab) {
-                                            lastSettledPage = -1
+                                            lastSettledItemId = null
                                             filterMode = "Live Feed"
                                             searchQuery = ""
                                             if (searchResultsActive) {
@@ -1408,7 +1458,7 @@ fun UnifiedFeedTab(
                                     viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                                 }
                                 
-                                lastSettledPage = -1
+                                lastSettledItemId = null
                                 searchQuery = q
                                 filterMode = localFilterMode
                                 
@@ -1590,7 +1640,7 @@ fun UnifiedFeedTab(
                             viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                         }
                         
-                        lastSettledPage = -1
+                        lastSettledItemId = null
                         searchQuery = q
                         filterMode = localFilterMode
                         
@@ -1617,7 +1667,7 @@ fun UnifiedFeedTab(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = { 
-                            lastSettledPage = -1
+                            lastSettledItemId = null
                             localSearchQuery = ""
                             localFilterMode = "Live Feed"
                             searchQuery = ""

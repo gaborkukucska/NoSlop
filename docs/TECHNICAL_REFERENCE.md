@@ -2287,7 +2287,14 @@ The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any mis
 
 ### 20.1 Immediate Swipe-Away History & Multi-Key Exclusion
 Previously, swiping away a slide only invoked `markItemViewed` if a 4-second dwell timer elapsed. If a user swiped away while the card was loading or within 3 seconds, the item remained unread (`isRead = false`), was never registered in `swipe_tracker`, and was omitted from `cachedExcludedIds`.
-- `UnifiedFeedTab.kt` tracks page transitions using hoisted `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
+- `UnifiedFeedTab.kt` tracks page transitions: whenever the pager settles on a different item, the slides moved past are immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
+- **By item, not by page (2026-10-09).** The settled item is tracked by id (`lastSettledItemId`), together with the ids of the list at that moment (`lastSettledListIds`). `itemsSwipedPast` works out what was passed:
+  - over an unchanged list, every item between the previous and the current one (a fling passes several);
+  - if the list changed in between, only a previous item directly next to the current one;
+  - nothing after a jump to the top, a mode switch, or when the previous item has left the list.
+- The old page-index range broke whenever the list changed under the pager. A mesh post arriving at the top moved the current post down a page, and the new post was marked viewed and swiped without being seen. A replaced list followed by a jump to the top marked every item between the top and the old page (seen in device logs as five posts "swiped away" within 10 ms). Text posts were lost from the Mesh view for good that way.
+- The 4 s dwell effect is keyed on the settled item id as well. It no longer marks an item that was replaced at the same page, and a list shift that keeps the same item on screen isn't a new slide for `onSlideViewed`.
+- Tested (unit: `FeedSwipeMarkingTest`).
 - `EngagementRepository.recordSwipe()` writes the raw `itemId`, normalized ID (`normId`), and canonical key (`canonicalKey`) into `swipe_tracker`.
 - `NoSlopViewModel.loadMoreFeedItems()` filters candidates against `cachedExcludedIds` across raw, normalized, and canonical keys, ensuring swiped items are permanently excluded from the Live Feed.
 
@@ -2297,7 +2304,7 @@ Previously, swiping away a slide only invoked `markItemViewed` if a 4-second dwe
 - `NoSlopViewModel` ignores Room's initial empty emission (`feeds.isEmpty() && meshes.isEmpty()`), waiting for disk contents to emit before building `restoredFeed`.
 - `UnifiedFeedTab.kt` gates position restoration on `isSavedPositionLoaded == true`, scrolling to the saved target via `pagerState.scrollToPage(index)` before permitting any position saves.
 - `saveFeedPosition` centers `itemsToSave` around the active `itemId` rather than naive `takeLast(100)`, ensuring early slides are never dropped from `saved_feed_list`.
-- `lastSettledPage` is initialized to the restored index on cold start to avoid false swipe triggers on the initial scroll.
+- The settled item (`lastSettledItemId`) is set to the restored item on cold start to avoid false swipe triggers on the initial scroll.
 
 ### 20.3 Fair Round-Robin Creator Variety for 40+ Channels
 In `takeRoundRobin()`, sorting priority creator queues strictly by `effectiveDate` descending caused ~10 frequent daily uploaders to permanently occupy the top positions of `rawVideos`. Because each batch requested only 5 videos, the other 30+ creators were never reached until all 15 videos from the first 10 creators were consumed (~150 slides).
@@ -2337,7 +2344,7 @@ Previously, using the History filter presented several severe defects:
 - `NoSlopViewModel.loadMoreFeedItems()` handles `"History"` with an instant in-memory O(1) map resolution against `viewedHistoryRecords.value` (sorted by `viewedAt DESC`), bypassing all heavy feed filtering, regexes, and network sync.
 - History, Liked, and Saved batches default to 30 items, allowing smooth infinite scrolling past slide 27.
 - Dismissing filter chips and clearing modal filters calls `syncFilterMode("Live Feed", forceRefresh = false)`, immediately restoring `cachedDefaultFeed` and scrolling to `savedFeedItemId` with zero delay.
-- `LaunchedEffect(filterMode) { lastSettledPage = -1 }` in `UnifiedFeedTab.kt` prevents filter switches from registering false swipe-away events against vacated slides.
+- `LaunchedEffect(filterMode) { lastSettledItemId = null }` in `UnifiedFeedTab.kt` prevents filter switches from registering false swipe-away events against vacated slides.
 - The "See Old Posts" button on the Mesh "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts` is true.
 
 ### 20.7 Mesh Tab Instant Empty State & Position Restoration on Return
@@ -2346,7 +2353,9 @@ Previously, toggling to the Mesh tab checked `if (isRefreshing)` before checking
 - `UnifiedFeedTab.kt` prioritizes `filterMode == "Mesh"` in the empty state container, instantly rendering the "Nothing New Here" card by default with zero delay.
 - The "See Old Posts" button on the "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts == true`.
 - The tab-switching restore mechanism uses a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)` independent of the one-time cold-start flag, restoring the exact slide position when returning to "All".
-- On tab clicks ("All" / "Mesh"), `lastSettledPage` is reset to -1 so tab switches do not trigger false swipe-away events against the vacated slide.
+- On tab clicks ("All" / "Mesh"), `lastSettledItemId` is cleared so tab switches do not trigger false swipe-away events against the vacated slide.
+- **Mode switch from a pager load (2026-10-09).** `loadMoreFeedItems(mode)` for a mode other than the current one now switches the mode the way `syncFilterMode` does: it caches the Live Feed, empties the list, clears `sessionLoadedIds`, resets "See Old Posts" for Mesh and updates `currentFilterModeFlow`. The feed screen's `syncFilterMode(mode)` is a no-op once the mode matches, so when the pager's load ran first the All feed's session ids stayed behind. Mesh posts that had been loaded into the All feed but never reached were then hidden from Mesh.
+- **Infinite scroll appends (2026-10-09).** In the specific-filter path (Mesh, My Content, Videos, Images, Audio, Articles, search) only the first batch of a mode fills the list and scrolls to the top. Later batches are appended. They used to replace the list and jump to the top, so with more than one batch of mesh posts the user lost the first batch, and the jump marked posts in between as seen.
 
 ### 20.8 History Filter Chronological Ordering, In-Memory Fast Path & Search Integration
 Previously, using the History filter presented several severe defects:
@@ -2415,6 +2424,9 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 * **Local Proxy Loopback Isolation**: `HttpClientProvider.loopbackClient` enforces `Proxy.NO_PROXY` for requests targeting `127.0.0.1` and `localhost`. Eliminates `Connection reset` and `Broken pipe` exceptions previously caused by `torClient` routing local ExoPlayer proxy connections through the Tor SOCKS daemon when "Route Clearnet via Tor" was enabled.
 * **Unthrottled Background Chunk Pipeline**: Removed blocking `isVideoActive` checks in `MediaManager.requestNextChunks`. Downloads continue without interruption across background navigation and tab changes. Switched `MeshTransport` to suspending `mediaSemaphore.acquire()` (3 permits), preventing packet loss on high-latency Tor hidden service circuits.
 * **Seen State Playback Gating**: `NoSlopViewModel.markItemViewed` and `recordItemSwiped` strictly verify that attached mesh media exists on disk and has commenced playback (`playedMeshPostIds`) before applying seen timestamps or swipe exclusions.
+  * **2026-10-09:** the check is `isMeshMediaUnseen(post)`. It applies only to posts with a mesh media id in `mediaUrl`, and not to file attachments (the card is the whole post; downloading is optional). Posts without mesh media (text, clearnet shares) are never held back. A post with a media type but no media id used to be held back for good.
+  * `markMeshMediaPlaybackStarted` is now called for every kind of mesh media: by `VideoPlayer` on playback, by `AudioPlayer` (new `onPlaybackStarted` parameter) when audio starts playing, and by `FullScreenMeshCardV2` when a downloaded image or GIF is on screen. Only video used to report, so image, GIF and audio posts were never marked seen and kept returning in Mesh as new.
+  * Mesh posts without a clearnet or media URL are keyed by their id in `getCanonicalItemKey`. They used to be keyed by their first 80 characters (`mesh_title_…`), so two text posts that began alike hid each other in the feed, and viewing one marked the other as seen. Clearnet shares are still keyed by their URL, so one link shared by several peers shows once. Tested (unit: `MeshCanonicalKeyTest`).
 
 ### 23.10 Broadcast Slide Stability, Mesh Post Editing & Swipe-Down Bottom Sheets (v0.5.6-alpha)
 * **Broadcast Recomposition Stability**: `NoSlopViewModel.kt` promotes `localKeys` and `burnableKeys` to `SharingStarted.Eagerly`. Eliminates transient `null` evaluation cycles in `UnifiedFeedTab.kt` that caused index-0 pager key oscillation and slide flickering. `allMeshes` filter accommodates both primary and burnable identities.
