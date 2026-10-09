@@ -712,13 +712,14 @@ class HandshakePacketHandler(
                     val timestamp = group.createdAt
                     val sortedMembers = members.sorted().joinToString(",")
                     val allMembers = (members + group.adminPublicKeyB64).distinct()
-                    val myHandle = repo.getLocalHandle()
+                    // D04: the admin key's own handle (the creator handle for an open group's creator key).
+                    val adminHandle = repo.ownHandleFor(adminKeys.publicKeyB64)
                     val memberDetailsMap = allMembers.mapNotNull { pub ->
                         val p = peerDao.getPeerByPublicKey(pub)
                         if (p != null) {
                             pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
                         } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
-                            pub to GroupMemberInfo(myHandle, adminKeys.encPublicKeyB64, adminKeys.onionAddress)
+                            pub to GroupMemberInfo(adminHandle, adminKeys.encPublicKeyB64, adminKeys.onionAddress)
                         } else null
                     }.toMap()
                     val sortedDetails = canonicalMemberDetailsString(memberDetailsMap)
@@ -775,6 +776,13 @@ class HandshakePacketHandler(
 
     suspend fun handleIdentityUpdate(packet: NetworkPacket): Boolean {
         val identityPay = packet.getIdentityUpdatePayload() ?: return false
+        // Senders sign with CryptoService.encodeForSigning (MeshSocialRepository.broadcastIdentityUpdate),
+        // but only the older pipe-joined form was checked here, so no IDENTITY_UPDATE was ever accepted
+        // and profile changes never reached contacts. Both forms are accepted now.
+        val canonical = CryptoService.encodeForSigning(
+            identityPay.userId, identityPay.handle, identityPay.timestamp.toString(),
+            identityPay.authorAvatarB64, identityPay.bio
+        )
         var payloadToVerify = "${identityPay.userId}|${identityPay.handle}|${identityPay.timestamp}"
         if (identityPay.authorAvatarB64 != null) {
             payloadToVerify += "|${identityPay.authorAvatarB64}"
@@ -782,7 +790,8 @@ class HandshakePacketHandler(
         if (!identityPay.bio.isNullOrBlank()) {
             payloadToVerify += "|${identityPay.bio}"
         }
-        if (!CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)) return false
+        if (!CryptoService.verify(canonical, identityPay.signature, identityPay.userId) &&
+            !CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)) return false
 
         val isOldPacket = (System.currentTimeMillis() - identityPay.timestamp) > 5 * 60 * 1000L
         if (isOldPacket) return true
@@ -1199,7 +1208,7 @@ class HandshakePacketHandler(
             val p = peerDao.getPeerByPublicKey(pub)
             if (p != null) pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
             else if (pub == myKeys.publicKeyB64 || (burnableKeys != null && pub == burnableKeys.publicKeyB64)) {
-                pub to GroupMemberInfo(repo.getLocalHandle(), signingKey.encPublicKeyB64, signingKey.onionAddress)
+                pub to GroupMemberInfo(repo.ownHandleFor(signingKey.publicKeyB64), signingKey.encPublicKeyB64, signingKey.onionAddress)
             } else null
         }.toMap()
 

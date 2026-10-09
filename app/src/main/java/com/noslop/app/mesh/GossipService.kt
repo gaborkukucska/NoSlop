@@ -811,12 +811,14 @@ object GossipService {
         val forwardedPacket = NetworkPacket(
             id = packet.id,
             hops = currentHops - 1,
-            senderId = if (packet.type == "MESSAGE" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE" || packet.type.startsWith("GROUP_")) packet.senderId else localPublicKeyB64,
+            senderId = if (preservesOriginalSender(packet.type)) packet.senderId else localPublicKeyB64,
             targetUserId = packet.targetUserId,
             signature = packet.signature,
             type = packet.type,
             payload = packet.payload
         )
+        val router = tx.repository.identityRouter
+        val creatorPub = if (preservesOriginalSender(packet.type)) null else tx.repository.getBurnableIdentity()?.publicKeyB64
 
         for (peer in peersToForward) {
             // Skip peers that are in cooldown due to repeated failures
@@ -826,8 +828,69 @@ object GossipService {
             }
             
             scope.launch {
-                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, forwardedPacket)
+                // D04: we relay as the identity this peer knows. The relay used to be stamped with the
+                // personal key for everyone, which handed creator contacts our personal key.
+                val outbound = if (creatorPub != null && router.knowsUsAsCreator(peer.publicKeyB64, peer)) {
+                    forwardedPacket.copy(senderId = creatorPub)
+                } else {
+                    forwardedPacket
+                }
+                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, outbound)
             }
+        }
+    }
+
+    /**
+     * Packet types whose envelope keeps the original sender when relayed (the receiver needs it, e.g. to
+     * decrypt a DM or to check group membership). All other relayed packets carry the relaying node.
+     */
+    internal fun preservesOriginalSender(type: String): Boolean =
+        type == "MESSAGE" || type == "ANNOUNCE_DISCOVERABLE" || type == "CHAT_REACTION" ||
+            type == "DELETE_MESSAGE" || type.startsWith("GROUP_")
+
+    /**
+     * D04: packets that only make sense from the identity a peer knows: presence, profile, exit, follow,
+     * removal. They are never sent across identities, not even dressed as a relay.
+     */
+    internal fun isSameIdentityOnlyType(type: String): Boolean =
+        type == "ANNOUNCE_PEER" || type == "IDENTITY_UPDATE" || type == "USER_EXIT" ||
+            type == "FOLLOW" || type == "UNFOLLOW" || type == "PEER_REMOVED"
+
+    /**
+     * D04: what one of our own broadcasts looks like to [peer], or null when that peer must not get it
+     * directly. [peerKnowsCreator] says whether the peer knows us by our creator identity
+     * ([com.noslop.app.data.IdentityRouter.knowsUsAsCreator]).
+     *
+     *  - Written by our personal identity, for a creator contact: not sent. A creator contact used to
+     *    receive our personal posts, comments, reactions, presence (with the personal onion) and
+     *    profile directly from the creator node, with the envelope re-stamped, which linked the two.
+     *  - Written by our creator identity, for a contact who knows our personal identity: sent exactly
+     *    as a relay of someone else's packet would be (hop count one lower; envelope = the relaying
+     *    node, or the original sender for the types a relay keeps it for), so a friend cannot tell it
+     *    from a relayed creator post. It used to go out re-stamped with the personal key as an original.
+     *    Presence and profile packets ([isSameIdentityOnlyType]) are not sent.
+     *  - Otherwise: the envelope names the identity the peer knows (as before).
+     */
+    internal fun outboundFor(
+        packet: NetworkPacket,
+        peerKnowsCreator: Boolean,
+        mainPub: String?,
+        creatorPub: String?
+    ): NetworkPacket? {
+        val routedPub = (if (peerKnowsCreator) creatorPub else mainPub) ?: return null
+        val writtenByMain = mainPub != null && packet.senderId == mainPub
+        val writtenByCreator = creatorPub != null && packet.senderId == creatorPub
+        return when {
+            writtenByMain && peerKnowsCreator -> null
+            writtenByCreator && !peerKnowsCreator -> {
+                if (isSameIdentityOnlyType(packet.type)) return null
+                packet.copy(
+                    senderId = if (preservesOriginalSender(packet.type)) packet.senderId else routedPub,
+                    hops = ((packet.hops ?: DEFAULT_MAX_HOPS).coerceIn(1, DEFAULT_MAX_HOPS) - 1).coerceAtLeast(1)
+                )
+            }
+            packet.senderId == routedPub -> packet
+            else -> packet.copy(senderId = routedPub)
         }
     }
 
@@ -896,14 +959,28 @@ object GossipService {
             }
             
             scope.launch {
-                val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
-                val isCreatorTraffic = tx.repository.getAppSetting("is_creator_enabled") == "true"
-                val peerSenderId = if (!isFriendsOnly && (peerIdentitySetting == "burnable" || (isCreatorTraffic && peer.isTemporary))) {
-                    tx.repository.getBurnableIdentity()?.publicKeyB64 ?: packet.senderId
+                val outboundPacket = if (isGroupPacket || isFriendsOnly) {
+                    // Group and friends-only traffic keeps its existing per-peer envelope rule.
+                    val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
+                    val isCreatorTraffic = tx.repository.getAppSetting("is_creator_enabled") == "true"
+                    val peerSenderId = if (!isFriendsOnly && (peerIdentitySetting == "burnable" || (isCreatorTraffic && peer.isTemporary))) {
+                        tx.repository.getBurnableIdentity()?.publicKeyB64 ?: packet.senderId
+                    } else {
+                        tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId
+                    }
+                    if (packet.senderId != peerSenderId) packet.copy(senderId = peerSenderId) else packet
                 } else {
-                    tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId
+                    outboundFor(
+                        packet,
+                        peerKnowsCreator = tx.repository.identityRouter.knowsUsAsCreator(peer.publicKeyB64, peer),
+                        mainPub = tx.repository.getLocalIdentity()?.publicKeyB64,
+                        creatorPub = tx.repository.getBurnableIdentity()?.publicKeyB64
+                    )
                 }
-                val outboundPacket = if (packet.senderId != peerSenderId) packet.copy(senderId = peerSenderId) else packet
+                if (outboundPacket == null) {
+                    Logger.debug(TAG, "Not sending ${packet.type} ${packet.id} to ${peer.publicKeyB64.take(12)}: written by the identity this peer doesn't know")
+                    return@launch
+                }
                 tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, outboundPacket)
             }
         }

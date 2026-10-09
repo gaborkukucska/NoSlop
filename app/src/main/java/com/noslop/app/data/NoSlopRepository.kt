@@ -141,13 +141,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // WHY: all social/mesh write+broadcast actions and the presence heartbeat live in
     // MeshSocialRepository (Stage 0.3, final repository split). Identity/profile are injected as
     // suspend accessors so it stays decoupled; the facade's lifecycle methods trigger its broadcasts.
+    /** D04: which of our identities (and which profile) a packet for a given peer is built from. */
+    val identityRouter = IdentityRouter(
+        db,
+        getLocalIdentity = { getLocalIdentity() },
+        getBurnableIdentity = { getBurnableIdentity() },
+        getLocalHandle = { getLocalHandle() },
+        getUserProfile = { getUserProfile() },
+        getCreatorProfile = { getCreatorProfile() }
+    )
+
     internal val meshSocialRepository = MeshSocialRepository(
         db, meshTransport, repositoryScope,
         getLocalIdentity = { getLocalIdentity() },
         getBurnableIdentity = { getBurnableIdentity() },
         getLocalHandle = { getLocalHandle() },
         getUserProfile = { getUserProfile() },
-        getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() }
+        getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
+        identityRouter = identityRouter
     )
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
@@ -706,8 +717,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun toggleFollowPeer(peerPub: String, follow: Boolean) {
         peerDao.updateFollowState(peerPub, follow)
-        val myKeys = getLocalIdentity() ?: return
         val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
+        // D04: follow a creator as the identity they know us by.
+        val myKeys = identityRouter.forPeer(peerPub, peer)?.keys ?: return
         if (peer.onionAddress.isNotBlank()) {
             val timestamp = System.currentTimeMillis()
             val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(peerPub, myKeys.publicKeyB64, timestamp.toString())
@@ -752,10 +764,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val timestamp = System.currentTimeMillis()
         
         val myHandle = getLocalHandle() ?: "Me"
+        // D04: the admin key's own handle (the creator handle when an open group uses the creator key).
+        val adminHandle = ownHandleFor(adminKeys.publicKeyB64)
         val memberHandlesMap = allMembers.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
             if (peer != null) pub to peer.handle
-            else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) pub to myHandle
+            else if (pub == adminKeys.publicKeyB64) pub to adminHandle
+            else if (pub == myMain.publicKeyB64) pub to myHandle
             else null
         }.toMap()
 
@@ -785,7 +800,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
             } else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) {
                 pub to com.noslop.app.mesh.GroupMemberInfo(
-                    handle = myHandle,
+                    handle = adminHandle,
                     encPublicKey = adminKeys.encPublicKeyB64,
                     onionAddress = adminKeys.onionAddress
                 )
@@ -964,8 +979,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     suspend fun sendTypingSignal(peerPub: String, isTyping: Boolean) {
-        val myKeys = getLocalIdentity() ?: return
         val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
+        // D04: as the identity this contact knows (it used to always be the personal one).
+        val myKeys = identityRouter.forPeer(peerPub, peer)?.keys ?: return
         if (peer.onionAddress.isNotBlank()) {
             val typingPayload = com.noslop.app.mesh.TypingPayload(
                 chatWithPeerPub = myKeys.publicKeyB64,
@@ -1145,6 +1161,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val peer = db.peerDao().getPeerByPublicKey(pub)
             if (peer != null) existingHandles[pub] = peer.handle
             else if (pub == myKeys.publicKeyB64) existingHandles[pub] = myHandle
+            // D04: our creator key goes by the creator handle (older copies may hold the personal one).
+            else if (burnableKeys != null && pub == burnableKeys.publicKeyB64) existingHandles[pub] = ownHandleFor(pub)
         }
         val memberHandlesMap = existingHandles.toMap()
 
@@ -1194,7 +1212,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
             } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
                 pub to com.noslop.app.mesh.GroupMemberInfo(
-                    handle = myHandle,
+                    handle = ownHandleFor(adminKeys.publicKeyB64),
                     encPublicKey = adminKeys.encPublicKeyB64,
                     onionAddress = adminKeys.onionAddress
                 )
@@ -1447,10 +1465,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         } catch (e: Exception) { emptyList() }
 
         val myHandle = getLocalHandle() ?: "Me"
+        val adminHandle = ownHandleFor(adminKeys.publicKeyB64)
         val memberHandlesMap = members.mapNotNull { pub ->
             val peer = db.peerDao().getPeerByPublicKey(pub)
             if (peer != null) pub to peer.handle
-            else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) pub to myHandle
+            else if (pub == adminKeys.publicKeyB64) pub to adminHandle
+            else if (pub == myKeys.publicKeyB64) pub to myHandle
             else null
         }.toMap()
 
@@ -1465,7 +1485,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 )
             } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
                 pub to com.noslop.app.mesh.GroupMemberInfo(
-                    handle = myHandle,
+                    handle = adminHandle,
                     encPublicKey = adminKeys.encPublicKeyB64,
                     onionAddress = adminKeys.onionAddress
                 )
@@ -2092,6 +2112,27 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun getUserProfile(): UserProfile =
         preferencesRepository.getUserProfile()
+
+    /** D04: the creator identity's own profile; the empty profile (handle "Creator") until set. */
+    suspend fun getCreatorProfile(): UserProfile =
+        preferencesRepository.getCreatorProfile()
+
+    /**
+     * D04: stores the creator profile and tells the creator identity's contacts (IDENTITY_UPDATE signed
+     * by the creator key; GossipService sends it to creator contacts only).
+     */
+    suspend fun saveCreatorProfile(profile: UserProfile) {
+        preferencesRepository.saveCreatorProfile(profile)
+        _identityUpdateFlow.emit(Unit)
+        meshSocialRepository.broadcastCreatorIdentityUpdate()
+    }
+
+    /** D04: a burned creator identity starts with an empty profile, so nothing links old and new. */
+    suspend fun clearCreatorProfile() = preferencesRepository.clearCreatorProfile()
+
+    /** D04: the handle that goes with one of our own keys (creator handle for the creator key). */
+    suspend fun ownHandleFor(publicKeyB64: String): String =
+        identityRouter.forKey(publicKeyB64)?.handle ?: getLocalHandle()
 
     suspend fun saveBannedChannels(channels: List<String>) =
         preferencesRepository.saveBannedChannels(channels)

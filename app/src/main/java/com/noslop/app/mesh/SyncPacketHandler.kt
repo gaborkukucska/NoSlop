@@ -113,9 +113,13 @@ class SyncPacketHandler(
         // D01: one friend rule everywhere (Peer.isFriend), plus the bound contact identity.
         val isTrustedDirectPeer = requestingPeer?.isFriend == true && contactIdentity != "burnable"
         val myPub = localKeys.publicKeyB64
+        // D04: answer as the identity the requester knows; a creator contact gets nothing our personal
+        // identity wrote (posts, comments on them, comments and reactions by it).
+        val me = if (requestingPeer != null) repo.identityRouter.forPeer(packet.senderId, requestingPeer) else null
+        val hiddenAuthor = if (me?.isCreator == true) myPub else null
 
         val recentPosts = postDao.getPostsSince(syncPay.since).filter { post ->
-            !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+            !post.isOrphaned && post.authorPublicKeyB64 != hiddenAuthor && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val postCache = mutableMapOf<String, MeshPost?>()
         recentPosts.forEach { postCache[it.id] = it }
@@ -129,7 +133,8 @@ class SyncPacketHandler(
                 postCache[comment.postId] = p
                 p
             }
-            post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+            post != null && !post.isOrphaned && comment.authorPublicKeyB64 != hiddenAuthor && post.authorPublicKeyB64 != hiddenAuthor &&
+                canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
@@ -139,17 +144,16 @@ class SyncPacketHandler(
                 postCache[reaction.postId] = p
                 p
             }
-            post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+            post != null && !post.isOrphaned && reaction.authorPublicKeyB64 != hiddenAuthor && post.authorPublicKeyB64 != hiddenAuthor &&
+                canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
-        if (requestingPeer != null) {
+        if (requestingPeer != null && me != null) {
             val maxBatchSize = 25
-            val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
-            val effectiveSenderId = if (contactIdentity == "burnable" || isCreator) {
-                repo.getBurnableIdentity()?.publicKeyB64 ?: localKeys.publicKeyB64
-            } else {
-                localKeys.publicKeyB64
-            }
+            // D04: the identity the requester knows. In creator mode this used to be the creator key for
+            // everyone, so friends saw the creator key answer for the personal one (and dropped the
+            // friends-only posts in the answer, since the creator key isn't their friend).
+            val effectiveSenderId = me.publicKeyB64
             
             // Send posts in batches
             for (postBatch in postPayloads.chunked(maxBatchSize)) {
@@ -212,12 +216,15 @@ class SyncPacketHandler(
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = localKeys.publicKeyB64
         val myBurnablePub = repo.getBurnableIdentity()?.publicKeyB64
+        // D04: as in handleSyncRequest — the identity the requester knows, nothing personal to a creator contact.
+        val me = if (requestingPeer != null) repo.identityRouter.forPeer(packet.senderId, requestingPeer) else null
+        val hiddenAuthor = if (me?.isCreator == true) myPub else null
         val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
-            !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+            !post.isOrphaned && post.authorPublicKeyB64 != hiddenAuthor && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }.toMutableList()
         // Always include own authored broadcasts regardless of age
         val olderOwnPosts = postDao.getPostsSince(0L).filter { post ->
-            !post.isOrphaned && post.timestamp <= syncCutoff &&
+            !post.isOrphaned && post.timestamp <= syncCutoff && post.authorPublicKeyB64 != hiddenAuthor &&
             (post.authorPublicKeyB64 == myPub || (myBurnablePub != null && post.authorPublicKeyB64 == myBurnablePub)) &&
             (post.privacy != "friends" || isTrustedDirectPeer)
         }
@@ -243,7 +250,8 @@ class SyncPacketHandler(
                 postCache[comment.postId] = p
                 p
             }
-            post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+            post != null && !post.isOrphaned && comment.authorPublicKeyB64 != hiddenAuthor && post.authorPublicKeyB64 != hiddenAuthor &&
+                canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
@@ -253,16 +261,13 @@ class SyncPacketHandler(
                 postCache[reaction.postId] = p
                 p
             }
-            post != null && !post.isOrphaned && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+            post != null && !post.isOrphaned && reaction.authorPublicKeyB64 != hiddenAuthor && post.authorPublicKeyB64 != hiddenAuthor &&
+                canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
-        if (requestingPeer != null) {
+        if (requestingPeer != null && me != null) {
             val maxBatchSize = 25
-            val effectiveSenderId = if (contactIdentity == "burnable") {
-                repo.getBurnableIdentity()?.publicKeyB64 ?: localKeys.publicKeyB64
-            } else {
-                localKeys.publicKeyB64
-            }
+            val effectiveSenderId = me.publicKeyB64
 
             // Send posts in batches
             for (postBatch in postPayloads.chunked(maxBatchSize)) {

@@ -402,9 +402,13 @@ class DmPacketHandler(
 
         GossipService.recordSendSuccess(peer.onionAddress)
 
+        // D04: the messages we sent as the identity this contact knows, re-sent as that identity. This
+        // used to look up (and send as) the personal identity only, so a creator contact got nothing back
+        // and every resend named the personal key.
+        val me = repo.identityRouter.forPeer(peerPub, peer)?.keys ?: return true
         val missedMessages = messageDao.getMessagesSentAfter(
             peerPub = peerPub,
-            myPub = localKeys.publicKeyB64,
+            myPub = me.publicKeyB64,
             since = syncReq.since,
             limit = 50
         )
@@ -426,7 +430,7 @@ class DmPacketHandler(
             val packetToSend = NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 3,
-                senderId = localKeys.publicKeyB64,
+                senderId = me.publicKeyB64,
                 targetUserId = peerPub,
                 type = "MESSAGE",
                 payload = com.noslop.app.util.Json.gson.toJsonTree(msgPay)

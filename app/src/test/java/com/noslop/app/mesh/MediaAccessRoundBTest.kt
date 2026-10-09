@@ -58,6 +58,9 @@ class MediaAccessRoundBTest {
                 onionAddress = follower.onionAddress, relationship = PeerRelationship.ACCEPTED, isTemporary = true
             )
         )
+        // A follower's contact is bound to our creator identity (acceptConnectionRequest does this). D04
+        // decides the identity by this binding, not by isTemporary alone.
+        db.appSettingDao().insertSetting(AppSetting("contact_identity_${follower.publicKeyB64}", "burnable"))
     }
 
     @After

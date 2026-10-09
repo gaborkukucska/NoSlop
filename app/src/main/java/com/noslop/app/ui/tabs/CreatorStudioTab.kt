@@ -3,7 +3,9 @@ package com.noslop.app.ui.tabs
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -66,9 +68,24 @@ fun CreatorStudioTab(
     var showBurnConfirmDialog by remember { mutableStateOf(false) }
     var burnableIdentity by remember { mutableStateOf<com.noslop.app.crypto.CryptoService.IdentityKeys?>(null) }
     val coroutineScope = rememberCoroutineScope()
-    val handle by viewModel.localHandle.collectAsState()
+    // D04: everything shown or shared as the creator uses the creator profile, never the personal one.
+    val creatorProfile by viewModel.creatorProfile.collectAsState()
+    val creatorHandle = creatorProfile.displayName.trim().ifBlank { com.noslop.app.data.DEFAULT_CREATOR_HANDLE }
+    var showProfileEditor by remember { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    if (showProfileEditor) {
+        CreatorProfileEditor(
+            current = creatorProfile,
+            onSave = { updated ->
+                viewModel.updateCreatorProfile(updated)
+                showProfileEditor = false
+            },
+            onBack = { showProfileEditor = false }
+        )
+        return
+    }
 
     Column(
         modifier = Modifier
@@ -163,6 +180,12 @@ fun CreatorStudioTab(
             }
         }
 
+        CreatorProfileCard(
+            profile = creatorProfile,
+            handle = creatorHandle,
+            onEdit = { showProfileEditor = true }
+        )
+
         Text(
             "AI Approval Queue".tr,
             style = MaterialTheme.typography.titleMedium,
@@ -255,13 +278,199 @@ fun CreatorStudioTab(
 
     if (showCreatorIdSheet && burnableIdentity != null) {
         com.noslop.app.ui.QRShareSheet(
-            handle = handle,
+            handle = creatorHandle,
             localKeys = burnableIdentity!!,
             title = "Creator Contact Card".tr,
             subtitle = "Fans and peers can scan this QR code to connect with your Creator Node. This connection uses your severable secondary Tor address, keeping your personal identity private.".tr,
             isCreator = true,
             onDismiss = { showCreatorIdSheet = false }
         )
+    }
+}
+
+/** D04: the creator identity's profile as followers see it, with an edit button. */
+@Composable
+private fun CreatorProfileCard(
+    profile: com.noslop.app.data.UserProfile,
+    handle: String,
+    onEdit: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(12.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CreatorAvatar(avatarB64 = profile.avatarB64, size = 44)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Creator Profile".tr, fontSize = 12.sp, color = TextMuted)
+                Text(handle, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextLight)
+                if (profile.displayName.isBlank()) {
+                    Text("Set a creator name. Followers see Creator until you do.".tr, fontSize = 11.sp, color = AccentGreen)
+                } else if (profile.bio.isNotBlank()) {
+                    Text(profile.bio, fontSize = 11.sp, color = TextMuted, maxLines = 2)
+                }
+            }
+            OutlinedButton(
+                onClick = onEdit,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Edit".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Text(
+            "Followers and creator contacts only ever see this profile, never your personal one.".tr,
+            fontSize = 11.sp,
+            color = TextMuted,
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+        )
+    }
+}
+
+@Composable
+private fun CreatorAvatar(avatarB64: String?, size: Int) {
+    val bitmap = remember(avatarB64) {
+        if (avatarB64.isNullOrBlank()) null else try {
+            val bytes = android.util.Base64.decode(avatarB64, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        } catch (_: Exception) { null }
+    }
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .clip(RoundedCornerShape(50))
+            .background(PrimaryBlack),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bitmap,
+                contentDescription = "Creator Avatar".tr,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            )
+        } else {
+            Icon(Icons.Default.Podcasts, contentDescription = null, tint = TextMuted, modifier = Modifier.size((size / 2).dp))
+        }
+    }
+}
+
+/**
+ * D04: edits the creator profile (picture, name, bio). Starts from the creator profile only, never
+ * from the personal one, so nothing personal is carried over by accident.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CreatorProfileEditor(
+    current: com.noslop.app.data.UserProfile,
+    onSave: (com.noslop.app.data.UserProfile) -> Unit,
+    onBack: () -> Unit
+) {
+    var displayName by remember { mutableStateOf(current.displayName) }
+    var bio by remember { mutableStateOf(current.bio) }
+    var avatarB64 by remember { mutableStateOf(current.avatarB64) }
+    var cropUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    if (cropUri != null) {
+        com.noslop.app.ui.components.AvatarCropper(
+            uri = cropUri!!,
+            onCropSuccess = { b64 ->
+                avatarB64 = b64
+                cropUri = null
+            },
+            onCancel = { cropUri = null }
+        )
+        return
+    }
+
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        cropUri = uri
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
+            }
+            Text(
+                text = "Edit Creator Profile".tr,
+                style = MaterialTheme.typography.titleLarge,
+                color = TextLight,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(16.dp)
+        ) {
+            Box(modifier = Modifier.clickable { launcher.launch("image/*") }) {
+                CreatorAvatar(avatarB64 = avatarB64, size = 80)
+            }
+            if (avatarB64 != null) {
+                TextButton(onClick = { avatarB64 = null }) {
+                    Text("Remove Picture".tr, color = DestructiveRed)
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedTextField(
+                value = displayName,
+                onValueChange = { displayName = it.take(40) },
+                label = { Text("Creator Name".tr) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = bio,
+                onValueChange = { bio = it },
+                label = { Text("Bio".tr) },
+                maxLines = 3,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Use a name and picture that don't identify your personal profile.".tr,
+                fontSize = 12.sp,
+                color = TextMuted
+            )
+        }
+
+        Button(
+            onClick = {
+                onSave(current.copy(displayName = displayName, bio = bio, avatarB64 = avatarB64))
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).height(50.dp)
+        ) {
+            Text("Save Creator Profile".tr, fontWeight = FontWeight.Bold)
+        }
     }
 }
 

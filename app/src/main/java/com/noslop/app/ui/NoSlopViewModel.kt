@@ -481,6 +481,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _userProfile = MutableStateFlow(com.noslop.app.data.UserProfile())
     val userProfile: StateFlow<com.noslop.app.data.UserProfile> = _userProfile.asStateFlow()
 
+    /** D04: the creator identity's own profile (handle, bio, avatar), edited in Creator Studio. */
+    private val _creatorProfile = MutableStateFlow(com.noslop.app.data.UserProfile())
+    val creatorProfile: StateFlow<com.noslop.app.data.UserProfile> = _creatorProfile.asStateFlow()
+
+    /** D04: saves the creator profile, tells creator contacts and refreshes the discoverable announcement. */
+    fun updateCreatorProfile(profile: com.noslop.app.data.UserProfile) {
+        viewModelScope.launch {
+            val clean = profile.copy(displayName = profile.displayName.trim(), bio = profile.bio.trim())
+            repository.saveCreatorProfile(clean)
+            _creatorProfile.value = clean
+            if (_isDiscoverableEnabled.value) {
+                broadcastDiscoverable()
+            }
+        }
+    }
+
     private val _selectedInterests = MutableStateFlow<List<String>>(emptyList())
     val selectedInterests: StateFlow<List<String>> = _selectedInterests.asStateFlow()
 
@@ -642,6 +658,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _appLanguage.value = appLang
             com.noslop.app.util.LanguageManager.loadLanguage(appLang)
             _userProfile.value = repository.getUserProfile()
+            _creatorProfile.value = repository.getCreatorProfile()
             _selectedInterests.value = repository.getUserSelectedCategories()
             _selectedMusicGenres.value = repository.getSelectedMusicGenres()
             _selectedVideoGenres.value = repository.getSelectedVideoGenres()
@@ -2028,6 +2045,7 @@ fun toggleAggregator() {
             _selectedPeerPub.value = null
             _selectedGroupChatId.value = null
             _userProfile.value = com.noslop.app.data.UserProfile()
+            _creatorProfile.value = com.noslop.app.data.UserProfile()
             _selectedInterests.value = emptyList()
             _selectedMusicGenres.value = emptyList()
             _selectedVideoGenres.value = emptyList()
@@ -2719,6 +2737,9 @@ fun toggleAggregator() {
     fun burnCreatorIdentity() {
         viewModelScope.launch {
             repository.clearBurnableIdentity()
+            // D04: the new creator identity must not carry the old one's handle, bio or avatar.
+            repository.clearCreatorProfile()
+            _creatorProfile.value = com.noslop.app.data.UserProfile()
             ensureBurnableIdentity()
             if (_isDiscoverableEnabled.value) {
                 broadcastDiscoverable()
@@ -2786,7 +2807,9 @@ fun toggleAggregator() {
 
     fun broadcastDiscoverable() {
         viewModelScope.launch {
-            val handle = localHandle.value
+            // D04: the creator profile's handle and bio, never the personal ones.
+            val creatorProfile = repository.getCreatorProfile()
+            val handle = creatorProfile.creatorHandle()
             val isCreator = _isCreatorEnabled.value
             val link = _creatorFundMeLink.value.takeIf { it.isNotBlank() }
             
@@ -2812,9 +2835,9 @@ fun toggleAggregator() {
             val encKeyB64 = identity.encPublicKeyB64
             val timestamp = System.currentTimeMillis()
             
-            val userProfile = repository.getUserProfile()
+            val creatorBio = creatorProfile.bio.takeIf { it.isNotBlank() }
             // Omit avatar to save bandwidth on the periodic background heartbeat
-            val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}::${userProfile.bio ?: ""}:${timestamp}"
+            val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}::${creatorBio ?: ""}:${timestamp}"
             val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, identity.privateKeyB64)
             
             val payload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
@@ -2825,7 +2848,7 @@ fun toggleAggregator() {
                 isCreator = isCreator,
                 fundMeLink = link,
                 authorAvatarB64 = null,
-                bio = userProfile.bio,
+                bio = creatorBio,
                 timestamp = timestamp,
                 signature = signature
             )

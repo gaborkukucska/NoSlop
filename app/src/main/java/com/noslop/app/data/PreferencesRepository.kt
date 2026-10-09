@@ -175,6 +175,20 @@ class PreferencesRepository(
         UserProfile() // Default empty profile
     }
 
+    /** D04: the creator identity's own profile (handle, bio, avatar); never the personal one. */
+    suspend fun saveCreatorProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting(CREATOR_PROFILE_KEY, com.noslop.app.util.Json.gson.toJson(profile)))
+    }
+
+    /** D04: the creator profile; the empty profile (handle [DEFAULT_CREATOR_HANDLE]) until one is set. */
+    suspend fun getCreatorProfile(): UserProfile = withContext(Dispatchers.IO) {
+        parseCreatorProfile(appSettingDao.getSetting(CREATOR_PROFILE_KEY))
+    }
+
+    suspend fun clearCreatorProfile() = withContext(Dispatchers.IO) {
+        appSettingDao.removeSetting(CREATOR_PROFILE_KEY)
+    }
+
     // --- Banned Channels ---
 
     suspend fun saveBannedChannels(channels: List<String>) = withContext(Dispatchers.IO) {

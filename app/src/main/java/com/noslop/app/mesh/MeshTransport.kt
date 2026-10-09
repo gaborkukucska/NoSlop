@@ -143,6 +143,7 @@ class MeshTransport(
     }
 
     suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+        sendInterceptorForTesting?.let { return@withContext it(onionAddress, packet) }
         var pushedToHub = false
         val hubStatus = repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
@@ -391,6 +392,13 @@ class MeshTransport(
     }
 
     companion object {
+        /**
+         * Tests only: when set, every [sendPacket] goes here (onion, packet) instead of the Hub or Tor,
+         * and its result is returned. Used to check exactly what each peer is sent (review D04).
+         */
+        @Volatile
+        internal var sendInterceptorForTesting: (suspend (String, NetworkPacket) -> Boolean)? = null
+
         internal fun isHandshakeType(type: String) = type == "CONNECTION_REQUEST" || type == "USER_HANDSHAKE"
 
         internal fun isDmHighPriorityType(type: String) = type == "MESSAGE" || type == "DELETE_MESSAGE" ||

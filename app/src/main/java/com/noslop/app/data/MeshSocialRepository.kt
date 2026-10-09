@@ -39,7 +39,11 @@ class MeshSocialRepository(
     private val getBurnableIdentity: suspend () -> CryptoService.IdentityKeys? = { null },
     private val getLocalHandle: suspend () -> String,
     private val getUserProfile: suspend () -> UserProfile,
-    private val getMeshFilterSettings: suspend () -> com.noslop.app.data.MeshFilterSettings = { com.noslop.app.data.MeshFilterSettings() }
+    private val getMeshFilterSettings: suspend () -> com.noslop.app.data.MeshFilterSettings = { com.noslop.app.data.MeshFilterSettings() },
+    /** D04: picks the identity and profile for each outgoing packet (NoSlopRepository passes its own). */
+    private val identityRouter: IdentityRouter = IdentityRouter(
+        db, getLocalIdentity, getBurnableIdentity, getLocalHandle, getUserProfile, getCreatorProfile = { UserProfile() }
+    )
 ) {
     private val TAG = "REPOSITORY"
 
@@ -68,15 +72,15 @@ class MeshSocialRepository(
     private val commentVoteDao = db.commentVoteDao()
 
     /**
-     * Which of our identities a peer knows us by. The bound contact identity wins; before the
-     * user has accepted, the identity the peer addressed (requested_identity_*) is used so a reply
-     * to someone who contacted our burnable identity never comes from the personal one (D01/D04).
+     * Which of our identities a peer knows us by ([IdentityRouter.forPeer]). The bound contact identity
+     * wins; before the user has accepted, the identity the peer addressed (requested_identity_*) is used
+     * so a reply to someone who contacted our burnable identity never comes from the personal one.
+     *
+     * D04: null when the peer knows us as a creator and the creator identity is gone. Callers used to
+     * fall back to the personal identity then, which handed that peer the personal key.
      */
-    private suspend fun getIdentityForPeer(peerPubKey: String): CryptoService.IdentityKeys? {
-        val setting = db.appSettingDao().getSetting("contact_identity_$peerPubKey")
-            ?: db.appSettingDao().getSetting("requested_identity_$peerPubKey")
-        return if (setting == "burnable") getBurnableIdentity() else getLocalIdentity()
-    }
+    private suspend fun getIdentityForPeer(peerPubKey: String): CryptoService.IdentityKeys? =
+        identityRouter.forPeer(peerPubKey)?.keys
 
     // Persistent DM outbox: queued packets waiting for peer connection
     private val pendingOutboxMessages = java.util.concurrent.ConcurrentHashMap<String, MutableList<com.noslop.app.mesh.NetworkPacket>>()
@@ -564,10 +568,74 @@ class MeshSocialRepository(
         _acceptedHandshakeFlow.value = null
     }
 
+    private var creatorPresenceJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * D04: the creator identity's own presence. An ANNOUNCE_PEER signed by the creator key (only creator
+     * contacts receive it; they never got one before, since the personal announce names the personal
+     * key) and, when discoverable, the ANNOUNCE_DISCOVERABLE with the creator profile's handle and bio
+     * (it used to carry the personal handle and bio).
+     */
+    internal suspend fun announceCreatorPresence() {
+        val creator = identityRouter.creator() ?: return
+        val keys = creator.keys
+        val timestamp = System.currentTimeMillis()
+        val announceSig = CryptoService.sign(CryptoService.encodeForSigning(keys.publicKeyB64, timestamp.toString()), keys.privateKeyB64)
+        com.noslop.app.mesh.GossipService.broadcast(
+            com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = keys.publicKeyB64,
+                type = "ANNOUNCE_PEER",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(
+                    com.noslop.app.mesh.AnnouncePeerPayload(
+                        authorId = keys.publicKeyB64,
+                        onionAddress = keys.onionAddress,
+                        timestamp = timestamp,
+                        signature = announceSig
+                    )
+                ),
+                signature = announceSig
+            )
+        )
+
+        if (db.appSettingDao().getSetting("is_discoverable_enabled") != "true") return
+        val creatorAddress = keys.onionAddress.takeIf { it.isNotBlank() } ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress ?: return
+        val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
+        val link = db.appSettingDao().getSetting("creator_fundme_link")?.takeIf { it.isNotBlank() }
+        // Omit avatar to save bandwidth on the periodic background heartbeat
+        val msgToSign = "${keys.publicKeyB64}:${creator.handle}:${creatorAddress}:${keys.encPublicKeyB64}:${isCreator}:${link ?: ""}::${creator.bio ?: ""}:${timestamp}"
+        val sig = CryptoService.sign(msgToSign, keys.privateKeyB64)
+        val discPayload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
+            authorId = keys.publicKeyB64,
+            handle = creator.handle,
+            onionAddress = creatorAddress,
+            encPublicKey = keys.encPublicKeyB64,
+            isCreator = isCreator,
+            fundMeLink = link,
+            authorAvatarB64 = null,
+            bio = creator.bio,
+            timestamp = timestamp,
+            signature = sig
+        )
+        com.noslop.app.mesh.GossipService.broadcast(
+            com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 4, // 4 hops to reach wider network periodically
+                senderId = keys.publicKeyB64,
+                type = "ANNOUNCE_DISCOVERABLE",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(discPayload),
+                signature = sig
+            )
+        )
+    }
+
     /** Stops the background presence loop and any pending-request probing (Round A2). */
     fun stopPresenceHeartbeat() {
         presenceJob?.cancel()
         presenceJob = null
+        creatorPresenceJob?.cancel()
+        creatorPresenceJob = null
         outgoingRequestPolls.keys.toList().forEach { stopOutgoingRequestPoll(it) }
     }
 
@@ -600,42 +668,18 @@ class MeshSocialRepository(
                         
                         com.noslop.app.mesh.GossipService.broadcast(packet)
 
-                        val isDiscoverable = db.appSettingDao().getSetting("is_discoverable_enabled") == "true"
-                        if (isDiscoverable) {
-                            val burnableIdentity = getBurnableIdentity()
-                            val burnableAddress = burnableIdentity?.onionAddress ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress
-                            if (burnableAddress != null && burnableIdentity != null) {
-                                val handle = getLocalHandle()
-                                val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
-                                val link = db.appSettingDao().getSetting("creator_fundme_link")?.takeIf { it.isNotBlank() }
-                                val userProfile = getUserProfile()
-                                
-                                // Omit avatar to save bandwidth on the periodic background heartbeat
-                                val msgToSign = "${burnableIdentity.publicKeyB64}:${handle}:${burnableAddress}:${burnableIdentity.encPublicKeyB64}:${isCreator}:${link ?: ""}::${userProfile.bio ?: ""}:${timestamp}"
-                                val sig = CryptoService.sign(msgToSign, burnableIdentity.privateKeyB64)
-                                
-                                val discPayload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
-                                    authorId = burnableIdentity.publicKeyB64,
-                                    handle = handle,
-                                    onionAddress = burnableAddress,
-                                    encPublicKey = burnableIdentity.encPublicKeyB64,
-                                    isCreator = isCreator,
-                                    fundMeLink = link,
-                                    authorAvatarB64 = null,
-                                    bio = userProfile.bio,
-                                    timestamp = timestamp,
-                                    signature = sig
-                                )
-                                
-                                val discPacket = com.noslop.app.mesh.NetworkPacket(
-                                    id = UUID.randomUUID().toString(),
-                                    hops = 4, // 4 hops to reach wider network periodically
-                                    senderId = burnableIdentity.publicKeyB64,
-                                    type = "ANNOUNCE_DISCOVERABLE",
-                                    payload = com.noslop.app.util.Json.gson.toJsonTree(discPayload),
-                                    signature = sig
-                                )
-                                com.noslop.app.mesh.GossipService.broadcast(discPacket)
+                        // D04: the creator identity's presence (and discoverable announcement) goes out
+                        // separately, a random 5-50 s later, so the two never arrive together.
+                        if (creatorPresenceJob?.isActive != true) {
+                            creatorPresenceJob = repositoryScope.launch {
+                                kotlinx.coroutines.delay(kotlin.random.Random.nextLong(5_000L, 50_000L))
+                                try {
+                                    announceCreatorPresence()
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    Logger.warn(TAG, "Creator presence announce failed: ${e.message}")
+                                }
                             }
                         }
                     }
@@ -764,8 +808,8 @@ class MeshSocialRepository(
             else -> return@withContext false
         }
 
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
+        // D04: the avatar of the identity that wrote the post (a creator post never gets the personal one).
+        val avatarB64 = identityRouter.forKey(signingKey.publicKeyB64)?.avatarB64
         val timestamp = System.currentTimeMillis()
 
         val effectiveMediaId = mediaMetadata?.id ?: existingPost.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
@@ -856,12 +900,14 @@ class MeshSocialRepository(
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
         val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
-        val myKeys = (if (isCreator && privacy != "friends") getBurnableIdentity() else null) ?: getLocalIdentity() ?: return@withContext null
-        val handle = getLocalHandle()
+        // D04: a creator post carries the creator profile's handle and avatar (it used to carry the
+        // personal ones, signed by the creator key).
+        val me = (if (isCreator && privacy != "friends") identityRouter.creator() else null) ?: identityRouter.main() ?: return@withContext null
+        val myKeys = me.keys
+        val handle = me.handle
         val timestamp = System.currentTimeMillis()
         val id = postIdOverride ?: UUID.randomUUID().toString()
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
+        val avatarB64 = me.avatarB64
 
         val mediaHash = mediaMetadata?.sha256
         val payload = if (mediaHash != null) {
@@ -1013,8 +1059,8 @@ class MeshSocialRepository(
 
         val boundIdentity = db.appSettingDao().getSetting("contact_identity_$publicKeyB64")
         val useBurnable = useBurnableIdentity || boundIdentity == "burnable"
-        val myKeys = if (useBurnable) getBurnableIdentity() else getLocalIdentity()
-        if (myKeys != null) {
+        val me = if (useBurnable) identityRouter.creator() else identityRouter.main()
+        if (me != null) {
             if (useBurnable) {
                 db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
             }
@@ -1022,7 +1068,7 @@ class MeshSocialRepository(
                 // Nonce is only needed if the peer lost us; store it so their echo can be matched.
                 peerDao.getPeerByPublicKey(publicKeyB64)?.let { peerDao.insertPeer(it.copy(pendingNonce = nonce)) }
             }
-            val packet = buildConnectionRequestPacket(myKeys, publicKeyB64, nonce)
+            val packet = buildConnectionRequestPacket(me, publicKeyB64, nonce)
             dispatchPacket(targetOnion, packet)
             if (existing?.relationship != PeerRelationship.ACCEPTED) {
                 startOutgoingRequestPoll(publicKeyB64, nonce)
@@ -1036,12 +1082,13 @@ class MeshSocialRepository(
      * the first send and for every Round A2 probe (same nonce, fresh timestamp and packet id).
      */
     private suspend fun buildConnectionRequestPacket(
-        myKeys: CryptoService.IdentityKeys,
+        me: RoutedIdentity,
         targetPub: String,
         nonce: String
     ): com.noslop.app.mesh.NetworkPacket {
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
+        // D04: the profile of the identity we ask from (the creator profile for a creator request).
+        val myKeys = me.keys
+        val avatarB64 = me.avatarB64
         val now = System.currentTimeMillis()
         val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
             id = UUID.randomUUID().toString(),
@@ -1049,7 +1096,7 @@ class MeshSocialRepository(
             fromUsername = myKeys.displayName,
             fromDisplayName = myKeys.displayName,
             authorAvatarB64 = avatarB64,
-            bio = userProfile.bio.takeIf { it.isNotBlank() },
+            bio = me.bio,
             fromHomeNode = myKeys.onionAddress,
             fromEncryptionPublicKey = myKeys.encPublicKeyB64,
             timestamp = now,
@@ -1098,8 +1145,8 @@ class MeshSocialRepository(
         val nonce = row.pendingNonce
         if (row.relationship != PeerRelationship.OUTGOING_PENDING || nonce.isNullOrBlank()) return null
         val useBurnable = db.appSettingDao().getSetting("contact_identity_$peerPub") == "burnable"
-        val myKeys = (if (useBurnable) getBurnableIdentity() else getLocalIdentity()) ?: return null
-        return buildConnectionRequestPacket(myKeys, peerPub, nonce)
+        val me = (if (useBurnable) identityRouter.creator() else identityRouter.main()) ?: return null
+        return buildConnectionRequestPacket(me, peerPub, nonce)
     }
 
     /**
@@ -1179,18 +1226,20 @@ class MeshSocialRepository(
         // Sync with hub before dispatching so the hub firewall is aware of the new peer
         meshTransport.repository.syncPeersWithHub()
         
-        val myKeys = getIdentityForPeer(current.publicKeyB64) ?: getLocalIdentity()
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
+        // D04: answer as the identity they addressed, with that identity's profile. No fallback to the
+        // personal identity (and no personal avatar or bio on a creator handshake).
+        val me = identityRouter.forPeer(current.publicKeyB64)
+        val myKeys = me?.keys
+        val avatarB64 = me?.avatarB64
         val now = System.currentTimeMillis()
-        if (myKeys != null) {
+        if (me != null && myKeys != null) {
             val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
                 fromUsername = myKeys.displayName,
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
-                bio = userProfile.bio.takeIf { it.isNotBlank() },
+                bio = me.bio,
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = now,
@@ -1306,7 +1355,7 @@ class MeshSocialRepository(
     private val lastDmSyncRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     suspend fun requestDmSync(peer: Peer) = withContext(Dispatchers.IO) {
-        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: return@withContext
         if (!peer.isTrusted || peer.onionAddress.isBlank()) return@withContext
 
         val now = System.currentTimeMillis()
@@ -1355,13 +1404,17 @@ class MeshSocialRepository(
     }
 
     suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
-        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
+        val me = identityRouter.forPeer(peer.publicKeyB64, peer) ?: return@withContext
+        val myKeys = me.keys
         val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
         val isTrustedDirectPeer = peer.isFriend && contactIdentity != "burnable"
+        // D04: a creator contact is never told which posts our personal identity wrote.
+        val hiddenAuthor = if (me.isCreator) getLocalIdentity()?.publicKeyB64 else null
 
         val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
         val myPub = myKeys.publicKeyB64
         val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
+            post.authorPublicKeyB64 != hiddenAuthor &&
             com.noslop.app.mesh.SyncPacketHandler.canSharePost(post, isTrustedDirectPeer, myPub, peer.publicKeyB64)
         }.toMutableList()
         val olderOwnPosts = postDao.getPostsSince(0L).filter { post ->
@@ -1403,7 +1456,7 @@ class MeshSocialRepository(
         }
         // Resolve the identity they addressed BEFORE dropping requested_identity_*: otherwise a
         // request to our burnable identity would be declined by the main one.
-        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
+        val myKeys = getIdentityForPeer(peer.publicKeyB64)
         peerDao.deletePeer(current)
         db.appSettingDao().removeSetting("requested_identity_${peer.publicKeyB64}")
         // Round A2: their requester keeps probing with this nonce; remember the decision so the
@@ -1449,7 +1502,7 @@ class MeshSocialRepository(
         val targetHandle = peer?.handle
         val targetOnion = peer?.onionAddress ?: ""
 
-        val myKeys = getIdentityForPeer(targetPub) ?: getBurnableIdentity() ?: getLocalIdentity()
+        val myKeys = getIdentityForPeer(targetPub)
         if (myKeys != null && notifyRemote && targetOnion.isNotBlank()) {
             val timestamp = System.currentTimeMillis()
             val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
@@ -1591,7 +1644,7 @@ class MeshSocialRepository(
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
         replyToMessageId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getIdentityForPeer(recipientPubB64) ?: getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(recipientPubB64) ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
         val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
@@ -1680,12 +1733,14 @@ class MeshSocialRepository(
         parentCommentId: String? = null,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        val handle = getLocalHandle()
+        // D04: on our own creator posts, and on posts by peers who know us as a creator, we comment as the
+        // creator (it used to be the personal identity, handle and avatar on every comment).
+        val me = identityRouter.forPostAuthor(postDao.getPostById(postId)?.authorPublicKeyB64) ?: return@withContext false
+        val myKeys = me.keys
+        val handle = me.handle
         val timestamp = System.currentTimeMillis()
         val id = UUID.randomUUID().toString()
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
+        val avatarB64 = me.avatarB64
 
         val mediaHash = mediaMetadata?.sha256
         val payload = if (mediaHash != null) {
@@ -1762,8 +1817,8 @@ class MeshSocialRepository(
             else -> return@withContext false
         }
 
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
+        // D04: the avatar of the identity that wrote the comment.
+        val avatarB64 = identityRouter.forKey(signingKey.publicKeyB64)?.avatarB64
         val timestamp = System.currentTimeMillis()
 
         var payloadToSign = "${existing.postId}|${commentId}|$newContent|$timestamp"
@@ -1977,7 +2032,7 @@ class MeshSocialRepository(
 }
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getIdentityForPeer(recipientPubB64) ?: getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(recipientPubB64) ?: return@withContext false
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
@@ -2247,6 +2302,39 @@ class MeshSocialRepository(
         true
     }
 
+    /**
+     * D04: tells the creator identity's contacts about a changed creator profile. Signed by the creator
+     * key over the same fields as [broadcastIdentityUpdate]; GossipService sends it to creator contacts
+     * only.
+     */
+    suspend fun broadcastCreatorIdentityUpdate(): Boolean = withContext(Dispatchers.IO) {
+        val creator = identityRouter.creator() ?: return@withContext false
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            creator.publicKeyB64, creator.handle, timestamp.toString(), creator.avatarB64, creator.bio
+        )
+        val signature = CryptoService.sign(payloadToSign, creator.keys.privateKeyB64)
+        val updatePayload = com.noslop.app.mesh.IdentityUpdatePayload(
+            userId = creator.publicKeyB64,
+            handle = creator.handle,
+            authorAvatarB64 = creator.avatarB64,
+            bio = creator.bio,
+            timestamp = timestamp,
+            signature = signature
+        )
+        com.noslop.app.mesh.GossipService.broadcast(
+            com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = creator.publicKeyB64,
+                type = "IDENTITY_UPDATE",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload),
+                signature = signature
+            )
+        )
+        true
+    }
+
     suspend fun broadcastUserExit(): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val timestamp = System.currentTimeMillis()
@@ -2286,7 +2374,7 @@ class MeshSocialRepository(
 
 
     suspend fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getIdentityForPeer(peerPubB64) ?: getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(peerPubB64) ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext false
         
         for (messageId in messageIds) {
@@ -2372,12 +2460,14 @@ class MeshSocialRepository(
     }
 
     suspend fun clearChat(peerPubB64: String) = withContext(Dispatchers.IO) {
-        val myKeys = getIdentityForPeer(peerPubB64) ?: getLocalIdentity() ?: return@withContext
+        // D04: without the identity this contact knows (creator identity gone) nothing is announced, but
+        // the chat is still cleared locally.
+        val myKeys = getIdentityForPeer(peerPubB64)
         val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext
         
         val messages = messageDao.getMessagesWithPeerList(peerPubB64)
         for (msg in messages) {
-            if (msg.senderPub == myKeys.publicKeyB64) {
+            if (myKeys != null && msg.senderPub == myKeys.publicKeyB64) {
                 val timestamp = System.currentTimeMillis()
                 val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(msg.id, myKeys.publicKeyB64, timestamp.toString())
                 val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)

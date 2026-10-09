@@ -1,5 +1,61 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-09) — Round C: Creator Identity Separation (D04) (v0.7.0-alpha)
+
+This round closes review finding D04: the creator (burnable) identity could be linked to the personal one. It also fixes `IDENTITY_UPDATE` verification, which turned up on the way. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** No packet layout, signature or Room schema change. Older receivers behave as before. Nodes on this build send fewer packets across identities (see below), accept `IDENTITY_UPDATE`s they used to drop, and get an `ANNOUNCE_PEER` for the creator identity.
+
+### Where the creator identity leaked the personal one
+
+* `getBurnableIdentity().displayName` was the personal handle. Every creator handshake (request, probe, accept) carried it, together with the personal bio and avatar.
+* `ANNOUNCE_DISCOVERABLE` (heartbeat and ViewModel) carried the personal handle and bio. The Creator Studio QR card showed the personal handle.
+* Creator posts and edits were signed by the creator key but carried the personal handle and avatar. Comments always used the personal identity, including replies on one's own creator posts.
+* `GossipService.broadcast` re-stamped every copy of an original per peer. Creator contacts therefore received our personal posts, comments, reactions, `IDENTITY_UPDATE` and the personal `ANNOUNCE_PEER` (personal key and onion) from the creator node. Friends received creator posts stamped with the personal key.
+* `forwardPacket` stamped every relay with the personal key, including relays to creator contacts.
+* Sync answers sent posts, comments and reactions written by the personal identity to creator contacts. In creator mode they were sent under the creator key to everyone, so friends also dropped the friends-only posts in the answer.
+* DM sync answers looked up, and resent as, the personal identity only. A creator contact got nothing back, and every resend named the personal key.
+* Typing and follow always used the personal key. Group member handles listed the personal handle for our creator key.
+* `MediaManager` and `GossipService` decided the identity by `isTemporary`, other paths by `contact_identity_*`. When the creator identity was gone, callers fell back to the personal identity.
+
+### Fix
+
+* **Creator profile** (`creator_profile` setting): handle, bio and avatar, edited in Creator Studio. The default handle is `Creator`, never the personal handle. *Burn ID* clears it, and changes go to creator contacts as a creator-signed `IDENTITY_UPDATE`.
+* **`IdentityRouter`** (`data/IdentityRouter.kt`) is the single rule: binding first, then the addressed identity, then temporary-and-not-accepted. It picks the identity and profile for every per-peer send listed above, and returns nothing (rather than the personal identity) for a creator contact without a creator identity. `MediaManager.requesterIdentity`/`responderIdentity` use the same rule.
+* **`GossipService.outboundFor`**: personal-authored originals are not sent to creator contacts. Creator-authored originals reach friends exactly in relay form. Presence, profile, exit, follow and removal packets never cross identities. Relays to creator contacts carry the creator key.
+* **Sync** to a creator contact leaves out everything written by the personal identity. Answers use the routed identity.
+* **Presence.** The creator identity sends its own `ANNOUNCE_PEER`, plus the discoverable announcement with the creator profile, a random 5–50 s after the personal one.
+* Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`; `MediaAccessRoundBTest` fixture now binds its follower to the creator identity, as `acceptConnectionRequest` does).
+
+### `IDENTITY_UPDATE` was never accepted
+
+* **Cause.** Senders sign with `encodeForSigning`, but receivers only verified the older pipe-joined string. Profile changes therefore never reached contacts.
+* **Fix.** Both forms are accepted. A forged update is still refused.
+* Tested (unit: `IdentityRoutingTest`).
+
+### Behaviour changes to watch on device
+
+* Friends receive our creator posts in relay form (hop count one lower). Creator contacts no longer receive our personal posts directly; they can still reach them through other relays.
+* Comments on our own creator posts, and on posts by creator contacts, are made as the creator identity.
+* After creator mode is turned off, DMs, typing and syncs to former creator contacts are no longer sent at all. Before, they went out under the personal key, which those contacts don't know.
+
+### Still open (D04)
+
+* Reactions and votes on posts still use the personal identity: the feed's "my reaction" state is keyed to it. They are not sent directly to creator contacts, but third-party relays can still carry them.
+* The capture test covers the packets listed above; group traffic keeps its own identity rule (`groupMemberIdentity`).
+* With a Hub linked, broadcasts are handed to the Hub, which relays by its own rules.
+* `IdentityViewModel` still holds an unused copy of the old discoverable code; it is removed with D10.
+* New UI strings are English only, and fall back to English in other languages.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `CreatorIdentityCaptureTest` | Posts, comments, reactions, identity updates, DM, DM catch-up, typing, sync answer, handshake to a new follower, creator presence and profile updates: nothing sent to a creator contact contains the personal key, onion, handle, bio or avatar, and every envelope is the creator key. Creator side carries the creator profile. Friends get creator posts in relay form and no creator presence. Relays to a follower carry the creator key |
+| `IdentityRoutingTest` | Creator handle on the burnable identity; `knowsUsAsCreator` rules; `forPeer` returns nothing without a creator identity; `forPostAuthor`; every `outboundFor` case; `IDENTITY_UPDATE` accepted when signed as senders sign, forged one refused; nothing sent to a creator contact after creator mode is off |
+
+---
+
 ## Completed Changes (2026-10-09) — Mesh Feed: Missing and Repeating Posts; No Startup Handshake Broadcast (v0.7.0-alpha)
 
 Device report: switching between All and Mesh sometimes left new mesh posts out, even after "See Old Posts", and sometimes kept showing old posts. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
@@ -1634,7 +1690,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** | `BackupManagerTest` |
 | **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Partial** — v2 ✔; unconditional v1 fallback, no ACK domain label (D05) | `CryptoServiceRobolectricTest` |
 | **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
-| **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Partial (~20%)** — sync batches only (D04) | Implemented (untested): cited `SyncPacketHandlerTest` does not exist |
+| **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** with D04 (Round C, 2026-10-09) — see D04 | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
 | **C11** | P1 | 20-character visual safety fingerprint derivation | **Partial** — derivation ✔; no caller, not shown in any screen (D10) | `CryptoServiceRobolectricTest` |
 | **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
 | **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
@@ -1667,7 +1723,7 @@ same-device backup export/import. Multi-device testing is next.
 | **D01** | P1 | Startup "heal" granted trust without consent; one trust rule (`relationship`, `Peer.isFriend`) | **Resolved** | `PeerTrustInvariantTest`, `Migration18To19Test` |
 | **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Resolved** (Round B) — index-only, deny by default; `accessKey` deliberately not issued (see TECHNICAL_REFERENCE §6.1.1) | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
 | **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Resolved** (Round B) — relay removed; one-hop recovery behind the ACL | `MediaAccessRoundBTest` |
-| **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Open** | — |
+| **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Resolved** (Round C, 2026-10-09; not yet device-verified) — creator profile, `IdentityRouter`, `outboundFor`, sync exclusion; reactions/votes and Hub relaying still open | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
 | **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Partial** — outbox expiry + FAILED/retry ✔ (R3); v1 latch and ACK domain separation open | `OutboxExpiryTest` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
@@ -1689,6 +1745,7 @@ same-device backup export/import. Multi-device testing is next.
 | **R4d** | — | Handshake budget | **Open** | — |
 | **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
 | **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
+| **IU1** | — | `IDENTITY_UPDATE` signed with `encodeForSigning` but verified only in pipe form; never accepted (2026-10-09) | **Resolved** (not yet device-verified) | `IdentityRoutingTest` |
 | **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `OnionAddressUpdateTest` |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session

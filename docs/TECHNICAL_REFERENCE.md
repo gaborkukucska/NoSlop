@@ -322,6 +322,21 @@ cryptographically the same key.
 `isEncryptionActive()` checks `prefs.javaClass.name.contains("EncryptedSharedPreferences")`
 to determine which backend is actually active at runtime.
 
+### 3.7.1 Creator Identity Separation (`IdentityRouter`, review D04, 2026-10-09)
+
+The creator (burnable) identity has its own profile and is never sent with the personal one.
+
+- **Creator profile.** Stored in `app_settings` under `creator_profile` (`CREATOR_PROFILE_KEY`, `UserProfile` JSON: handle, bio, avatar), edited in Creator Studio (*Creator Profile* card → *Edit Creator Profile*). Until a name is set the handle is `Creator` (`DEFAULT_CREATOR_HANDLE`), never the personal handle. `getBurnableIdentity().displayName` and `generateBurnableIdentity` use it; both used the personal handle before. *Burn ID* clears the profile, so the new identity carries nothing of the old one. Changes are announced to creator contacts with an `IDENTITY_UPDATE` signed by the creator key.
+- **`IdentityRouter`** (`data/IdentityRouter.kt`, `NoSlopRepository.identityRouter`) is the one place that decides which identity and profile a packet for a given peer is built from:
+  - `knowsUsAsCreator(peer)`: `contact_identity_<peer>` = burnable; otherwise, before the user decides, `requested_identity_<peer>` = burnable. A peer with neither setting counts as a creator contact only when it is a temporary row we never accepted (a discoverable node, a stranger). An accepted contact without a binding knows the personal identity.
+  - `forPeer(peer)`: the creator identity for creator contacts, the personal identity otherwise. **Null** when a creator contact remains but the creator identity is gone (creator mode off). Callers then send nothing. They used to fall back to the personal identity.
+  - `forKey(pub)`: one of our identities with its own profile. `forPostAuthor(author)`: the creator identity on our own creator posts and on posts by creator contacts.
+- **Users** (all sends towards a specific peer): handshakes (request, probe, accept: creator handle, bio, avatar), DMs, DM sync answers (now look up the messages we sent *as that identity*, and resend as it), chat reactions, typing, follow, peer removal, inventory sync requests, sync answers, media requester/responder identity, creator posts and edits (creator handle and avatar), comments (`forPostAuthor`), comment edits, and the group member handle for our own keys (`NoSlopRepository.ownHandleFor`).
+- **Sync to a creator contact** (`SyncPacketHandler`, `requestInventorySync`) leaves out everything the personal identity wrote: its posts, comments on them, and its own comments and reactions. The answer's envelope is the routed identity. In creator mode it used to be the creator key for everyone, so friends also dropped the friends-only posts in the answer.
+- **Presence.** The personal `ANNOUNCE_PEER` goes only to contacts of the personal identity. The creator identity sends its own `ANNOUNCE_PEER` (creator contacts never had one before) and, when discoverable, the `ANNOUNCE_DISCOVERABLE` with the creator profile. Both go out from `announceCreatorPresence`, a random 5–50 s after the personal announce, so the two never arrive together.
+- **Not changed:** reactions and votes on posts are still made by the personal identity (the feed's "my reaction" state is keyed to it). `GossipService.outboundFor` keeps them away from creator contacts directly; relays by third parties can still carry them. Group traffic keeps its own identity rules (`groupMemberIdentity`). With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying.
+- Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`).
+
 ### 3.8 BIP39 Mnemonic
 
 `MnemonicGenerator.kt` generates a 12-word mnemonic using a 2053-word
@@ -440,9 +455,25 @@ processed locally by `MeshPacketHandler`):
   `scope.launch { tx.sendPacket(...) }` — fire-and-forget, no error
   aggregation.
 
-**`broadcast(packet)`** (used for locally-originated content): sends the
-**unmodified** packet to every `isTrusted && publicKeyB64 != localPublicKeyB64`
-peer, each in its own coroutine.
+**`broadcast(packet)`** (used for locally-originated content): sends to every
+`isTrusted && publicKeyB64 != localPublicKeyB64` peer (friends only for
+friends-only packets), each in its own coroutine. Since 2026-10-09 (D04) each
+copy goes through `outboundFor(packet, peerKnowsCreator, mainPub, creatorPub)`:
+- written by the personal identity, for a creator contact → **not sent**;
+- written by the creator identity, for a contact of the personal identity →
+  sent the way a relay of someone else's packet looks (hops one lower; envelope
+  = the relaying node, or the original sender for the types a relay keeps it
+  for: `MESSAGE`, `ANNOUNCE_DISCOVERABLE`, `CHAT_REACTION`, `DELETE_MESSAGE`,
+  `GROUP_*`). `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT`, `FOLLOW`,
+  `UNFOLLOW` and `PEER_REMOVED` are never sent across identities;
+- anything else → the envelope names the identity the peer knows.
+Group and friends-only packets keep their existing envelope rule. Before, every
+copy was re-stamped per peer, so creator contacts received our personal posts,
+comments, reactions, presence (with the personal onion) and profile from the
+creator node, and friends received creator posts stamped with the personal key.
+
+`forwardPacket` likewise stamps relays to creator contacts with the creator key
+(it used the personal key for everyone).
 
 ### 4.3 Media Recovery (relay state machine removed, Round B)
 
@@ -657,8 +688,8 @@ which only the key holder can host. Every refusal is logged at WARN (R6c).
 
 **Which identity answers (`responderIdentity`).** Metadata, chunks and
 `MEDIA_RECOVERY_FOUND` are sent as the local identity the request was
-addressed to (`targetUserId`), else the burnable identity for a temporary or
-burnable-bound peer, else main. The responder rate limit (16 MB per requester
+addressed to (`targetUserId`), else the identity the peer knows
+(`IdentityRouter.knowsUsAsCreator`, §3.7.1), else main. The responder rate limit (16 MB per requester
 per 60 s) now waits for the window to reset, up to 3 attempts, instead of
 dropping the request.
 
@@ -666,7 +697,7 @@ dropping the request.
 - group media → our member key in that group (`groupMemberIdentity`);
 - DM media → the identity bound to the contact (`contact_identity_*`);
 - holder is not a peer at all → the burnable key (main if none);
-- anything else → the burnable key towards a temporary or burnable-bound contact, else the main key.
+- anything else → the burnable key towards a creator contact (`IdentityRouter.knowsUsAsCreator`, §3.7.1), else the main key.
 
 Requests are addressed (`targetUserId` = the source peer, or the media's
 `ownerId`) with hops=1 and are never gossiped. `startDownload` no longer sends
@@ -2494,7 +2525,7 @@ To maintain sovereign identity separation between personal direct messages and p
 * **Creator ID Sharing in Studio (`CreatorStudioTab.kt`)**: Added a **Creator ID 🪪** action to Creator Studio. Tapping it opens `QRShareSheet` with the node's `burnableIdentity` (the severable secondary Tor `.onion` address) and `isCreator = true` in the QR JSON payload, ensuring followers connect to the secondary identity.
 * **Decoupled Creator Controls & Disconnect Warning (`SettingsTab.kt`)**: Un-nested the Creator Node switch from Discoverability so it remains accessible at all times. Toggling Creator Mode OFF triggers an `AlertDialog` warning that all connections established via the Creator ID will be lost.
 * **Discoverability Deactivation Guard**: `setDiscoverableEnabled(false)` in `NoSlopViewModel.kt` only sends `USER_EXIT` if Creator Mode is also disabled, keeping the Creator Identity active on Tor.
-* **Dual-Identity Targeted Broadcast Routing (`MeshSocialRepository.kt`, `GossipService.kt`)**: When `is_creator_enabled == true`, `composeAndBroadcastPost` authors posts using `getBurnableIdentity()`. During `GossipService.broadcast()`, packets are dynamically stamped with `senderId = burnable.publicKeyB64` for followers (`contact_identity_$peerPub == "burnable"`) and `main.publicKeyB64` for personal friends, allowing both peer types to pass firewall validation.
+* **Dual-Identity Targeted Broadcast Routing (`MeshSocialRepository.kt`, `GossipService.kt`)**: When `is_creator_enabled == true`, `composeAndBroadcastPost` authors posts using `getBurnableIdentity()`. During `GossipService.broadcast()`, packets are dynamically stamped with `senderId = burnable.publicKeyB64` for followers (`contact_identity_$peerPub == "burnable"`) and `main.publicKeyB64` for personal friends, allowing both peer types to pass firewall validation. *(Superseded 2026-10-09: §4.2 `outboundFor` and §3.7.1.)*
 
 ### 22.3 Official NoSlop Creator Node Seeding & In-App Browser Reader
 * In `NoSlopRepository.ensureDefaultDiscoverableNode()`, seeded the official NoSlop creator node into `PeerDao` using `OFFICIAL_CREATOR_PUBKEY` and `OFFICIAL_CREATOR_ONION` (`fnozdo...`), with dynamic tripcode derivation.

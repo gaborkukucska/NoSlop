@@ -975,7 +975,8 @@ object MediaManager {
         // Round B: a holder we have no peer row for (e.g. the author of a public post relayed to us) is a
         // stranger: ask as the burnable identity when we have one, so our personal key is not handed out.
         if (targetPeer == null) return burnable ?: main
-        return if (targetPeer.isTemporary || repo.getAppSetting("contact_identity_${targetPeer.publicKeyB64}") == "burnable") burnable ?: main else main
+        // D04: the same rule as every other send path (IdentityRouter.knowsUsAsCreator).
+        return if (repo.identityRouter.knowsUsAsCreator(targetPeer.publicKeyB64, targetPeer)) burnable ?: main else main
     }
 
     /**
@@ -996,8 +997,8 @@ object MediaManager {
             if (burnable != null && addressedTo == burnable.publicKeyB64) return burnable
         }
         val peer = repo.peerDao.getPeerByPublicKey(requesterId)
-        val bound = repo.getAppSetting("contact_identity_$requesterId") == "burnable"
-        return if (burnable != null && (bound || peer?.isTemporary == true)) burnable else main
+        // D04: the same rule as every other send path (IdentityRouter.knowsUsAsCreator).
+        return if (burnable != null && repo.identityRouter.knowsUsAsCreator(requesterId, peer)) burnable else main
     }
 
     /** Round B: the canonical string a MEDIA_REQUEST is signed over (envelope `signature`). */

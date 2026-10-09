@@ -871,5 +871,14 @@
   "Cancel Request": "Cancel Request",
   "Not delivered. Tap to retry": "Not delivered. Tap to retry",
   "You (admin)": "You (admin)",
-  "Me": "Me"
+  "Me": "Me",
+  "Creator Profile": "Creator Profile",
+  "Set a creator name. Followers see Creator until you do.": "Set a creator name. Followers see Creator until you do.",
+  "Followers and creator contacts only ever see this profile, never your personal one.": "Followers and creator contacts only ever see this profile, never your personal one.",
+  "Creator Avatar": "Creator Avatar",
+  "Edit Creator Profile": "Edit Creator Profile",
+  "Remove Picture": "Remove Picture",
+  "Creator Name": "Creator Name",
+  "Use a name and picture that don't identify your personal profile.": "Use a name and picture that don't identify your personal profile.",
+  "Save Creator Profile": "Save Creator Profile"
 }

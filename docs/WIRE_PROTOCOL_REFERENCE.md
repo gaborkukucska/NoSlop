@@ -358,6 +358,24 @@ connection:
 The normal (separate-connection) delivery of `USER_HANDSHAKE` and
 `CONNECTION_REJECTED` still happens as before; the reply path is an addition.
 
+**Identity per peer (2026-10-09, review D04).** Every packet a node sends to a
+peer names the identity that peer knows (`IdentityRouter`): the creator
+(burnable) identity for creator contacts, the personal one otherwise. A node's
+own broadcasts follow `GossipService.outboundFor` (TECHNICAL_REFERENCE §4.2):
+packets written by the personal identity are not sent to creator contacts;
+packets written by the creator identity reach the personal identity's contacts
+in relay form (hops − 1, relay envelope). The creator identity now sends its own
+`ANNOUNCE_PEER`, and handshakes, posts, comments and `ANNOUNCE_DISCOVERABLE`
+from it carry the creator profile (handle, bio, avatar), never the personal one.
+No field or signature changed.
+
+**`IDENTITY_UPDATE` verification (2026-10-09).** Senders sign
+`encodeForSigning(user_id, handle, timestamp, author_avatar_b64, bio)`
+(absent avatar or bio = `"0:"`). Receivers only checked the older pipe form
+`user_id|handle|timestamp[|avatar][|bio]`, so no update was ever accepted.
+Both forms are accepted now. Older receivers still ignore updates from any
+sender, as before.
+
 **No broadcast handshakes (2026-10-09).** `USER_HANDSHAKE` is only ever sent to
 one peer, naming it in `targetUserId`. `NoSlopRepository.updateOnionAddress`
 used to broadcast an untargeted, legacy-signed `USER_HANDSHAKE` (6 hops) on
