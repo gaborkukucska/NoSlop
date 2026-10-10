@@ -1962,6 +1962,42 @@ fun toggleAggregator() {
         _backupPromptReason.value = null
     }
 
+    /**
+     * R5b: compares the Word Cloud typed for an export with the one stored on this device, in canonical
+     * form (case and spacing ignored). A mismatch is logged as counts only, never the words.
+     */
+    suspend fun checkWordCloud(typed: String): com.noslop.app.data.WordCloudCheck {
+        val stored = getActiveMnemonic()
+        val result = com.noslop.app.data.WordCloudCheck.compare(typed, stored)
+        if (result is com.noslop.app.data.WordCloudCheck.Differs) {
+            // R5c: which phrase (if either) this account's keys were derived from. Version-2 identities
+            // are derived from their Word Cloud; version 1 identities have random keys, so neither phrase
+            // derives them and the stored phrase is only a backup password. Booleans only, never words.
+            val diag = try {
+                val idRepo = com.noslop.app.data.IdentityRepository(
+                    getApplication(),
+                    com.noslop.app.data.NoSlopDatabase.getDatabase(getApplication()).appSettingDao()
+                )
+                val localPub = idRepo.loadIdentity()?.publicKeyB64
+                val handle = idRepo.getHandle()
+                fun derives(phrase: String?): Boolean {
+                    if (phrase.isNullOrBlank() || localPub == null) return false
+                    val seed = com.noslop.app.crypto.MnemonicGenerator.deriveSeed(com.noslop.app.crypto.MnemonicGenerator.normalize(phrase))
+                    return CryptoService.deriveIdentityFromSeed(seed, handle).publicKeyB64 == localPub
+                }
+                "identityVersion=${idRepo.getIdentityVersion()} | typedDerivesIdentity=${derives(typed)} | storedDerivesIdentity=${derives(stored)}"
+            } catch (e: Exception) {
+                "derivation check failed: ${e.message}"
+            }
+            Logger.warn(
+                "VM",
+                "Typed Word Cloud differs from the one stored on this device",
+                "differingWords=${result.differingWords} | typedWords=${result.typedWords} | storedWords=${result.storedWords} | $diag"
+            )
+        }
+        return result
+    }
+
     suspend fun getActiveMnemonic(): String? {
         val idRepo = com.noslop.app.data.IdentityRepository(
             getApplication(),

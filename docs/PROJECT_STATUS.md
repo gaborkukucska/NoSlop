@@ -25,6 +25,13 @@ Device report after D09: the feed tutorial swiped itself away on a new account; 
 * If the old account's backup still fails, the log now names the reason; send it.
 * Tested (unit: `BackupWordCloudFormsTest`).
 
+### Export refused: "Mnemonic does not match your active Word Cloud!" (R5b, device report on the older account)
+
+* **Cause.** Before exporting, Settings (and the backup advisory) compared the typed Word Cloud with the one stored on the device using `trim()` + `equals(ignoreCase)`: any difference in spacing inside the phrase (double space, line break) failed, and a real difference was a dead end. The older account could not be backed up at all.
+* **Fix.** `WordCloudCheck.compare` compares canonical forms (case and spacing ignored). A real difference opens a dialog saying in how many places the words differ and that the backup will open only with the words typed; the user can back up with them or re-enter. The log records the counts only (`differingWords`, `typedWords`, `storedWords`), never the words.
+* Open: why the older account's stored Word Cloud differs from the user's written copy. Device report: 12 of 12 words differ. No change in this session writes the stored Word Cloud on an existing install (only restores do, and their behaviour is unchanged apart from the D09 legacy re-derivation, which stores the phrase typed at restore). R5c adds to the mismatch log the identity version and whether the typed and the stored phrase derive the account's keys (booleans only).
+* Tested (unit: `BackupWordCloudFormsTest`).
+
 ### Older backups could not be restored from onboarding
 
 * **Cause.** Onboarding passed no handler for an unauthenticated (pre-GCM) archive, so such a restore spun forever.
@@ -47,7 +54,7 @@ Device report after D09: the feed tutorial swiped itself away on a new account; 
 | Test class | Covers |
 |---|---|
 | `QrImageDecodeTest` | Dark-on-light, light-on-dark, dark and light modules on a transparent background, a code inside a large frame, an image with no code, 2×2 downscale |
-| `BackupWordCloudFormsTest` | Canonical form; export typed with capitals and spaces restores with the plain phrase; archives encrypted (as before this round) under a capitalised phrase or with a trailing space restore; a different phrase is refused with "The Word Cloud does not match this backup"; first-block key probe |
+| `BackupWordCloudFormsTest` | Canonical form; Word Cloud check ignores case and spacing and counts differing words; export typed with capitals and spaces restores with the plain phrase; archives encrypted (as before this round) under a capitalised phrase or with a trailing space restore; a different phrase is refused with "The Word Cloud does not match this backup"; first-block key probe |
 | `OnionDescriptorRefreshTest` | Refresh on the second failure, not the first; at most once a minute per onion; when the peer reaches us after failed sends; not on plain successes; non-onion addresses ignored |
 
 ---
