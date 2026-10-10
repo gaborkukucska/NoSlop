@@ -554,6 +554,30 @@ object CryptoService {
         }
     }
 
+    /**
+     * D09: the X25519 public key of [privateB64], in the encoding identities store
+     * (SubjectPublicKeyInfo, Base64 NO_WRAP, as [generateX25519Keypair]); null if the key can't be read.
+     */
+    fun x25519PublicKeyFromPrivate(privateB64: String): String? = try {
+        val priv = getX25519PrivateKeyParams(Base64.decode(privateB64, Base64.DEFAULT))
+        Base64.encodeToString(
+            org.bouncycastle.crypto.util.SubjectPublicKeyInfoFactory.createSubjectPublicKeyInfo(priv.generatePublicKey()).encoded,
+            Base64.NO_WRAP
+        )
+    } catch (e: Exception) {
+        Logger.warn(TAG, "X25519 public key derivation failed: ${e.message}")
+        null
+    }
+
+    /** D09: whether two stored X25519 public keys are the same key, whatever their encoding (raw or SPKI). */
+    fun sameX25519PublicKey(aB64: String, bB64: String): Boolean = try {
+        val a = getX25519PublicKeyParams(Base64.decode(aB64, Base64.DEFAULT)).encoded
+        val b = getX25519PublicKeyParams(Base64.decode(bB64, Base64.DEFAULT)).encoded
+        a.contentEquals(b)
+    } catch (_: Exception) {
+        false
+    }
+
     fun verifyX25519Keypair(publicB64: String, privateB64: String): Boolean {
         return try {
             val (ephPub, ephPriv) = generateX25519Keypair()

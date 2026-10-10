@@ -15,6 +15,32 @@ import javax.crypto.spec.SecretKeySpec
 
 class LegacyBackupConfirmationRequiredException : Exception("Legacy unauthenticated backup archive detected")
 
+/**
+ * D09: what a restore did. Callers must not treat [SuccessIdentityRecoveryRequired] as a failure:
+ * the backup *was* applied, and the app has to restart into identity recovery.
+ */
+sealed class ImportResult {
+    /** Everything was restored; restart the app. */
+    object Success : ImportResult()
+
+    /**
+     * Data was restored, but this device can't open the archive's identity and the Word Cloud doesn't
+     * rebuild it (an old, non-deterministic identity). The identity is quarantined; after the restart the
+     * onboarding screen shows the "Identity Recovery Required" banner.
+     */
+    object SuccessIdentityRecoveryRequired : ImportResult()
+
+    /**
+     * Nothing usable was restored. [rolledBack] is true when the device is exactly as before (the
+     * archive was rejected before anything was replaced, or a failed commit was fully rolled back), and
+     * false when a rollback could not be verified (snapshots are kept for recovery, see the log).
+     */
+    data class Failed(val rolledBack: Boolean, val reason: String) : ImportResult()
+
+    /** An unauthenticated (pre-GCM) archive: ask the user, then call again with allowLegacyUnauthenticated. */
+    object ConfirmLegacy : ImportResult()
+}
+
 enum class BackupMediaOption {
     NONE,        // IDs, keys, contacts, settings, and database only (Lightweight, ~100KB)
     OWNED_ONLY,  // Database, keys, plus only media files authored by local identities
@@ -30,10 +56,6 @@ object BackupManager {
 
     /** 4-byte header identifying an authenticated AES-GCM archive. */
     private val MAGIC_GCM = "NSG1".toByteArray(Charsets.UTF_8)
-
-    @Volatile
-    var lastRestoreNeedsIdentityRecovery: Boolean = false
-        private set
 
     fun createEncryptedBackupFile(context: Context, mnemonic: String): File? {
         val backupFile = File(context.cacheDir, "noslop_backup_export.enc")
@@ -330,14 +352,32 @@ object BackupManager {
         }
     }
 
+    /**
+     * Boolean form kept for existing callers: true when the backup was applied (with or without identity
+     * recovery; the caller restarts the app either way), false when it was not. An unauthenticated archive
+     * still throws [LegacyBackupConfirmationRequiredException]. New code should use [importBackup].
+     */
     fun importData(
         context: Context,
         mnemonic: String,
         sourceStream: InputStream,
         allowLegacyUnauthenticated: Boolean = false
-    ): Boolean {
+    ): Boolean = when (importBackup(context, mnemonic, sourceStream, allowLegacyUnauthenticated)) {
+        ImportResult.Success, ImportResult.SuccessIdentityRecoveryRequired -> true
+        ImportResult.ConfirmLegacy -> throw LegacyBackupConfirmationRequiredException()
+        is ImportResult.Failed -> false
+    }
+
+    /** D09: the outcome of the restore. See [ImportResult]. */
+    fun importBackup(
+        context: Context,
+        mnemonic: String,
+        sourceStream: InputStream,
+        allowLegacyUnauthenticated: Boolean = false
+    ): ImportResult {
         Logger.info(TAG, "Starting data import...")
-        lastRestoreNeedsIdentityRecovery = false
+        // D09: set once the commit phase starts replacing live state; an exception before that leaves the device untouched.
+        var commitStarted = false
         // C06: Internal cache only for decrypting restore archive
         val tempDir = File(context.cacheDir, "backup_ops").apply { mkdirs() }
         val tempZip = File(tempDir, "noslop_restore_${System.currentTimeMillis()}.zip")
@@ -350,7 +390,7 @@ object BackupManager {
             val header = ByteArray(16)
             if (!readFully(input, header)) {
                 Logger.error(TAG, "Import failed: backup file is too small to contain a header")
-                return false
+                return ImportResult.Failed(rolledBack = true, reason = "Backup file is too small")
             }
 
             val isGcm = header[0] == MAGIC_GCM[0] && header[1] == MAGIC_GCM[1] &&
@@ -364,8 +404,8 @@ object BackupManager {
                 cipher.init(Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
             } else {
                 if (!allowLegacyUnauthenticated) {
-                    Logger.warn(TAG, "Legacy unauthenticated archive detected. Raising confirmation required.")
-                    throw LegacyBackupConfirmationRequiredException()
+                    Logger.warn(TAG, "Legacy unauthenticated archive detected. Confirmation required.")
+                    return ImportResult.ConfirmLegacy
                 }
                 Logger.info(TAG, "Decrypting legacy AES-256-CBC backup archive (user confirmed)...")
                 cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
@@ -390,7 +430,7 @@ object BackupManager {
                     Logger.debug(TAG, "Failed to clean up temp zip on decryption failure: ${delEx.message}")
                 }
                 Logger.error(TAG, "Import failed during decryption — wrong Word Cloud, or archive corrupt/modified: ${e.message}")
-                return false
+                return ImportResult.Failed(rolledBack = true, reason = "Wrong Word Cloud, or the archive is corrupt")
             }
 
             var restoredKeystoreSealedIdentity = false
@@ -400,6 +440,7 @@ object BackupManager {
             var hasPortableIdentity = false
             var hasStagedDb = false
             var stagedGroupMessagesJson: String? = null
+            var legacyRederivation: LegacyRederivation? = null
 
             try {
                 ZipInputStream(BufferedInputStream(FileInputStream(tempZip))).use { zis ->
@@ -468,11 +509,11 @@ object BackupManager {
                         testDb.close()
                         if (!checkResult.equals("ok", ignoreCase = true)) {
                             Logger.error(TAG, "Staged database failed integrity check: $checkResult")
-                            return false
+                            return ImportResult.Failed(rolledBack = true, reason = "Backup database failed its integrity check")
                         }
                     } catch (dbEx: Exception) {
                         Logger.error(TAG, "Staged database failed integrity check: ${dbEx.message}")
-                        return false
+                        return ImportResult.Failed(rolledBack = true, reason = "Backup database failed its integrity check")
                     }
                 }
 
@@ -487,12 +528,12 @@ object BackupManager {
                         val valResult = tempIdRepo.validateIdentityObject(obj, mnemonic)
                         if (valResult !is IdentityRestoreResult.Success) {
                             Logger.error(TAG, "Staged identity JSON validation failed: $valResult")
-                            return false
+                            return ImportResult.Failed(rolledBack = true, reason = "Backup identity failed validation")
                         }
                         parsedIdentityObj = obj
                     } catch (idEx: Exception) {
                         Logger.error(TAG, "Staged identity JSON is malformed: ${idEx.message}")
-                        return false
+                        return ImportResult.Failed(rolledBack = true, reason = "Backup identity is malformed")
                     }
                 }
 
@@ -504,7 +545,7 @@ object BackupManager {
                         parsedApiObj = org.json.JSONObject(stagedApi.readText(Charsets.UTF_8))
                     } catch (apiEx: Exception) {
                         Logger.error(TAG, "Staged api_keys_backup.json is malformed: ${apiEx.message}")
-                        return false
+                        return ImportResult.Failed(rolledBack = true, reason = "Backup API keys are malformed")
                     }
                 }
 
@@ -517,15 +558,26 @@ object BackupManager {
                             val row = arr.getJSONObject(idx)
                             if (!row.has("id") || !row.has("groupId") || !row.has("plaintext")) {
                                 Logger.error(TAG, "Staged group message at index $idx is missing required columns")
-                                return false
+                                return ImportResult.Failed(rolledBack = true, reason = "Backup group messages are malformed")
                             }
                         }
                         parsedGroupMsgsArray = arr
                     } catch (gmEx: Exception) {
                         Logger.error(TAG, "Staged group_messages_backup.json is malformed: ${gmEx.message}")
-                        return false
+                        return ImportResult.Failed(rolledBack = true, reason = "Backup group messages are malformed")
                     }
                 }
+
+                // 5. D09: a legacy archive (no portable identity, keystore-sealed prefs only) restored on a
+                // device that can't open those prefs is rebuilt from the Word Cloud. Whether that rebuild gives
+                // the archive's identity is decided here, from the staged data, before anything is replaced.
+                // (It used to be decided after the commit, and a mismatch then reported "Import failed" with
+                // the device's data already replaced.)
+                legacyRederivation =
+                    if (!hasPortableIdentity && File(stageDir, "preferences.xml").exists() && !File(stageDir, "preferences_fallback.xml").exists()) {
+                        val dbForIdentity = if (hasStagedDb) File(stageDir, "database.db") else context.getDatabasePath(DB_NAME)
+                        planLegacyRederivation(dbForIdentity, mnemonic)
+                    } else null
 
                 // --- U02 / V02: MULTI-STORE SNAPSHOT FOR ATOMIC ROLLBACK ---
                 // Quiescence: Close active Room instance before snapshotting database files
@@ -701,6 +753,7 @@ object BackupManager {
 
                 // --- COMMIT PHASE (guarded by atomic multi-store rollback) ---
                 var commitSucceeded = false
+                commitStarted = true
                 try {
                     // Commit 1: Replace Room database
                     if (hasStagedDb) {
@@ -810,8 +863,8 @@ object BackupManager {
                     commitSucceeded = true
                 } catch (commitEx: Exception) {
                     Logger.error(TAG, "Commit phase failed — initiating full state rollback: ${commitEx.message}")
-                    performFullRollback()
-                    return false
+                    val rolledBack = performFullRollback()
+                    return ImportResult.Failed(rolledBack = rolledBack, reason = "Restore failed while applying: ${commitEx.message}")
                 } finally {
                     // W05: Clean up snapshots ONLY when commit completely succeeded or rollback cleanly verified
                     if (commitSucceeded || rollbackCompleted) {
@@ -831,91 +884,125 @@ object BackupManager {
             }
 
             // Cross-device detection for legacy archives without portable identity
-            if (!hasPortableIdentity && restoredKeystoreSealedIdentity && !restoredFallbackIdentity && !canOpenRestoredIdentity(context)) {
+            var identityRecoveryRequired = false
+            if (legacyRederivation != null && restoredKeystoreSealedIdentity && !restoredFallbackIdentity && !canOpenRestoredIdentity(context)) {
                 Logger.info(TAG, "Cross-device restore detected: re-deriving identity deterministically from mnemonic using local hardware Keystore...")
+                // The restored sealed prefs can't be opened on this device in either case.
                 val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                 if (secureFile.exists()) secureFile.delete()
-                try {
-                    val handle = try {
-                        val db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                            context.getDatabasePath(DB_NAME).absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
-                        )
-                        var extractedHandle = "Anonymous"
-                        db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_handle' LIMIT 1", null).use {
-                            if (it.moveToFirst()) extractedHandle = it.getString(0)
-                        }
-                        db.close()
-                        extractedHandle
-                    } catch (_: Exception) { "Anonymous" }
-
-                    val cleanMnemonic = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
-                    var expectedPub: String? = null
+                val derivedKeys = legacyRederivation.derivedKeys
+                if (derivedKeys == null || !legacyRederivation.matchesArchive) {
+                    // C15/D09: the Word Cloud doesn't rebuild this identity (a legacy non-deterministic one).
+                    // The data is restored; the identity has to be recovered by the user.
+                    Logger.error(TAG, "Mnemonic-derived identity does not match the restored one (${legacyRederivation.reason}). Quarantining identity; recovery required after restart.")
+                    markIdentityQuarantined(context)
+                    identityRecoveryRequired = true
+                } else {
                     try {
-                        val db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                            context.getDatabasePath(DB_NAME).absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                        val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                            context,
+                            PREFS_NAME,
+                            androidx.security.crypto.MasterKey.Builder(context)
+                                .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                                .build(),
+                            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                         )
-                        db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_pub_ed25519' LIMIT 1", null).use {
-                            if (it.moveToFirst()) expectedPub = it.getString(0)
-                        }
-                        db.close()
-                    } catch (_: Exception) {}
-
-                    val derivationSeed = MnemonicGenerator.deriveSeed(cleanMnemonic)
-                    val derivedKeys = com.noslop.app.crypto.CryptoService.deriveIdentityFromSeed(derivationSeed, handle)
-
-                    // C15: Compare derived public key with database identity to prevent account clobbering on identity v1
-                    if (expectedPub != null && expectedPub != derivedKeys.publicKeyB64) {
-                        Logger.error(TAG, "Mnemonic derived public key ${derivedKeys.publicKeyB64.take(8)}... does not match restored database key ${expectedPub.take(8)}... (Legacy non-deterministic identity). Quarantining identity.")
-                        lastRestoreNeedsIdentityRecovery = true
-                        kotlinx.coroutines.runBlocking {
-                            NoSlopDatabase.getDatabase(context).appSettingDao().insertSetting(AppSetting("identity_quarantined", "true"))
-                        }
-                        return false
+                        freshPrefs.edit().clear()
+                            .putString("ed25519_private_key", derivedKeys.privateKeyB64)
+                            .putString("enc_private_key", derivedKeys.encPrivateKeyB64)
+                            .putString("mnemonic", legacyRederivation.cleanMnemonic)
+                            .putString("pub_ed25519", derivedKeys.publicKeyB64)
+                            .putString("pub_enc", derivedKeys.encPublicKeyB64)
+                            .putString("handle", legacyRederivation.handle)
+                            .putString("tripcode", derivedKeys.tripcode)
+                            .putString("onion", derivedKeys.onionAddress)
+                            .putString("display_name", derivedKeys.displayName)
+                            .putString("onboarding_complete", "true")
+                            .putString("identity_version", "2")
+                            .commit()
+                        Logger.info(TAG, "Identity deterministically re-derived and hardware-encrypted for new device.")
+                    } catch (recEx: Exception) {
+                        // D09: this used to report success with no identity and no recovery banner.
+                        Logger.warn(TAG, "Automatic cross-device identity recovery failed: ${recEx.message}")
+                        markIdentityQuarantined(context)
+                        identityRecoveryRequired = true
                     }
-
-                    val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
-                        context,
-                        PREFS_NAME,
-                        androidx.security.crypto.MasterKey.Builder(context)
-                            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-                            .build(),
-                        androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                    )
-                    freshPrefs.edit().clear()
-                        .putString("ed25519_private_key", derivedKeys.privateKeyB64)
-                        .putString("enc_private_key", derivedKeys.encPrivateKeyB64)
-                        .putString("mnemonic", cleanMnemonic)
-                        .putString("pub_ed25519", derivedKeys.publicKeyB64)
-                        .putString("pub_enc", derivedKeys.encPublicKeyB64)
-                        .putString("handle", handle)
-                        .putString("tripcode", derivedKeys.tripcode)
-                        .putString("onion", derivedKeys.onionAddress)
-                        .putString("display_name", derivedKeys.displayName)
-                        .putString("onboarding_complete", "true")
-                        .putString("identity_version", "2")
-                        .commit()
-                    lastRestoreNeedsIdentityRecovery = false
-                    Logger.info(TAG, "Identity deterministically re-derived and hardware-encrypted for new device.")
-                } catch (recEx: Exception) {
-                    lastRestoreNeedsIdentityRecovery = true
-                    Logger.warn(TAG, "Automatic cross-device identity recovery failed: ${recEx.message}")
                 }
             }
 
-            Logger.info(TAG, "Import completed. Restart required.", "identityRecoveryNeeded=$lastRestoreNeedsIdentityRecovery")
-            true
-        } catch (e: LegacyBackupConfirmationRequiredException) {
-            throw e
+            Logger.info(TAG, "Import completed. Restart required.", "identityRecoveryNeeded=$identityRecoveryRequired")
+            if (identityRecoveryRequired) ImportResult.SuccessIdentityRecoveryRequired else ImportResult.Success
         } catch (e: Exception) {
             Logger.error(TAG, "Import failed: ${e.message}")
-            false
+            // The commit phase handles (and rolls back) its own failures; anything reaching here before it
+            // started left the device as it was.
+            ImportResult.Failed(rolledBack = !commitStarted, reason = e.message ?: "Import failed")
         } finally {
             try {
                 if (tempZip.exists()) tempZip.delete()
             } catch (e: Exception) {
                 Logger.debug(TAG, "Failed to clean up temp import zip: ${e.message}")
             }
+        }
+    }
+
+    /** D09: the Word Cloud rebuild of a legacy archive's identity, decided before the commit. */
+    private data class LegacyRederivation(
+        val handle: String,
+        val cleanMnemonic: String,
+        val derivedKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?,
+        val matchesArchive: Boolean,
+        val reason: String
+    )
+
+    /**
+     * D09: reads the handle and public key the archive's database recorded ([dbFile], opened read-only) and
+     * derives the identity from [mnemonic]. `matchesArchive` is false when the database names a different
+     * public key (an old, non-deterministic identity) or the derivation failed.
+     */
+    private fun planLegacyRederivation(dbFile: File, mnemonic: String): LegacyRederivation {
+        var handle = "Anonymous"
+        var expectedPub: String? = null
+        try {
+            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                dbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+            )
+            try {
+                db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_handle' LIMIT 1", null).use {
+                    if (it.moveToFirst()) handle = it.getString(0)
+                }
+                db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_pub_ed25519' LIMIT 1", null).use {
+                    if (it.moveToFirst()) expectedPub = it.getString(0)
+                }
+            } finally {
+                db.close()
+            }
+        } catch (_: Exception) {}
+
+        val cleanMnemonic = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+        val derived = try {
+            com.noslop.app.crypto.CryptoService.deriveIdentityFromSeed(MnemonicGenerator.deriveSeed(cleanMnemonic), handle)
+        } catch (e: Exception) {
+            return LegacyRederivation(handle, cleanMnemonic, null, false, "derivation failed: ${e.message}")
+        }
+        val expected = expectedPub
+        return if (expected != null && expected != derived.publicKeyB64) {
+            LegacyRederivation(handle, cleanMnemonic, derived, false,
+                "derived ${derived.publicKeyB64.take(8)}... vs restored ${expected.take(8)}...")
+        } else {
+            LegacyRederivation(handle, cleanMnemonic, derived, true, "match")
+        }
+    }
+
+    /** D09: the flag IdentityRepository.needsIdentityRecovery reads after the restart. */
+    private fun markIdentityQuarantined(context: Context) {
+        try {
+            kotlinx.coroutines.runBlocking {
+                NoSlopDatabase.getDatabase(context).appSettingDao().insertSetting(AppSetting("identity_quarantined", "true"))
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Could not record the identity quarantine flag: ${e.message}")
         }
     }
 

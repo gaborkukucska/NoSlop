@@ -2030,8 +2030,19 @@ parent by canonical path. The plaintext temp archive is deleted in a `finally`,
 success or failure.
 
 `preferences.xml` in the archive is sealed by a non-exportable Keystore key.
-`canOpenRestoredIdentity()` probes it after a restore and sets
-`lastRestoreNeedsIdentityRecovery` — see "Still open" item 3.
+`canOpenRestoredIdentity()` probes it after a restore. Since 2026-10-10
+(review D09) `importBackup` returns an `ImportResult` (`Success`,
+`SuccessIdentityRecoveryRequired`, `Failed(rolledBack, reason)`,
+`ConfirmLegacy`); `importData` is the Boolean wrapper for older callers. For a
+legacy archive (sealed prefs, no `identity_backup.json`) the Word Cloud rebuild
+is planned while staging (`planLegacyRederivation`: handle and
+`local_pub_ed25519` read from the staged database, read-only). If this device
+can't open the restored prefs and the rebuild doesn't match (or can't be
+sealed), `identity_quarantined` is set and the result is
+`SuccessIdentityRecoveryRequired`: the app restarts into onboarding with the
+"Identity Recovery Required" banner. `loadIdentity` / `getBurnableIdentity`
+also re-derive the X25519 public key from its private key and repair a
+diverged cache.
 
 ### 17.9 Player IP lock — `NOSLOP_PLAYER_IP_LOCK_V1`
 

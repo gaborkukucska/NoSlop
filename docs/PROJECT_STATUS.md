@@ -1,8 +1,39 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-10) — Round D09: Typed Restore Result, Pre-Commit Identity Check, X25519 Reconciliation (v0.7.0-alpha)
+
+This round closes review finding D09. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Compatibility.** No archive format, packet or Room schema change. `BackupManager.importData` keeps its Boolean contract for existing callers (`IdentityViewModel`, tests); the app's restore path uses the new `importBackup`.
+
+### A restore that needed identity recovery reported "Import failed"
+
+* **Cause.** For a legacy archive (keystore-sealed identity prefs, no portable identity JSON) restored on another device, `importData` checked whether the Word Cloud rebuilds the archive's identity only *after* replacing the database, prefs and media. On a mismatch it deleted the sealed prefs, set the quarantine flag and returned `false`, so the UI said "Import failed" and no restart happened, although the device's data had already been replaced. A failed rebuild returned `true` with no quarantine flag, so the app restarted into an ordinary onboarding with no recovery banner. `lastRestoreNeedsIdentityRecovery` was never read.
+* **Fix.**
+  * `BackupManager.importBackup` returns an `ImportResult`: `Success`, `SuccessIdentityRecoveryRequired`, `Failed(rolledBack, reason)` or `ConfirmLegacy`. `rolledBack` is false only when a failed commit's rollback could not be verified. `ConfirmLegacy` replaces the exception for an unauthenticated archive (the Boolean `importData` still throws it). `lastRestoreNeedsIdentityRecovery` is removed.
+  * While staging, before anything is replaced, the archive's handle and public key are read from the staged database (read-only) and the identity is derived from the Word Cloud (`planLegacyRederivation`). Whether that rebuild is *needed* still depends on whether this device can open the restored prefs, which can only be probed once they are in place; a same-device legacy restore keeps working as before.
+  * After the commit, a mismatch or a failed rebuild sets `identity_quarantined` and returns `SuccessIdentityRecoveryRequired`. `NoSlopViewModel.importBackupFromUri` restarts the app for it as for a success (without the Hub prompt). `isOnboardingComplete` is false while recovery is needed, so the onboarding screen shows the "Identity Recovery Required" banner.
+* Tested (unit: `BackupImportResultD09Test`; existing `BackupManagerTest`).
+
+### The cached X25519 public key was never checked against the private key
+
+* **Cause.** `loadIdentity` reconciled the Ed25519 public key with the private key (C15) but returned the cached X25519 public key unchecked. A diverged cache was advertised in handshakes while DMs were decrypted with the private key.
+* **Fix.** `loadIdentity` and `getBurnableIdentity` derive the X25519 public key from the private key (`CryptoService.x25519PublicKeyFromPrivate`, compared encoding-independently by `sameX25519PublicKey`) and repair the caches when they differ.
+* Tested (unit: `BackupImportResultD09Test`).
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `BackupImportResultD09Test` | Portable archive → `Success`; wrong Word Cloud → `Failed(rolledBack = true)`; unauthenticated archive → `ConfirmLegacy` (Boolean form still throws); injected commit failure → `Failed(rolledBack = true)` with the identity intact; legacy archive whose identity the Word Cloud can't rebuild → data restored, `SuccessIdentityRecoveryRequired`, quarantine flag set (Boolean form returns true); legacy archive whose rebuild can't be sealed → recovery required, not a silent success; diverged cached X25519 public key repaired, matching key left as stored |
+
+---
+
 ## Completed Changes (2026-10-10) — Round D08: Media Digest Downgrade and Same-Revision Signature Check (v0.7.0-alpha)
 
-This round closes review finding D08. The sync path was already fixed in R2. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+This round closes review finding D08. The sync path was already fixed in R2. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-10).** Tests passed and the build was installed on the test devices; editing existing posts syncs correctly between nodes.
 
 **Protocol compatibility.** No packet layout, signature encoding or Room schema change (one new DAO query on the existing `media_owner.sha256` column).
 
@@ -1770,7 +1801,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
 | **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
 | **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
-| **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** | `BackupManagerTest` |
+| **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** — X25519 public key also reconciled; mismatch reported as recovery-required (D09, 2026-10-10) | `BackupManagerTest`, `BackupImportResultD09Test` |
 | **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** | cited `IdentityRepositoryTest` does not exist |
 | **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** with D08 (2026-10-10) — v2 binding via live, sync and re-issue; unsigned digests never used; "unverified" label open (D10) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test` |
 | **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** — ACK sent off the inbound path (R1); outbox expiry → FAILED with retry, group legs not held for ACKs (R3) | `CryptoServiceRobolectricTest`, `WireProtocolTest`, `OutboxExpiryTest` |
@@ -1802,8 +1833,8 @@ same-device backup export/import. Multi-device testing is next.
 | **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Resolved** (2026-10-10; not yet device-verified) — outbox expiry + FAILED/retry (R3); v1 latch, ACK domain label + "ACK" check (Round D05). "Sent final for v1 peers" deliberately not done (see Round D05) | `OutboxExpiryTest`, `DmProtocolD05Test` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
-| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; not yet device-verified) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "unverified" label deferred to D10 | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test` |
-| **D09** | P2 | Cross-device restore mismatch reported after commit | **Open** | — |
+| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "unverified" label deferred to D10 | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test` |
+| **D09** | P2 | Cross-device restore mismatch reported after commit | **Resolved** (2026-10-10; not yet device-verified) — typed `ImportResult`, pre-commit identity plan, restart into recovery, X25519 reconciliation | `BackupImportResultD09Test` |
 | **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; fingerprint UI, `IdentityViewModel` deletion, status-file check open | — |
 | **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |
 | **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |

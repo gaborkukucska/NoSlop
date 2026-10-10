@@ -535,6 +535,14 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             pubEd
         }
 
+        // D09: the same reconciliation for the X25519 encryption key. A diverged cached public key was
+        // advertised in handshakes while DMs were decrypted with the private key, so peers encrypted to a
+        // key we couldn't use.
+        val finalPubEnc = reconcileEncPublicKey(pubEnc, privEnc) { repaired ->
+            appSettingDao.insertSetting(AppSetting("local_pub_enc", repaired))
+            prefs.edit().putString("pub_enc", repaired).apply()
+        }
+
         val rawForTripcode = if (isKeyMatch) rawStored else (rawFromPriv ?: rawStored ?: ByteArray(0))
         val derivedTripcode = CryptoService.deriveTripcode(rawForTripcode)
         val derivedOnion = CryptoService.deriveOnionAddress(rawForTripcode)
@@ -554,9 +562,22 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             tripcode = derivedTripcode,
             onionAddress = derivedOnion,
             displayName = displayName,
-            encPublicKeyB64 = pubEnc,
+            encPublicKeyB64 = finalPubEnc,
             encPrivateKeyB64 = privEnc
         )
+    }
+
+    /**
+     * D09: returns the X25519 public key that belongs to [privEnc]. When the cached [pubEnc] is a different
+     * key, [repair] stores the derived one and the derived one is returned. If the private key can't be
+     * read, the cached key is returned unchanged (the identity is unusable for DMs either way).
+     */
+    private suspend fun reconcileEncPublicKey(pubEnc: String, privEnc: String, repair: suspend (String) -> Unit): String {
+        val derived = CryptoService.x25519PublicKeyFromPrivate(privEnc) ?: return pubEnc
+        if (CryptoService.sameX25519PublicKey(pubEnc, derived)) return pubEnc
+        Logger.warn(TAG, "Cached X25519 public key diverged from the private key. Reconciling caches with the derived key...")
+        repair(derived)
+        return derived
     }
 
     suspend fun getMnemonic(): String? = secureFallbackRead(prefs.getString("mnemonic", null))
@@ -664,6 +685,10 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         val displayName = creatorHandle()
         val privEd = secureFallbackRead(prefs.getString("burnable_ed25519_private_key", null)) ?: return null
         val privEnc = secureFallbackRead(prefs.getString("burnable_enc_private_key", null)) ?: return null
+        // D09: as for the personal identity.
+        val finalPubEnc = reconcileEncPublicKey(pubEnc, privEnc) { repaired ->
+            prefs.edit().putString("burnable_pub_enc", repaired).apply()
+        }
         
         return CryptoService.IdentityKeys(
             publicKeyB64 = pubEd,
@@ -671,7 +696,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             tripcode = tripcode,
             onionAddress = onion,
             displayName = displayName,
-            encPublicKeyB64 = pubEnc,
+            encPublicKeyB64 = finalPubEnc,
             encPrivateKeyB64 = privEnc
         )
     }

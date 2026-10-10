@@ -2137,13 +2137,21 @@ fun toggleAggregator() {
             try {
                 val inputStream = context.contentResolver.openInputStream(uri)
                 if (inputStream != null) {
-                    try {
-                        val success = com.noslop.app.data.BackupManager.importData(
-                            context, mnemonic, inputStream, allowLegacyUnauthenticated
-                        )
-                        if (success) {
-                            context.getSharedPreferences("noslop_system", Context.MODE_PRIVATE)
-                                .edit().putBoolean("prompt_hub_after_restore", true).commit()
+                    // D09: a typed outcome. A restore that needs identity recovery *was* applied: it restarts
+                    // like a success (the onboarding screen then shows the recovery banner) instead of being
+                    // reported as "Import failed" with the device's data already replaced.
+                    val result = inputStream.use {
+                        com.noslop.app.data.BackupManager.importBackup(context, mnemonic, it, allowLegacyUnauthenticated)
+                    }
+                    when (result) {
+                        com.noslop.app.data.ImportResult.Success,
+                        com.noslop.app.data.ImportResult.SuccessIdentityRecoveryRequired -> {
+                            if (result == com.noslop.app.data.ImportResult.Success) {
+                                context.getSharedPreferences("noslop_system", Context.MODE_PRIVATE)
+                                    .edit().putBoolean("prompt_hub_after_restore", true).commit()
+                            } else {
+                                Logger.warn("VM", "Backup restored; identity recovery is required after the restart")
+                            }
                             kotlinx.coroutines.delay(500)
                             val pm = context.packageManager
                             val intent = pm.getLaunchIntentForPackage(context.packageName)
@@ -2152,10 +2160,19 @@ fun toggleAggregator() {
                                 context.startActivity(intent)
                                 android.os.Process.killProcess(android.os.Process.myPid())
                             }
+                            withContext(Dispatchers.Main) { onResult(true) }
                         }
-                        withContext(Dispatchers.Main) { onResult(success) }
-                    } catch (e: com.noslop.app.data.LegacyBackupConfirmationRequiredException) {
-                        withContext(Dispatchers.Main) { onLegacyDetected?.invoke() }
+                        com.noslop.app.data.ImportResult.ConfirmLegacy -> {
+                            withContext(Dispatchers.Main) { onLegacyDetected?.invoke() }
+                        }
+                        is com.noslop.app.data.ImportResult.Failed -> {
+                            if (!result.rolledBack) {
+                                Logger.error("VM", "Import failed and the rollback could not be verified: ${result.reason}")
+                            } else {
+                                Logger.warn("VM", "Import failed; nothing was changed: ${result.reason}")
+                            }
+                            withContext(Dispatchers.Main) { onResult(false) }
+                        }
                     }
                 } else {
                     withContext(Dispatchers.Main) { onResult(false) }
