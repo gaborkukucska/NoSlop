@@ -177,6 +177,8 @@ class FakePostDao : PostDao {
     override suspend fun deleteMediaOwnersFor(ownerType: String, ownerId: String) {
         mediaOwners.keys.removeAll { it.second == ownerType && it.third == ownerId }
     }
+    override suspend fun getRecordedMediaDigest(ownerType: String, ownerId: String): String? =
+        mediaOwners.values.firstOrNull { it.ownerType == ownerType && it.ownerId == ownerId && it.sha256 != null }?.sha256
     override suspend fun hasPost(id: String): Int = if (posts.containsKey(id)) 1 else 0
     override suspend fun getPostById(id: String): MeshPost? = posts[id]
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }

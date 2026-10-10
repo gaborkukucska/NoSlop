@@ -816,6 +816,8 @@ class MeshSocialRepository(
         val effectiveClearnetUrl = existingPost.clearnetUrl
 
         // U06: Emit complete authenticated descriptor for retained attachments on text-only edits
+        // D08: with the media digest, so a caption edit keeps the C17 v2 (hash-binding) signature; it
+        // used to drop to the 8-field form, and receivers then had nothing signed to check the file against.
         val effectiveMediaMetadata = mediaMetadata ?: if (effectiveMediaId != null) {
             com.noslop.app.mesh.MediaMetadata(
                 id = effectiveMediaId,
@@ -824,7 +826,8 @@ class MeshSocialRepository(
                 size = existingPost.mediaSize,
                 chunkCount = 0,
                 thumbnailB64 = existingPost.thumbnailB64,
-                originNode = signingKey.onionAddress
+                originNode = signingKey.onionAddress,
+                sha256 = meshTransport.repository.mediaDigestFor(effectiveMediaId)
             )
         } else null
 
@@ -872,7 +875,8 @@ class MeshSocialRepository(
             thumbnailB64 = newThumb,
             mediaSize = newSize,
             privacy = privacy,
-            clearnetUrl = effectiveClearnetUrl
+            clearnetUrl = effectiveClearnetUrl,
+            signedMediaHash = mediaHash
         )
 
         val packet = com.noslop.app.mesh.NetworkPacket(

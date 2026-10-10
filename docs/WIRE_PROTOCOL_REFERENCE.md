@@ -251,8 +251,11 @@ Every payload class in `Packets.kt`, with wire (`snake_case`) field names.
 When `media_metadata.sha256` is present the author signs the **v2** form
 (the 8 canonical fields plus the digest, §7). A receiver that can only verify
 the 8-field form treats the digest as unsigned. In `SYNC_RESPONSE` the digest
-is then removed before auto-download (2026-10-08); the live `POST` /
-`EDIT_POST` path does not strip it yet (review finding D08, open).
+is then removed before auto-download (2026-10-08), and since 2026-10-10
+(review D08) the live `POST` / `EDIT_POST` path does the same. A receiver
+replaces a stored post's signature at the same `timestamp` only if every
+signed field matches (including `author_avatar_b64`) and the new signature
+covers the digest already recorded for the post.
 
 ### MESSAGE (Secure Direct Messages)
 **Type:** `MESSAGE` · class `EncryptedPayload`
@@ -469,7 +472,7 @@ new prompt. Received `CONNECTION_REJECTED` only cancels our own
 | `author_avatar_b64`? | String | Author's avatar Base64, if set |
 | `content` | String | New content |
 | `timestamp` | Long | Epoch timestamp (must be ≥ stored post's timestamp to apply) |
-| `signature` | String | Signature over `postId\|authorId\|content\|timestamp` |
+| `signature` | String | Canonical 8-field signature, or the v2 form with `media_metadata.sha256` (§7); see POST for how an unsigned digest is treated |
 | `media_id`? | String | ID of updated media attachment, if present |
 | `media_metadata`? | Object | Media descriptor object, if present |
 | `privacy`? | String | `"public"` (hops=6) or `"friends"` (hops=1) |
@@ -1040,7 +1043,7 @@ and still accurate.
 | `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
 | `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
-| `EDIT_POST` | Canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy fallbacks strictly eliminated; complete signed state is atomically persisted to database. |
+| `EDIT_POST` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl, sha256)`. Otherwise canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy fallbacks strictly eliminated; complete signed state is atomically persisted to database. A caption-only edit of a media post carries the recorded digest, so it is v2-signed (D08). |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | **v2 only** (D07 hard break): `encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode, fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?)` with `nonce` = `request_nonce` (request) or `in_reply_to_nonce` (handshake). The legacy `fromUserId\|fromUsername\|fromHomeNode\|timestamp` forms are rejected. |

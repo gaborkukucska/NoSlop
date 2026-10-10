@@ -182,6 +182,10 @@ interface PostDao {
     @Query("DELETE FROM media_owner WHERE ownerType = :ownerType AND ownerId = :ownerId")
     suspend fun deleteMediaOwnersFor(ownerType: String, ownerId: String)
 
+    /** D08: the media digest recorded for this owner (a signed one, see NoSlopRepository.recordMediaDigest), if any. */
+    @Query("SELECT sha256 FROM media_owner WHERE ownerType = :ownerType AND ownerId = :ownerId AND sha256 IS NOT NULL LIMIT 1")
+    suspend fun getRecordedMediaDigest(ownerType: String, ownerId: String): String?
+
     suspend fun syncPostMediaOwner(postId: String, mediaUrl: String?, privacy: String, authorPub: String, isOrphaned: Boolean) {
         val mediaId = MediaOwner.mediaIdFromUrl(mediaUrl)
         if (mediaId == null || isOrphaned) {
@@ -244,8 +248,12 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature, authorAvatarB64 = :authorAvatarB64, mediaUrl = :mediaUrl, mediaType = :mediaType, thumbnailB64 = :thumbnailB64, mediaSize = :mediaSize, privacy = :privacy, clearnetUrl = :clearnetUrl WHERE id = :id")
     suspend fun updatePostDetails(id: String, newContent: String, newTimestamp: Long, newSignature: String, authorAvatarB64: String?, mediaUrl: String?, mediaType: String?, thumbnailB64: String?, mediaSize: Long, privacy: String, clearnetUrl: String?)
 
+    /**
+     * [signedMediaHash] is the media digest the new signature covers (the C17 v2 encoding), or null
+     * when only the 8-field encoding verified. It matters only for a same-revision signature change.
+     */
     @Transaction
-    suspend fun insertPostSafely(post: MeshPost): Boolean {
+    suspend fun insertPostSafely(post: MeshPost, signedMediaHash: String? = null): Boolean {
         val existing = getPostById(post.id)
         if (existing != null) {
             // V06: Post IDs belong to their authentic author; foreign authors can never overwrite a known post, active or orphaned!
@@ -254,12 +262,10 @@ interface PostDao {
             if (existing.timestamp > post.timestamp) return false
             if (existing.timestamp == post.timestamp) {
                 // W07: Allow signature-only upgrade strictly if canonical content matches, and update signature only
+                // D08: every signed field must match: the avatar too, and the media digest (below).
                 if (existing.signature == post.signature) return false
-                val isContentMatch = existing.content == post.content &&
-                    existing.privacy == post.privacy &&
-                    existing.mediaUrl == post.mediaUrl &&
-                    existing.clearnetUrl == post.clearnetUrl
-                if (!isContentMatch) return false
+                if (!signedFieldsMatch(existing, post)) return false
+                if (!signatureKeepsRecordedDigest(post.id, signedMediaHash)) return false
                 updateSignatureIfUnchanged(post.id, post.authorPublicKeyB64, existing.signature, existing.timestamp, post.signature)
                 return true
             }
@@ -275,6 +281,29 @@ interface PostDao {
         return true
     }
 
+    /**
+     * D08: the fields of a stored post that its signature covers (C17 8-field encoding: id, author,
+     * content, timestamp, avatar, privacy, media id, clearnet URL; the digest is checked separately).
+     * The full media URL is compared, as before, which is stricter than the media id alone.
+     */
+    fun signedFieldsMatch(existing: MeshPost, candidate: MeshPost): Boolean =
+        existing.content == candidate.content &&
+            existing.privacy == candidate.privacy &&
+            existing.authorAvatarB64 == candidate.authorAvatarB64 &&
+            existing.mediaUrl == candidate.mediaUrl &&
+            existing.clearnetUrl == candidate.clearnetUrl
+
+    /**
+     * D08: a signature may replace the stored one at the same revision only if it covers the media
+     * digest we already hold for the post. Otherwise an old 8-field signature (no digest) could be
+     * replayed over a v2 one, and the post would be re-served as unverifiable.
+     */
+    suspend fun signatureKeepsRecordedDigest(postId: String, signedMediaHash: String?): Boolean {
+        val recorded = getRecordedMediaDigest(MediaOwner.TYPE_POST, postId) ?: return true
+        return signedMediaHash != null && signedMediaHash.equals(recorded, ignoreCase = true)
+    }
+
+    /** [signedMediaHash]: as for [insertPostSafely]. */
     @Transaction
     suspend fun editPostSafely(
         id: String,
@@ -288,12 +317,17 @@ interface PostDao {
         thumbnailB64: String?,
         mediaSize: Long,
         privacy: String,
-        clearnetUrl: String?
+        clearnetUrl: String?,
+        signedMediaHash: String? = null
     ): Boolean {
         val existing = getPostById(id) ?: return false
         if (existing.authorPublicKeyB64 != authorId) return false
         if (existing.isOrphaned) return false
         if (existing.timestamp > newTimestamp) return false
+        // D08: a same-revision replay (same media) may not swap the signature for one without the digest.
+        if (existing.timestamp == newTimestamp && existing.signature != newSignature &&
+            existing.mediaUrl == mediaUrl && !signatureKeepsRecordedDigest(id, signedMediaHash)
+        ) return false
         updatePostDetails(id, newContent, newTimestamp, newSignature, authorAvatarB64, mediaUrl, mediaType, thumbnailB64, mediaSize, privacy, clearnetUrl)
         syncPostMediaOwner(id, mediaUrl, privacy, authorId, isOrphaned = false)
         return true

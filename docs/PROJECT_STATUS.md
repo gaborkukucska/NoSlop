@@ -1,8 +1,43 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-10) — Round D08: Media Digest Downgrade and Same-Revision Signature Check (v0.7.0-alpha)
+
+This round closes review finding D08. The sync path was already fixed in R2. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** No packet layout, signature encoding or Room schema change (one new DAO query on the existing `media_owner.sha256` column).
+
+### Live POST and EDIT_POST checked downloads against an unsigned digest
+
+* **Cause.** A media post may carry the C17 v2 signature (canonical fields plus `media_metadata.sha256`) or the 8-field one, which doesn't cover the digest. `PostPacketHandler` passed `media_metadata` to auto-download as received, whichever form verified. A relay could attach the digest of its own substituted file to a post signed in the 8-field form, and the download check would then pass.
+* **Fix.** When only the 8-field form verifies, the digest is removed before auto-download (`PostPacketHandler.downloadMetadata`), as sync already did, and a warning is logged. `EDIT_POST` now also records a v2-signed digest, as `POST` does.
+* **Own caption edits lost the digest.** Editing only the caption of one's own media post rebuilt the media descriptor without `sha256`, so the edit was signed in the 8-field form and receivers had nothing signed to check the file against. The descriptor now carries the recorded digest (`mediaDigestFor`), so the edit keeps the v2 signature.
+* Tested (unit: `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test`).
+
+### Same-revision signature changes ignored signed fields (W07)
+
+* **Cause.** `PostDao.insertPostSafely` let a new signature replace the stored one at the same timestamp when content, privacy, media URL and clearnet URL matched. The avatar and the media digest are signed too and weren't compared. An older 8-field signature for the same revision could also be replayed over a v2 one, and the post was then re-served by sync as unverifiable.
+* **Fix.** `signedFieldsMatch` adds the avatar. `signatureKeepsRecordedDigest` allows a same-revision signature change only if the new signature covers the digest already recorded for the post (callers pass `signedMediaHash`, null for the 8-field form). Without a recorded digest, an upgrade from 8-field to v2 is accepted as before. `editPostSafely` refuses the same replay at an unchanged timestamp and media.
+* Tested (unit: `PostDigestBindingD08Test`; existing `PostPacketHandlerTest`, `MediaSyncAndAclRestoreTest`).
+
+### Still open (D08)
+
+* The review also asks to show such media as "unverified". Nothing in the feed marks it yet; it is planned with D10's trust indicators (fingerprints, key-change banner).
+* `mediaDigestFor` caches the hash of a local file when no signed digest is recorded. For someone else's media that was downloaded unverified, that hash can later block a genuine same-revision v2 upgrade (the post keeps its 8-field signature; nothing wrong is accepted).
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `PostDigestBindingD08Test` | 8-field POST and EDIT_POST with an attached digest: stored, downloaded without the digest; v2 POST and EDIT_POST keep it; same-revision copy with another avatar doesn't replace the signature; an 8-field signature can't replace a v2 one once the digest is recorded; 8-field → v2 upgrade still accepted; `insertPostSafely` and `editPostSafely` digest rules directly |
+| `OwnPostEditDigestD08Test` | A caption-only edit of one's own media post is signed over the recorded digest |
+
+---
+
 ## Completed Changes (2026-10-10) — Round D05: DM v1 Latch and DM_ACK Domain Separation (v0.7.0-alpha)
 
-This round closes the two open parts of review finding D05. The outbox expiry part was already done in R3. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+This round closes the two open parts of review finding D05. The outbox expiry part was already done in R3. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-10).** `./gradlew testGithubDebugUnitTest --rerun-tasks` passed on the developer machine, including `DmProtocolD05Test`; the build was installed on the test devices and works. The mixed-version cases below were not reported one by one.
 
 **Protocol compatibility.** No Room schema change. `MESSAGE` is unchanged. `DM_ACK` gains two optional fields and `v: 3`. Earlier builds keep working in both directions (see below).
 
@@ -1737,7 +1772,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
 | **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** | `BackupManagerTest` |
 | **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** | cited `IdentityRepositoryTest` does not exist |
-| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Partial** — v2 binding ✔, now also via sync and re-issue (R2); live POST/EDIT legacy path keeps unsigned hash (D08) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest` |
+| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** with D08 (2026-10-10) — v2 binding via live, sync and re-issue; unsigned digests never used; "unverified" label open (D10) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test` |
 | **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** — ACK sent off the inbound path (R1); outbox expiry → FAILED with retry, group legs not held for ACKs (R3) | `CryptoServiceRobolectricTest`, `WireProtocolTest`, `OutboxExpiryTest` |
 | **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Implemented (untested)** — ~20 logs still carry search terms / bare IDs (D11) | cited `LoggerTest` does not exist |
 | **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** | cited `JamendoApiClientTest` does not exist |
@@ -1753,7 +1788,7 @@ same-device backup export/import. Multi-device testing is next.
 | **W04** | P1 | Group revision alignment strictly on admin & ban clearing propagation | **Resolved** | `GroupMessageSecurityTest` |
 | **W05** | P1 | Synchronous API key commits & rollback atomicity | **Resolved** | `BackupManagerTest` |
 | **W06** | P1 | Monotonic author-scoped tombstones (`timestamp > existingTs`) | **Resolved** | `PostPacketHandlerTest` |
-| **W07** | P1 | Content-matching signature upgrades on equal timestamps | **Resolved** | `PostPacketHandlerTest` |
+| **W07** | P1 | Content-matching signature upgrades on equal timestamps | **Resolved** — avatar and recorded digest also compared since D08 (2026-10-10) | `PostPacketHandlerTest`, `PostDigestBindingD08Test` |
 | **W08** | P1 | Asynchronous recovery StateFlow & runBlocking elimination | **Implemented (untested)** | `OnboardingScreen` is a composable, not a test |
 
 ### Review round 2 (D01–D12) and git-history regressions — status 2026-10-08
@@ -1767,7 +1802,7 @@ same-device backup export/import. Multi-device testing is next.
 | **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Resolved** (2026-10-10; not yet device-verified) — outbox expiry + FAILED/retry (R3); v1 latch, ACK domain label + "ACK" check (Round D05). "Sent final for v1 peers" deliberately not done (see Round D05) | `OutboxExpiryTest`, `DmProtocolD05Test` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
-| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Partial** — sync path fixed (R2); live POST/EDIT path and `insertPostSafely` match open | `MediaSyncAndAclRestoreTest` |
+| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; not yet device-verified) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "unverified" label deferred to D10 | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test` |
 | **D09** | P2 | Cross-device restore mismatch reported after commit | **Open** | — |
 | **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; fingerprint UI, `IdentityViewModel` deletion, status-file check open | — |
 | **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |

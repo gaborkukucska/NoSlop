@@ -404,7 +404,7 @@ class SyncPacketHandler(
                 clearnetMediaType = postPay.clearnetMediaType,
                 mediaSize = postPay.mediaMetadata?.size ?: 0L
             )
-            val inserted = postDao.insertPostSafely(post)
+            val inserted = postDao.insertPostSafely(post, signedMediaHash = if (isV2) mediaHash else null)
             if (!inserted) {
                 Logger.debug(TAG, "Sync: Dropping post ${postPay.id} — already deleted, author mismatch, or older timestamp")
                 continue
