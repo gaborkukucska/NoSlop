@@ -297,17 +297,39 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
     var mnemonicInput by remember { mutableStateOf("") }
     var isRestoring by remember { mutableStateOf(false) }
     var restoreError by remember { mutableStateOf<String?>(null) }
+    // R5: an unauthenticated (older) archive needs the user's confirmation, as in Settings. Onboarding
+    // passed no handler, so such a restore spun forever.
+    var pendingLegacyUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    fun startRestore(uri: android.net.Uri, allowLegacy: Boolean) {
+        // R5: the Word Cloud as typed; BackupManager tries its canonical and as-typed forms.
+        viewModel.importBackupFromUri(
+            context,
+            mnemonicInput,
+            uri,
+            allowLegacyUnauthenticated = allowLegacy,
+            onLegacyDetected = {
+                isRestoring = false
+                pendingLegacyUri = uri
+            },
+            onFailed = { reason ->
+                restoreError = com.noslop.app.util.LanguageManager.translate("Restore failed: {reason}").replace("{reason}", reason)
+            }
+        ) { success ->
+            if (!success) {
+                isRestoring = false
+                if (restoreError == null) {
+                    restoreError = com.noslop.app.util.LanguageManager.translate("Failed to decrypt or import backup. Check your mnemonic.")
+                }
+            } else {
+                // importBackupFromUri restarts the process automatically on success.
+            }
+        }
+    }
     
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            viewModel.importBackupFromUri(context, mnemonicInput.trim(), uri) { success ->
-                if (!success) {
-                    isRestoring = false
-                    restoreError = "Failed to decrypt or import backup. Check your mnemonic."
-                } else {
-                    // importBackupFromUri restarts the process automatically on success.
-                }
-            }
+            startRestore(uri, allowLegacy = false)
         } else {
             isRestoring = false
         }
@@ -380,6 +402,39 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
             Text("Restore from Backup Archive".tr, fontWeight = FontWeight.Bold)
         }
         
+        pendingLegacyUri?.let { legacyUri ->
+            AlertDialog(
+                onDismissRequest = { pendingLegacyUri = null },
+                containerColor = SurfaceDark,
+                title = { Text("Older Backup Format".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control.".tr,
+                        color = TextMuted,
+                        fontSize = 14.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            pendingLegacyUri = null
+                            isRestoring = true
+                            restoreError = null
+                            startRestore(legacyUri, allowLegacy = true)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Text("Proceed with Import".tr, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingLegacyUri = null }) {
+                        Text("Cancel".tr, color = TextMuted)
+                    }
+                }
+            )
+        }
+
         if (showRestoreDialog) {
             AlertDialog(
                 onDismissRequest = { if (!isRestoring) showRestoreDialog = false },

@@ -1,8 +1,62 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-10) — Round R5: Device Feedback after D09 (v0.7.0-alpha)
+
+Device report after D09: the feed tutorial swiped itself away on a new account; a QR image from the gallery was "not a QR"; an older account's backup said the Word Cloud was wrong; after a restore Tor took long to come up and replies arrived minutes late; videos buffered a lot. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Compatibility.** No packet, archive-format or Room schema change. New backups are encrypted under the canonical Word Cloud; every older archive still opens (see below).
+
+### Feed tutorial swiped itself away (regression from the Mesh Feed round)
+
+* **Cause.** Landing on tutorial slide N recorded step N + 1. The slide list is rebuilt from that step whenever the feed refreshes, which a new account does many times while it fills, so the slide on screen dropped out; the pager settled on the next slide, which recorded the one after, and so on until no tutorial was left. The Mesh Feed round keyed this effect on the item id instead of the page index, which is what let the chain run.
+* **Fix.** The slide on screen is recorded (step N), so a refresh never removes it; a slide leaves the list only once the user has moved past it. Reopening the app shows the slide last viewed.
+* Not unit-tested (Compose pager state); verify on device with a new account.
+
+### Gallery QR images were not read
+
+* **Cause.** The gallery path made one attempt: full-size RGB, no `TRY_HARDER`, no inverted pass, transparent pixels read as black. Light-on-dark codes, PNGs with a transparent background and small codes in large photos all failed. Nothing was logged.
+* **Fix.** `decodeQrFromArgb` composites over white (and black, when the image has transparency), tries full size and halved sizes, each with the hybrid and global-histogram binarizers, normal and inverted. Large images are decoded at most 2048 px on the longest side. The result is logged (`QR_SCAN Gallery image ...`).
+* Tested (unit: `QrImageDecodeTest`; existing `QrFrameDecodeTest`).
+
+### A backup said the Word Cloud was wrong
+
+* **Cause.** Export used the Word Cloud exactly as typed in the dialog (only compared case-insensitively with the stored one), so an archive made with an auto-capitalised first word or a trailing space opened only with that exact string. Onboarding also trimmed the input, and showed "Check your mnemonic" for every failure.
+* **Fix.** Export encrypts under the canonical form (`MnemonicGenerator.normalize`: trimmed, lower case, single spaces). Restore tries the canonical and the likely as-typed forms (`restoreCandidates`), picking the one whose key turns the first cipher block into a zip header (`firstBlockIsZip`); the full authenticated decryption still decides. Settings and onboarding show the actual reason (`ImportResult.Failed.reason`), e.g. "The Word Cloud does not match this backup".
+* If the old account's backup still fails, the log now names the reason; send it.
+* Tested (unit: `BackupWordCloudFormsTest`).
+
+### Older backups could not be restored from onboarding
+
+* **Cause.** Onboarding passed no handler for an unauthenticated (pre-GCM) archive, so such a restore spun forever.
+* **Fix.** Onboarding asks for confirmation, as Settings does, and restores with it.
+
+### Replies arrived minutes late after a restore
+
+* **Cause (from the logs).** The restore restarts the app; the restored phone's Tor then sat at "Connecting to a relay" for two minutes. Its .onion came back with new introduction points while the other phone's Tor kept the old descriptor; every send to it timed out ("Connect timed out", the app's 10–25 s send timeouts being shorter than Tor's own retry) until 19:35:16, when the backlog arrived at once.
+* **Fix.**
+  * `GossipService` asks Tor for a fresh descriptor (`TorService.refreshOnionDescriptor`, control command `HSFETCH`) on the second failed send to an onion in a row, and when that peer reaches us while our sends to it were failing; at most once a minute per onion.
+  * Before the restore restart, Tor is stopped cleanly (`stopTor`), so it can save its state; a precaution, as the logs cannot show whether the abrupt kill caused the slow bootstrap.
+* Tested (unit: `OnionDescriptorRefreshTest`).
+
+### Video buffering
+
+* No defect found in the logs. The buffering burst at 18:42 is the position jumping about 10 s per step (double-tap skipping); the other waits are slow YouTube streams over Tor, and the existing stall escape moved one stream to a fresh circuit. Report a specific video with its log if it keeps happening.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `QrImageDecodeTest` | Dark-on-light, light-on-dark, dark and light modules on a transparent background, a code inside a large frame, an image with no code, 2×2 downscale |
+| `BackupWordCloudFormsTest` | Canonical form; export typed with capitals and spaces restores with the plain phrase; archives encrypted (as before this round) under a capitalised phrase or with a trailing space restore; a different phrase is refused with "The Word Cloud does not match this backup"; first-block key probe |
+| `OnionDescriptorRefreshTest` | Refresh on the second failure, not the first; at most once a minute per onion; when the peer reaches us after failed sends; not on plain successes; non-onion addresses ignored |
+
+---
+
 ## Completed Changes (2026-10-10) — Round D09: Typed Restore Result, Pre-Commit Identity Check, X25519 Reconciliation (v0.7.0-alpha)
 
-This round closes review finding D09. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+This round closes review finding D09. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-10).** Tests passed and the build was installed; export and restore of a new account worked on device. Restoring an older account's backup failed with "wrong Word Cloud" (see Round R5).
 
 **Compatibility.** No archive format, packet or Room schema change. `BackupManager.importData` keeps its Boolean contract for existing callers (`IdentityViewModel`, tests); the app's restore path uses the new `importBackup`.
 

@@ -945,7 +945,13 @@ fun UnifiedFeedTab(
             val currentItem = unifiedItems[settledIndex]
             
             if (currentItem is UnifiedItem.Tutorial) {
-                viewModel.setFeedTutorialStep(currentItem.step + 1)
+                // R5: record the slide on screen, not the next one. The list is rebuilt from this step
+                // whenever the feed refreshes (often, on a new account); recording step + 1 removed the
+                // slide being viewed, the pager settled on the next one, which recorded the one after,
+                // and the tutorial "swiped itself away". (Before the feed round this effect was keyed on
+                // the page index, which hid the cascade.) A slide only leaves the list once the user has
+                // moved on to a later one.
+                viewModel.setFeedTutorialStep(currentItem.step)
             } else if (currentTutStep != -1 && currentTutStep < 5) {
                 viewModel.completeFeedTutorial()
             }

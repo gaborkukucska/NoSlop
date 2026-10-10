@@ -127,6 +127,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     init {
         com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
+        // R5: re-fetch a peer's onion descriptor when sends to it keep failing (see GossipService).
+        com.noslop.app.mesh.GossipService.onionDescriptorRefresher = { onion ->
+            com.noslop.app.tor.TorService.refreshOnionDescriptor(onion)
+        }
     }
 
     @Volatile

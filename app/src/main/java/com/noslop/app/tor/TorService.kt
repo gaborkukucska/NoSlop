@@ -476,6 +476,39 @@ object TorService {
     }
 
     /**
+     * R5: asks Tor to fetch the current descriptor of [onionAddress] from the hidden-service directories
+     * (control command HSFETCH). Tor answers at once and fetches in the background; the next connection
+     * uses the fresh introduction points. Only while READY; failures are logged, never thrown.
+     */
+    fun refreshOnionDescriptor(onionAddress: String) {
+        if (_torState.value != TorState.READY) return
+        val serviceId = onionAddress.removeSuffix(".onion").lowercase()
+        if (!ONION_V3_SERVICE_ID.matches(serviceId)) return
+        scope.launch {
+            try {
+                val channel = TorControlChannel.open(connectTimeoutMs = 1000, readTimeoutMs = 3000) ?: run {
+                    Logger.debug(TAG, "HSFETCH skipped: control channel unavailable")
+                    return@launch
+                }
+                channel.use { ch ->
+                    ch.send("HSFETCH $serviceId")
+                    val reply = ch.readLine()
+                    if (reply != null && reply.startsWith("250")) {
+                        Logger.info(TAG, "HSFETCH requested for ${serviceId.take(6)}...${serviceId.takeLast(4)}.onion")
+                    } else {
+                        Logger.warn(TAG, "HSFETCH for ${serviceId.take(6)}... was refused: $reply")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "HSFETCH failed: ${e.message}")
+            }
+        }
+    }
+
+    /** A v3 onion service id: 56 base32 characters. */
+    private val ONION_V3_SERVICE_ID = Regex("^[a-z2-7]{56}$")
+
+    /**
      * Unregisters the currently active hidden services.
      * This is critical when transitioning to a Hub, to prevent descriptor flapping
      * where both the Hub and the mobile app publish the same .onion address.

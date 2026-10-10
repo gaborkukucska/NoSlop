@@ -2044,6 +2044,24 @@ sealed), `identity_quarantined` is set and the result is
 also re-derive the X25519 public key from its private key and repair a
 diverged cache.
 
+Since round R5 (2026-10-10) the archive key is derived from
+`MnemonicGenerator.normalize(wordCloud)` (trimmed, lower case, single spaces).
+Earlier builds used the phrase exactly as typed, so a restore tries
+`MnemonicGenerator.restoreCandidates` (canonical first, then as-typed forms:
+untrimmed, capitalised first word, trailing space or newline) and picks the one
+whose key turns the first cipher block into `PK\x03\x04` (`firstBlockIsZip`;
+GCM block 0 is CTR with counter `IV || 00000002`, CBC block 0 is
+`AES⁻¹(C0) XOR IV`). The full authenticated decryption still decides.
+`ImportResult.Failed.reason` is shown to the user. Onboarding handles
+`ConfirmLegacy`. Before restarting after a restore the app stops Tor cleanly.
+
+**Onion descriptor refresh (R5).** `GossipService.recordSendFailure` asks
+`TorService.refreshOnionDescriptor` (control command `HSFETCH <id>`) for a
+fresh descriptor on the second failed send to an onion in a row;
+`recordSendSuccess` does the same when the peer reaches us after two or more
+failed sends. At most once per `DESCRIPTOR_REFRESH_INTERVAL_MS` (60 s) per
+onion; only while Tor is READY.
+
 ### 17.9 Player IP lock — `NOSLOP_PLAYER_IP_LOCK_V1`
 
 `playerEndpoint()` is unconditionally direct. Confirm with `PLAYBACK_DIAG

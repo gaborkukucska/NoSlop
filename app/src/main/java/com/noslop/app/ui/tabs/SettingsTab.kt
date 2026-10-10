@@ -1627,6 +1627,9 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                                         pendingLegacyMnemonic = mnemonicToUse
                                                         showLegacyConfirmDialog = true
                                                         importStatus = "Legacy archive detected. Confirmation required."
+                                                    },
+                                                    onFailed = { reason ->
+                                                        importStatus = com.noslop.app.util.LanguageManager.translate("Import failed: {reason}").replace("{reason}", reason)
                                                     }
                                                 ) { success ->
                                                     if (!success) {
@@ -1719,7 +1722,10 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                                     context,
                                                     mnemonic,
                                                     uri,
-                                                    allowLegacyUnauthenticated = true
+                                                    allowLegacyUnauthenticated = true,
+                                                    onFailed = { reason ->
+                                                        importStatus = com.noslop.app.util.LanguageManager.translate("Import failed: {reason}").replace("{reason}", reason)
+                                                    }
                                                 ) { success ->
                                                     if (!success) {
                                                         importStatus = "Legacy import failed. Check password and file."

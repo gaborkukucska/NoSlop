@@ -2131,6 +2131,8 @@ fun toggleAggregator() {
         uri: android.net.Uri,
         allowLegacyUnauthenticated: Boolean = false,
         onLegacyDetected: (() -> Unit)? = null,
+        /** R5: why a restore failed, in plain words (shown instead of a generic "check your mnemonic"). */
+        onFailed: ((String) -> Unit)? = null,
         onResult: (Boolean) -> Unit = {}
     ) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -2152,7 +2154,15 @@ fun toggleAggregator() {
                             } else {
                                 Logger.warn("VM", "Backup restored; identity recovery is required after the restart")
                             }
-                            kotlinx.coroutines.delay(500)
+                            // R5: stop Tor cleanly before the process is killed, so its state (guards,
+                            // directory info) is saved; after an abrupt kill the restarted daemon sat at
+                            // "Connecting to a relay" for two minutes.
+                            try {
+                                com.noslop.app.tor.TorService.stopTor(context.applicationContext)
+                            } catch (e: Exception) {
+                                Logger.warn("VM", "Stopping Tor before the restore restart failed: ${e.message}")
+                            }
+                            kotlinx.coroutines.delay(1500)
                             val pm = context.packageManager
                             val intent = pm.getLaunchIntentForPackage(context.packageName)
                             if (intent != null) {
@@ -2171,7 +2181,11 @@ fun toggleAggregator() {
                             } else {
                                 Logger.warn("VM", "Import failed; nothing was changed: ${result.reason}")
                             }
-                            withContext(Dispatchers.Main) { onResult(false) }
+                            withContext(Dispatchers.Main) {
+                                onResult(false)
+                                // After onResult, so the specific reason replaces any generic failure text.
+                                onFailed?.invoke(result.reason)
+                            }
                         }
                     }
                 } else {

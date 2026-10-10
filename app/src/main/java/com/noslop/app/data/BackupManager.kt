@@ -315,7 +315,8 @@ object BackupManager {
                 }
             }
 
-            val seed = MnemonicGenerator.deriveSeed(mnemonic)
+            // R5: the canonical Word Cloud, so the archive opens however the phrase is typed at restore.
+            val seed = MnemonicGenerator.deriveSeed(MnemonicGenerator.normalize(mnemonic))
             val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             val iv = ByteArray(12)
@@ -382,9 +383,6 @@ object BackupManager {
         val tempDir = File(context.cacheDir, "backup_ops").apply { mkdirs() }
         val tempZip = File(tempDir, "noslop_restore_${System.currentTimeMillis()}.zip")
         return try {
-            val seed = MnemonicGenerator.deriveSeed(mnemonic)
-            val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
-
             val input = BufferedInputStream(sourceStream)
 
             val header = ByteArray(16)
@@ -395,6 +393,28 @@ object BackupManager {
 
             val isGcm = header[0] == MAGIC_GCM[0] && header[1] == MAGIC_GCM[1] &&
                 header[2] == MAGIC_GCM[2] && header[3] == MAGIC_GCM[3]
+            if (!isGcm && !allowLegacyUnauthenticated) {
+                Logger.warn(TAG, "Legacy unauthenticated archive detected. Confirmation required.")
+                return ImportResult.ConfirmLegacy
+            }
+
+            // R5: archives used to be encrypted under the Word Cloud exactly as typed at export (an
+            // auto-capitalised first word, a trailing space). Pick the form whose key turns the first
+            // cipher block into a zip header; the full authenticated decryption below still decides.
+            val firstBlock = ByteArray(16)
+            input.mark(64)
+            val hasFirstBlock = readFully(input, firstBlock)
+            input.reset()
+            val candidates = MnemonicGenerator.restoreCandidates(mnemonic)
+            val keyMnemonic = if (hasFirstBlock) {
+                candidates.firstOrNull { firstBlockIsZip(aesKeyFor(it), header, firstBlock, isGcm) }
+            } else null
+            if (keyMnemonic == null) {
+                Logger.warn(TAG, "No form of the entered Word Cloud opens this backup (tried ${candidates.size})")
+            } else if (keyMnemonic != candidates.first()) {
+                Logger.info(TAG, "Backup was encrypted under a differently typed form of the Word Cloud (case or spacing); using it")
+            }
+            val key = aesKeyFor(keyMnemonic ?: candidates.firstOrNull() ?: mnemonic)
 
             val cipher: Cipher
             if (isGcm) {
@@ -403,10 +423,6 @@ object BackupManager {
                 cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
             } else {
-                if (!allowLegacyUnauthenticated) {
-                    Logger.warn(TAG, "Legacy unauthenticated archive detected. Confirmation required.")
-                    return ImportResult.ConfirmLegacy
-                }
                 Logger.info(TAG, "Decrypting legacy AES-256-CBC backup archive (user confirmed)...")
                 cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
                 cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(header))
@@ -430,7 +446,10 @@ object BackupManager {
                     Logger.debug(TAG, "Failed to clean up temp zip on decryption failure: ${delEx.message}")
                 }
                 Logger.error(TAG, "Import failed during decryption — wrong Word Cloud, or archive corrupt/modified: ${e.message}")
-                return ImportResult.Failed(rolledBack = true, reason = "Wrong Word Cloud, or the archive is corrupt")
+                return ImportResult.Failed(
+                    rolledBack = true,
+                    reason = if (keyMnemonic == null) "The Word Cloud does not match this backup" else "The backup file is damaged or was modified"
+                )
             }
 
             var restoredKeystoreSealedIdentity = false
@@ -525,7 +544,7 @@ object BackupManager {
                         val jsonStr = stagedIdFile.readText(Charsets.UTF_8)
                         val obj = org.json.JSONObject(jsonStr)
                         val tempIdRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
-                        val valResult = tempIdRepo.validateIdentityObject(obj, mnemonic)
+                        val valResult = tempIdRepo.validateIdentityObject(obj, MnemonicGenerator.normalize(mnemonic))
                         if (valResult !is IdentityRestoreResult.Success) {
                             Logger.error(TAG, "Staged identity JSON validation failed: $valResult")
                             return ImportResult.Failed(rolledBack = true, reason = "Backup identity failed validation")
@@ -768,7 +787,7 @@ object BackupManager {
                         val db = NoSlopDatabase.getDatabase(context)
                         val idRepo = IdentityRepository(context, db.appSettingDao())
                         val restoreResult = kotlinx.coroutines.runBlocking {
-                            idRepo.restoreAuthoritativeIdentity(parsedIdentityObj, mnemonic)
+                            idRepo.restoreAuthoritativeIdentity(parsedIdentityObj, MnemonicGenerator.normalize(mnemonic))
                         }
                         if (restoreResult !is IdentityRestoreResult.Success) {
                             throw IllegalStateException("Identity restore rejected: $restoreResult")
@@ -1004,6 +1023,36 @@ object BackupManager {
         } catch (e: Exception) {
             Logger.error(TAG, "Could not record the identity quarantine flag: ${e.message}")
         }
+    }
+
+    private fun aesKeyFor(mnemonic: String) =
+        SecretKeySpec(MnemonicGenerator.deriveSeed(mnemonic).copyOfRange(0, 32), "AES")
+
+    /**
+     * R5: whether [key] turns the archive's first cipher block into a zip local-file header
+     * ("PK\u0003\u0004"); a wrong key does so with probability 2^-32. Unauthenticated by itself — it only
+     * chooses the key; the full decryption (GCM tag, or CBC padding plus zip parsing) is the check.
+     * GCM is CTR mode: block 0 of the payload is XORed with AES(key, IV || 00000002). CBC: block 0
+     * decrypts to AES^-1(key, C0) XOR IV, the IV being the 16-byte header.
+     */
+    internal fun firstBlockIsZip(key: SecretKeySpec, header: ByteArray, firstBlock: ByteArray, isGcm: Boolean): Boolean = try {
+        val plain = if (isGcm) {
+            val counter = header.copyOfRange(4, 16) + byteArrayOf(0, 0, 0, 2)
+            val keystream = Cipher.getInstance("AES/ECB/NoPadding").run {
+                init(Cipher.ENCRYPT_MODE, key)
+                doFinal(counter)
+            }
+            ByteArray(16) { (firstBlock[it].toInt() xor keystream[it].toInt()).toByte() }
+        } else {
+            val raw = Cipher.getInstance("AES/ECB/NoPadding").run {
+                init(Cipher.DECRYPT_MODE, key)
+                doFinal(firstBlock)
+            }
+            ByteArray(16) { (raw[it].toInt() xor header[it].toInt()).toByte() }
+        }
+        plain[0] == 0x50.toByte() && plain[1] == 0x4B.toByte() && plain[2] == 0x03.toByte() && plain[3] == 0x04.toByte()
+    } catch (e: Exception) {
+        false
     }
 
     private fun canOpenRestoredIdentity(context: Context): Boolean {

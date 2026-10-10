@@ -880,5 +880,10 @@
   "Remove Picture": "Remove Picture",
   "Creator Name": "Creator Name",
   "Use a name and picture that don't identify your personal profile.": "Use a name and picture that don't identify your personal profile.",
-  "Save Creator Profile": "Save Creator Profile"
+  "Save Creator Profile": "Save Creator Profile",
+  "Restore failed: {reason}": "Restore failed: {reason}",
+  "Import failed: {reason}": "Import failed: {reason}",
+  "Failed to decrypt or import backup. Check your mnemonic.": "Failed to decrypt or import backup. Check your mnemonic.",
+  "Older Backup Format": "Older Backup Format",
+  "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control.": "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control."
 }

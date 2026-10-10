@@ -276,6 +276,35 @@ object MnemonicGenerator {
     }
 
     /**
+     * R5: the canonical form of a Word Cloud as typed: trimmed, lower case, single spaces. Generated
+     * phrases are already in this form; keyboards add capitals (first word), trailing spaces and
+     * line breaks. New backups are encrypted under this form (BackupManager.exportData).
+     */
+    fun normalize(mnemonic: String): String =
+        mnemonic.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+
+    /**
+     * R5: the forms of [entered] a backup may have been encrypted under. Until this round the export
+     * used the Word Cloud exactly as typed, so an archive made with an auto-capitalised first word or
+     * a trailing space only opens with that exact string. The canonical form comes first.
+     */
+    fun restoreCandidates(entered: String): List<String> {
+        val norm = normalize(entered)
+        val capitalised = norm.replaceFirstChar { it.uppercase() }
+        val trimmed = entered.trim()
+        return listOf(
+            norm,
+            entered,
+            trimmed,
+            capitalised,
+            "$norm ",
+            "$capitalised ",
+            "$norm\n",
+            trimmed.lowercase()
+        ).filter { it.isNotBlank() }.distinct()
+    }
+
+    /**
      * Helper to get a Base64 string from the derived seed.
      */
     fun deriveSeedB64(mnemonic: String, salt: String = "noslop"): String {

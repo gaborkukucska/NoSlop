@@ -411,9 +411,18 @@ private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> U
     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
         try {
             val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
+                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
                     decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
                     decoder.isMutableRequired = true
+                    // R5: a full-resolution camera photo is ~12-50 MP; keep the longest side within
+                    // MAX_GALLERY_QR_SIDE so decoding stays fast and cannot run out of memory.
+                    val w = info.size.width
+                    val h = info.size.height
+                    val longest = maxOf(w, h)
+                    if (longest > MAX_GALLERY_QR_SIDE) {
+                        val scale = MAX_GALLERY_QR_SIDE.toFloat() / longest
+                        decoder.setTargetSize((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1))
+                    }
                 }
             } else {
                 @Suppress("DEPRECATION")
@@ -421,23 +430,114 @@ private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> U
             }
 
             if (bitmap == null) {
+                Logger.warn("QR_SCAN", "Gallery image could not be decoded as a bitmap")
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
                 return@launch
             }
 
             val intArray = IntArray(bitmap.width * bitmap.height)
             bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-            val source = com.google.zxing.RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
-            val binaryBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
-            val reader = com.google.zxing.MultiFormatReader().apply {
-                setHints(mapOf(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE)))
-            }
-            val result = reader.decode(binaryBitmap)
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(result.text) }
+            val text = decodeQrFromArgb(intArray, bitmap.width, bitmap.height)
+            Logger.info("QR_SCAN", "Gallery image ${bitmap.width}x${bitmap.height}: ${if (text != null) "QR code detected (${text.length} chars)" else "no QR code found"}")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(text) }
         } catch (e: Exception) {
+            Logger.warn("QR_SCAN", "Gallery image decode failed: ${e.javaClass.simpleName}: ${e.message}")
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
         }
     }
+}
+
+/** R5: longest side a gallery image is decoded at. */
+private const val MAX_GALLERY_QR_SIDE = 2048
+
+/**
+ * R5: decodes a QR code from an image picked from the gallery (ARGB pixels). Pure, so it is unit tested.
+ *
+ * The gallery path used to make one attempt: full-size RGB, no TRY_HARDER, no inverted pass, and
+ * transparent pixels read as black. So a light-on-dark code, a PNG with a transparent background, or a
+ * small code in a large photo all came back as "No QR code found in this image". This tries, in order:
+ * the image composited over white and (when it has transparency) over black; at full size and then at
+ * halved sizes; each with the hybrid and the global-histogram binarizer, normal and inverted.
+ */
+internal fun decodeQrFromArgb(pixels: IntArray, width: Int, height: Int): String? {
+    if (width <= 0 || height <= 0 || pixels.size < width * height) return null
+    val reader = com.google.zxing.MultiFormatReader().apply {
+        setHints(
+            mapOf(
+                com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+                com.google.zxing.DecodeHintType.TRY_HARDER to true
+            )
+        )
+    }
+    val hasTransparency = pixels.any { (it ushr 24) != 0xFF }
+    val backgrounds = if (hasTransparency) intArrayOf(255, 0) else intArrayOf(255)
+    for (background in backgrounds) {
+        var lum = argbToLuminance(pixels, width, height, background)
+        var w = width
+        var h = height
+        while (true) {
+            decodeQrLuminance(lum, w, h, reader)?.let { return it }
+            decodeQrLuminanceGlobal(lum, w, h, reader)?.let { return it }
+            if (minOf(w, h) < 400) break
+            val halved = halveLuminance(lum, w, h)
+            lum = halved
+            w /= 2
+            h /= 2
+        }
+    }
+    return null
+}
+
+/** ARGB to 8-bit luminance, composited over a [background] grey level (255 = white). */
+internal fun argbToLuminance(pixels: IntArray, width: Int, height: Int, background: Int): ByteArray {
+    val out = ByteArray(width * height)
+    for (i in 0 until width * height) {
+        val p = pixels[i]
+        val a = p ushr 24
+        val r = (p shr 16) and 0xFF
+        val g = (p shr 8) and 0xFF
+        val b = p and 0xFF
+        val lum = (r * 299 + g * 587 + b * 114) / 1000
+        out[i] = ((lum * a + background * (255 - a)) / 255).toByte()
+    }
+    return out
+}
+
+/** 2x2 box-average downscale of a luminance plane (odd last row/column dropped). */
+internal fun halveLuminance(lum: ByteArray, width: Int, height: Int): ByteArray {
+    val w = width / 2
+    val h = height / 2
+    val out = ByteArray(w * h)
+    for (y in 0 until h) {
+        val r0 = (2 * y) * width
+        val r1 = r0 + width
+        for (x in 0 until w) {
+            val x0 = 2 * x
+            val sum = (lum[r0 + x0].toInt() and 0xFF) + (lum[r0 + x0 + 1].toInt() and 0xFF) +
+                (lum[r1 + x0].toInt() and 0xFF) + (lum[r1 + x0 + 1].toInt() and 0xFF)
+            out[y * w + x] = (sum / 4).toByte()
+        }
+    }
+    return out
+}
+
+/** Like [decodeQrLuminance], with ZXing's global-histogram binarizer (better on smooth, high-contrast images). */
+internal fun decodeQrLuminanceGlobal(
+    luminance: ByteArray,
+    width: Int,
+    height: Int,
+    reader: com.google.zxing.MultiFormatReader
+): String? {
+    val source = com.google.zxing.PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
+    for (candidate in listOf(source, source.invert())) {
+        try {
+            return reader.decodeWithState(com.google.zxing.BinaryBitmap(com.google.zxing.common.GlobalHistogramBinarizer(candidate))).text
+        } catch (_: com.google.zxing.ReaderException) {
+        } finally {
+            reader.reset()
+        }
+    }
+    return null
 }
 
 /**

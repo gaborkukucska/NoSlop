@@ -92,6 +92,35 @@ object GossipService {
     /** Time source for the failure bookkeeping; replaced only by tests. */
     internal var clock: () -> Long = { System.currentTimeMillis() }
 
+    /**
+     * R5: asks Tor to fetch a peer's current hidden-service descriptor (TorService.refreshOnionDescriptor,
+     * wired in by the repository). When a peer's Tor restarts (a restore, a reboot) its .onion gets new
+     * introduction points, but our Tor keeps using the cached descriptor; with our send timeouts shorter
+     * than Tor's own retry cycle, every send timed out for minutes. Null in unit tests.
+     */
+    @Volatile
+    var onionDescriptorRefresher: ((String) -> Unit)? = null
+
+    /** A descriptor is re-fetched for the same onion at most this often. */
+    internal const val DESCRIPTOR_REFRESH_INTERVAL_MS = 60_000L
+    private val descriptorRefreshedAt = ConcurrentHashMap<String, Long>()
+
+    /** R5: second failure in a row to an onion, or the peer reached us while our sends were failing. */
+    private fun maybeRefreshDescriptor(peerOnionAddress: String, reason: String) {
+        val refresher = onionDescriptorRefresher ?: return
+        if (!peerOnionAddress.endsWith(".onion")) return
+        val now = clock()
+        val last = descriptorRefreshedAt[peerOnionAddress]
+        if (last != null && now - last < DESCRIPTOR_REFRESH_INTERVAL_MS) return
+        descriptorRefreshedAt[peerOnionAddress] = now
+        Logger.info(TAG, "Refreshing hidden-service descriptor of $peerOnionAddress ($reason)")
+        try {
+            refresher(peerOnionAddress)
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Descriptor refresh for $peerOnionAddress failed to start: ${e.message}")
+        }
+    }
+
     fun recordDeletedPeer(publicKeyB64: String) {
         recentlyDeletedPeers[publicKeyB64] = System.currentTimeMillis()
     }
@@ -106,6 +135,7 @@ object GossipService {
         
         val effectiveCount = if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS) 1 else count + 1
         peerSendFailures[peerOnionAddress] = effectiveCount to now
+        if (effectiveCount >= 2) maybeRefreshDescriptor(peerOnionAddress, "$effectiveCount failed sends")
         
         if (effectiveCount >= PEER_FAILURE_THRESHOLD) {
             val cooldownMs = cooldownFor(effectiveCount)
@@ -147,7 +177,12 @@ object GossipService {
      * Record a successful send to reset failure counter
      */
     fun recordSendSuccess(peerOnionAddress: String) {
-        peerSendFailures.remove(peerOnionAddress)
+        val previous = peerSendFailures.remove(peerOnionAddress)
+        // R5: also called when an authenticated packet from the peer arrives. If our sends to it were
+        // failing, our copy of its descriptor is the likely cause (it can reach us; we can't reach it).
+        if (previous != null && previous.first >= 2) {
+            maybeRefreshDescriptor(peerOnionAddress, "reachable again after ${previous.first} failed sends")
+        }
     }
 
 
@@ -213,6 +248,7 @@ object GossipService {
         checkEntityExists = null
         checkIsLocalUser = null
         pushPacketToHub = null
+        onionDescriptorRefresher = null
         cleanupJob?.cancel()
         cleanupJob = null
     }
@@ -228,6 +264,7 @@ object GossipService {
         senderMediaBytes.clear()
         recentlyDeletedPeers.clear()
         peerSendFailures.clear()
+        descriptorRefreshedAt.clear()
     }
 
 
