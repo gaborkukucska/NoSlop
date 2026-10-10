@@ -885,5 +885,9 @@
   "Import failed: {reason}": "Import failed: {reason}",
   "Failed to decrypt or import backup. Check your mnemonic.": "Failed to decrypt or import backup. Check your mnemonic.",
   "Older Backup Format": "Older Backup Format",
-  "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control.": "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control."
+  "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control.": "This backup was made by an older NoSlop version and is not tamper-protected. Only continue if you made this file yourself and it has not left your control.",
+  "Word Cloud Differs": "Word Cloud Differs",
+  "Back Up With These Words": "Back Up With These Words",
+  "Re-enter Words": "Re-enter Words",
+  "The words you typed differ from the Word Cloud saved on this device in {count} of {total} places. The backup is encrypted with the words you typed and will open only with exactly those words. Continue only if they are the words you have written down.": "The words you typed differ from the Word Cloud saved on this device in {count} of {total} places. The backup is encrypted with the words you typed and will open only with exactly those words. Continue only if they are the words you have written down."
 }

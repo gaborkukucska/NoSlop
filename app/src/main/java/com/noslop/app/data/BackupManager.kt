@@ -41,6 +41,28 @@ sealed class ImportResult {
     object ConfirmLegacy : ImportResult()
 }
 
+/**
+ * R5b: how the Word Cloud typed for an export compares with the one stored on this device. Compared in
+ * canonical form (MnemonicGenerator.normalize). Only counts are kept, never the words.
+ */
+sealed class WordCloudCheck {
+    object Matches : WordCloudCheck()
+    object NothingStored : WordCloudCheck()
+    data class Differs(val differingWords: Int, val typedWords: Int, val storedWords: Int) : WordCloudCheck()
+
+    companion object {
+        fun compare(typed: String, stored: String?): WordCloudCheck {
+            val s = stored?.let { MnemonicGenerator.normalize(it) }?.takeIf { it.isNotBlank() } ?: return NothingStored
+            val t = MnemonicGenerator.normalize(typed)
+            if (t == s) return Matches
+            val tw = if (t.isEmpty()) emptyList() else t.split(" ")
+            val sw = s.split(" ")
+            val differing = (0 until maxOf(tw.size, sw.size)).count { tw.getOrNull(it) != sw.getOrNull(it) }
+            return Differs(differing, tw.size, sw.size)
+        }
+    }
+}
+
 enum class BackupMediaOption {
     NONE,        // IDs, keys, contacts, settings, and database only (Lightweight, ~100KB)
     OWNED_ONLY,  // Database, keys, plus only media files authored by local identities

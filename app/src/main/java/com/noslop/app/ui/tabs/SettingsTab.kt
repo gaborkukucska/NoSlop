@@ -1391,6 +1391,9 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             var showExportSuccessDialog by remember { mutableStateOf(false) }
                             var pendingLegacyImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
                             var pendingLegacyMnemonic by remember { mutableStateOf("") }
+                            // R5b: the typed Word Cloud differs from the stored one; the user decides.
+                            var wordCloudMismatch by remember { mutableStateOf<com.noslop.app.data.WordCloudCheck.Differs?>(null) }
+                            var mismatchMediaOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.OWNED_ONLY) }
 
                             val isBackupExporting by viewModel.isBackupExporting.collectAsState()
 
@@ -1553,9 +1556,14 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                                 val mnemonicToVerify = mnemonicInput.trim()
                                                 val mediaOpt = selectedMediaOption
                                                 scope.launch {
-                                                    val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
-                                                    if (isExporting && !activeMnemonic.isNullOrBlank() && !mnemonicToVerify.equals(activeMnemonic, ignoreCase = true)) {
-                                                        android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic does not match your active Word Cloud!"), android.widget.Toast.LENGTH_LONG).show()
+                                                    // R5b: compared in canonical form (case and spacing ignored); a real
+                                                    // difference is shown with its size and left to the user, instead of a
+                                                    // dead end that made backing up impossible.
+                                                    val check = if (isExporting) viewModel.checkWordCloud(mnemonicToVerify) else com.noslop.app.data.WordCloudCheck.NothingStored
+                                                    if (check is com.noslop.app.data.WordCloudCheck.Differs) {
+                                                        showMnemonicDialog = false
+                                                        mismatchMediaOption = mediaOpt
+                                                        wordCloudMismatch = check
                                                     } else {
                                                         showMnemonicDialog = false
                                                         if (isExporting) {
@@ -1581,6 +1589,44 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     },
                                     containerColor = SurfaceDark,
                                     titleContentColor = TextLight
+                                )
+                            }
+
+                            // ─── R5b: typed Word Cloud differs from the stored one ───
+                            wordCloudMismatch?.let { mismatch ->
+                                AlertDialog(
+                                    onDismissRequest = { wordCloudMismatch = null },
+                                    title = { Text("Word Cloud Differs".tr, color = TemporaryAmber, fontWeight = FontWeight.Bold) },
+                                    text = {
+                                        Text(
+                                            com.noslop.app.util.LanguageManager.translate("The words you typed differ from the Word Cloud saved on this device in {count} of {total} places. The backup is encrypted with the words you typed and will open only with exactly those words. Continue only if they are the words you have written down.")
+                                                .replace("{count}", mismatch.differingWords.toString())
+                                                .replace("{total}", maxOf(mismatch.storedWords, mismatch.typedWords).toString()),
+                                            color = TextMuted
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                wordCloudMismatch = null
+                                                val prefix = if (mismatchMediaOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                                                val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                                                exportLauncher.launch("$prefix$exportTimestamp.zip")
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = TemporaryAmber, contentColor = PrimaryBlack)
+                                        ) {
+                                            Text("Back Up With These Words".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = {
+                                            wordCloudMismatch = null
+                                            showMnemonicDialog = true
+                                        }) {
+                                            Text("Re-enter Words".tr, color = AccentGreen)
+                                        }
+                                    },
+                                    containerColor = SurfaceDark
                                 )
                             }
 
@@ -1915,14 +1961,17 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
         var advisoryOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.NONE) }
         var advisoryMnemonicInput by remember { mutableStateOf("") }
         var showAdvisoryMnemonicPrompt by remember { mutableStateOf(false) }
+        // R5b: set once the typed words were checked (matching, or the user accepted a difference).
+        var advisoryWordsAccepted by remember { mutableStateOf(false) }
+        var advisoryMismatch by remember { mutableStateOf<com.noslop.app.data.WordCloudCheck.Differs?>(null) }
         val advisoryScope = rememberCoroutineScope()
         val advisoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
             if (uri != null && advisoryMnemonicInput.isNotBlank()) {
                 val mediaOpt = advisoryOption
                 val mnemonic = advisoryMnemonicInput.trim()
                 advisoryScope.launch {
-                    val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
-                    if (activeMnemonic.isNullOrBlank() || mnemonic.equals(activeMnemonic, ignoreCase = true)) {
+                    if (advisoryWordsAccepted) {
+                        advisoryWordsAccepted = false
                         viewModel.exportBackupToUri(context, mnemonic, uri, mediaOpt) { success, _ ->
                             if (success) {
                                 android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Backup exported successfully!"), android.widget.Toast.LENGTH_SHORT).show()
@@ -2028,10 +2077,11 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         } else if (advisoryMnemonicInput.isNotBlank()) {
                             val mnemonicToVerify = advisoryMnemonicInput.trim()
                             advisoryScope.launch {
-                                val activeMnemonic = viewModel.getActiveMnemonic()?.trim()
-                                if (!activeMnemonic.isNullOrBlank() && !mnemonicToVerify.equals(activeMnemonic, ignoreCase = true)) {
-                                    android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic does not match your active Word Cloud!"), android.widget.Toast.LENGTH_LONG).show()
+                                val check = viewModel.checkWordCloud(mnemonicToVerify)
+                                if (check is com.noslop.app.data.WordCloudCheck.Differs) {
+                                    advisoryMismatch = check
                                 } else {
+                                    advisoryWordsAccepted = true
                                     val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
                                     val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
                                     advisoryLauncher.launch("$prefix$exportTimestamp.zip")
@@ -2050,5 +2100,40 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 }
             }
         )
+
+        advisoryMismatch?.let { mismatch ->
+            AlertDialog(
+                onDismissRequest = { advisoryMismatch = null },
+                title = { Text("Word Cloud Differs".tr, color = TemporaryAmber, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        com.noslop.app.util.LanguageManager.translate("The words you typed differ from the Word Cloud saved on this device in {count} of {total} places. The backup is encrypted with the words you typed and will open only with exactly those words. Continue only if they are the words you have written down.")
+                            .replace("{count}", mismatch.differingWords.toString())
+                            .replace("{total}", maxOf(mismatch.storedWords, mismatch.typedWords).toString()),
+                        color = TextMuted
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            advisoryMismatch = null
+                            advisoryWordsAccepted = true
+                            val prefix = if (advisoryOption == com.noslop.app.data.BackupMediaOption.NONE) "noslop_keys_" else "noslop_full_"
+                            val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                            advisoryLauncher.launch("$prefix$exportTimestamp.zip")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TemporaryAmber, contentColor = PrimaryBlack)
+                    ) {
+                        Text("Back Up With These Words".tr, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { advisoryMismatch = null }) {
+                        Text("Re-enter Words".tr, color = AccentGreen)
+                    }
+                },
+                containerColor = SurfaceDark
+            )
+        }
     }
 }

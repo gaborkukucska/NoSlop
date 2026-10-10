@@ -99,6 +99,21 @@ class BackupWordCloudFormsTest {
     }
 
     @Test
+    fun wordCloudCheck_ignoresCaseAndSpacing() {
+        assertEquals(WordCloudCheck.Matches, WordCloudCheck.compare("Apple  banana cherry dragon elephant falcon grape honey island jungle kiwi lemon\n", canonical))
+        assertEquals(WordCloudCheck.NothingStored, WordCloudCheck.compare(canonical, null))
+        assertEquals(WordCloudCheck.NothingStored, WordCloudCheck.compare(canonical, "  "))
+    }
+
+    @Test
+    fun wordCloudCheck_countsDifferingWords() {
+        val typed = "apple banana cherry dragon elephant falcon grape honey island jungle kiwi melon"
+        assertEquals(WordCloudCheck.Differs(differingWords = 1, typedWords = 12, storedWords = 12), WordCloudCheck.compare(typed, canonical))
+        assertEquals(WordCloudCheck.Differs(differingWords = 1, typedWords = 11, storedWords = 12),
+            WordCloudCheck.compare("apple banana cherry dragon elephant falcon grape honey island jungle kiwi", canonical))
+    }
+
+    @Test
     fun firstBlockProbe_recognisesTheRightKeyOnly() {
         val archive = export(canonical)
         val header = archive.copyOfRange(0, 16)
