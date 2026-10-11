@@ -230,6 +230,10 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         }
     }
 
+    /**
+     * Creates the account. R6: the only place a Word Cloud is first written; called only from onboarding
+     * (NoSlopRepository.saveLocalIdentity <- NoSlopViewModel.completeOnboarding), see WordCloudGuard.
+     */
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         // Private keys -> SharedPreferences (encrypted via ESP or fallback AES-GCM)
         val commitSuccess = prefs.edit()
@@ -356,6 +360,8 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
     /**
      * U01 / U02: Atomically restore identity credentials with strict validation and verified persistence.
+     * R6: [fallbackMnemonic] is the phrase typed to open the backup. It is stored only when the archive
+     * carries no Word Cloud and it derives the restored keys (WordCloudGuard).
      */
     suspend fun restoreAuthoritativeIdentity(identityObj: JSONObject, fallbackMnemonic: String): IdentityRestoreResult {
         try {
@@ -435,14 +441,27 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
             val handle = identityObj.getString("handle")
             val displayName = identityObj.getString("displayName")
-            val mnemonic = identityObj.optString("mnemonic", fallbackMnemonic)
             val idVersion = identityObj.optString("identity_version", "2")
+            // R6: the restored account keeps its own Word Cloud; the typed words never replace it.
+            val archivePhrase = if (identityObj.has("mnemonic") && !identityObj.isNull("mnemonic")) identityObj.getString("mnemonic") else null
+            val wordCloud = WordCloudGuard.decideRestored(archivePhrase, fallbackMnemonic, pubEd)
+            when (wordCloud) {
+                is WordCloudGuard.Decision.Keep -> if (!wordCloud.derivesKeys && idVersion == "2") {
+                    Logger.warn(TAG, "The backup's Word Cloud does not derive this version 2 account's keys; kept unchanged")
+                } else {
+                    Logger.info(TAG, "Restored account keeps its Word Cloud", "source=${wordCloud.source} | derivesKeys=${wordCloud.derivesKeys} | identityVersion=$idVersion")
+                }
+                is WordCloudGuard.Decision.StoreNothing ->
+                    Logger.warn(TAG, "No Word Cloud stored for the restored account: ${wordCloud.reason}", "identityVersion=$idVersion")
+            }
 
             val edit = prefs.edit().clear()
             edit.putString("ed25519_private_key", secureFallbackWrite(privEd))
                 .putString("enc_private_key", secureFallbackWrite(privEnc))
-                .putString("mnemonic", secureFallbackWrite(mnemonic))
-                .putString("pub_ed25519", pubEd)
+            if (wordCloud is WordCloudGuard.Decision.Keep) {
+                edit.putString("mnemonic", secureFallbackWrite(wordCloud.phrase))
+            }
+            edit.putString("pub_ed25519", pubEd)
                 .putString("pub_enc", pubEnc)
                 .putString("handle", handle)
                 .putString("tripcode", tripcode)

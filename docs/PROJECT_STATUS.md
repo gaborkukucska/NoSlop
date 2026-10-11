@@ -1,5 +1,36 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-10) — Round R6: Nothing Changes the Word Cloud (v0.7.0-alpha)
+
+**Diagnosis of the older account (R5c log, 22:04:05).** `identityVersion=1 | typedDerivesIdentity=false | storedDerivesIdentity=false`, 12 of 12 words differ. The account predates Word Cloud–derived keys (version 2, 2026-09-11): its keys are random, so no phrase derives them and the device cannot tell which of the two phrases is the "right" one. The keys, contacts and data are intact. No code in the history rewrites the stored phrase on a running install. A past restore could only bring back the exporting phone's stored phrase, or, before R6, the words typed at that export or restore when the phone had none stored. The paths that replaced keys with Word Cloud–derived ones would have made the account version 2, so they did not run here. Since R5b the account can be backed up with the written-down words ("Back Up With These Words"); that backup opens with those words, and the account keeps its stored phrase.
+
+**Rule (agreed with the user).** The Word Cloud an account keeps is written when the account is created and never changed afterwards. A restore brings back the backed-up account's own phrase; it never substitutes the words typed to open the backup, which only decrypt the file. `WordCloudGuard` (`data/WordCloudGuard.kt`) holds the rule:
+
+* **Restore** (`IdentityRepository.restoreAuthoritativeIdentity` → `WordCloudGuard.decideRestored`): the archive's phrase is kept as it is. The typed words are stored only when the archive carries no phrase **and** they derive the restored keys. Otherwise no phrase is stored (logged as a warning). Before, the typed words were stored whenever the archive had no phrase. A version 2 archive whose phrase does not derive its keys is still kept unchanged, with a warning in the log. The log records the source and booleans only, never words.
+* **Export** (`BackupManager.exportData`): the archive carries the account's stored phrase. If it can't be read, the archive carries none. Before, the archive carried the words typed for the export, which a restore then stored.
+* **Legacy cross-device rebuild** (`planLegacyRederivation`): the typed words become the account's phrase only when the archive's database names the public key they derive. An archive that records no key used to count as a match; it is now a recovery-required restore.
+* **Account creation** (`saveIdentity`) remains the only first write, reached only from `NoSlopViewModel.completeOnboarding`, which derives the new keys from the phrase it stores.
+* The old prefs-file restore of pre-portable archives copies the account's own prefs file and is unchanged; the rollback restores the pre-restore snapshot.
+* `IdentityRepository.unlock` compares against the stored phrase; an account restored with no phrase could not be unlocked, but no screen calls `logout`/`unlock` today.
+* No "show my Word Cloud" screen (user decision).
+
+**Compatibility.** No packet, archive-format or Room schema change. Archives without a `mnemonic` field are valid (the field was always optional on restore).
+
+### Removed: the unused `IdentityViewModel` (C25 leftover, D10 item; R6b)
+
+* **Why it existed.** C25 copied the account code (onboarding, Word Cloud, backup export and restore, creator identity) out of `NoSlopViewModel` into `IdentityViewModel` but never switched the screens over or deleted the originals. `NoSlopViewModel` created an instance on every launch (`val identityViewModel`) that nothing used. A project-wide search found no other reference outside its own test.
+* **Why it had to go.** The copy had drifted. Its restore still used the Boolean `importData` without the D09 results, the R5 failure reasons, or the Tor stop before restart. Its onboarding did not reset the tutorial step. It was a second account-creation path for the Word Cloud rule. Its eager flows also read the identity at every start for no use.
+* **Change.** Deleted `ui/IdentityViewModel.kt`, its instance in `NoSlopViewModel`, and `IdentityViewModelTest`. That test only covered the copy; the same `generateMnemonic` and backup-prompt state live in `NoSlopViewModel`. No behaviour change: no screen used the copy.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `WordCloudRuleTest` | Archive phrase kept when other words opened the backup (version 1 keys), and kept even when the typed words derive the keys; derivation flag; no archive phrase: typed words kept (canonical form) only when they derive the keys, otherwise nothing stored (`null`, blank, `"null"`); export with other words carries the account's own phrase; end-to-end restore with other words keeps the stored phrase; legacy rebuild needs the archive to name the derived key (no key → no match) |
+| `WordCloudWritePathsTest` | Source scan: the stored phrase is written only in `saveIdentity`, `restoreAuthoritativeIdentity` (through the guard), `exportData` (the archive copy) and `importBackup` (legacy rebuild, after the key-match gate); `saveIdentity` is reached only via `saveLocalIdentity` ← `NoSlopViewModel.completeOnboarding`, which stores the phrase it derived the new keys from; nothing removes the phrase on its own |
+
+---
+
 ## Completed Changes (2026-10-10) — Round R5: Device Feedback after D09 (v0.7.0-alpha)
 
 Device report after D09: the feed tutorial swiped itself away on a new account; a QR image from the gallery was "not a QR"; an older account's backup said the Word Cloud was wrong; after a restore Tor took long to come up and replies arrived minutes late; videos buffered a lot. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
@@ -29,7 +60,7 @@ Device report after D09: the feed tutorial swiped itself away on a new account; 
 
 * **Cause.** Before exporting, Settings (and the backup advisory) compared the typed Word Cloud with the one stored on the device using `trim()` + `equals(ignoreCase)`: any difference in spacing inside the phrase (double space, line break) failed, and a real difference was a dead end. The older account could not be backed up at all.
 * **Fix.** `WordCloudCheck.compare` compares canonical forms (case and spacing ignored). A real difference opens a dialog saying in how many places the words differ and that the backup will open only with the words typed; the user can back up with them or re-enter. The log records the counts only (`differingWords`, `typedWords`, `storedWords`), never the words.
-* Open: why the older account's stored Word Cloud differs from the user's written copy. Device report: 12 of 12 words differ. No change in this session writes the stored Word Cloud on an existing install (only restores do, and their behaviour is unchanged apart from the D09 legacy re-derivation, which stores the phrase typed at restore). R5c adds to the mismatch log the identity version and whether the typed and the stored phrase derive the account's keys (booleans only).
+* Resolved in R6 (version 1 account with random keys; see Round R6). Device report: 12 of 12 words differ. No change in this session writes the stored Word Cloud on an existing install (only restores do, and their behaviour is unchanged apart from the D09 legacy re-derivation, which stores the phrase typed at restore). R5c adds to the mismatch log the identity version and whether the typed and the stored phrase derive the account's keys (booleans only).
 * Tested (unit: `BackupWordCloudFormsTest`).
 
 ### Older backups could not be restored from onboarding
@@ -65,7 +96,7 @@ This round closes review finding D09. A "Tested" label names a test class that m
 
 **Verification (2026-10-10).** Tests passed and the build was installed; export and restore of a new account worked on device. Restoring an older account's backup failed with "wrong Word Cloud" (see Round R5).
 
-**Compatibility.** No archive format, packet or Room schema change. `BackupManager.importData` keeps its Boolean contract for existing callers (`IdentityViewModel`, tests); the app's restore path uses the new `importBackup`.
+**Compatibility.** No archive format, packet or Room schema change. `BackupManager.importData` keeps its Boolean contract for existing callers (tests; `IdentityViewModel` until R6b); the app's restore path uses the new `importBackup`.
 
 ### A restore that needed identity recovery reported "Import failed"
 
@@ -211,7 +242,7 @@ This round closes review finding D04: the creator (burnable) identity could be l
 * Reactions and votes on posts still use the personal identity: the feed's "my reaction" state is keyed to it. They are not sent directly to creator contacts, but third-party relays can still carry them.
 * The capture test covers the packets listed above; group traffic keeps its own identity rule (`groupMemberIdentity`).
 * With a Hub linked, broadcasts are handed to the Hub, which relays by its own rules.
-* `IdentityViewModel` still holds an unused copy of the old discoverable code; it is removed with D10.
+* `IdentityViewModel` still held an unused copy of the old discoverable code; deleted in R6b.
 * New UI strings are English only, and fall back to English in other languages.
 
 ### Tests added in this round
@@ -667,7 +698,7 @@ These existing tests were adjusted to the new APIs: `MeshSocialRepositoryTest`, 
 * Those changelog lines are kept as the historical record. The verification matrix now shows what is actually tested.
 * Other claims in that entry that don't hold:
   * No `secureDelete()` function exists (C06).
-  * `IdentityViewModel` is an unused copy; its deletion is planned (C25).
+  * `IdentityViewModel` was an unused copy; deleted in R6b (2026-10-11).
   * `deriveSafetyFingerprint()` has no callers, so no screen shows a fingerprint yet (C11).
   * The README sentences about fingerprints, the creator identity, exit affinity and translation coverage were corrected.
 
@@ -680,7 +711,7 @@ These existing tests were adjusted to the new APIs: `MeshSocialRepositoryTest`, 
   * **D05** — v1 DM latch; `DM_ACK` domain separation; outbox expiry.
   * **D08** — the live `POST` and `EDIT_POST` path still passes an unsigned `sha256` to auto-download when only the legacy signature verified. Sync is fixed by R2.
   * **D09** — typed `ImportResult`; check before commit.
-  * **D10** — fingerprint UI and `pendingEncKey` banner; `IdentityViewModel` deletion; status-file test-existence check.
+  * **D10** — fingerprint UI and `pendingEncKey` banner; status-file test-existence check. (`IdentityViewModel` deleted in R6b.)
   * **D11** — smaller items.
   * **D12** — items still open from round 1.
 * **Regression register:**
@@ -1872,7 +1903,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C22** | P2 | Click-to-load prompts for remote GIFs & retired cleartext GROUP_MESSAGE | **Resolved** | `TorLeakArchitectureTest` |
 | **C23** | P2 | Translation key parity (`content_en.json`), pre-install APK cert verification, docs sync | **Resolved** | `TranslationParityTest` |
 | **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Resolved** | `testGithubDebugUnitTest` |
-| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Partial** — `IdentityViewModel` is an unused copy (deletion planned, D10) | `IdentityViewModelTest` |
+| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** — the unused `IdentityViewModel` copy was deleted (R6b, 2026-10-11); the account code lives in `NoSlopViewModel` | — |
 | **C26** | P2 | Canonical presence-encoded signing formats (`ABSENT` / `CLEAR` / `SET:`) | **Resolved** | `GroupMessageSecurityTest` |
 | **W01** | P0 | Synchronized Feed sync cancellation deadlock fix | **Resolved** | `FeedRepositoryTest` |
 | **W02** | P0 | Eliminated legacy 4-field GROUP_UPDATE bypass | **Resolved** | `GroupMessageSecurityTest` |
@@ -1896,7 +1927,7 @@ same-device backup export/import. Multi-device testing is next.
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
 | **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "unverified" label deferred to D10 | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test` |
 | **D09** | P2 | Cross-device restore mismatch reported after commit | **Resolved** (2026-10-10; not yet device-verified) — typed `ImportResult`, pre-commit identity plan, restart into recovery, X25519 reconciliation | `BackupImportResultD09Test` |
-| **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; fingerprint UI, `IdentityViewModel` deletion, status-file check open | — |
+| **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; `IdentityViewModel` deleted (R6b); fingerprint UI, status-file check open | — |
 | **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |
 | **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |
 | **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |

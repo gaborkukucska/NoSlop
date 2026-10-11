@@ -73,8 +73,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val repository = NoSlopApp.repository
     val logFilePath: String
 
-    val identityViewModel: IdentityViewModel = IdentityViewModel(application)
-
     init {
         Logger.initialize(application)
         logFilePath = Logger.getLogFilePath()

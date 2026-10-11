@@ -330,6 +330,17 @@ cryptographically the same key.
 `isEncryptionActive()` checks `prefs.javaClass.name.contains("EncryptedSharedPreferences")`
 to determine which backend is actually active at runtime.
 
+**Stored Word Cloud (`mnemonic`), R6.** Written when the account is created (`saveIdentity`, from
+`NoSlopViewModel.completeOnboarding` only) and never changed afterwards. Rules in `WordCloudGuard`:
+- A restore keeps the archive's phrase as it is; the words typed to open the backup are stored only
+  when the archive carries none and they derive the restored Ed25519 key. Otherwise no phrase is stored.
+- An export puts the stored phrase (never the typed words) in `identity_backup.json`, or none if it
+  can't be read.
+- The legacy cross-device rebuild stores the typed words only when the archive's database names the
+  key they derive.
+- Version 1 accounts (before 2026-09-11) have random keys, so no phrase derives them.
+`WordCloudWritePathsTest` fails on any other write site.
+
 ### 3.7.1 Creator Identity Separation (`IdentityRouter`, review D04, 2026-10-09)
 
 The creator (burnable) identity has its own profile and is never sent with the personal one.

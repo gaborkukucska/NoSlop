@@ -132,7 +132,10 @@ object BackupManager {
                         val idKeys = idRepo.loadIdentity() ?: return@runBlocking null
                         val burnable = idRepo.getBurnableIdentity()
                         val handle = idRepo.getHandle()
-                        val idMnemonic = idRepo.getMnemonic() ?: mnemonic
+                        // R6: the archive carries the account's own stored Word Cloud, never the words typed for
+                        // this export (they only encrypt the file). Unreadable -> no phrase in the archive.
+                        val idMnemonic = idRepo.getMnemonic()?.takeIf { it.isNotBlank() }
+                        if (idMnemonic == null) Logger.warn(TAG, "Stored Word Cloud unreadable; the archive carries none")
                         val idVersion = idRepo.getIdentityVersion()
                         org.json.JSONObject().apply {
                             put("publicKeyB64", idKeys.publicKeyB64)
@@ -143,7 +146,7 @@ object BackupManager {
                             put("tripcode", idKeys.tripcode)
                             put("onionAddress", idKeys.onionAddress)
                             put("displayName", idKeys.displayName)
-                            put("mnemonic", idMnemonic)
+                            if (idMnemonic != null) put("mnemonic", idMnemonic)
                             put("identity_version", idVersion)
                             if (burnable != null) {
                                 val bObj = org.json.JSONObject().apply {
@@ -952,6 +955,7 @@ object BackupManager {
                         freshPrefs.edit().clear()
                             .putString("ed25519_private_key", derivedKeys.privateKeyB64)
                             .putString("enc_private_key", derivedKeys.encPrivateKeyB64)
+                            // R6: allowed only because matchesArchive proved these words derive the archived keys.
                             .putString("mnemonic", legacyRederivation.cleanMnemonic)
                             .putString("pub_ed25519", derivedKeys.publicKeyB64)
                             .putString("pub_enc", derivedKeys.encPublicKeyB64)
@@ -989,7 +993,7 @@ object BackupManager {
     }
 
     /** D09: the Word Cloud rebuild of a legacy archive's identity, decided before the commit. */
-    private data class LegacyRederivation(
+    internal data class LegacyRederivation(
         val handle: String,
         val cleanMnemonic: String,
         val derivedKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?,
@@ -1000,9 +1004,9 @@ object BackupManager {
     /**
      * D09: reads the handle and public key the archive's database recorded ([dbFile], opened read-only) and
      * derives the identity from [mnemonic]. `matchesArchive` is false when the database names a different
-     * public key (an old, non-deterministic identity) or the derivation failed.
+     * public key (an old, non-deterministic identity), records none (R6), or the derivation failed.
      */
-    private fun planLegacyRederivation(dbFile: File, mnemonic: String): LegacyRederivation {
+    internal fun planLegacyRederivation(dbFile: File, mnemonic: String): LegacyRederivation {
         var handle = "Anonymous"
         var expectedPub: String? = null
         try {
@@ -1027,8 +1031,11 @@ object BackupManager {
         } catch (e: Exception) {
             return LegacyRederivation(handle, cleanMnemonic, null, false, "derivation failed: ${e.message}")
         }
+        // R6: with no recorded key there is nothing to prove the typed words belong to this account, so they
+        // must not become its Word Cloud (this used to count as a match).
         val expected = expectedPub
-        return if (expected != null && expected != derived.publicKeyB64) {
+            ?: return LegacyRederivation(handle, cleanMnemonic, derived, false, "the archive records no public key to check the Word Cloud against")
+        return if (expected != derived.publicKeyB64) {
             LegacyRederivation(handle, cleanMnemonic, derived, false,
                 "derived ${derived.publicKeyB64.take(8)}... vs restored ${expected.take(8)}...")
         } else {
