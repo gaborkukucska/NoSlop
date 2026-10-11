@@ -810,6 +810,16 @@ fun FullScreenMeshCardV2(
                         }
                     }
                     Text(displayHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                    // D08/D10: media the author's signature does not cover can't be checked after download.
+                    if (post.mediaUrl != null && !isMyPost && viewModel != null) {
+                        val mediaVerified by produceState(initialValue = true, post.id, post.signature) {
+                            value = viewModel.isMeshPostMediaVerified(post)
+                        }
+                        if (!mediaVerified) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            UnverifiedMediaChip()
+                        }
+                    }
 
                 }
 
@@ -1217,5 +1227,39 @@ fun FullScreenMeshCardV2(
                 containerColor = SurfaceDark
             )
         }
+    }
+}
+
+/** D08/D10: marks mesh media whose file can't be checked against what the author signed. */
+@Composable
+private fun UnverifiedMediaChip() {
+    var showInfo by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(TemporaryAmber.copy(alpha = 0.2f))
+            .clickable { showInfo = true }
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Warning, contentDescription = null, tint = TemporaryAmber, modifier = Modifier.size(12.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Unverified media".tr, color = TemporaryAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+    if (showInfo) {
+        AlertDialog(
+            onDismissRequest = { showInfo = false },
+            containerColor = SurfaceDark,
+            title = { Text("Unverified media".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "The author's signature on this post does not cover its media file, so the downloaded file cannot be checked against what they posted. It may have been replaced on the way.".tr,
+                    color = TextMuted
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showInfo = false }) { Text("OK".tr, color = AccentGreen) }
+            }
+        )
     }
 }

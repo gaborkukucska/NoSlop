@@ -40,25 +40,41 @@ class TranslationParityTest {
         )
     }
 
+    /**
+     * D10: report (never fail) how many English keys each other language is missing. Missing keys
+     * fall back to English at runtime. The report is printed and also written to
+     * app/build/reports/translation-parity.txt. Unreadable JSON still fails the test.
+     */
     @Test
-    fun otherLanguageAssets_areScannedForParityReporting() {
+    fun otherLanguageAssets_reportMissingKeysPerLanguage() {
         val projectRoot = findProjectRoot()
         val langDir = File(projectRoot, "app/src/main/assets/languages")
         val enAsset = File(langDir, "content_en.json")
-        if (!enAsset.exists()) return
+        assertTrue("content_en.json must exist at ${enAsset.absolutePath}", enAsset.exists())
 
-        val enJson = JsonParser.parseString(enAsset.readText()).asJsonObject
-        val enKeys = enJson.keySet().toSet()
-
+        val enKeys = JsonParser.parseString(enAsset.readText()).asJsonObject.keySet().toSet()
         val otherFiles = langDir.listFiles { _, name -> name.startsWith("content_") && name != "content_en.json" && name.endsWith(".json") }
             ?: emptyArray()
 
-        println("Scanned ${otherFiles.size} secondary language files against ${enKeys.size} English keys.")
+        val report = StringBuilder()
+        report.appendLine("Translation parity: ${otherFiles.size} languages against ${enKeys.size} English keys (missing keys fall back to English).")
         for (f in otherFiles.sortedBy { it.name }) {
-            val json = JsonParser.parseString(f.readText()).asJsonObject
-            val keys = json.keySet().toSet()
-            val coverage = (keys.intersect(enKeys).size * 100) / enKeys.size.coerceAtLeast(1)
-            println("Language file ${f.name}: $coverage% coverage (${keys.size}/${enKeys.size} keys)")
+            val keys = JsonParser.parseString(f.readText()).asJsonObject.keySet().toSet()
+            val missing = (enKeys - keys).sorted()
+            val extra = (keys - enKeys).sorted()
+            val coverage = ((enKeys.size - missing.size) * 100) / enKeys.size.coerceAtLeast(1)
+            val code = f.name.removePrefix("content_").removeSuffix(".json")
+            report.appendLine("  $code: ${missing.size} missing, ${extra.size} not in English, $coverage% covered")
+            missing.take(10).forEach { report.appendLine("      - $it") }
+            if (missing.size > 10) report.appendLine("      ... and ${missing.size - 10} more")
+        }
+        println(report)
+        try {
+            val out = File(projectRoot, "app/build/reports/translation-parity.txt")
+            out.parentFile?.mkdirs()
+            out.writeText(report.toString())
+        } catch (e: Exception) {
+            println("Could not write translation-parity.txt: ${e.message}")
         }
     }
 

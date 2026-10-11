@@ -132,6 +132,21 @@ interface PeerDao {
     suspend fun setVerifiedFingerprint(pubKey: String, fingerprint: String?)
 
     /**
+     * D10: the user accepted the encryption key held in pendingEncKey. Applied only if the pending
+     * key is still the one the user saw ([expectedKey]); clears any earlier verification.
+     * Returns the number of rows changed (0 or 1).
+     */
+    @Query(
+        "UPDATE peers SET encPublicKeyB64 = pendingEncKey, pendingEncKey = NULL, verifiedFingerprint = NULL " +
+        "WHERE publicKeyB64 = :pubKey AND pendingEncKey = :expectedKey"
+    )
+    suspend fun acceptPendingEncKey(pubKey: String, expectedKey: String): Int
+
+    /** D10: the user kept the old key; the pending one is dropped. Returns the rows changed (0 or 1). */
+    @Query("UPDATE peers SET pendingEncKey = NULL WHERE publicKeyB64 = :pubKey AND pendingEncKey IS NOT NULL")
+    suspend fun clearPendingEncKey(pubKey: String): Int
+
+    /**
      * D06: presence changes touch only presence columns. Re-inserting a whole row read moments
      * earlier could silently undo a concurrent relationship change (e.g. a handshake promotion).
      */

@@ -1,5 +1,47 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-11) — Round D10: Status Honesty, Safety Fingerprints, Key Changes, Unverified Media (v0.7.0-alpha)
+
+This round closes review finding D10 and the "unverified" label left open by D08. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`; from this round on, `StatusDocCitationTest` fails the build if a label names a class that does not exist. Not yet verified on device.
+
+**Compatibility.** No packet, archive-format or Room schema change. Two new `PeerDao` queries on existing columns (`acceptPendingEncKey`, `clearPendingEncKey`). The fingerprint derivation changed, but nothing displayed or stored a fingerprint before this round.
+
+### Status documents cited tests that never existed (D10 a, e)
+
+* **Cause.** The 2026-10-06 entry labelled items "Tested" with classes that were never written (`IdentityRepositoryTest`, `SyncPacketHandlerTest`, `CryptoServiceTest`, `JamendoApiClientTest`, `LoggerTest`), a composable (`OnboardingScreen`), a Gradle task (`testGithubDebugUnitTest`) and, since R6b, a deleted test (`IdentityViewModelTest`). It also described a `secureDelete()` that was never added and a Bouncy Castle ProGuard change that was never made. The matrix still listed C07 (streaming backup encryption) as resolved.
+* **Fix.** Those lines now say what is true: "Implemented (untested)", the test that does cover the item, or a correction note. C07 is back to Open (D12). Two malformed matrix rows (R7a–R8, R3b–R3c) were repaired.
+* **Check.** `StatusDocCitationTest` reads `PROJECT_STATUS.md`, `TECHNICAL_REFERENCE.md`, `WIRE_PROTOCOL_REFERENCE.md` and `README.md`. Every "Tested" label must start with a backticked test class, and every backticked name ending in `Test` in it, or in the last column of a findings matrix, must be a class declared under `app/src/test` or `app/src/androidTest`. It checks that cited tests exist, not that they passed; passing is what running the suite shows.
+
+### Safety fingerprints were derived but never shown (C11, D10 b)
+
+* **Fingerprint.** `CryptoService.deriveSafetyFingerprint` now hashes SHA3-256(`"noslop-safety-fp-v1"` ‖ raw Ed25519 public key ‖ raw X25519 public key) and shows 20 Base32 characters in five groups of four. Keys are reduced to their raw 32 bytes first, so raw and X.509/SPKI-wrapped encodings give the same fingerprint. A missing or unreadable key returns `null`; it used to return `0000-0000-0000-0000-0000`, which two broken keys would have "matched".
+* **Where it shows.** Your own fingerprint is on the "My ID" card and the Creator Contact Card (`QRShareSheet`). A contact's fingerprint is on their contact card (`ContactCardDialog` → `SafetyFingerprintPanel`) with its state: Verified, Not verified, or "Changed since you verified it".
+* **Mark verified.** `NoSlopRepository.setPeerVerified` stores the current fingerprint in `peers.verifiedFingerprint` (column added in 18→19). Only an `ACCEPTED` contact with no key change pending can be marked. A verification goes stale on its own when either key changes, because the UI compares it with the current fingerprint. Verified contacts get a shield next to their name in the chat header.
+
+### A changed encryption key was held but never shown (C02, D10 c)
+
+* **Cause.** Since C02 a changed encryption key from an accepted contact is held in `peers.pendingEncKey` instead of being applied, but no screen showed it, so the contact stayed on the old key with no way forward.
+* **Fix.** The chat shows a "Safety Key Changed" banner with the new fingerprint. **Accept New Key** (after a confirmation) applies it with `PeerDao.acceptPendingEncKey`. That update only applies if the pending key is still the one the user saw, and it clears any earlier verification. **Keep Old Key** drops the pending key (`clearPendingEncKey`); if the contact keeps presenting the new key, their next handshake holds it again and the banner returns. The contact card also says when a key change is waiting.
+
+### Media whose digest the author did not sign was not marked (D08 leftover)
+
+* **Fix.** `NoSlopRepository.isMeshPostMediaVerified` re-checks the stored post signature in the v2 (C17) form over each digest recorded for its media. The feed shows an **Unverified media** label (tap for an explanation) on another author's mesh media post when no recorded digest is covered by the author's signature. A digest that is only cached on the owner rows (for example by `mediaDigestFor` from a local file) does not count, so the label stays correct even where that cache holds an unsigned hash. Own posts and posts without mesh media are never labelled.
+
+### Translations: per-language missing-key report (D10 d)
+
+* `TranslationParityTest.otherLanguageAssets_reportMissingKeysPerLanguage` prints, for each language, the number of English keys it lacks (with up to ten examples) and writes the same report to `app/build/reports/translation-parity.txt`. It never fails on missing translations, which fall back to English; unreadable JSON still fails. The English-key check is unchanged.
+* New English strings for this round: 19 keys in `content_en.json`.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `StatusDocCitationTest` | Every "Tested" label and matrix validation cell in the four documents names an existing test class |
+| `SafetyFingerprintD10Test` | Fingerprint shape; same fingerprint for raw and wrapped keys; different per identity and per encryption key; `null` for missing/unreadable keys (no shared placeholder); Mark verified stores the current fingerprint, can be removed, refused for non-accepted contacts and without an encryption key; a key change from a real v2 `CONNECTION_REQUEST` is held, blocks verifying, and Accept applies it and resets verification; Keep Old Key drops it and keeps a still-valid verification; accept/reject with nothing pending change nothing; media covered by a v2 signature is verified, an 8-field post with a digest on record is not, a different recorded digest is not, own posts and posts without mesh media are never flagged |
+| `TranslationParityTest` (changed) | Per-language missing-key report (non-failing) |
+
+---
+
 ## Completed Changes (2026-10-10) — Round R6: Nothing Changes the Word Cloud (v0.7.0-alpha)
 
 **Diagnosis of the older account (R5c log, 22:04:05).** `identityVersion=1 | typedDerivesIdentity=false | storedDerivesIdentity=false`, 12 of 12 words differ. The account predates Word Cloud–derived keys (version 2, 2026-09-11): its keys are random, so no phrase derives them and the device cannot tell which of the two phrases is the "right" one. The keys, contacts and data are intact. No code in the history rewrites the stored phrase on a running install. A past restore could only bring back the exporting phone's stored phrase, or, before R6, the words typed at that export or restore when the phone had none stored. The paths that replaced keys with Word Cloud–derived ones would have made the account version 2, so they did not run here. Since R5b the account can be backed up with the written-down words ("Back Up With These Words"); that backup opens with those words, and the account keeps its stored phrase.
@@ -144,7 +186,7 @@ This round closes review finding D08. The sync path was already fixed in R2. A "
 
 ### Still open (D08)
 
-* The review also asks to show such media as "unverified". Nothing in the feed marks it yet; it is planned with D10's trust indicators (fingerprints, key-change banner).
+* The review also asks to show such media as "unverified". Done in Round D10 (2026-10-11): the feed shows an "Unverified media" label when the author's signature covers no recorded digest.
 * `mediaDigestFor` caches the hash of a local file when no signed digest is recorded. For someone else's media that was downloaded unverified, that hash can later block a genuine same-revision v2 upgrade (the post keeps its 8-field signature; nothing wrong is accepted).
 
 ### Tests added in this round
@@ -481,7 +523,7 @@ This round continues the git-history regression register. It covers the group it
 
 This round has two parts. The first fixes the round-2 review findings D01, D06 and D07, plus groundwork for D02. The second is a review of the last 100 commits, done because several features that used to work had stopped working on devices. It found and fixed the regressions behind the failures seen in two-device testing.
 
-**How the status labels are used.** "Tested (unit: `X`)" names a test class that exists under `app/src/test` and passed with `./gradlew testGithubDebugUnitTest`. Every test runs the real handlers or repositories against an in-memory Room database or a real loopback socket; none of the code under test is mocked. "Verified on device" means the developer confirmed it in two-device testing on this build.
+**How the status labels are used.** A "Tested" label names a test class that exists under `app/src/test` and passed with `./gradlew testGithubDebugUnitTest`. Every test runs the real handlers or repositories against an in-memory Room database or a real loopback socket; none of the code under test is mocked. "Verified on device" means the developer confirmed it in two-device testing on this build.
 
 **Verified on device (2026-10-08).** These all work between a trusted peer and a burnable-identity peer:
 - DMs, including recorded video and GIFs
@@ -765,28 +807,28 @@ These existing tests were adjusted to the new APIs: `MeshSocialRepositoryTest`, 
 * **No Plaintext Secrets on External Storage & Streaming ZIP Import (C06) — Tested (unit: `BackupManagerTest`)**:
   * Staged backup export and import exclusively in internal storage (`context.cacheDir/backup_ops` and `context.noBackupFilesDir/restore_stage`), completely eliminating unencrypted archives from shared `externalCacheDir`.
   * Streamed `identity_backup.json` and `api_keys_backup.json` directly into ZIP streams.
-  * Added `secureDelete()` overwriting temporary archives and decrypted group message files with zeros before unlinking.
+  * Claimed here: a `secureDelete()` overwriting temporary archives and decrypted group message files. (Corrected 2026-10-11: no such function was ever added. Removing the plaintext zip from disk is open as C06/D12.)
 * **API 24+ Compatible PBKDF2 Seed Derivation (C14) — Tested (unit: `MnemonicGeneratorTest`)**:
   * Switched `MnemonicGenerator.deriveSeed()` to use Bouncy Castle's `PKCS5S2ParametersGenerator(SHA512Digest())` directly, eliminating platform JCA provider failures on Android 7.0–7.1 (API 24–25).
 * **Cross-Device Key Derivation Verification & Authoritative Derivation (C15) — Tested (unit: `BackupManagerTest`)**:
   * In `IdentityRepository.loadIdentity()`, reconciled cached public keys against the authoritative key derived from `privEd` via `CryptoService.getPublicKeyFromPrivateKey()`.
   * In `BackupManager.importData()` legacy cross-device restore, verified that mnemonic-derived public keys match `local_pub_ed25519` in the restored database, setting `identity_quarantined = true` and aborting if an identity v1 mismatch is detected.
-* **Hardware-Backed Fallback Storage Master Key (C16) — Tested (unit: `IdentityRepositoryTest`)**:
+* **Hardware-Backed Fallback Storage Master Key (C16) — Implemented (untested; the test class cited here until 2026-10-11, IdentityRepositoryTest, never existed)**:
   * Replaced `ANDROID_ID` salt obfuscation in `IdentityRepository` with a dedicated raw AndroidKeyStore AES-256-GCM master key (`"noslop_fallback_hardware_key"`).
 * **Synchronous API Key Commits & Rollback Atomicity (W05) — Tested (unit: `BackupManagerTest`)**:
   * Switched `ApiKeyRepository.setKey` and `removeKey` to synchronous `commit()`.
   * Added `commitSucceeded` tracking in `BackupManager.importData` and checked `commit()` outcomes on preference rollback, preserving recovery snapshots whenever rollback cannot be verified.
-* **Asynchronous Recovery State & runBlocking Elimination (W08) — Tested (unit: `OnboardingScreen`)**:
+* **Asynchronous Recovery State & runBlocking Elimination (W08) — Implemented (untested; OnboardingScreen, cited here until 2026-10-11, is a composable, not a test)**:
   * Exposed `needsIdentityRecovery: StateFlow<Boolean>` asynchronously on `NoSlopViewModel`.
   * Eliminated blocking `runBlocking` in Compose composition inside `OnboardingScreen.kt`.
-* **Creator Identity Linkage Elimination (C10) — Tested (unit: `SyncPacketHandlerTest`)**:
+* **Creator Identity Linkage Elimination (C10) — superseded by D04, Tested (unit: `CreatorIdentityCaptureTest`); the SyncPacketHandlerTest cited here until 2026-10-11 never existed**:
   * In `SyncPacketHandler.handleSyncRequest` and `handleInventorySyncRequest`, used `effectiveSenderId` for comment and reaction `SYNC_RESPONSE` batches, preventing personal identity public key leaks to creator followers.
-* **20-Character Visual Safety Fingerprint (C11) — Tested (unit: `CryptoServiceTest`)**:
-  * Implemented `CryptoService.deriveSafetyFingerprint(edPub, encPub)` generating formatted Base32 fingerprints from `SHA3-256(edPub || encPub)`.
-* **Pure Bouncy Castle Engine & Dependency Pruning (C13, C20) — Tested (unit: `CryptoServiceTest`, `JamendoApiClientTest`)**:
+* **20-Character Visual Safety Fingerprint (C11) — Tested (unit: `SafetyFingerprintD10Test`, added in Round D10, 2026-10-11; the CryptoServiceTest cited here before never existed)**:
+  * Implemented `CryptoService.deriveSafetyFingerprint(edPub, encPub)` generating formatted Base32 fingerprints from `SHA3-256(edPub || encPub)`. (Round D10 changed the derivation — domain label, raw keys, `null` on failure — and put it in the UI.)
+* **Pure Bouncy Castle Engine & Dependency Pruning (C13, C20) — Implemented (untested; CryptoServiceTest and JamendoApiClientTest, cited here until 2026-10-11, never existed)**:
   * Removed `com.goterl:lazysodium-android` and `net.java.dev.jna:jna` from `build.gradle.kts` and `CryptoService.kt`, standardizing on pure Bouncy Castle `Ed25519KeyPairGenerator`.
   * Removed bundled third-party candidate IDs and rotation loops from `JamendoApiClient.kt`.
-* **Log Privacy & Opt-in DoH (C19, C21, C22) — Tested (unit: `LoggerTest`)**:
+* **Log Privacy & Opt-in DoH (C19, C21, C22) — Implemented (untested; LoggerTest, cited here until 2026-10-11, never existed)**:
   * Sanitized release logs: reduced URLs to origin only (`scheme://host/…`), masked 11-char YouTube IDs, and auto-pruned logs older than 72 hours.
   * Respected NXDOMAIN in `HttpClientProvider.cascadingDns` and disabled DoH fallback by default.
   * Embedded click-to-load prompts for remote GIF URLs and retired cleartext `GROUP_MESSAGE` packet handling.
@@ -802,15 +844,15 @@ These existing tests were adjusted to the new APIs: `MeshSocialRepositoryTest`, 
   * Implemented AEAD-authenticated `DM_ACK` packet keyed with directional v2 DM key and authenticated AAD.
   * Outgoing DMs persist in `pendingOutboxMessages` with exponential backoff retry until `DM_ACK` arrives.
   * Real-time delivery status indicators in `ChatThreadScreen`: Sending (`Icons.Default.Schedule`) → Sent on socket write (`Icons.Default.Check`) → Delivered on ACK (`Icons.Default.DoneAll`).
-* **Dependency Hygiene & ProGuard Shrinking (C24) — Tested (unit: `testGithubDebugUnitTest`)**:
+* **Dependency Hygiene & ProGuard Shrinking (C24) — Partly done, untested (corrected 2026-10-11; the label used to cite a Gradle task, not a test)**:
   * Removed unreferenced Guardian Project artifacts `info.guardianproject:jtorctl` and `info.guardianproject.netcipher:netcipher` from `build.gradle.kts`.
   * Removed obsolete Lazysodium and JNA keep rules from `proguard-rules.pro`.
-  * Tightened overbroad Bouncy Castle and OkHttp ProGuard rules to allow R8 optimization and shrinking.
+  * Narrowed the OkHttp ProGuard rules. (Corrected 2026-10-11: the Bouncy Castle keep-all rule `-keep class org.bouncycastle.** { *; }` was not changed.)
 
-* **Maintainability & ViewModel Extraction (C25) — Tested (unit: `IdentityViewModelTest`)**:
+* **Maintainability & ViewModel Extraction (C25) — Partly done; the IdentityViewModel part was removed in R6b together with the IdentityViewModelTest cited here until 2026-10-11**:
   * Standardized JSON serialization across the entire application on process-wide shared `com.noslop.app.util.Json.gson`, avoiding repetitive reflection metadata allocations across 50+ classes.
   * Introduced structured application coroutine scopes `com.noslop.app.util.AppScopes` (`io`, `default`, `main`) equipped with unified `CoroutineExceptionHandler` unhandled error logging.
-  * Extracted sovereign identity, account lifecycle, onboarding, Word Cloud mnemonic, backup export/import, and creator identity management from `NoSlopViewModel` into dedicated `IdentityViewModel`.
+  * Extracted sovereign identity, account lifecycle, onboarding, Word Cloud mnemonic, backup export/import, and creator identity management from `NoSlopViewModel` into dedicated `IdentityViewModel`. (Corrected 2026-10-11: this was an unused copy, never wired to a screen; deleted in R6b.)
 * **Translation Parity & Documentation Synchronization (C23) — Tested (unit: `TranslationParityTest`)**:
   * Added missing translation keys to `content_en.json` (100% string coverage across 780+ UI strings). Added automated `TranslationParityTest` scanning all code literals for missing translation dictionary keys.
   * Implemented pre-install APK signing certificate verification in `UpdateManager.kt` (`PackageManager.getPackageArchiveInfo`), ensuring downloaded APKs match the installed application's signing key before launching the system package installer.
@@ -1885,24 +1927,24 @@ same-device backup export/import. Multi-device testing is next.
 | **C04** | P0 | Article WebView Tor leak elimination & external browser gating | **Resolved** | `TorLeakArchitectureTest` |
 | **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
 | **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Partial** — internal staging ✔; plaintext zip still written; no `secureDelete()` exists (D10/D12) | `BackupManagerTest` |
-| **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** | `BackupManagerTest` |
+| **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Open** — still NSG1 (whole-file GCM, `seed[0:32]` key); NSG2 is planned in D12 (corrected 2026-10-11; was listed as Resolved) | — |
 | **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** with D05 (2026-10-10) — v1 latched per key, ACK has its own AAD label | `CryptoServiceRobolectricTest`, `DmProtocolD05Test` |
 | **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
 | **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** with D04 (Round C, 2026-10-09) — see D04 | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
-| **C11** | P1 | 20-character visual safety fingerprint derivation | **Partial** — derivation ✔; no caller, not shown in any screen (D10) | `CryptoServiceRobolectricTest` |
+| **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** (Round D10, 2026-10-11; not yet device-verified) — on the contact card and the ID card, "Mark verified", key-change banner | `SafetyFingerprintD10Test` |
 | **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
 | **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
 | **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
 | **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** — X25519 public key also reconciled; mismatch reported as recovery-required (D09, 2026-10-10) | `BackupManagerTest`, `BackupImportResultD09Test` |
-| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** | cited `IdentityRepositoryTest` does not exist |
-| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** with D08 (2026-10-10) — v2 binding via live, sync and re-issue; unsigned digests never used; "unverified" label open (D10) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test` |
+| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** — the test cited on 2026-10-06 (IdentityRepositoryTest) never existed | — |
+| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** with D08 (2026-10-10) — v2 binding via live, sync and re-issue; unsigned digests never used; "Unverified media" label since Round D10 (2026-10-11) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test` |
 | **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** — ACK sent off the inbound path (R1); outbox expiry → FAILED with retry, group legs not held for ACKs (R3) | `CryptoServiceRobolectricTest`, `WireProtocolTest`, `OutboxExpiryTest` |
-| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Implemented (untested)** — ~20 logs still carry search terms / bare IDs (D11) | cited `LoggerTest` does not exist |
-| **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** | cited `JamendoApiClientTest` does not exist |
+| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Implemented (untested)** — ~20 logs still carry search terms / bare IDs (D11); the test cited on 2026-10-06 (LoggerTest) never existed | — |
+| **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** — the test cited on 2026-10-06 (JamendoApiClientTest) never existed | — |
 | **C21** | P2 | Respected NXDOMAIN in cascading DNS (DoH opt-in only) | **Resolved** | `TorLeakArchitectureTest` |
 | **C22** | P2 | Click-to-load prompts for remote GIFs & retired cleartext GROUP_MESSAGE | **Resolved** | `TorLeakArchitectureTest` |
 | **C23** | P2 | Translation key parity (`content_en.json`), pre-install APK cert verification, docs sync | **Resolved** | `TranslationParityTest` |
-| **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Resolved** | `testGithubDebugUnitTest` |
+| **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Partial** — jtorctl/netcipher pruned, OkHttp rules narrowed; the Bouncy Castle keep-all rule is unchanged (corrected 2026-10-11) | — |
 | **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** — the unused `IdentityViewModel` copy was deleted (R6b, 2026-10-11); the account code lives in `NoSlopViewModel` | — |
 | **C26** | P2 | Canonical presence-encoded signing formats (`ABSENT` / `CLEAR` / `SET:`) | **Resolved** | `GroupMessageSecurityTest` |
 | **W01** | P0 | Synchronized Feed sync cancellation deadlock fix | **Resolved** | `FeedRepositoryTest` |
@@ -1925,9 +1967,9 @@ same-device backup export/import. Multi-device testing is next.
 | **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Resolved** (2026-10-10; not yet device-verified) — outbox expiry + FAILED/retry (R3); v1 latch, ACK domain label + "ACK" check (Round D05). "Sent final for v1 peers" deliberately not done (see Round D05) | `OutboxExpiryTest`, `DmProtocolD05Test` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
-| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "unverified" label deferred to D10 | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test` |
+| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "Unverified media" label added in Round D10 (2026-10-11) | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test`, `SafetyFingerprintD10Test` |
 | **D09** | P2 | Cross-device restore mismatch reported after commit | **Resolved** (2026-10-10; not yet device-verified) — typed `ImportResult`, pre-commit identity plan, restart into recovery, X25519 reconciliation | `BackupImportResultD09Test` |
-| **D10** | P1 | Status document claims tests/code that don't exist | **Partial** — matrix corrected 2026-10-08; `IdentityViewModel` deleted (R6b); fingerprint UI, status-file check open | — |
+| **D10** | P1 | Status document claims tests/code that don't exist | **Resolved** (Round D10, 2026-10-11; not yet device-verified) — claims corrected and checked by a test, `IdentityViewModel` deleted (R6b), fingerprint UI with "Mark verified", key-change banner, per-language translation report | `StatusDocCitationTest`, `SafetyFingerprintD10Test`, `TranslationParityTest` |
 | **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |
 | **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |
 | **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |
@@ -1936,8 +1978,8 @@ same-device backup export/import. Multi-device testing is next.
 | **VID** | — | Recorded video stuck at 9% (chunk window above sender cap) | **Resolved** (device-verified) | `MediaChunkWindowTest` |
 | **R1–R4c** | — | Cooldown memory, cooldown gate, cooldown clear, blocking ACK, handshake pool, outbox video gate, Tor hidden-service re-registration, background start, offline PROXY_READY | **Resolved** (device-verified) | `PeerCooldownRestoreTest` |
 | **R5, R6a** | — | Sync rejected v2-signed media posts/comments; re-issue stripped hash; comment media never served | **Resolved** (device-verified) | `MediaSyncAndAclRestoreTest` |
-| **R7a–R7c, R8** | — | Group leave signature; group catch-up after member-initiated changes; group members rate-limited; DM outbox backoff/expiry (plus group sender identity and queued group sender) | **Resolved** (group paths device-verified) |
-| **R3b, R3c** | — | Group media requester identity; "You (admin)" row; group attachment origin; sender-onion download; no discoverable announce for group media | **Resolved** (device-verified) | `GroupLifecycleRestoreTest` | `GroupLifecycleRestoreTest`, `OutboxExpiryTest` |
+| **R7a–R7c, R8** | — | Group leave signature; group catch-up after member-initiated changes; group members rate-limited; DM outbox backoff/expiry (plus group sender identity and queued group sender) | **Resolved** (group paths device-verified) | `GroupLifecycleRestoreTest`, `OutboxExpiryTest` |
+| **R3b, R3c** | — | Group media requester identity; "You (admin)" row; group attachment origin; sender-onion download; no discoverable announce for group media | **Resolved** (device-verified) | `GroupLifecycleRestoreTest` |
 | **R7d–R7f** | — | Invitee bootstrap; reinstall recovery; update freshness gate | **Reviewed, no change** (see 2026-10-08 R3 entry) | — |
 | **R6b, R6c** | — | Non-contact media replies (signed requests, derived reply onion); silent media drops; media flood | **Resolved** (Round B) | `MediaAccessRoundBTest` |
 | **R4d** | — | Handshake budget | **Open** | — |

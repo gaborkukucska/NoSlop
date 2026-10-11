@@ -536,21 +536,33 @@ object CryptoService {
         }
     }
 
+    private const val SAFETY_FP_LABEL = "noslop-safety-fp-v1"
+
     /**
-     * C11: Derive 20-character Base32 visual safety fingerprint from SHA3-256(edPub || encPub).
+     * C11/D10: the 20-character Base32 safety fingerprint of an identity, shown as five groups of
+     * four (`ABCD-EFGH-IJKL-MNOP-QRST`): SHA3-256("noslop-safety-fp-v1" || raw Ed25519 public key ||
+     * raw X25519 public key). Both keys are reduced to their raw 32 bytes first, so an identity has
+     * the same fingerprint whether a key was stored raw or X.509/SPKI-wrapped.
+     *
+     * Returns null when either key is missing or unreadable — never a placeholder that two broken
+     * keys could "match".
      */
-    fun deriveSafetyFingerprint(edPublicKeyB64: String, encPublicKeyB64: String): String {
+    fun deriveSafetyFingerprint(edPublicKeyB64: String, encPublicKeyB64: String): String? {
+        if (edPublicKeyB64.isBlank() || encPublicKeyB64.isBlank()) return null
         return try {
-            val edBytes = Base64.decode(edPublicKeyB64, Base64.DEFAULT)
-            val encBytes = Base64.decode(encPublicKeyB64, Base64.DEFAULT)
+            val ed = getEd25519PublicKeyParams(Base64.decode(edPublicKeyB64, Base64.DEFAULT)).encoded
+            val enc = getX25519PublicKeyParams(Base64.decode(encPublicKeyB64, Base64.DEFAULT)).encoded
+            val label = SAFETY_FP_LABEL.toByteArray(Charsets.UTF_8)
             val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
-            digest.update(edBytes, 0, edBytes.size)
-            digest.update(encBytes, 0, encBytes.size)
+            digest.update(label, 0, label.size)
+            digest.update(ed, 0, ed.size)
+            digest.update(enc, 0, enc.size)
             val hash = ByteArray(digest.digestSize)
             digest.doFinal(hash, 0)
-            base32(hash).take(20).chunked(4).joinToString("-")
-        } catch (_: Exception) {
-            "0000-0000-0000-0000-0000"
+            base32(hash).take(20).uppercase(java.util.Locale.ROOT).chunked(4).joinToString("-")
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Safety fingerprint derivation failed: ${e.message}")
+            null
         }
     }
 

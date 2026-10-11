@@ -168,6 +168,28 @@ fun QRShareSheet(
                     textAlign = TextAlign.Center
                 )
 
+                // D10: our own safety fingerprint, for contacts to compare with what they see for us.
+                val ownFingerprint = remember(localKeys) {
+                    CryptoService.deriveSafetyFingerprint(localKeys.publicKeyB64, localKeys.encPublicKeyB64)
+                }
+                if (ownFingerprint != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Your safety fingerprint".tr,
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = ownFingerprint,
+                        color = TextLight,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(

@@ -2976,6 +2976,24 @@ fun toggleAggregator() {
 
     /** D07: whether this peer was last seen running the pre-v0.7.0 handshake protocol. */
     suspend fun isPeerOnLegacyProtocol(peerPub: String): Boolean = repository.isPeerOnLegacyProtocol(peerPub)
+
+    /** D10: mark a contact's current safety fingerprint as verified (or remove the mark). */
+    fun setPeerVerified(peerPub: String, verified: Boolean) {
+        viewModelScope.launch { repository.setPeerVerified(peerPub, verified) }
+    }
+
+    /** D10: accept the contact's changed encryption key (held in pendingEncKey). */
+    fun acceptPeerKeyChange(peerPub: String) {
+        viewModelScope.launch { repository.acceptPeerKeyChange(peerPub) }
+    }
+
+    /** D10: keep the contact's old encryption key and drop the pending one. */
+    fun rejectPeerKeyChange(peerPub: String) {
+        viewModelScope.launch { repository.rejectPeerKeyChange(peerPub) }
+    }
+
+    /** D08/D10: false when a mesh post's media is not covered by its author's signature. */
+    suspend fun isMeshPostMediaVerified(post: MeshPost): Boolean = repository.isMeshPostMediaVerified(post)
     fun removePeer(peerPub: String) { 
         viewModelScope.launch { 
             val peer = peers.value.find { it.publicKeyB64 == peerPub }

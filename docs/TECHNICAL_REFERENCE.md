@@ -210,6 +210,35 @@ net).
   packet type. `MeshPacketHandler` reconstructs these strings explicitly in
   `handlePost`, `handleComment`, `handleReaction`, `handleVote`, and `handleSyncResponse`.
 
+### 3.4.1 Safety Fingerprints & Key Changes (review C11/D10, 2026-10-11)
+
+- **Derivation.** `CryptoService.deriveSafetyFingerprint(edPub, encPub)` =
+  first 20 Base32 characters of SHA3-256(`"noslop-safety-fp-v1"` ‖ raw Ed25519
+  public key ‖ raw X25519 public key), upper case, in five groups of four
+  (`ABCD-EFGH-IJKL-MNOP-QRST`). Both keys are reduced to their raw 32 bytes
+  first, so raw and X.509/SPKI encodings agree. Returns `null` when a key is
+  missing or unreadable.
+- **Display.** Own fingerprint: `QRShareSheet` ("My ID" and the Creator Contact
+  Card, each for the identity it shows). A contact's fingerprint:
+  `SafetyFingerprintPanel` in `ContactCardDialog`, computed from the stored
+  `publicKeyB64` and `encPublicKeyB64`.
+- **Verification.** `peers.verifiedFingerprint` holds the fingerprint the user
+  confirmed out-of-band (`NoSlopRepository.setPeerVerified`; `ACCEPTED`
+  contacts with no pending key only). A contact counts as verified only while
+  that value equals the current fingerprint, so any key change makes it stale
+  without a write.
+- **Key changes.** A changed encryption key from an `ACCEPTED` contact is held
+  in `peers.pendingEncKey` (C02) and never used. `ChatThreadScreen` shows a
+  "Safety Key Changed" banner with the new fingerprint. Accepting runs
+  `PeerDao.acceptPendingEncKey(pub, expectedKey)`: one `UPDATE` that applies the
+  key only if it is still the pending one and clears `verifiedFingerprint`.
+  Keeping the old key runs `PeerDao.clearPendingEncKey`.
+- **Unverified media (D08).** `NoSlopRepository.isMeshPostMediaVerified(post)`
+  re-verifies the stored post signature in the v2 form
+  (`encodeForSigning(id, author, content, timestamp, avatar, privacy, mediaId,
+  clearnetUrl, sha256)`) for each digest recorded for the media; the feed labels
+  other authors' mesh media "Unverified media" when none verifies.
+
 ### 3.5 Direct Message Encryption
 
 `encryptDM(plaintext, theirEncPubB64, myEncPrivB64) -> Pair<ciphertextB64, nonceB64>`:

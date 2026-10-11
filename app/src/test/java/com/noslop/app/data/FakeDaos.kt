@@ -135,6 +135,18 @@ class FakePeerDao : PeerDao {
     override suspend fun setVerifiedFingerprint(pubKey: String, fingerprint: String?) {
         peers[pubKey]?.let { peers[pubKey] = it.copy(verifiedFingerprint = fingerprint) }
     }
+    override suspend fun acceptPendingEncKey(pubKey: String, expectedKey: String): Int {
+        val p = peers[pubKey] ?: return 0
+        if (p.pendingEncKey == null || p.pendingEncKey != expectedKey) return 0
+        peers[pubKey] = p.copy(encPublicKeyB64 = expectedKey, pendingEncKey = null, verifiedFingerprint = null)
+        return 1
+    }
+    override suspend fun clearPendingEncKey(pubKey: String): Int {
+        val p = peers[pubKey] ?: return 0
+        if (p.pendingEncKey == null) return 0
+        peers[pubKey] = p.copy(pendingEncKey = null)
+        return 1
+    }
     override suspend fun updatePresence(pubKey: String, isOnline: Boolean, lastSeenAt: Long) {
         peers[pubKey]?.let { peers[pubKey] = it.copy(isOnline = isOnline, lastSeenAt = lastSeenAt) }
     }

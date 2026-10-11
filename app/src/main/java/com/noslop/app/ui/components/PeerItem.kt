@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -181,6 +182,100 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
                 fontWeight = FontWeight.Bold,
                 fontSize = (size / 2.2).sp
             )
+        }
+    }
+}
+
+/**
+ * D10: a contact's safety fingerprint and whether the user verified it. "Verified" holds only while
+ * the stored fingerprint equals the current one; after a key change the contact shows as changed and
+ * has to be compared again. Only accepted contacts with no key change pending can be marked.
+ */
+@Composable
+fun SafetyFingerprintPanel(peer: Peer, fingerprint: String, viewModel: NoSlopViewModel?) {
+    val stored = peer.verifiedFingerprint
+    val isVerified = stored != null && stored == fingerprint
+    val isStale = stored != null && stored != fingerprint
+    val canVerify = peer.relationship == com.noslop.app.data.PeerRelationship.ACCEPTED && peer.pendingEncKey == null
+
+    Spacer(modifier = Modifier.height(16.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PrimaryBlack)
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Safety Fingerprint".tr,
+                color = TextMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
+                modifier = Modifier.weight(1f)
+            )
+            when {
+                isVerified -> {
+                    Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Verified".tr, color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                isStale -> {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Changed since you verified it".tr, color = DestructiveRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                else -> Text("Not verified".tr, color = TextMuted, fontSize = 11.sp)
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = fingerprint,
+            color = TextLight,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Compare this with the fingerprint on your contact's own ID card, in person or on another channel you trust. If they match, mark it verified.".tr,
+            color = TextMuted,
+            fontSize = 11.sp
+        )
+        if (peer.pendingEncKey != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "This contact's encryption key changed. Open the chat to review the change.".tr,
+                color = DestructiveRed,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (viewModel != null && canVerify) {
+            Spacer(modifier = Modifier.height(8.dp))
+            if (isVerified) {
+                OutlinedButton(
+                    onClick = { viewModel.setPeerVerified(peer.publicKeyB64, false) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                ) {
+                    Text("Remove Verification".tr, fontSize = 12.sp)
+                }
+            } else {
+                Button(
+                    onClick = { viewModel.setPeerVerified(peer.publicKeyB64, true) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Mark Verified".tr, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
         }
     }
 }
@@ -537,6 +632,14 @@ fun ContactCardDialog(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
+
+            // D10: safety fingerprint (C11) with "Mark verified".
+            val fingerprint = remember(peer.publicKeyB64, peer.encPublicKeyB64) {
+                com.noslop.app.crypto.CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, peer.encPublicKeyB64)
+            }
+            if (fingerprint != null) {
+                SafetyFingerprintPanel(peer = peer, fingerprint = fingerprint, viewModel = viewModel)
             }
 
             val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))

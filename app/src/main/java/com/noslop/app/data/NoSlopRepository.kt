@@ -2323,6 +2323,80 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun isPeerOnLegacyProtocol(publicKeyB64: String): Boolean =
         appSettingDao.getSetting("peer_legacy_protocol_$publicKeyB64") != null
 
+    /**
+     * D10: a contact's safety fingerprint as this device knows it (their Ed25519 key and the X25519
+     * key we encrypt to); null until an encryption key is known.
+     */
+    fun safetyFingerprintOf(peer: Peer): String? =
+        com.noslop.app.crypto.CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, peer.encPublicKeyB64)
+
+    /**
+     * D10: "Mark verified" stores the fingerprint the user compared out-of-band. It goes stale on its
+     * own when either key changes, because the UI compares it with the current fingerprint. Only an
+     * accepted contact with no key change pending can be marked; un-marking always works.
+     */
+    suspend fun setPeerVerified(publicKeyB64: String, verified: Boolean): Boolean {
+        val peer = peerDao.getPeerByPublicKey(publicKeyB64) ?: return false
+        if (!verified) {
+            peerDao.setVerifiedFingerprint(publicKeyB64, null)
+            return true
+        }
+        if (peer.relationship != PeerRelationship.ACCEPTED || peer.pendingEncKey != null) return false
+        val fingerprint = safetyFingerprintOf(peer) ?: return false
+        peerDao.setVerifiedFingerprint(publicKeyB64, fingerprint)
+        com.noslop.app.debug.Logger.info("PEER_TRUST", "Contact ${publicKeyB64.take(8)} marked verified")
+        return true
+    }
+
+    /**
+     * D10 (C02 follow-up): the user accepts the encryption key held in pendingEncKey. Any earlier
+     * verification is cleared, since it was for the old key.
+     */
+    suspend fun acceptPeerKeyChange(publicKeyB64: String): Boolean {
+        val peer = peerDao.getPeerByPublicKey(publicKeyB64) ?: return false
+        val newKey = peer.pendingEncKey ?: return false
+        if (peer.relationship != PeerRelationship.ACCEPTED) return false
+        val changed = peerDao.acceptPendingEncKey(publicKeyB64, newKey) > 0
+        if (changed) {
+            com.noslop.app.debug.Logger.warn("PEER_TRUST", "New encryption key accepted for ${publicKeyB64.take(8)}; verification reset")
+        }
+        return changed
+    }
+
+    /**
+     * D10: the user keeps the old key and the pending one is dropped. If the contact keeps
+     * presenting the new key, the next handshake holds it again and the banner returns.
+     */
+    suspend fun rejectPeerKeyChange(publicKeyB64: String): Boolean {
+        val changed = peerDao.clearPendingEncKey(publicKeyB64) > 0
+        if (changed) {
+            com.noslop.app.debug.Logger.warn("PEER_TRUST", "Kept the old encryption key for ${publicKeyB64.take(8)}")
+        }
+        return changed
+    }
+
+    /**
+     * D08/D10: whether a mesh post's media can be checked against what its author signed.
+     * True when the post has no mesh media, is our own, or its stored signature verifies in the
+     * v2 (C17) form over a digest recorded for that media. A digest that is only cached on the
+     * owner rows (for example hashed from a local file by [mediaDigestFor]) counts only when the
+     * author's signature covers it.
+     */
+    suspend fun isMeshPostMediaVerified(post: MeshPost): Boolean {
+        val mediaId = MediaOwner.mediaIdFromUrl(post.mediaUrl) ?: return true
+        val mine = setOfNotNull(getLocalIdentity()?.publicKeyB64, getBurnableIdentity()?.publicKeyB64)
+        if (post.authorPublicKeyB64 in mine) return true
+        val candidates = (listOfNotNull(postDao.getRecordedMediaDigest(MediaOwner.TYPE_POST, post.id)) +
+            mediaOwnerDao.getOwners(mediaId).mapNotNull { it.sha256 }).distinct()
+        return candidates.any { digest ->
+            val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
+                post.privacy, mediaId, post.clearnetUrl, digest
+            )
+            com.noslop.app.crypto.CryptoService.verify(payload, post.signature, post.authorPublicKeyB64)
+        }
+    }
+
     suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = meshSocialRepository.deletePeer(publicKeyB64, notifyRemote)
     suspend fun deleteNotificationsBySender(senderPub: String) = db.notificationDao().deleteNotificationsBySender(senderPub)
     suspend fun purgeOrphanedPeerContent() = meshSocialRepository.purgeOrphanedPeerContent()

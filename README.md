@@ -32,7 +32,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 🔒 **Cryptographic Privacy** — E2EE Direct Messages (v2 directional X25519 + ChaCha20-Poly1305 AEAD with AAD metadata binding and delivery ACKs) and pairwise encrypted group chats.
 * 🧅 **Tor-Routed Anonymity** — Default network traffic routes through an embedded Tor daemon with per-stream circuit isolation. Article WebViews and external browser links are gated with explicit Tor leak warnings.
 * 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
-* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery (780+ UI strings with test-enforced parity).
+* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery (800+ UI strings; a test enforces that every string has an English entry, and untranslated strings fall back to English).
 
 ---
 
@@ -73,7 +73,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity, with its own creator profile, for public creator broadcasts. One router picks the identity for every packet.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
-* 🪪 **Visual Safety Fingerprints** — 6-character display tripcodes. A 20-character Base32 safety fingerprint is derived in code, but no screen shows it yet; that's planned for out-of-band contact verification.
+* 🪪 **Visual Safety Fingerprints** — 6-character display tripcodes, plus a 20-character safety fingerprint on every contact card and on your own ID card. Compare it with a contact out-of-band and mark them verified. If a contact's encryption key changes, the chat warns you and the new key is used only after you accept it.
 
 ---
 

@@ -340,7 +340,8 @@ reconnect). A
 `BLOCKED` peer's request is ignored. A request crossing our own
 `OUTGOING_PENDING` request is treated as mutual consent. A request from an
 `ACCEPTED` friend re-sends our handshake echoing their nonce; a changed
-encryption key is held in `pendingEncKey` and never applied silently.
+encryption key is held in `pendingEncKey` and never applied silently; the user
+accepts or rejects it from the chat (Round D10, see TECHNICAL_REFERENCE §3.4.1).
 
 #### 3.1 Handshake reply path (Round A2, 2026-10-07)
 
