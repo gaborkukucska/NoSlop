@@ -102,6 +102,42 @@ class MeshSocialRepository(
     internal var outboxClock: () -> Long = { System.currentTimeMillis() }
 
     companion object {
+        /**
+         * D10b fix 2: whether the inactive-discoverable clean-up may delete this row: only a node we
+         * merely saw announce itself. A pending request (either way) or a followed creator stays; the
+         * clean-up used to delete those too, and the pending request with them.
+         */
+        internal fun isDisposableDiscoverableRow(peer: Peer): Boolean =
+            !peer.isTrusted && peer.relationship == PeerRelationship.NONE && !peer.isFollowing
+
+        /**
+         * D10c: in creator mode the identity a post is signed by follows its privacy, as when it is
+         * written ([composeAndBroadcastPost]): public posts are the creator identity's, friends-only
+         * posts the personal identity's. An edit that crosses that line moves the post to the other
+         * identity ([moveMeshPostToOtherIdentity]). Null when nothing moves: creator mode off, no
+         * creator identity, or a post that is not ours.
+         *
+         * Before D10c a friends-only post edited to public stayed the personal identity's, and D04
+         * keeps personal posts from creator contacts, so the creator's followers never got it.
+         */
+        internal fun identityMoveFor(
+            authorPub: String,
+            newPrivacy: String,
+            isCreatorMode: Boolean,
+            personalPub: String?,
+            creatorPub: String?
+        ): IdentityMove? {
+            if (!isCreatorMode || personalPub.isNullOrBlank() || creatorPub.isNullOrBlank()) return null
+            return when {
+                authorPub == personalPub && newPrivacy != "friends" -> IdentityMove.TO_CREATOR
+                authorPub == creatorPub && newPrivacy == "friends" -> IdentityMove.TO_PERSONAL
+                else -> null
+            }
+        }
+
+        /** D10c: "<creator key>|<name>" last sent to the creator identity's contacts (announceCreatorPresence). */
+        internal const val CREATOR_NAME_SENT_KEY = "creator_identity_name_sent"
+
         /** An entry not delivered (or, for a DM, not acknowledged) within 7 days is given up. */
         internal const val OUTBOX_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000
         /** A DM delivered this many times with no DM_ACK is given up (the peer never acknowledges). */
@@ -599,6 +635,19 @@ class MeshSocialRepository(
             )
         )
 
+        // D10c: the contacts that know this identity learn its current name. A follower's secondary
+        // identity went out as "Creator" before D10c, and the creators it follows kept that name. Sent
+        // when the name differs from the one last sent and one of those contacts is online, so it is
+        // not lost while nobody is reachable.
+        val nameToSend = "${keys.publicKeyB64}|${creator.handle}"
+        if (db.appSettingDao().getSetting(CREATOR_NAME_SENT_KEY) != nameToSend) {
+            val contactOnline = peerDao.getAllPeersList().any { it.isOnline && identityRouter.knowsUsAsCreator(it.publicKeyB64, it) }
+            if (contactOnline && broadcastCreatorIdentityUpdate()) {
+                db.appSettingDao().insertSetting(AppSetting(CREATOR_NAME_SENT_KEY, nameToSend))
+                Logger.info(TAG, "Sent the secondary identity's current name to the contacts that know it")
+            }
+        }
+
         if (db.appSettingDao().getSetting("is_discoverable_enabled") != "true") return
         val creatorAddress = keys.onionAddress.takeIf { it.isNotBlank() } ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress ?: return
         val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
@@ -699,12 +748,13 @@ class MeshSocialRepository(
                             Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
                         }
                         if (peer.isDiscoverable && peer.lastSeenAt < discoverableTimeout) {
-                            if (!peer.isTrusted) {
+                            if (isDisposableDiscoverableRow(peer)) {
                                 peerDao.deletePeer(peer)
                                 Logger.info(TAG, "Removed inactive discoverable peer: ${peer.handle}")
-                            } else {
+                            } else if (peer.isTrusted) {
                                 peerDao.setDiscoverableFlag(peer.publicKeyB64, false)
                             }
+                            // D10b fix 2: a pending request (either way) or a followed creator stays.
                         }
                         if (peer.lastSeenAt < archiveTimeout) {
                             deletePeer(peer.publicKeyB64) // Wipes the peer AND their messages
@@ -818,7 +868,9 @@ class MeshSocialRepository(
         // U06: Emit complete authenticated descriptor for retained attachments on text-only edits
         // D08: with the media digest, so a caption edit keeps the C17 v2 (hash-binding) signature; it
         // used to drop to the 8-field form, and receivers then had nothing signed to check the file against.
-        val effectiveMediaMetadata = mediaMetadata ?: if (effectiveMediaId != null) {
+        // D10c: a new attachment names the identity that signs the edit (the UI fills in the personal one).
+        val effectiveMediaMetadata = mediaMetadata?.copy(originNode = signingKey.onionAddress, ownerId = signingKey.publicKeyB64)
+            ?: if (effectiveMediaId != null) {
             com.noslop.app.mesh.MediaMetadata(
                 id = effectiveMediaId,
                 type = existingPost.mediaType ?: "image",
@@ -893,6 +945,63 @@ class MeshSocialRepository(
         true
     }
 
+    /**
+     * D10c: saves an edit of our own post that moves it to our other identity ([identityMoveFor]).
+     * The author key of a signed post cannot change, so the post is published again by the identity
+     * its new privacy belongs to (new id; same time, attachment and clearnet link) and the old copy is
+     * deleted. Likes and comments stay with the old copy. Returns the new post, or null when nothing
+     * moved (the old post is then untouched).
+     */
+    suspend fun moveMeshPostToOtherIdentity(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String
+    ): MeshPost? = withContext(Dispatchers.IO) {
+        val existing = postDao.getPostById(postId) ?: return@withContext null
+        if (existing.isOrphaned) return@withContext null
+        val isCreator = db.appSettingDao().getSetting(CREATOR_MODE_KEY) == "true"
+        val personal = identityRouter.main() ?: return@withContext null
+        val creator = identityRouter.creator()
+        val move = identityMoveFor(existing.authorPublicKeyB64, privacy, isCreator, personal.publicKeyB64, creator?.publicKeyB64)
+            ?: return@withContext null
+        val target = if (move == IdentityMove.TO_CREATOR) (creator ?: return@withContext null) else personal
+
+        // The attachment stays: a new one from the edit sheet, or the post's own file.
+        val keptMediaId = existing.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
+        val media = mediaMetadata ?: keptMediaId?.let { mediaId ->
+            com.noslop.app.mesh.MediaMetadata(
+                id = mediaId,
+                type = existing.mediaType ?: "image",
+                mimeType = "application/octet-stream",
+                size = existing.mediaSize,
+                chunkCount = 0,
+                thumbnailB64 = existing.thumbnailB64,
+                sha256 = meshTransport.repository.mediaDigestFor(mediaId)
+            )
+        }
+
+        val moved = composeAndBroadcastPost(
+            content = newContent,
+            mediaMetadata = media,
+            privacy = privacy,
+            clearnetUrl = existing.clearnetUrl,
+            clearnetTitle = existing.clearnetTitle,
+            clearnetThumbnailUrl = existing.clearnetThumbnailUrl,
+            clearnetMediaType = existing.clearnetMediaType,
+            timestampOverride = existing.timestamp
+        ) ?: return@withContext null
+        if (moved.authorPublicKeyB64 != target.publicKeyB64) {
+            // composeAndBroadcastPost picks the identity by the same rule; never keep two copies.
+            Logger.error(TAG, "Moving post $postId: the new copy was signed by the wrong identity; removing it")
+            deleteMeshPost(moved.id)
+            return@withContext null
+        }
+        deleteMeshPost(existing.id)
+        Logger.info(TAG, "Moved post $postId to the ${if (move == IdentityMove.TO_CREATOR) "creator" else "personal"} identity as ${moved.id}")
+        moved
+    }
+
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
@@ -901,7 +1010,9 @@ class MeshSocialRepository(
         clearnetTitle: String? = null,
         clearnetThumbnailUrl: String? = null,
         clearnetMediaType: String? = null,
-        postIdOverride: String? = null
+        postIdOverride: String? = null,
+        /** D10c: a post moved to our other identity keeps its time (and place in the feed). */
+        timestampOverride: Long? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
         val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
         // D04: a creator post carries the creator profile's handle and avatar (it used to carry the
@@ -909,7 +1020,7 @@ class MeshSocialRepository(
         val me = (if (isCreator && privacy != "friends") identityRouter.creator() else null) ?: identityRouter.main() ?: return@withContext null
         val myKeys = me.keys
         val handle = me.handle
-        val timestamp = System.currentTimeMillis()
+        val timestamp = timestampOverride ?: System.currentTimeMillis()
         val id = postIdOverride ?: UUID.randomUUID().toString()
         val avatarB64 = me.avatarB64
 
@@ -939,7 +1050,9 @@ class MeshSocialRepository(
             signature = signature,
             privacy = privacy,
             mediaId = mediaMetadata?.id,
-            mediaMetadata = mediaMetadata,
+            // D10c: the attachment names the identity that posts. The UI fills in the personal onion
+            // and key, which put them in every creator post with an attachment.
+            mediaMetadata = mediaMetadata?.copy(originNode = myKeys.onionAddress, ownerId = myKeys.publicKeyB64),
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
             clearnetThumbnailUrl = clearnetThumbnailUrl,
@@ -1680,7 +1793,8 @@ class MeshSocialRepository(
         // Always wrap content with JSON to securely pass metadata over X25519 channel
         val map = mutableMapOf<String, Any>("content" to messageText)
         if (mediaMetadata != null) {
-            map["media"] = mediaMetadata
+            // D10c: the attachment names the identity this contact knows (the creator for a follower).
+            map["media"] = mediaMetadata.copy(originNode = myKeys.onionAddress, ownerId = myKeys.publicKeyB64)
         }
         if (replyToMessageId != null) {
             map["replyTo"] = replyToMessageId
@@ -1793,7 +1907,8 @@ class MeshSocialRepository(
             signature = signature,
             mediaId = mediaMetadata?.id,
             mediaType = mediaMetadata?.type,
-            mediaMetadata = mediaMetadata
+            // D10c: the attachment names the identity that comments (the creator on creator posts).
+            mediaMetadata = mediaMetadata?.copy(originNode = myKeys.onionAddress, ownerId = myKeys.publicKeyB64)
         )
 
         val commentPay = com.noslop.app.mesh.CommentPayload(
@@ -2517,3 +2632,6 @@ class MeshSocialRepository(
         meshTransport.repository.triggerDmSync()
     }
 }
+
+/** D10c: the identity an edited post moves to (see MeshSocialRepository.identityMoveFor). */
+enum class IdentityMove { TO_CREATOR, TO_PERSONAL }

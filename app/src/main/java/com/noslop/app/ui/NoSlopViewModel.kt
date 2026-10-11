@@ -2689,9 +2689,23 @@ fun toggleAggregator() {
         postId: String,
         newContent: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
-        privacy: String = "public"
+        privacy: String = "public",
+        /** D10c: the edit moves the post to our other identity (see [identityMoveFor]). */
+        moveIdentity: Boolean = false
     ) {
         viewModelScope.launch {
+            if (moveIdentity) {
+                // D10c: the post is published again by the other identity and the old copy deleted, so
+                // the feed swaps the old item for the new post.
+                val moved = repository.moveMeshPostToOtherIdentity(postId, newContent, mediaMetadata, privacy)
+                if (moved != null) {
+                    val currentFeed = _unifiedFeed.value.toMutableList()
+                    val idx = currentFeed.indexOfFirst { it.id == postId }
+                    if (idx >= 0) currentFeed[idx] = UnifiedItem.Mesh(moved) else currentFeed.add(0, UnifiedItem.Mesh(moved))
+                    _unifiedFeed.value = currentFeed
+                }
+                return@launch
+            }
             val success = repository.editMeshPost(postId, newContent, mediaMetadata, privacy)
             if (success) {
                 val currentFeed = _unifiedFeed.value.toMutableList()
@@ -2715,6 +2729,17 @@ fun toggleAggregator() {
             }
         }
     }
+
+    /**
+     * D10c: whether saving [post] with [privacy] moves it to our other identity (null: it stays where
+     * it is). In creator mode public posts are the creator identity's and friends-only posts the
+     * personal identity's.
+     */
+    fun identityMoveFor(post: com.noslop.app.data.MeshPost, privacy: String): com.noslop.app.data.IdentityMove? =
+        com.noslop.app.data.MeshSocialRepository.identityMoveFor(
+            post.authorPublicKeyB64, privacy, _isCreatorEnabled.value,
+            localKeys.value?.publicKeyB64, burnableKeys.value?.publicKeyB64
+        )
 
     fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null, clearnetThumbnailUrl: String? = null, clearnetMediaType: String? = null) {
         if (content.isBlank() && mediaMetadata == null && clearnetUrl == null) return

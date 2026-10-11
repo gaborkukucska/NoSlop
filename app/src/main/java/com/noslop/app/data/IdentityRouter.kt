@@ -7,6 +7,10 @@ import com.noslop.app.crypto.CryptoService
  * One of our two identities, with the profile that goes with it. The personal identity carries the
  * personal handle, bio and avatar; the creator (burnable) identity carries the creator profile
  * (see [CREATOR_PROFILE_KEY]) and never the personal one.
+ *
+ * D10c: on a node that is not a creator the burnable identity only follows creators; it goes by the
+ * personal handle there (see [secondaryIdentityHandle]) and still never carries the personal bio or
+ * avatar.
  */
 data class RoutedIdentity(
     val keys: CryptoService.IdentityKeys,
@@ -60,7 +64,11 @@ class IdentityRouter(
         val profile = getCreatorProfile()
         return RoutedIdentity(
             keys = keys,
-            handle = profile.creatorHandle(),
+            handle = secondaryIdentityHandle(
+                isCreatorNode = db.appSettingDao().getSetting(CREATOR_MODE_KEY) == "true",
+                creatorProfile = profile,
+                personalHandle = getLocalHandle()
+            ),
             bio = profile.bio.takeIf { it.isNotBlank() },
             avatarB64 = profile.avatarB64?.takeIf { it.isNotBlank() },
             isCreator = true

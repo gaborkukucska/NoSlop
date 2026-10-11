@@ -6,6 +6,7 @@ import android.util.Base64
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.*
 
 /**
@@ -24,6 +25,33 @@ class SyncPacketHandler(
     private val peerDao = db.peerDao()
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
+
+    /** D10b fix 2: background re-sends of sync replies that were not delivered. */
+    private val retryScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+    )
+
+    /**
+     * D10b fix 2: sends one SYNC_RESPONSE. If it is not delivered (no bulk slot, the peer not reachable
+     * yet) it is sent again in the background after [SYNC_RETRY_DELAYS_MS] instead of being lost; the
+     * requester only asks again on its next full sync. Each re-send gets a fresh packet id, so the
+     * receiver's duplicate filter never drops it; storing the same items twice is harmless.
+     */
+    private suspend fun sendSyncResponse(onion: String, packet: NetworkPacket, what: String) {
+        if (repo.meshTransport.sendPacket(onion, com.noslop.app.util.Constants.MESH_PORT, packet)) return
+        Logger.warn(TAG, "SYNC_RESPONSE ($what) to ${onion.take(12)} was not delivered; retrying in the background")
+        retryScope.launch {
+            for ((attempt, waitMs) in SYNC_RETRY_DELAYS_MS.withIndex()) {
+                delay(waitMs)
+                val again = packet.copy(id = UUID.randomUUID().toString())
+                if (repo.meshTransport.sendPacket(onion, com.noslop.app.util.Constants.MESH_PORT, again)) {
+                    Logger.info(TAG, "SYNC_RESPONSE ($what) to ${onion.take(12)} delivered on retry ${attempt + 1}")
+                    return@launch
+                }
+            }
+            Logger.warn(TAG, "SYNC_RESPONSE ($what) to ${onion.take(12)} not delivered after ${SYNC_RETRY_DELAYS_MS.size} retries; the peer's next sync will ask again")
+        }
+    }
 
     private suspend fun MeshComment.toCommentSyncData(): CommentSyncData = CommentSyncData(
         id = id,
@@ -51,6 +79,10 @@ class SyncPacketHandler(
             )
         }
     )
+
+    /** D10b fix 2: what a sync reply carries, for the logs. */
+    private fun SyncResponsePayload.describe(): String =
+        "${posts.size} posts, ${comments?.size ?: 0} comments, ${reactions?.size ?: 0} reactions"
 
     private fun MeshReaction.toReactionSyncData(): ReactionSyncData = ReactionSyncData(
         id = id,
@@ -93,6 +125,9 @@ class SyncPacketHandler(
     }
 
     companion object {
+        /** D10b fix 2: waits before re-sending an undelivered sync reply. */
+        internal val SYNC_RETRY_DELAYS_MS = listOf(30_000L, 90_000L)
+
         fun canSharePost(
             post: MeshPost,
             isTrustedDirectPeer: Boolean,
@@ -166,7 +201,7 @@ class SyncPacketHandler(
                     type = "SYNC_RESPONSE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
-                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                sendSyncResponse(requestingPeer.onionAddress, respPacket, syncResp.describe())
                 delay(500)
             }
             
@@ -181,7 +216,7 @@ class SyncPacketHandler(
                     type = "SYNC_RESPONSE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
-                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                sendSyncResponse(requestingPeer.onionAddress, respPacket, syncResp.describe())
                 delay(500)
             }
             
@@ -196,7 +231,7 @@ class SyncPacketHandler(
                     type = "SYNC_RESPONSE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
-                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                sendSyncResponse(requestingPeer.onionAddress, respPacket, syncResp.describe())
                 delay(500)
             }
         }
@@ -219,9 +254,13 @@ class SyncPacketHandler(
         // D04: as in handleSyncRequest — the identity the requester knows, nothing personal to a creator contact.
         val me = if (requestingPeer != null) repo.identityRouter.forPeer(packet.senderId, requestingPeer) else null
         val hiddenAuthor = if (me?.isCreator == true) myPub else null
-        val candidatePosts = postDao.getPostsSince(syncCutoff).filter { post ->
-            !post.isOrphaned && post.authorPublicKeyB64 != hiddenAuthor && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
+        val recentPostRows = postDao.getPostsSince(syncCutoff).filter { !it.isOrphaned }
+        val candidatePosts = recentPostRows.filter { post ->
+            post.authorPublicKeyB64 != hiddenAuthor && canSharePost(post, isTrustedDirectPeer, myPub, packet.senderId)
         }.toMutableList()
+        // D10b fix 2: for the log — posts this peer may not have (our personal posts to a creator
+        // contact, friends-only posts to anyone who isn't a friend).
+        val withheldPosts = recentPostRows.size - candidatePosts.size
         // Always include own authored broadcasts regardless of age
         val olderOwnPosts = postDao.getPostsSince(0L).filter { post ->
             !post.isOrphaned && post.timestamp <= syncCutoff && post.authorPublicKeyB64 != hiddenAuthor &&
@@ -280,7 +319,7 @@ class SyncPacketHandler(
                     type = "SYNC_RESPONSE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
-                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                sendSyncResponse(requestingPeer.onionAddress, respPacket, syncResp.describe())
                 delay(500)
             }
 
@@ -295,7 +334,7 @@ class SyncPacketHandler(
                     type = "SYNC_RESPONSE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
-                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                sendSyncResponse(requestingPeer.onionAddress, respPacket, syncResp.describe())
                 delay(500)
             }
 
@@ -310,11 +349,11 @@ class SyncPacketHandler(
                     type = "SYNC_RESPONSE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(syncResp)
                 )
-                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                sendSyncResponse(requestingPeer.onionAddress, respPacket, syncResp.describe())
                 delay(500)
             }
         }
-        Logger.info(TAG, "INVENTORY_SYNC_REQUEST handled — sent ${missingOrUpdatedPosts.size} missing posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
+        Logger.info(TAG, "INVENTORY_SYNC_REQUEST handled — sent ${missingOrUpdatedPosts.size} missing posts (of ${candidatePosts.size} shareable, $withheldPosts withheld), ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
     }
 
@@ -326,21 +365,39 @@ class SyncPacketHandler(
 
         val filterSettings = try { repo.getMeshFilterSettings() ?: MeshFilterSettings() } catch (e: Exception) { MeshFilterSettings() }
         var stored = 0
+        // D10b fix 2: why posts were not stored, for the summary log line.
+        var filtered = 0
+        var rejected = 0
+        var notInserted = 0
         for (postPay in syncPay.posts) {
             val isAuthor = postPay.authorId == packet.senderId
             if (postPay.privacy == "friends" && !isSenderTrustedDirect && !isAuthor) {
                 Logger.warn(TAG, "Sync: Dropped incoming friends-only post ${postPay.id} from non-direct peer ${packet.senderId}")
+                rejected++
                 continue
             }
             if (postPay.clearnetUrl != null && !filterSettings.allowIncomingClearnetShares) {
                 Logger.info(TAG, "Sync: Mesh Filter dropped incoming clearnet share post ${postPay.id}")
+                filtered++
                 continue
             }
             if (postPay.mediaMetadata != null) {
-                if (postPay.mediaMetadata.type == "image" && !filterSettings.allowIncomingImagePosts) continue
-                if (postPay.mediaMetadata.type == "video" && !filterSettings.allowIncomingVideoPosts) continue
+                if (postPay.mediaMetadata.type == "image" && !filterSettings.allowIncomingImagePosts) {
+                    Logger.info(TAG, "Sync: Mesh Filter dropped incoming image post ${postPay.id}")
+                    filtered++
+                    continue
+                }
+                if (postPay.mediaMetadata.type == "video" && !filterSettings.allowIncomingVideoPosts) {
+                    Logger.info(TAG, "Sync: Mesh Filter dropped incoming video post ${postPay.id}")
+                    filtered++
+                    continue
+                }
             } else if (postPay.clearnetUrl == null) {
-                if (!filterSettings.allowIncomingTextPosts) continue
+                if (!filterSettings.allowIncomingTextPosts) {
+                    Logger.info(TAG, "Sync: Mesh Filter dropped incoming text post ${postPay.id}")
+                    filtered++
+                    continue
+                }
             }
 
             val payloadCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
@@ -359,10 +416,12 @@ class SyncPacketHandler(
 
             if (postPay.mediaMetadata != null && postPay.mediaId != postPay.mediaMetadata.id) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — mediaId/metadata mismatch")
+                rejected++
                 continue
             }
             if (postPay.mediaId != null && postPay.mediaMetadata == null) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — mediaId present without mediaMetadata")
+                rejected++
                 continue
             }
 
@@ -379,6 +438,7 @@ class SyncPacketHandler(
             val isCanonical = isV2 || CryptoService.verify(payloadCanonical, sig, postPay.authorId)
             if (!isCanonical) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — canonical signature verification failed")
+                rejected++
                 continue
             }
             val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)
@@ -407,6 +467,7 @@ class SyncPacketHandler(
             val inserted = postDao.insertPostSafely(post, signedMediaHash = if (isV2) mediaHash else null)
             if (!inserted) {
                 Logger.debug(TAG, "Sync: Dropping post ${postPay.id} — already deleted, author mismatch, or older timestamp")
+                notInserted++
                 continue
             }
             if (isV2) repo.recordMediaDigest(postPay.mediaId, mediaHash)
@@ -422,7 +483,8 @@ class SyncPacketHandler(
             
             stored++
         }
-        Logger.info(TAG, "SYNC_RESPONSE: stored $stored/${syncPay.posts.size} verified posts")
+        Logger.info(TAG, "SYNC_RESPONSE: stored $stored/${syncPay.posts.size} verified posts" +
+            if (stored < syncPay.posts.size) " (mesh filter: $filtered, rejected: $rejected, already stored or deleted: $notInserted)" else "")
 
         // Process synced comments
         var storedComments = 0

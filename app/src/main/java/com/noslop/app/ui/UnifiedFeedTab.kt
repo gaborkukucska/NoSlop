@@ -1697,7 +1697,11 @@ fun UnifiedFeedTab(
 
     if (isComposing) {
         var postContent by remember(editingPost) { mutableStateOf(editingPost?.content ?: "") }
-        var selectedPrivacy by remember(editingPost) { mutableStateOf(editingPost?.privacy ?: "friends") }
+        // D10c: in creator mode a new post is public by default (public posts are the creator's).
+        val isCreatorMode by viewModel.isCreatorEnabled.collectAsState()
+        var selectedPrivacy by remember(editingPost) { mutableStateOf(editingPost?.privacy ?: if (isCreatorMode) "public" else "friends") }
+        // D10c: for an edit that would move a personal post to the creator identity: move it (default) or keep it personal.
+        var moveToCreator by remember(editingPost) { mutableStateOf(true) }
         var showPublicWarning by remember { mutableStateOf(false) }
         val coroutineScope = rememberCoroutineScope()
         var isProcessingAttachment by remember { mutableStateOf(false) }
@@ -1926,6 +1930,44 @@ fun UnifiedFeedTab(
                                 )
                             }
                         }
+                        // D10c: in creator mode the privacy also decides which identity the post goes out as.
+                        if (isCreatorMode) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                if (selectedPrivacy == "public") "Public posts go out as your creator identity, to your followers and the mesh.".tr
+                                else "Friends-only posts go out as your personal identity. Your followers will not see them.".tr,
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                        val identityMove = editingPost?.let { viewModel.identityMoveFor(it, selectedPrivacy) }
+                        if (identityMove != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                if (identityMove == IdentityMove.TO_CREATOR) "This post belongs to your personal identity, so your followers cannot see it. Move it to your creator identity? It is posted again from there and the personal copy is deleted. Likes and comments stay with the old copy.".tr
+                                else "Friends-only posts belong to your personal identity. Saving moves this post there: it is posted again for your friends and removed from your followers. Likes and comments stay with the old copy.".tr,
+                                color = TextLight,
+                                fontSize = 12.sp
+                            )
+                            if (identityMove == IdentityMove.TO_CREATOR) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = moveToCreator,
+                                        onClick = { if (!isBusy) moveToCreator = true },
+                                        enabled = !isBusy,
+                                        label = { Text("Move to creator".tr) },
+                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted)
+                                    )
+                                    FilterChip(
+                                        selected = !moveToCreator,
+                                        onClick = { if (!isBusy) moveToCreator = false },
+                                        enabled = !isBusy,
+                                        label = { Text("Keep personal".tr) },
+                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted)
+                                    )
+                                }
+                            }
+                        }
                     }
                 },
                 confirmButton = {
@@ -1997,11 +2039,15 @@ fun UnifiedFeedTab(
                                 val finalContent = if (postContent.isBlank() && sharedItem != null) "🔥 Shared Post" else postContent
                                 
                                 if (editingPost != null) {
+                                    // D10c: a friends-only edit of a creator post always moves it; a personal
+                                    // post made public moves unless "Keep personal" was chosen.
+                                    val move = viewModel.identityMoveFor(editingPost!!, selectedPrivacy)
                                     viewModel.editMeshPost(
                                         postId = editingPost!!.id,
                                         newContent = finalContent,
                                         mediaMetadata = mediaMetadata,
-                                        privacy = selectedPrivacy
+                                        privacy = selectedPrivacy,
+                                        moveIdentity = move == IdentityMove.TO_PERSONAL || (move == IdentityMove.TO_CREATOR && moveToCreator)
                                     )
                                 } else {
                                     viewModel.composeAndBroadcastPost(

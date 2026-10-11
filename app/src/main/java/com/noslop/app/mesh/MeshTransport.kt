@@ -224,16 +224,24 @@ class MeshTransport(
             }
             acquiredBulk = true
         } else {
-            // Bulk feed/comment/post sync acquires strictly from bulkSemaphore
+            // Bulk feed/comment/post sync acquires strictly from bulkSemaphore.
+            // D10b fix 2: sync packets wait up to BULK_SYNC_WAIT_MS for a slot. They used to be dropped
+            // after 4 s like the rest, and nothing re-sends a sync reply, so a follower whose sync
+            // landed while the slots were busy never got the creator's posts.
+            val waitMs = if (waitsForBulkSlot(packet.type)) BULK_SYNC_WAIT_MS else BULK_WAIT_MS
+            val waitStart = System.currentTimeMillis()
             var acquired = false
-            val waitUntilMs = System.currentTimeMillis() + 4000L
-            while (System.currentTimeMillis() < waitUntilMs) {
+            while (System.currentTimeMillis() - waitStart < waitMs) {
                 if (bulkSemaphore.tryAcquire()) { acquired = true; break }
                 delay(80)
             }
             if (!acquired) {
-                Logger.warn(TAG, "Dropping bulk ${packet.type} to $onionAddress: bulk circuits busy")
+                Logger.warn(TAG, "Dropping bulk ${packet.type} to $onionAddress: bulk circuits busy for ${waitMs / 1000} s")
                 return@withContext pushedToHub
+            }
+            val waited = System.currentTimeMillis() - waitStart
+            if (waited > BULK_WAIT_MS) {
+                Logger.info(TAG, "${packet.type} to $onionAddress waited ${waited / 1000} s for a bulk slot")
             }
             acquiredBulk = true
         }
@@ -419,6 +427,15 @@ class MeshTransport(
         /** R1: typing/read receipts and DM receipts never count toward a peer's cooldown. */
         internal fun countsAsPeerFailure(type: String) =
             type != "TYPING" && type != "READ_RECEIPT" && type != "DM_ACK"
+
+        /** D10b fix 2: sync packets wait for a bulk slot instead of being dropped after [BULK_WAIT_MS]. */
+        internal fun waitsForBulkSlot(type: String) =
+            type == "SYNC_REQUEST" || type == "SYNC_RESPONSE" || type == "INVENTORY_SYNC_REQUEST"
+
+        /** How long other bulk packets (posts, comments, relays) wait for a bulk slot. */
+        internal const val BULK_WAIT_MS = 4_000L
+        /** How long sync packets wait for a bulk slot. */
+        internal const val BULK_SYNC_WAIT_MS = 90_000L
 
         /** How long a CONNECTION_REQUEST connection stays open for the accepter's answer. */
         const val HANDSHAKE_REPLY_WINDOW_MS = 6_000L

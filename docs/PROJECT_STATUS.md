@@ -1,5 +1,37 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-11) — Round D10c: Creator Posts, Follower Names, Attachment Identity (v0.7.0-alpha)
+
+Testers saw three problems after D10b fix 2: two older creator broadcasts still never reached followers, even after being edited to public; a follower that connected to a discovered creator with its secondary identity was listed by the creator as "Creator"; and new posts in creator mode defaulted to friends-only. Unit tests: `CreatorPostIdentityD10cTest` (new) and `IdentityRoutingTest` (updated). Not yet verified on device.
+
+* **Older creator posts.**
+  * **Cause.** The two posts were written as friends-only. In creator mode, a friends-only post is signed by the personal identity, and editing it to public kept the personal key, because a signed post's author cannot change. D04 never sends personal posts to creator contacts. The creator's log showed "2 withheld" on every inventory sync and "Not sending EDIT_POST …: written by the identity this peer doesn't know".
+  * **Fix.** In creator mode, a post's privacy decides its identity, the same rule as when it is written: public posts belong to the creator identity and friends-only posts to the personal identity (`MeshSocialRepository.identityMoveFor`).
+  * An edit that crosses that line moves the post (`moveMeshPostToOtherIdentity`). It is published again by the other identity, with a new id and the same time, attachment and clearnet link, and the old copy is deleted. Likes and comments stay with the old copy.
+  * The edit sheet explains this. For a personal post made public it offers "Move to creator" (the default) or "Keep personal". A creator post made friends-only always moves.
+* **Creator mode posting.** New posts default to Public, and the compose sheet says which identity each privacy setting posts as.
+* **"Creator" instead of the follower's name.**
+  * **Cause.** D04 named the secondary (burnable) identity after the creator profile on every node. A node that is not a creator has no creator profile, so its secondary identity went by the default "Creator".
+  * **Fix.** On a node that is not a creator, the secondary identity goes by the personal handle again, as before D04. It still never carries the personal bio or avatar. On a creator node it keeps the creator handle (`secondaryIdentityHandle`, used by `IdentityRepository` and `IdentityRouter`).
+  * `announceCreatorPresence` sends the identity's name (`IDENTITY_UPDATE`, signed by that identity) to the contacts that know it. It sends whenever the name differs from the last one sent and one of those contacts is online, so existing "Creator" rows correct themselves.
+* **Identity leak found on the way.** Attachments carried the personal onion and key (`originNode`, `ownerId`) whatever identity sent them, because the UI fills in the personal ones. This included creator posts, comments as the creator, DMs to followers and group messages sent as the creator. Each attachment now names the identity that sends it. These fields are not signed, so nothing else changes on the wire.
+* **Known limit.** Turning creator mode on reuses an existing secondary identity. The creators that identity followed knew it by the personal handle, so they can link the new creator identity to that name.
+
+## Completed Changes (2026-10-11) — Round D10b fix 2: Creator Posts Reach Followers (v0.7.0-alpha)
+
+Testers saw that posts by a creator node (a video and an older post) never appeared on a node that followed it, neither in its mesh content nor on the creator's card. Unit tests: `BulkSyncDeliveryTest` (new). Not yet verified on device.
+
+* **Cause 1: sync replies were thrown away.** When the follower synced, the creator answered "sent 1 missing posts", but `MeshTransport.sendPacket` dropped the reply carrying the post. The log said "Dropping bulk SYNC_RESPONSE …: bulk circuits busy". A bulk packet that could not get one of the 4 bulk connection slots within 4 s was dropped, and nothing sent a sync reply again.
+* **Fix.**
+  * Sync packets (`SYNC_REQUEST`, `SYNC_RESPONSE`, `INVENTORY_SYNC_REQUEST`) now wait up to 90 s for a slot (`MeshTransport.waitsForBulkSlot`).
+  * Other bulk packets keep the 4 s limit, and presence announcements are still dropped at once.
+  * `SyncPacketHandler` re-sends an undelivered sync reply in the background after 30 s and again after 90 s, with a fresh packet id.
+* **Cause 2: pending requests to creators were deleted.** The 15-minute clean-up of inactive discoverable nodes deleted every untrusted row, including a creator we had a pending request with or followed. **Fix:** it now deletes only nodes we merely saw announce themselves (`MeshSocialRepository.isDisposableDiscoverableRow`).
+* **Diagnostics.**
+  * The inventory log now says how many posts were withheld from the peer (our personal posts to a creator contact, friends-only posts to anyone who isn't a friend).
+  * The sync-response log says why posts were not stored: mesh filter, rejected, or already stored.
+  * The image, video and text mesh filters used to drop synced posts without any log line.
+
 ## Completed Changes (2026-10-11) — Round D10b: Verification by Camera Scan, Automatic Key Changes, 8-Character Tags (v0.7.0-alpha)
 
 Testers found D10's manual "Mark verified" step tedious. This round replaces it: the app verifies contacts itself when people meet and scan each other's QR code. Unit tests: `ContactVerificationD10bTest` (new), `SafetyFingerprintD10Test`, `PeerTrustInvariantTest`, `CryptoDerivationTest`, `CryptoServiceRobolectricTest`. Not yet verified on device.

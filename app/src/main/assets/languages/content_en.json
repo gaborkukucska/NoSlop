@@ -912,5 +912,11 @@
   "Ask them to read the name and check code from their own ID card, in person or over a chat you already trust. Accept only if both match.": "Ask them to read the name and check code from their own ID card, in person or over a chat you already trust. Accept only if both match.",
   "They scanned your QR code with their camera. If the check code matches, accepting marks them as verified in person.": "They scanned your QR code with their camera. If the check code matches, accepting marks them as verified in person.",
   "{handle}'s security key changed on {date}, usually after a reinstall or a restore.": "{handle}'s security key changed on {date}, usually after a reinstall or a restore.",
-  "Dismiss": "Dismiss"
+  "Dismiss": "Dismiss",
+  "Public posts go out as your creator identity, to your followers and the mesh.": "Public posts go out as your creator identity, to your followers and the mesh.",
+  "Friends-only posts go out as your personal identity. Your followers will not see them.": "Friends-only posts go out as your personal identity. Your followers will not see them.",
+  "This post belongs to your personal identity, so your followers cannot see it. Move it to your creator identity? It is posted again from there and the personal copy is deleted. Likes and comments stay with the old copy.": "This post belongs to your personal identity, so your followers cannot see it. Move it to your creator identity? It is posted again from there and the personal copy is deleted. Likes and comments stay with the old copy.",
+  "Friends-only posts belong to your personal identity. Saving moves this post there: it is posted again for your friends and removed from your followers. Likes and comments stay with the old copy.": "Friends-only posts belong to your personal identity. Saving moves this post there: it is posted again for your friends and removed from your followers. Likes and comments stay with the old copy.",
+  "Move to creator": "Move to creator",
+  "Keep personal": "Keep personal"
 }

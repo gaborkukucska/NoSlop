@@ -43,7 +43,12 @@ class DmProtocolD05Test {
     private val bob = CryptoService.generateIdentity("bob")
     private val carol = CryptoService.generateIdentity("carol")
 
-    private val sent = java.util.Collections.synchronizedList(mutableListOf<Pair<String, NetworkPacket>>())
+    // Packets are added from background coroutines (ACK sends and their
+    // broadcast fallback run on AppScopes.io), so the list must be safe to
+    // read while another thread adds to it. CopyOnWriteArrayList iterates a
+    // snapshot; a synchronizedList throws ConcurrentModificationException
+    // when single { } / map { } run unlocked during an add.
+    private val sent = java.util.concurrent.CopyOnWriteArrayList<Pair<String, NetworkPacket>>()
 
     @Before
     fun setup() = runBlocking<Unit> {

@@ -683,12 +683,17 @@ class IdentityRepository(private val context: Context, private val appSettingDao
     /**
      * D04: the creator identity goes by the creator profile's handle, never the personal handle (it
      * used to be [getHandle], which put the personal handle in every creator handshake and announce).
+     * D10c: only on a creator node. On any other node the secondary identity is only used to follow
+     * creators and goes by the personal handle (see [secondaryIdentityHandle]).
      */
-    private suspend fun creatorHandle(): String =
-        parseCreatorProfile(appSettingDao.getSetting(CREATOR_PROFILE_KEY)).creatorHandle()
+    private suspend fun secondaryHandle(): String = secondaryIdentityHandle(
+        isCreatorNode = appSettingDao.getSetting(CREATOR_MODE_KEY) == "true",
+        creatorProfile = parseCreatorProfile(appSettingDao.getSetting(CREATOR_PROFILE_KEY)),
+        personalHandle = getHandle()
+    )
 
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {
-        val burnableHandle = creatorHandle()
+        val burnableHandle = secondaryHandle()
         val burnableIdentity = CryptoService.generateIdentity(burnableHandle)
         
         prefs.edit()
@@ -710,7 +715,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         val pubEnc = prefs.getString("burnable_pub_enc", null) ?: return null
         val tripcode = prefs.getString("burnable_tripcode", null) ?: return null
         val onion = prefs.getString("burnable_onion", null) ?: return null
-        val displayName = creatorHandle()
+        val displayName = secondaryHandle()
         val privEd = secureFallbackRead(prefs.getString("burnable_ed25519_private_key", null)) ?: return null
         val privEnc = secureFallbackRead(prefs.getString("burnable_enc_private_key", null)) ?: return null
         // D09: as for the personal identity.

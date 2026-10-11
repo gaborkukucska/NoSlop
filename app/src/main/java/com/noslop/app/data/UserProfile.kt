@@ -33,3 +33,16 @@ fun parseCreatorProfile(json: String?): UserProfile {
         UserProfile()
     }
 }
+
+/** D10c: the app setting that turns creator mode on ("true"). */
+const val CREATOR_MODE_KEY = "is_creator_enabled"
+
+/**
+ * D10c: the name our secondary (burnable) identity goes by. On a creator node it is the creator
+ * identity and goes by the creator profile's handle (D04). On any other node it only exists to follow
+ * discovered creators and goes by the personal handle, as it did before D04. D04 gave it the creator
+ * profile's handle everywhere, so on a node without a creator profile it went by the default
+ * "Creator", and the creators it followed listed the follower as "Creator".
+ */
+fun secondaryIdentityHandle(isCreatorNode: Boolean, creatorProfile: UserProfile, personalHandle: String): String =
+    if (isCreatorNode) creatorProfile.creatorHandle() else personalHandle.trim().ifBlank { "Anonymous" }

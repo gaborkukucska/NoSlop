@@ -67,6 +67,8 @@ class IdentityRoutingTest {
 
     @Test
     fun theCreatorIdentity_neverTakesThePersonalHandle() = runBlocking<Unit> {
+        // D10c: a creator node (on any other node the secondary identity goes by the personal handle).
+        repo.putAppSetting(CREATOR_MODE_KEY, "true")
         val burnable = repo.generateBurnableIdentity()
         assertEquals("default until set", DEFAULT_CREATOR_HANDLE, repo.getBurnableIdentity()!!.displayName)
         assertEquals("generated from the creator handle", "$DEFAULT_CREATOR_HANDLE.${burnable.tripcode}", burnable.displayName)
@@ -76,6 +78,27 @@ class IdentityRoutingTest {
         assertEquals("alice", repo.identityRouter.main()!!.handle)
         assertEquals("alice", repo.ownHandleFor(alice.publicKeyB64))
         assertEquals("studio", repo.ownHandleFor(burnable.publicKeyB64))
+    }
+
+    @Test
+    fun aFollowersSecondaryIdentity_goesByThePersonalHandle() = runBlocking<Unit> {
+        // D10c: a node that is not a creator uses its secondary identity only to follow creators. D04
+        // named it "Creator" there, and the creators it followed listed the follower as "Creator".
+        repo.saveUserProfile(UserProfile(displayName = "alice", bio = "personal bio", avatarB64 = "UEVSU09OQUw="))
+        val burnable = repo.generateBurnableIdentity()
+        assertEquals("generated from the personal handle", "alice.${burnable.tripcode}", burnable.displayName)
+        assertEquals("alice", repo.getBurnableIdentity()!!.displayName)
+        val secondary = repo.identityRouter.creator()!!
+        assertEquals("alice", secondary.handle)
+        assertNull("never the personal bio", secondary.bio)
+        assertNull("never the personal avatar", secondary.avatarB64)
+
+        // Creator mode on: the creator handle, never the personal one.
+        repo.putAppSetting(CREATOR_MODE_KEY, "true")
+        assertEquals(DEFAULT_CREATOR_HANDLE, repo.getBurnableIdentity()!!.displayName)
+        assertEquals(DEFAULT_CREATOR_HANDLE, repo.identityRouter.creator()!!.handle)
+        repo.saveCreatorProfile(UserProfile(displayName = "studio", bio = "b"))
+        assertEquals("studio", repo.identityRouter.creator()!!.handle)
     }
 
     @Test

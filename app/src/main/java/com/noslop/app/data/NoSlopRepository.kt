@@ -1080,7 +1080,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val jsonPayload = com.google.gson.JsonObject().apply {
             addProperty("content", text)
             addProperty("groupId", groupId)
-            if (media != null) add("media", com.noslop.app.util.Json.gson.toJsonTree(media))
+            // D10c: the attachment names the identity the message is sent as.
+            if (media != null) add("media", com.noslop.app.util.Json.gson.toJsonTree(
+                media.copy(originNode = senderKeys.onionAddress, ownerId = senderKeys.publicKeyB64)
+            ))
             if (replyToMessageId != null) addProperty("replyTo", replyToMessageId)
         }.toString()
 
@@ -2257,6 +2260,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
         privacy: String = "public"
     ): Boolean = meshSocialRepository.editMeshPost(postId, newContent, mediaMetadata, privacy)
+
+    /** D10c: an edit that moves our post to our other identity (MeshSocialRepository.identityMoveFor). */
+    suspend fun moveMeshPostToOtherIdentity(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String
+    ): MeshPost? = meshSocialRepository.moveMeshPostToOtherIdentity(postId, newContent, mediaMetadata, privacy)
 
     suspend fun composeAndBroadcastPost(
         content: String,
