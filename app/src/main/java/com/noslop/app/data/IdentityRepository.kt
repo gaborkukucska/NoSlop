@@ -314,7 +314,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 return IdentityRestoreResult.Failure("Main X25519 keypair consistency check failed")
             }
             val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
-            if (pubBytes == null || CryptoService.deriveTripcode(pubBytes) != tripcode) {
+            if (pubBytes == null || !CryptoService.isTripcodeOf(pubBytes, tripcode)) {
                 return IdentityRestoreResult.Failure("Main identity tripcode does not match public key")
             }
             if (CryptoService.deriveOnionAddress(pubBytes) != onion) {
@@ -345,7 +345,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                     return IdentityRestoreResult.Failure("Burnable X25519 keypair consistency check failed")
                 }
                 val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
-                if (bPubBytes == null || CryptoService.deriveTripcode(bPubBytes) != bObj.getString("tripcode")) {
+                if (bPubBytes == null || !CryptoService.isTripcodeOf(bPubBytes, bObj.getString("tripcode"))) {
                     return IdentityRestoreResult.Failure("Burnable identity tripcode does not match public key")
                 }
                 if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
@@ -396,7 +396,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
             // V01: Validate tripcode and onion address match public key
             val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
-            if (pubBytes == null || CryptoService.deriveTripcode(pubBytes) != tripcode) {
+            if (pubBytes == null || !CryptoService.isTripcodeOf(pubBytes, tripcode)) {
                 return IdentityRestoreResult.Failure("Main identity tripcode does not match public key")
             }
             if (CryptoService.deriveOnionAddress(pubBytes) != onion) {
@@ -430,7 +430,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                     return IdentityRestoreResult.Failure("Burnable X25519 keypair consistency check failed")
                 }
                 val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
-                if (bPubBytes == null || CryptoService.deriveTripcode(bPubBytes) != bObj.getString("tripcode")) {
+                if (bPubBytes == null || !CryptoService.isTripcodeOf(bPubBytes, bObj.getString("tripcode"))) {
                     return IdentityRestoreResult.Failure("Burnable identity tripcode does not match public key")
                 }
                 if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
@@ -566,13 +566,22 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         val derivedTripcode = CryptoService.deriveTripcode(rawForTripcode)
         val derivedOnion = CryptoService.deriveOnionAddress(rawForTripcode)
 
-        if (tripcode != derivedTripcode || onion != derivedOnion) {
+        // D10b: the tag is now 8 characters (Argon2id). A display name that still ends in the stored
+        // tag or the legacy 6-character one gets the new tag, once, together with the caches.
+        val staleTag = listOf(tripcode, CryptoService.deriveLegacyTripcode(rawForTripcode))
+            .firstOrNull { it.isNotBlank() && it != derivedTripcode && displayName.endsWith(".$it") }
+        val finalDisplayName = if (staleTag != null) displayName.removeSuffix(".$staleTag") + ".$derivedTripcode" else displayName
+
+        if (tripcode != derivedTripcode || onion != derivedOnion || finalDisplayName != displayName) {
             appSettingDao.insertSetting(AppSetting("local_tripcode", derivedTripcode))
             appSettingDao.insertSetting(AppSetting("local_onion", derivedOnion))
+            appSettingDao.insertSetting(AppSetting("local_display_name", finalDisplayName))
             prefs.edit()
                 .putString("tripcode", derivedTripcode)
                 .putString("onion", derivedOnion)
+                .putString("display_name", finalDisplayName)
                 .apply()
+            if (tripcode != derivedTripcode) Logger.info(TAG, "Identity tag rewritten in the ${CryptoService.TRIPCODE_LENGTH}-character form")
         }
 
         return CryptoService.IdentityKeys(
@@ -580,7 +589,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             privateKeyB64 = privEd,
             tripcode = derivedTripcode,
             onionAddress = derivedOnion,
-            displayName = displayName,
+            displayName = finalDisplayName,
             encPublicKeyB64 = finalPubEnc,
             encPrivateKeyB64 = privEnc
         )
@@ -708,11 +717,21 @@ class IdentityRepository(private val context: Context, private val appSettingDao
         val finalPubEnc = reconcileEncPublicKey(pubEnc, privEnc) { repaired ->
             prefs.edit().putString("burnable_pub_enc", repaired).apply()
         }
+        // D10b: a creator identity made before D10b still has the 6-character tag stored.
+        val derivedTripcode = try {
+            CryptoService.deriveTripcode(android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT))
+        } catch (_: Exception) {
+            tripcode
+        }
+        if (derivedTripcode != tripcode) {
+            prefs.edit().putString("burnable_tripcode", derivedTripcode).apply()
+            Logger.info(TAG, "Creator identity tag rewritten in the ${CryptoService.TRIPCODE_LENGTH}-character form")
+        }
         
         return CryptoService.IdentityKeys(
             publicKeyB64 = pubEd,
             privateKeyB64 = privEd,
-            tripcode = tripcode,
+            tripcode = derivedTripcode,
             onionAddress = onion,
             displayName = displayName,
             encPublicKeyB64 = finalPubEnc,

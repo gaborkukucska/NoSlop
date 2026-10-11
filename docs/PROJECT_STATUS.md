@@ -1,8 +1,38 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-11) — Round D10b: Verification by Camera Scan, Automatic Key Changes, 8-Character Tags (v0.7.0-alpha)
+
+Testers found D10's manual "Mark verified" step tedious. This round replaces it: the app verifies contacts itself when people meet and scan each other's QR code. Unit tests: `ContactVerificationD10bTest` (new), `SafetyFingerprintD10Test`, `PeerTrustInvariantTest`, `CryptoDerivationTest`, `CryptoServiceRobolectricTest`. Not yet verified on device.
+
+**Compatibility.** No Room schema change; `pendingEncKey` is no longer written. `CONNECTION_REQUEST` gains an optional signed `intro` field, appended to the v2 signature only when present, so requests without it sign exactly as before. The tag changed from 6 to 8 characters (alpha testers: old tags are accepted when an identity is loaded or restored and rewritten once). `PeerDao.acceptPendingEncKey` and `clearPendingEncKey` (D10) are replaced by `applyEncKeyChange` and `updateTagAndHandle`.
+
+### Verified in person, without a button
+
+* **Scanner.** Scanning someone's QR code with the camera (`QRScanScreen`, source `ContactIntro.QR_CAMERA`) stores that code's safety fingerprint in `peers.verifiedFingerprint` when the request is sent (`MeshSocialRepository.sendConnectionRequest`). It counts only while it equals the contact's current fingerprint, so a different key in their handshake shows as "Changed since you verified it". Scanning a contact you already have, or someone whose request is pending, verifies them only if the code carries the keys already stored.
+* **Approver.** The request carries `intro = "qr_camera"` inside the v2 signature, so it can't be added or removed on the way. The receiver stores it as `request_intro_<pub>`. The request dialog, the notification card and the contact card show the requester's name.tag (the tag comes from their key), a check code (the first two groups of the safety fingerprint), and a note that they scanned your code. Accepting there calls `NoSlopRepository.acceptConnectionRequest(…, confirmedByUser = true)`. That marks them verified in person, but only if the request was a camera scan and the keys are still the ones on screen. Creator auto-accept and crossing requests never verify anyone.
+* **Not verified.** A code read from a picture, a pasted ID, or a request over the network never verifies anyone. A picture or a pasted ID shows a red warning to continue only if the code came from that person.
+* **Warnings.** The scan and approval screens warn when an accepted contact already has the same name, ignoring tags and case (`sameNameContact`). The scan screen also warns when the tag written in the code doesn't belong to its key.
+* **UI.** The contact card shows "Verified in person", "Not verified in person" or "Changed since you verified it"; "Compare keys" shows the full fingerprint. The D10 "Mark verified"/"Remove verification" buttons are gone. "My ID" shows your check code above your fingerprint.
+
+### Key changes are applied automatically (C02, D10 c)
+
+* **Cause.** D10 held a changed encryption key in `pendingEncKey` until the user tapped "Accept New Key". The new key is signed by the contact's identity key, so holding it only delayed messages.
+* **Fix.** `HandshakePacketHandler` applies a changed key from an `ACCEPTED` contact (a request or a handshake refresh). It clears `verifiedFingerprint` and records `key_changed_at_<pub>`. The same key in a different encoding is not a change (`CryptoService.sameX25519PublicKey`). The chat shows a one-line notice ("…'s security key changed on …") until dismissed (`KeyChangeNotice`), replacing D10's accept/keep banner. Keys still held from D10 are applied once at startup.
+
+### 8-character tags made with Argon2id
+
+* **Change.** `CryptoService.deriveTripcode` is now base32(Argon2id(raw Ed25519 key, salt `noslop-tag-v2`, t=2, m=19456 KiB, p=1, 16 bytes)), first 8 characters (golden vector `wdbuab42` for bytes 0..31, computed with argon2-cffi; Bouncy Castle 1.78.1 gives the same). Finding a key whose tag matches someone else's now takes about 2^40 Argon2 runs, instead of 2^30 SHA3 hashes for the old 6-character tag. Results are cached per key (4096 entries). Only one Argon2 run happens at a time, using about 19 MiB.
+* **Old tags.** `deriveLegacyTripcode` keeps the old SHA3 tag (golden `aufeq4`). `isTripcodeOf` accepts either form when a backup is restored (`IdentityRepository.validateIdentityObject` and `restoreAuthoritativeIdentity`). `loadIdentity` rewrites the stored tag and the display name suffix; `getBurnableIdentity` rewrites the stored creator tag. Handshakes, announces and identity updates strip either form from incoming handles (`stripIdentityTag`).
+* **Migration.** `NoSlopRepository.migrateIdentityTagsV2`, started by the ViewModel, runs once (setting `identity_tags_v2_done`) and again after a failure. It applies held keys, rewrites stored contacts' tags and handles and post authors' tags and legacy handle suffixes, and reloads both own identities.
+* **Cost.** The first tag for each key takes a fraction of a second (about 160 ms on a desktop JVM, cold), and later ones come from the cache. Unit tests that create many identities take a few seconds longer.
+
+### Matching people by key, not name
+
+* `MeshSocialRepository.deletePeer`, `NoSlopViewModel.removePeer` and the contact card's post list used to match posts by handle as well as by key. Anyone can post under the same handle, so removing a contact could delete someone else's posts. They now match by key only.
+
 ## Completed Changes (2026-10-11) — Round D10: Status Honesty, Safety Fingerprints, Key Changes, Unverified Media (v0.7.0-alpha)
 
-This round closes review finding D10 and the "unverified" label left open by D08. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`; from this round on, `StatusDocCitationTest` fails the build if a label names a class that does not exist. Not yet verified on device.
+This round closes review finding D10 and the "unverified" label left open by D08. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`; from this round on, `StatusDocCitationTest` fails the build if a label names a class that does not exist. Not yet verified on device. *(Round D10b replaced the "Mark verified" button and the key-change banner described below with verification by camera scan and automatic key changes.)*
 
 **Compatibility.** No packet, archive-format or Room schema change. Two new `PeerDao` queries on existing columns (`acceptPendingEncKey`, `clearPendingEncKey`). The fingerprint derivation changed, but nothing displayed or stored a fingerprint before this round.
 
@@ -1931,7 +1961,7 @@ same-device backup export/import. Multi-device testing is next.
 | **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** with D05 (2026-10-10) — v1 latched per key, ACK has its own AAD label | `CryptoServiceRobolectricTest`, `DmProtocolD05Test` |
 | **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
 | **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** with D04 (Round C, 2026-10-09) — see D04 | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
-| **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** (Round D10, 2026-10-11; not yet device-verified) — on the contact card and the ID card, "Mark verified", key-change banner | `SafetyFingerprintD10Test` |
+| **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** (Rounds D10/D10b, 2026-10-11; not yet device-verified) — on the contact card and the ID card; verified in person by camera scan plus approval; check code; key changes applied with a notice | `SafetyFingerprintD10Test`, `ContactVerificationD10bTest` |
 | **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
 | **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
 | **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
@@ -1969,7 +1999,7 @@ same-device backup export/import. Multi-device testing is next.
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
 | **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "Unverified media" label added in Round D10 (2026-10-11) | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test`, `SafetyFingerprintD10Test` |
 | **D09** | P2 | Cross-device restore mismatch reported after commit | **Resolved** (2026-10-10; not yet device-verified) — typed `ImportResult`, pre-commit identity plan, restart into recovery, X25519 reconciliation | `BackupImportResultD09Test` |
-| **D10** | P1 | Status document claims tests/code that don't exist | **Resolved** (Round D10, 2026-10-11; not yet device-verified) — claims corrected and checked by a test, `IdentityViewModel` deleted (R6b), fingerprint UI with "Mark verified", key-change banner, per-language translation report | `StatusDocCitationTest`, `SafetyFingerprintD10Test`, `TranslationParityTest` |
+| **D10** | P1 | Status document claims tests/code that don't exist | **Resolved** (Rounds D10/D10b, 2026-10-11; not yet device-verified) — claims corrected and checked by a test, `IdentityViewModel` deleted (R6b), fingerprint UI, verification by camera scan (D10b, replaced "Mark verified"), automatic key changes with a notice, 8-character Argon2id tags, per-language translation report | `StatusDocCitationTest`, `SafetyFingerprintD10Test`, `ContactVerificationD10bTest`, `TranslationParityTest` |
 | **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |
 | **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |
 | **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |

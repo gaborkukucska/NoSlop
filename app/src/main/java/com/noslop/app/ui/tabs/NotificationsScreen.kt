@@ -102,11 +102,14 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
                     val gid = notif.targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
                     val isGroupJoined = !gid.isNullOrBlank() && groupChats.any { it.groupId == gid }
                     val isAlreadyContact = !notif.senderPub.isNullOrBlank() && peers.any { it.publicKeyB64 == notif.senderPub && it.isTrusted }
+                    val requester = notif.senderPub?.let { pub -> peers.find { it.publicKeyB64 == pub } }
 
                     NotificationCard(
                         notif = notif,
                         isGroupJoined = isGroupJoined,
                         isAlreadyContact = isAlreadyContact,
+                        requester = requester,
+                        viewModel = viewModel,
                         onClick = {
                             viewModel.markNotificationAsRead(notif.id)
                             if (notif.type == "GROUP_INVITE") {
@@ -153,7 +156,9 @@ fun NotificationCard(
     onDeclineGroup: (String, String?) -> Unit = { _, _ -> },
     isGroupJoined: Boolean = false,
     isAlreadyContact: Boolean = false,
-    onOpenGroup: () -> Unit = {}
+    onOpenGroup: () -> Unit = {},
+    requester: com.noslop.app.data.Peer? = null,
+    viewModel: NoSlopViewModel? = null
 ) {
     val icon = when (notif.iconType) {
         "dm" -> Icons.Default.Email
@@ -221,6 +226,13 @@ fun NotificationCard(
         }
 
         if (notif.type == "CONNECTION_REQUEST") {
+            // D10b: who is asking (name.tag) and the check code to compare before accepting.
+            if (requester != null && viewModel != null && requester.relationship == com.noslop.app.data.PeerRelationship.INCOMING_PENDING) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(modifier = Modifier.fillMaxWidth().padding(start = 64.dp)) {
+                    com.noslop.app.ui.components.ConnectionRequestIdentity(peer = requester, viewModel = viewModel)
+                }
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier

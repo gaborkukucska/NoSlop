@@ -365,12 +365,9 @@ fun ChatThreadScreen(
             )
         }
 
-        // D10 (C02): the contact's encryption key changed. The new key waits in pendingEncKey and is
-        // not used until the user accepts it here.
-        val pendingKey = peer.pendingEncKey
-        if (pendingKey != null) {
-            KeyChangeBanner(peer = peer, pendingKey = pendingKey, viewModel = viewModel)
-        }
+        // D10b (C02): a changed encryption key is applied automatically (it is signed by the
+        // contact's identity key); this one-line notice stays until dismissed.
+        KeyChangeNotice(peer = peer, viewModel = viewModel)
 
         if (peer.isTemporary) {
             Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
@@ -957,84 +954,40 @@ fun ChatInputBar(
 }
 
 /**
- * D10: banner for a contact whose encryption key changed (held in pendingEncKey since C02).
- * Accepting replaces the key and clears any earlier verification; keeping the old key drops the
- * pending one.
+ * D10b: one line saying the contact's security key changed (usually a reinstall or a restore). The
+ * new key is already in use; any in-person verification was reset with it.
  */
 @Composable
-private fun KeyChangeBanner(peer: Peer, pendingKey: String, viewModel: NoSlopViewModel) {
-    val newFingerprint = remember(peer.publicKeyB64, pendingKey) {
-        CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, pendingKey)
+private fun KeyChangeNotice(peer: Peer, viewModel: NoSlopViewModel) {
+    var changedAt by remember(peer.publicKeyB64) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(peer.publicKeyB64, peer.encPublicKeyB64) {
+        changedAt = viewModel.keyChangedAt(peer.publicKeyB64)
     }
-    var confirmAccept by remember { mutableStateOf(false) }
-
-    Column(
+    val at = changedAt ?: return
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DestructiveRed.copy(alpha = 0.12f))
-            .border(1.dp, DestructiveRed.copy(alpha = 0.5f))
-            .padding(12.dp)
+            .background(TemporaryAmber.copy(alpha = 0.12f))
+            .padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Safety Key Changed".tr, color = DestructiveRed, fontWeight = FontWeight.Bold)
-        }
-        Spacer(modifier = Modifier.height(4.dp))
+        Icon(Icons.Default.Info, contentDescription = null, tint = TemporaryAmber, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = "{handle}'s encryption key changed. This happens after a reinstall or a restore, but it can also mean someone is pretending to be them. Compare the new fingerprint with them on another channel before you accept it.".tr
-                .replace("{handle}", peer.handle),
+            text = "{handle}'s security key changed on {date}, usually after a reinstall or a restore.".tr
+                .replace("{handle}", peer.handle)
+                .replace("{date}", SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(at))),
             color = TextLight,
-            fontSize = 12.sp
+            fontSize = 12.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
-        if (newFingerprint != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "New fingerprint: {fingerprint}".tr.replace("{fingerprint}", newFingerprint),
-                color = TextLight,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp
-            )
+        TextButton(onClick = {
+            viewModel.dismissKeyChangeNotice(peer.publicKeyB64)
+            changedAt = null
+        }) {
+            Text("Dismiss".tr, color = TemporaryAmber, fontSize = 12.sp)
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = { confirmAccept = true },
-                colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
-            ) { Text("Accept New Key".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-            OutlinedButton(
-                onClick = { viewModel.rejectPeerKeyChange(peer.publicKeyB64) },
-                border = BorderStroke(1.dp, BorderSubtle),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
-            ) { Text("Keep Old Key".tr, fontSize = 12.sp) }
-        }
-    }
-
-    if (confirmAccept) {
-        AlertDialog(
-            onDismissRequest = { confirmAccept = false },
-            containerColor = SurfaceDark,
-            title = { Text("Accept New Key?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Accept only if {handle} confirmed this fingerprint to you. Your earlier verification of this contact will be removed.".tr
-                        .replace("{handle}", peer.handle),
-                    color = TextLight
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.acceptPeerKeyChange(peer.publicKeyB64)
-                        confirmAccept = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
-                ) { Text("Accept New Key".tr, fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmAccept = false }) { Text("Cancel".tr, color = TextMuted) }
-            }
-        )
     }
 }

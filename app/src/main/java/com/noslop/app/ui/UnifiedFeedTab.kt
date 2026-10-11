@@ -581,7 +581,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 Column {
                     Text("Incoming mesh connection request from:".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(peer.handle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+                    // D10b: name.tag, check code, scan note and same-name warning.
+                    com.noslop.app.ui.components.ConnectionRequestIdentity(peer = peer, viewModel = viewModel)
                 }
             },
             confirmButton = {

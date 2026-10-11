@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -2286,7 +2287,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         publicKeyB64: String,
         onionAddress: String,
         encPublicKeyB64: String = "",
-        useBurnableIdentity: Boolean = false
+        useBurnableIdentity: Boolean = false,
+        intro: String = ContactIntro.NETWORK
     ): Boolean {
         if (useBurnableIdentity && getBurnableIdentity() == null) {
             val newBurnable = generateBurnableIdentity()
@@ -2300,11 +2302,34 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 waitCount++
             }
         }
-        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
+        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro)
     }
 
-    suspend fun acceptConnectionRequest(peer: Peer, replyVia: com.noslop.app.mesh.ReplyChannel? = null): Boolean =
-        meshSocialRepository.acceptConnectionRequest(peer, replyVia)
+    /**
+     * D10b: [confirmedByUser] is true only when the user tapped Accept on a screen that showed the
+     * requester's name.tag and check code (the request dialog, the notification card, the contact
+     * card). If that request was signed as coming from a camera scan of our QR code, the contact is
+     * marked verified in person, provided the keys are still the ones the user was shown ([peer]).
+     * Creator auto-accept and crossing requests pass false and never verify anyone.
+     */
+    suspend fun acceptConnectionRequest(
+        peer: Peer,
+        replyVia: com.noslop.app.mesh.ReplyChannel? = null,
+        confirmedByUser: Boolean = false
+    ): Boolean {
+        val before = peerDao.getPeerByPublicKey(peer.publicKeyB64)
+        val cameFromScan = before?.relationship == PeerRelationship.INCOMING_PENDING && requestCameFromScan(peer.publicKeyB64)
+        val accepted = meshSocialRepository.acceptConnectionRequest(peer, replyVia)
+        if (accepted && confirmedByUser && cameFromScan) {
+            val shown = safetyFingerprintOf(peer)
+            val current = peerDao.getPeerByPublicKey(peer.publicKeyB64)?.let { safetyFingerprintOf(it) }
+            if (current != null && current == shown) {
+                peerDao.setVerifiedFingerprint(peer.publicKeyB64, current)
+                Logger.info("PEER_TRUST", "Contact ${peer.publicKeyB64.take(8)} verified in person (scanned our QR code; approved by the user)")
+            }
+        }
+        return accepted
+    }
 
     /** Round A2: answers a still-polling request we already declined, on the requester's connection. */
     suspend fun answerDeclinedRequest(addressedIdentity: String, peerPub: String, reply: com.noslop.app.mesh.ReplyChannel): Boolean =
@@ -2330,49 +2355,88 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     fun safetyFingerprintOf(peer: Peer): String? =
         com.noslop.app.crypto.CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, peer.encPublicKeyB64)
 
+    /** D10b: whether the pending request from [publicKeyB64] was signed as coming from a camera scan of our QR. */
+    suspend fun requestCameFromScan(publicKeyB64: String): Boolean =
+        appSettingDao.getSetting("request_intro_$publicKeyB64") == ContactIntro.QR_CAMERA
+
     /**
-     * D10: "Mark verified" stores the fingerprint the user compared out-of-band. It goes stale on its
-     * own when either key changes, because the UI compares it with the current fingerprint. Only an
-     * accepted contact with no key change pending can be marked; un-marking always works.
+     * D10b: a contact's encryption key changed (and was applied, see HandshakePacketHandler). The
+     * chat shows a one-line notice until the user dismisses it.
      */
-    suspend fun setPeerVerified(publicKeyB64: String, verified: Boolean): Boolean {
-        val peer = peerDao.getPeerByPublicKey(publicKeyB64) ?: return false
-        if (!verified) {
-            peerDao.setVerifiedFingerprint(publicKeyB64, null)
-            return true
-        }
-        if (peer.relationship != PeerRelationship.ACCEPTED || peer.pendingEncKey != null) return false
-        val fingerprint = safetyFingerprintOf(peer) ?: return false
-        peerDao.setVerifiedFingerprint(publicKeyB64, fingerprint)
-        com.noslop.app.debug.Logger.info("PEER_TRUST", "Contact ${publicKeyB64.take(8)} marked verified")
-        return true
+    suspend fun recordKeyChange(publicKeyB64: String) {
+        appSettingDao.insertSetting(AppSetting("key_changed_at_$publicKeyB64", System.currentTimeMillis().toString()))
+        Logger.warn("PEER_TRUST", "Encryption key of ${publicKeyB64.take(8)} changed; applied, in-person verification reset")
+    }
+
+    /** D10b: when the contact's key last changed, while the notice has not been dismissed. */
+    suspend fun keyChangedAt(publicKeyB64: String): Long? =
+        appSettingDao.getSetting("key_changed_at_$publicKeyB64")?.toLongOrNull()
+
+    suspend fun dismissKeyChangeNotice(publicKeyB64: String) {
+        appSettingDao.removeSetting("key_changed_at_$publicKeyB64")
+    }
+
+    private val tagMigrationMutex = kotlinx.coroutines.sync.Mutex()
+
+    /** D10b: the raw or X.509-wrapped Ed25519 key bytes of a stored identity key, or null (e.g. "admin_…" rows). */
+    private fun identityKeyBytes(publicKeyB64: String): ByteArray? = try {
+        android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT).takeIf { it.size == 32 || it.size == 44 }
+    } catch (_: Exception) {
+        null
     }
 
     /**
-     * D10 (C02 follow-up): the user accepts the encryption key held in pendingEncKey. Any earlier
-     * verification is cleared, since it was for the old key.
+     * D10b, once per install (setting `identity_tags_v2_done`; [force] is for tests). Started by the
+     * ViewModel at app start and safe to call again:
+     *  * applies encryption keys still held in pendingEncKey from D10 (each gets the chat notice),
+     *  * gives every stored contact and every stored post author the 8-character tag, and removes a
+     *    stale tag from the end of their handle (contacts: current or legacy tag; posts: legacy tag),
+     *  * reloads both of our own identities, which rewrites their stored tags and display name.
+     * If it fails it runs again on the next start.
      */
-    suspend fun acceptPeerKeyChange(publicKeyB64: String): Boolean {
-        val peer = peerDao.getPeerByPublicKey(publicKeyB64) ?: return false
-        val newKey = peer.pendingEncKey ?: return false
-        if (peer.relationship != PeerRelationship.ACCEPTED) return false
-        val changed = peerDao.acceptPendingEncKey(publicKeyB64, newKey) > 0
-        if (changed) {
-            com.noslop.app.debug.Logger.warn("PEER_TRUST", "New encryption key accepted for ${publicKeyB64.take(8)}; verification reset")
+    suspend fun migrateIdentityTagsV2(force: Boolean = false) = withContext(Dispatchers.IO) {
+        tagMigrationMutex.withLock {
+            if (!force && appSettingDao.getSetting("identity_tags_v2_done") == "true") return@withLock
+            var keysApplied = 0
+            var contacts = 0
+            var authors = 0
+            for (p in peerDao.getAllPeersList()) {
+                val held = p.pendingEncKey
+                if (!held.isNullOrBlank() && p.relationship == PeerRelationship.ACCEPTED) {
+                    if (peerDao.applyEncKeyChange(p.publicKeyB64, held) > 0) {
+                        recordKeyChange(p.publicKeyB64)
+                        keysApplied++
+                    }
+                }
+                val bytes = identityKeyBytes(p.publicKeyB64) ?: continue
+                val tag = try { CryptoService.deriveTripcode(bytes) } catch (_: Exception) { continue }
+                val handle = CryptoService.stripIdentityTag(p.handle, bytes)
+                if (tag != p.tripcode || handle != p.handle) {
+                    peerDao.updateTagAndHandle(p.publicKeyB64, tag, handle)
+                    contacts++
+                }
+            }
+            val writable = db.openHelper.writableDatabase
+            for (author in postDao.getAllPostsList().map { it.authorPublicKeyB64 }.distinct()) {
+                val bytes = identityKeyBytes(author) ?: continue
+                val tag = try { CryptoService.deriveTripcode(bytes) } catch (_: Exception) { continue }
+                val legacySuffix = ".${CryptoService.deriveLegacyTripcode(bytes)}"
+                writable.execSQL(
+                    "UPDATE mesh_posts SET authorTripcode = ? WHERE authorPublicKeyB64 = ? AND authorTripcode != ?",
+                    arrayOf<Any?>(tag, author, tag)
+                )
+                writable.execSQL(
+                    "UPDATE mesh_posts SET authorHandle = substr(authorHandle, 1, length(authorHandle) - ?) " +
+                        "WHERE authorPublicKeyB64 = ? AND length(authorHandle) > ? AND substr(authorHandle, -?) = ?",
+                    arrayOf<Any?>(legacySuffix.length, author, legacySuffix.length, legacySuffix.length, legacySuffix)
+                )
+                authors++
+            }
+            identityRepository.loadIdentity()
+            identityRepository.getBurnableIdentity()
+            appSettingDao.insertSetting(AppSetting("identity_tags_v2_done", "true"))
+            Logger.info(TAG, "Identity tag migration done: $keysApplied held key(s) applied, $contacts contact(s) and $authors post author(s) updated")
         }
-        return changed
-    }
-
-    /**
-     * D10: the user keeps the old key and the pending one is dropped. If the contact keeps
-     * presenting the new key, the next handshake holds it again and the banner returns.
-     */
-    suspend fun rejectPeerKeyChange(publicKeyB64: String): Boolean {
-        val changed = peerDao.clearPendingEncKey(publicKeyB64) > 0
-        if (changed) {
-            com.noslop.app.debug.Logger.warn("PEER_TRUST", "Kept the old encryption key for ${publicKeyB64.take(8)}")
-        }
-        return changed
     }
 
     /**

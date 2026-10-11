@@ -68,7 +68,7 @@ data class QRScannedPeer(
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun QRScanScreen(
-    onPeerScannedAndAccepted: (handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String) -> Unit,
+    onPeerScannedAndAccepted: (handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String, intro: String) -> Unit,
     dmStep: Int = 4,
     viewModel: com.noslop.app.ui.NoSlopViewModel? = null,
     onDismiss: () -> Unit
@@ -79,6 +79,8 @@ fun QRScanScreen(
     var scannedRawData by remember { mutableStateOf<String?>(null) }
     var parsedPeer by remember { mutableStateOf<QRScannedPeer?>(null) }
     var showConfirmDialog by remember { mutableStateOf(false) }
+    // D10b: where the identity came from (camera, picture or paste); only a camera scan verifies.
+    var scanSource by remember { mutableStateOf(com.noslop.app.data.ContactIntro.QR_CAMERA) }
     
     var showManualEntry by remember { mutableStateOf(false) }
     var manualEntryText by remember { mutableStateOf("") }
@@ -90,6 +92,7 @@ fun QRScanScreen(
         if (uri != null && scannedRawData == null) {
             decodeQrFromUri(context, uri) { result ->
                 if (result != null) {
+                    scanSource = com.noslop.app.data.ContactIntro.QR_IMAGE
                     scannedRawData = result
                 } else {
                     Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("No QR code found in this image"), Toast.LENGTH_SHORT).show()
@@ -186,6 +189,7 @@ fun QRScanScreen(
                             CameraScanPreview(
                                 onBarcodeDetected = { barcode ->
                                     if (scannedRawData == null) {
+                                        scanSource = com.noslop.app.data.ContactIntro.QR_CAMERA
                                         scannedRawData = barcode
                                     }
                                 }
@@ -330,6 +334,7 @@ fun QRScanScreen(
                     confirmButton = {
                         Button(
                             onClick = {
+                                scanSource = com.noslop.app.data.ContactIntro.PASTED
                                 scannedRawData = manualEntryText
                                 showManualEntry = false
                                 manualEntryText = ""
@@ -359,7 +364,7 @@ fun QRScanScreen(
                         title = { Text("Send Connection Request?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                         text = {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                Text("Handle: ${peer.handle}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+                                ScannedPeerChecks(peer = peer, source = scanSource, viewModel = viewModel)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text("ONION ADDRESS:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 Text(if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
@@ -373,7 +378,7 @@ fun QRScanScreen(
                         confirmButton = {
                             Button(
                                 onClick = {
-                                    onPeerScannedAndAccepted(peer.handle, peer.publicKey, peer.onionAddress, peer.encPublicKey ?: "")
+                                    onPeerScannedAndAccepted(peer.handle, peer.publicKey, peer.onionAddress, peer.encPublicKey ?: "", scanSource)
                                     Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent!"), Toast.LENGTH_LONG).show()
                                     showConfirmDialog = false
                                     onDismiss()
@@ -687,4 +692,97 @@ fun CameraScanPreview(onBarcodeDetected: (String) -> Unit) {
     }
 
     AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+}
+
+/**
+ * D10b: what the user checks before sending a request to a scanned identity: the name with the tag
+ * derived from the key (never the tag written in the code), the check code to compare with the other
+ * person's own ID card, where the code came from, and warnings for an edited tag or a familiar name.
+ */
+@Composable
+internal fun ScannedPeerChecks(peer: QRScannedPeer, source: String, viewModel: com.noslop.app.ui.NoSlopViewModel?) {
+    val derivedTag by produceState<String?>(initialValue = null, peer.publicKey) {
+        value = withContext(kotlinx.coroutines.Dispatchers.Default) { com.noslop.app.crypto.CryptoService.tripcodeOfKey(peer.publicKey) }
+    }
+    val writtenTag = remember(peer.handle) {
+        Regex("""\.([a-z2-7]{8}|[a-z2-7]{6})$""").find(peer.handle.trim())?.groupValues?.get(1)
+    }
+    val tagMismatch by produceState(initialValue = false, peer.publicKey, writtenTag) {
+        val tag = writtenTag
+        value = tag != null && withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val bytes = try { android.util.Base64.decode(peer.publicKey, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            bytes == null || !com.noslop.app.crypto.CryptoService.isTripcodeOf(bytes, tag)
+        }
+    }
+    val checkCode = remember(peer.publicKey, peer.encPublicKey) {
+        com.noslop.app.crypto.CryptoService.deriveCheckCode(peer.publicKey, peer.encPublicKey ?: "")
+    }
+    val peers by (viewModel?.peers?.collectAsState() ?: mutableStateOf(emptyList<com.noslop.app.data.Peer>()))
+    val sameName = remember(peers, peer.handle, peer.publicKey) {
+        com.noslop.app.data.sameNameContact(peers, peer.handle, peer.publicKey)
+    }
+    val name = com.noslop.app.data.handleWithoutTag(peer.handle)
+
+    Text(
+        text = if (derivedTag != null) "$name.$derivedTag" else name,
+        color = AccentGreen,
+        fontWeight = FontWeight.Bold,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 16.sp
+    )
+    if (checkCode != null) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Check code: {code}".tr.replace("{code}", checkCode),
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 14.sp
+        )
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = "Their own ID card shows the same name and check code.".tr,
+        color = TextMuted,
+        fontSize = 11.sp
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    when {
+        source == com.noslop.app.data.ContactIntro.QR_CAMERA && checkCode != null -> Text(
+            text = "Scanned with your camera. Once they accept, they show as verified in person.".tr,
+            color = AccentGreen,
+            fontSize = 12.sp
+        )
+        source == com.noslop.app.data.ContactIntro.QR_IMAGE -> Text(
+            text = "This code was read from a picture. Anyone can send a picture of a code, so continue only if you know it came from this person. They will not show as verified.".tr,
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+        source == com.noslop.app.data.ContactIntro.PASTED -> Text(
+            text = "This ID was pasted. Continue only if you know it came from this person. They will not show as verified.".tr,
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+    if (tagMismatch) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "The tag written in this code does not belong to its key, so the code may have been edited. Do not connect unless this person confirms the name and check code.".tr,
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+    if (sameName != null) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "You already have a contact named {name}. If this is meant to be the same person, compare the check code with them before you continue.".tr
+                .replace("{name}", "${com.noslop.app.data.handleWithoutTag(sameName.handle)}.${sameName.tripcode}"),
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
 }

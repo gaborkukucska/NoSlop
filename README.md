@@ -73,7 +73,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity, with its own creator profile, for public creator broadcasts. One router picks the identity for every packet.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
-* 🪪 **Visual Safety Fingerprints** — 6-character display tripcodes, plus a 20-character safety fingerprint on every contact card and on your own ID card. Compare it with a contact out-of-band and mark them verified. If a contact's encryption key changes, the chat warns you and the new key is used only after you accept it.
+* 🪪 **Verified in Person** — 8-character tags (Argon2id) after every name, and a check code on every ID card. Scan a friend's QR code with your camera, they approve after comparing name and check code, and you both show as verified in person. Codes from pictures or pasted IDs come with a warning, and so do new contacts whose name you already know. If a contact's encryption key changes, it's applied and the chat says so.
 
 ---
 

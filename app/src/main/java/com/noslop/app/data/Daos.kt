@@ -132,19 +132,15 @@ interface PeerDao {
     suspend fun setVerifiedFingerprint(pubKey: String, fingerprint: String?)
 
     /**
-     * D10: the user accepted the encryption key held in pendingEncKey. Applied only if the pending
-     * key is still the one the user saw ([expectedKey]); clears any earlier verification.
-     * Returns the number of rows changed (0 or 1).
+     * D10b: applies a contact's new encryption key and clears the in-person verification, which was
+     * for the old key. Used for keys still held in pendingEncKey from D10. Returns the rows changed.
      */
-    @Query(
-        "UPDATE peers SET encPublicKeyB64 = pendingEncKey, pendingEncKey = NULL, verifiedFingerprint = NULL " +
-        "WHERE publicKeyB64 = :pubKey AND pendingEncKey = :expectedKey"
-    )
-    suspend fun acceptPendingEncKey(pubKey: String, expectedKey: String): Int
+    @Query("UPDATE peers SET encPublicKeyB64 = :newKey, pendingEncKey = NULL, verifiedFingerprint = NULL WHERE publicKeyB64 = :pubKey")
+    suspend fun applyEncKeyChange(pubKey: String, newKey: String): Int
 
-    /** D10: the user kept the old key; the pending one is dropped. Returns the rows changed (0 or 1). */
-    @Query("UPDATE peers SET pendingEncKey = NULL WHERE publicKeyB64 = :pubKey AND pendingEncKey IS NOT NULL")
-    suspend fun clearPendingEncKey(pubKey: String): Int
+    /** D10b: the 8-character tag and the handle without a stale tag (one-time tag migration). */
+    @Query("UPDATE peers SET tripcode = :tripcode, handle = :handle WHERE publicKeyB64 = :pubKey")
+    suspend fun updateTagAndHandle(pubKey: String, tripcode: String, handle: String)
 
     /**
      * D06: presence changes touch only presence columns. Re-inserting a whole row read moments

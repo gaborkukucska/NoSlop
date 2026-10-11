@@ -147,7 +147,7 @@ com.noslop.app
 |---|---|---|
 | `publicKeyB64` | Base64, X.509 SubjectPublicKeyInfo | Ed25519 signing public key — also the node's primary identifier (`sender_id`, `author_id`, etc.) |
 | `privateKeyB64` | Base64, PKCS#8 | Ed25519 signing private key — never logged, stored only in `EncryptedSharedPreferences` |
-| `tripcode` | 6-char lowercase Base32 | `SHA3-256(raw Ed25519 pubkey bytes)` → Base32 → first 6 chars |
+| `tripcode` | 8-char lowercase Base32 | `Argon2id(raw Ed25519 pubkey bytes)` → Base32 → first 8 chars (§3.3; 6-char SHA3 before D10b) |
 | `onionAddress` | 56-char `.onion` + suffix | Tor v3 address derived from the same Ed25519 key (see §3.3) |
 | `displayName` | `"<handle>.<tripcode>"` | Human-facing identity string |
 | `encPublicKeyB64` | Base64, X.509 | X25519 public key, used for DM key agreement |
@@ -168,13 +168,20 @@ Both derivations strip the 12-byte X.509 SubjectPublicKeyInfo header when the
 encoded key is 44 bytes (`encodedPubKeyBytes.copyOfRange(12, 44)`), leaving
 the raw 32-byte Ed25519 public key.
 
-**Tripcode** (`deriveTripcode`):
+**Tripcode** (`deriveTripcode`, Round D10b):
 ```
 raw_pubkey (32 bytes)
-  -> SHA3-256                         (32-byte digest)
-  -> Base32 encode (RFC4648 alphabet "abcdefghijklmnopqrstuvwxyz234567")
-  -> take first 6 characters
+  -> Argon2id(password = raw_pubkey, salt = "noslop-tag-v2" (UTF-8),
+              t = 2, m = 19456 KiB, p = 1, version 0x13, 16-byte output)
+  -> Base32 encode (lowercase alphabet "abcdefghijklmnopqrstuvwxyz234567", no padding)
+  -> take first 8 characters            (golden: bytes 0x00..0x1F -> "wdbuab42")
 ```
+Results are cached per key (LRU, 4096 entries) and only one Argon2 run happens
+at a time (~19 MiB). The pre-D10b tag (`deriveLegacyTripcode`: SHA3-256 →
+Base32 → first 6 characters, golden `aufeq4`) is used only to recognise stored
+tags and handle suffixes: `isTripcodeOf` accepts either form on restore,
+`stripIdentityTag` removes either from incoming handles, and
+`NoSlopRepository.migrateIdentityTagsV2` rewrites stored contacts and posts once.
 
 **Onion address** (`deriveOnionAddress`), following the Tor v3 spec:
 ```
@@ -210,7 +217,7 @@ net).
   packet type. `MeshPacketHandler` reconstructs these strings explicitly in
   `handlePost`, `handleComment`, `handleReaction`, `handleVote`, and `handleSyncResponse`.
 
-### 3.4.1 Safety Fingerprints & Key Changes (review C11/D10, 2026-10-11)
+### 3.4.1 Safety Fingerprints, Verification & Key Changes (review C11/D10, Round D10b, 2026-10-11)
 
 - **Derivation.** `CryptoService.deriveSafetyFingerprint(edPub, encPub)` =
   first 20 Base32 characters of SHA3-256(`"noslop-safety-fp-v1"` ‖ raw Ed25519
@@ -218,21 +225,45 @@ net).
   (`ABCD-EFGH-IJKL-MNOP-QRST`). Both keys are reduced to their raw 32 bytes
   first, so raw and X.509/SPKI encodings agree. Returns `null` when a key is
   missing or unreadable.
-- **Display.** Own fingerprint: `QRShareSheet` ("My ID" and the Creator Contact
-  Card, each for the identity it shows). A contact's fingerprint:
-  `SafetyFingerprintPanel` in `ContactCardDialog`, computed from the stored
-  `publicKeyB64` and `encPublicKeyB64`.
-- **Verification.** `peers.verifiedFingerprint` holds the fingerprint the user
-  confirmed out-of-band (`NoSlopRepository.setPeerVerified`; `ACCEPTED`
-  contacts with no pending key only). A contact counts as verified only while
-  that value equals the current fingerprint, so any key change makes it stale
-  without a write.
-- **Key changes.** A changed encryption key from an `ACCEPTED` contact is held
-  in `peers.pendingEncKey` (C02) and never used. `ChatThreadScreen` shows a
-  "Safety Key Changed" banner with the new fingerprint. Accepting runs
-  `PeerDao.acceptPendingEncKey(pub, expectedKey)`: one `UPDATE` that applies the
-  key only if it is still the pending one and clears `verifiedFingerprint`.
-  Keeping the old key runs `PeerDao.clearPendingEncKey`.
+- **Check code.** `CryptoService.deriveCheckCode(edPub, encPub)` = the first
+  two groups of the fingerprint (`ABCD-EFGH`). People compare it, with the
+  name.tag, before approving a request.
+- **Display.** Own fingerprint and check code: `QRShareSheet` ("My ID" and the
+  Creator Contact Card, each for the identity it shows). A contact:
+  `SafetyFingerprintPanel` in `ContactCardDialog` ("Verified in person" / "Not
+  verified in person" / "Changed since you verified it"; "Compare keys" shows
+  the fingerprint), computed from the stored `publicKeyB64` and
+  `encPublicKeyB64`. A pending request: `ConnectionRequestIdentity` (name.tag,
+  check code, camera-scan note, same-name warning) in the request dialog
+  (`UnifiedFeedTab`), the notification card and the contact card. A scanned
+  code before sending: `ScannedPeerChecks` in `QRScanScreen` (name with the tag
+  derived from the key, check code, source note or warning, edited-tag and
+  same-name warnings).
+- **Verification (D10b).** `peers.verifiedFingerprint` holds the fingerprint
+  that was verified in person; a contact counts as verified only while it equals
+  the current fingerprint, so any key change makes it stale without a write.
+  It is set in two places only. (1) The scanner:
+  `MeshSocialRepository.sendConnectionRequest(…, intro = ContactIntro.QR_CAMERA)`
+  pins the fingerprint of the scanned code (for an `INCOMING_PENDING` or
+  `ACCEPTED` row only if the code's keys equal the stored ones). (2) The
+  approver: `NoSlopRepository.acceptConnectionRequest(peer, replyVia,
+  confirmedByUser = true)` when the request carried the signed
+  `intro = "qr_camera"` (stored by `HandshakePacketHandler` as
+  `request_intro_<pub>`, removed on accept) and the fingerprint still equals
+  the one shown. Pictures, pasted IDs, network requests, creator auto-accept and
+  crossing requests never verify anyone. The pending-request probes re-send the
+  same intro (`outgoing_intro_<pub>`).
+- **Key changes (D10b).** A changed encryption key from an `ACCEPTED` contact,
+  in a `CONNECTION_REQUEST` or a `USER_HANDSHAKE` refresh, is signed by their
+  Ed25519 key and is applied at once. `verifiedFingerprint` is cleared,
+  `pendingEncKey` is set to null, and `NoSlopRepository.recordKeyChange` stores
+  `key_changed_at_<pub>`. `ChatThreadScreen` shows a one-line, dismissible
+  `KeyChangeNotice`. Encodings are compared with `sameX25519PublicKey`, so a raw
+  copy of the same key is not a change. Keys still held in `pendingEncKey` from
+  D10 are applied once by `migrateIdentityTagsV2` (`PeerDao.applyEncKeyChange`).
+- **Matching.** Removing a contact (`MeshSocialRepository.deletePeer`,
+  `NoSlopViewModel.removePeer`) and the contact card's post list match posts by
+  author key only, never by handle.
 - **Unverified media (D08).** `NoSlopRepository.isMeshPostMediaVerified(post)`
   re-verifies the stored post signature in the v2 form
   (`encodeForSigning(id, author, content, timestamp, avatar, privacy, mediaId,

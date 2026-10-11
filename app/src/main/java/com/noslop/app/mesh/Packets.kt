@@ -132,7 +132,9 @@ data class PeerHandshakePayload(
     @SerializedName("request_nonce") val requestNonce: String? = null,
     @SerializedName("in_reply_to_nonce") val inReplyToNonce: String? = null,
     @SerializedName("target_user_id") val targetUserId: String? = null,
-    val version: Int = 1
+    val version: Int = 1,
+    /** D10b: ContactIntro.QR_CAMERA when the requester scanned our QR code with the camera; signed. */
+    @SerializedName("intro") val intro: String? = null
 )
 
 @Keep

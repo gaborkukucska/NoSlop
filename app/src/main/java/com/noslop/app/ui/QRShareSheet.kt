@@ -173,6 +173,16 @@ fun QRShareSheet(
                     CryptoService.deriveSafetyFingerprint(localKeys.publicKeyB64, localKeys.encPublicKeyB64)
                 }
                 if (ownFingerprint != null) {
+                    // D10b: the check code people compare when they approve your request.
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Check code: {code}".tr.replace("{code}", ownFingerprint.take(9)),
+                        color = TextLight,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        textAlign = TextAlign.Center
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Your safety fingerprint".tr,

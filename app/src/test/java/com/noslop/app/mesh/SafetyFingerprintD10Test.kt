@@ -4,13 +4,10 @@ package com.noslop.app.mesh
 import android.content.Context
 import android.util.Base64
 import androidx.room.Room
-import com.google.gson.Gson
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.MeshPost
 import com.noslop.app.data.NoSlopDatabase
 import com.noslop.app.data.NoSlopRepository
-import com.noslop.app.data.Peer
-import com.noslop.app.data.PeerRelationship
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -20,12 +17,11 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.util.UUID
 
 /**
- * Round D10: safety fingerprints (C11), "Mark verified", the key-change accept/reject flow (C02
- * pendingEncKey) and the "Unverified media" check (D08). Real repository and handlers against an
- * in-memory Room database; nothing under test is mocked.
+ * Round D10: safety fingerprints (C11) and the "Unverified media" check (D08). Real repository against
+ * an in-memory Room database; nothing under test is mocked. D10b replaced "Mark verified" and the
+ * key-change accept/reject flow; those are covered by ContactVerificationD10bTest.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -34,12 +30,9 @@ class SafetyFingerprintD10Test {
     private lateinit var context: Context
     private lateinit var db: NoSlopDatabase
     private lateinit var repo: NoSlopRepository
-    private lateinit var handshake: HandshakePacketHandler
-    private val gson = Gson()
 
     private val alice = CryptoService.generateIdentity("alice")
     private val bob = CryptoService.generateIdentity("bob")
-    private val carol = CryptoService.generateIdentity("carol")
 
     private val fingerprintShape = Regex("^[A-Z2-7]{4}(-[A-Z2-7]{4}){4}$")
     private val mediaId = "post_d10.jpg"
@@ -54,7 +47,6 @@ class SafetyFingerprintD10Test {
             .build()
         repo = NoSlopRepository(context, db)
         repo.saveLocalIdentity("alice", alice, "mnemonic test word cloud phrase")
-        handshake = HandshakePacketHandler(repo, db)
     }
 
     @After
@@ -65,58 +57,10 @@ class SafetyFingerprintD10Test {
 
     // ---------------------------------------------------------------- helpers
 
-    private suspend fun peer(pub: String) = db.peerDao().getPeerByPublicKey(pub)
-
-    private suspend fun acceptedBob(encPub: String = bob.encPublicKeyB64) {
-        db.peerDao().insertPeer(
-            Peer(bob.publicKeyB64, "bob", bob.tripcode, bob.onionAddress, encPublicKeyB64 = encPub,
-                relationship = PeerRelationship.ACCEPTED)
-        )
-    }
-
     /** The last 32 bytes of a stored key: the raw key inside an X.509/SPKI wrapper. */
     private fun rawB64(b64: String): String {
         val bytes = Base64.decode(b64, Base64.DEFAULT)
         return Base64.encodeToString(bytes.copyOfRange(bytes.size - 32, bytes.size), Base64.NO_WRAP)
-    }
-
-    private fun v2Request(sender: CryptoService.IdentityKeys, target: String, nonce: String, encPub: String): NetworkPacket {
-        val now = System.currentTimeMillis()
-        val sig = CryptoService.sign(
-            CryptoService.canonicalHandshakePayloadV2(
-                fromUserId = sender.publicKeyB64,
-                fromUsername = sender.displayName,
-                fromHomeNode = sender.onionAddress,
-                fromEncryptionPublicKey = encPub,
-                targetUserId = target,
-                nonce = nonce,
-                timestamp = now
-            ),
-            sender.privateKeyB64
-        )
-        val payload = PeerHandshakePayload(
-            id = UUID.randomUUID().toString(),
-            fromUserId = sender.publicKeyB64,
-            fromUsername = sender.displayName,
-            fromDisplayName = sender.displayName,
-            fromHomeNode = sender.onionAddress,
-            fromEncryptionPublicKey = encPub,
-            timestamp = now,
-            signature = sig,
-            requestNonce = nonce,
-            inReplyToNonce = null,
-            targetUserId = target,
-            version = 2
-        )
-        return NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 3,
-            senderId = sender.publicKeyB64,
-            targetUserId = target,
-            type = "CONNECTION_REQUEST",
-            payload = gson.toJsonTree(payload),
-            signature = sig
-        )
     }
 
     private fun post(author: CryptoService.IdentityKeys, signedDigest: String?, mediaUrl: String? = "noslop://${author.onionAddress}/$mediaId"): MeshPost {
@@ -162,81 +106,6 @@ class SafetyFingerprintD10Test {
         assertNull(CryptoService.deriveSafetyFingerprint("AAAA", alice.encPublicKeyB64))
         // Two broken peers must never share a placeholder fingerprint.
         assertNull(CryptoService.deriveSafetyFingerprint("AAAA", "AAAA"))
-    }
-
-    // ---------------------------------------------------------------- Mark verified
-
-    @Test
-    fun markVerified_storesTheCurrentFingerprint_andCanBeRemoved() = runBlocking {
-        acceptedBob()
-        assertTrue(repo.setPeerVerified(bob.publicKeyB64, true))
-        val p = peer(bob.publicKeyB64)!!
-        assertEquals(repo.safetyFingerprintOf(p), p.verifiedFingerprint)
-
-        assertTrue(repo.setPeerVerified(bob.publicKeyB64, false))
-        assertNull(peer(bob.publicKeyB64)!!.verifiedFingerprint)
-    }
-
-    @Test
-    fun markVerified_isRefusedForContactsThatAreNotAccepted() = runBlocking {
-        db.peerDao().insertPeer(
-            Peer(carol.publicKeyB64, "carol", carol.tripcode, carol.onionAddress, encPublicKeyB64 = carol.encPublicKeyB64,
-                relationship = PeerRelationship.INCOMING_PENDING)
-        )
-        assertFalse(repo.setPeerVerified(carol.publicKeyB64, true))
-        assertNull(peer(carol.publicKeyB64)!!.verifiedFingerprint)
-    }
-
-    @Test
-    fun markVerified_isRefusedWithoutAnEncryptionKey() = runBlocking {
-        acceptedBob(encPub = "")
-        assertFalse(repo.setPeerVerified(bob.publicKeyB64, true))
-    }
-
-    // ---------------------------------------------------------------- key change
-
-    @Test
-    fun keyChange_isHeldUntilAccepted_andAcceptingResetsVerification() = runBlocking {
-        acceptedBob()
-        assertTrue(repo.setPeerVerified(bob.publicKeyB64, true))
-        val (newEncPub, _) = CryptoService.generateX25519Keypair()
-
-        handshake.handleConnectionRequest(v2Request(bob, alice.publicKeyB64, "n1", newEncPub))
-        var p = peer(bob.publicKeyB64)!!
-        assertEquals(bob.encPublicKeyB64, p.encPublicKeyB64)
-        assertEquals(newEncPub, p.pendingEncKey)
-        assertFalse("no verifying while a key change is pending", repo.setPeerVerified(bob.publicKeyB64, true))
-
-        assertTrue(repo.acceptPeerKeyChange(bob.publicKeyB64))
-        p = peer(bob.publicKeyB64)!!
-        assertEquals(newEncPub, p.encPublicKeyB64)
-        assertNull(p.pendingEncKey)
-        assertNull("verification was for the old key", p.verifiedFingerprint)
-        assertEquals(PeerRelationship.ACCEPTED, p.relationship)
-    }
-
-    @Test
-    fun keyChange_keptOldKey_dropsThePendingKey_andKeepsVerification() = runBlocking {
-        acceptedBob()
-        assertTrue(repo.setPeerVerified(bob.publicKeyB64, true))
-        val verified = peer(bob.publicKeyB64)!!.verifiedFingerprint
-        val (newEncPub, _) = CryptoService.generateX25519Keypair()
-        handshake.handleConnectionRequest(v2Request(bob, alice.publicKeyB64, "n2", newEncPub))
-
-        assertTrue(repo.rejectPeerKeyChange(bob.publicKeyB64))
-        val p = peer(bob.publicKeyB64)!!
-        assertEquals(bob.encPublicKeyB64, p.encPublicKeyB64)
-        assertNull(p.pendingEncKey)
-        assertEquals(verified, p.verifiedFingerprint)
-        assertEquals(repo.safetyFingerprintOf(p), p.verifiedFingerprint)
-    }
-
-    @Test
-    fun keyChange_actionsWithNothingPending_changeNothing() = runBlocking {
-        acceptedBob()
-        assertFalse(repo.acceptPeerKeyChange(bob.publicKeyB64))
-        assertFalse(repo.rejectPeerKeyChange(bob.publicKeyB64))
-        assertEquals(bob.encPublicKeyB64, peer(bob.publicKeyB64)!!.encPublicKeyB64)
     }
 
     // ---------------------------------------------------------------- unverified media (D08)

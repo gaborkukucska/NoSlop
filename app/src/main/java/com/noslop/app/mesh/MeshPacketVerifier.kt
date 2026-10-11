@@ -286,7 +286,8 @@ object MeshPacketVerifier {
                     nonce = nonce,
                     timestamp = it.timestamp,
                     authorAvatarB64 = it.authorAvatarB64,
-                    bio = it.bio
+                    bio = it.bio,
+                    intro = it.intro
                 )
 
                 val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(

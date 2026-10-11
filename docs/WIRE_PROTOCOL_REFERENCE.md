@@ -325,12 +325,14 @@ else.
 | `in_reply_to_nonce`? | String | `USER_HANDSHAKE`: echo of the requester's `request_nonce`; promotion to `ACCEPTED` requires it to match the stored `pendingNonce` |
 | `target_user_id`? | String | Identity this handshake is addressed to (main or burnable key). Must be a local identity and must equal the envelope `targetUserId` when that is set |
 | `version` | Int | `2` for handshakes built by current clients |
+| `intro`? | String | Round D10b, `CONNECTION_REQUEST` only: `"qr_camera"` when the requester scanned the recipient's QR code with the camera. Absent otherwise. Signed (below); the recipient uses it only to mark the requester verified in person after the user approves |
 
 **Signature (v2 only).** `canonicalHandshakePayloadV2` =
 `encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode,
-fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?)`,
+fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?[, intro])`,
 where `nonce` is `request_nonce` for a request and `in_reply_to_nonce` for a
-handshake. Legacy encodings (`fromUserId|fromUsername|fromHomeNode|timestamp…`)
+handshake. `intro` is appended only when present, so packets without it sign
+exactly as before; adding or removing it breaks the signature. Legacy encodings (`fromUserId|fromUsername|fromHomeNode|timestamp…`)
 are recognised only to report "peer must update"; they are never accepted.
 
 **Receiver rules (`HandshakePacketHandler`).** Requests older than 1 hour from
@@ -339,9 +341,10 @@ unknown peers are ignored, as are requests from a peer deleted within the last
 reconnect). A
 `BLOCKED` peer's request is ignored. A request crossing our own
 `OUTGOING_PENDING` request is treated as mutual consent. A request from an
-`ACCEPTED` friend re-sends our handshake echoing their nonce; a changed
-encryption key is held in `pendingEncKey` and never applied silently; the user
-accepts or rejects it from the chat (Round D10, see TECHNICAL_REFERENCE §3.4.1).
+`ACCEPTED` friend re-sends our handshake echoing their nonce. A changed
+encryption key (signed by their identity key) is applied, any in-person
+verification is cleared and the chat shows a notice (Round D10b, see
+TECHNICAL_REFERENCE §3.4.1).
 
 #### 3.1 Handshake reply path (Round A2, 2026-10-07)
 
@@ -1047,7 +1050,7 @@ and still accurate.
 | `EDIT_POST` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl, sha256)`. Otherwise canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy fallbacks strictly eliminated; complete signed state is atomically persisted to database. A caption-only edit of a media post carries the recorded digest, so it is v2-signed (D08). |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
-| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | **v2 only** (D07 hard break): `encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode, fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?)` with `nonce` = `request_nonce` (request) or `in_reply_to_nonce` (handshake). The legacy `fromUserId\|fromUsername\|fromHomeNode\|timestamp` forms are rejected. |
+| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | **v2 only** (D07 hard break): `encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode, fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?[, intro])` with `nonce` = `request_nonce` (request) or `in_reply_to_nonce` (handshake); `intro` only when present (D10b). The legacy `fromUserId\|fromUsername\|fromHomeNode\|timestamp` forms are rejected. |
 | `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey, sortedMemberDetails, sortedMemberHandles)`. Legacy 7-field fallback strictly restricted to admin self-signed payloads with empty unsigned fields. |
 | `GROUP_UPDATE` | Canonical 13-field presence-encoded `canonicalGroupUpdatePayload(groupId, encodeOptString(wireTitle), signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, encodeOptBanned(banned), encodeOptString(wireDesc), encodeOptString(wireAvatar), encodeOptBool(wireAllowInvites), encodeOptBool(wireAllowSelfRemove), sortedMemberDetails, sortedMemberHandles)`. Distinguishes absent (`ABSENT`) from cleared (`CLEAR`) values per W03. |
 | `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |

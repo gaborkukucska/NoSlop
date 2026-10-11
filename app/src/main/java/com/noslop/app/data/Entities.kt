@@ -101,6 +101,43 @@ object PeerRelationship {
 }
 
 /**
+ * D10b: how a connection request came about. Only [QR_CAMERA] ever goes on the wire, signed into the
+ * CONNECTION_REQUEST (`intro`, see CryptoService.canonicalHandshakePayloadV2); the others are local.
+ */
+object ContactIntro {
+    /** The requester scanned the other person's QR code with the camera. */
+    const val QR_CAMERA = "qr_camera"
+    /** The QR code was read from a picture. */
+    const val QR_IMAGE = "qr_image"
+    /** The identity string was pasted. */
+    const val PASTED = "pasted"
+    /** Anything else: re-sends, the contact card's Connect button, discovery. */
+    const val NETWORK = "network"
+}
+
+private val IDENTITY_TAG_SUFFIX = Regex("""\.([a-z2-7]{8}|[a-z2-7]{6})$""")
+
+/**
+ * D10b: a handle without a trailing identity tag ("alice.wdbuab42" and "alice.aufeq4" both give
+ * "alice"). Only for comparing names; the tag shown next to a name always comes from the key.
+ */
+fun handleWithoutTag(handle: String): String = handle.trim().replace(IDENTITY_TAG_SUFFIX, "")
+
+/**
+ * D10b: an accepted contact other than [exceptPub] with the same name as [handle] once tags are
+ * removed (ignoring case), or null. A new contact with a familiar name is the easy way to pose as
+ * someone, so the scan and approval screens warn about it.
+ */
+fun sameNameContact(peers: List<Peer>, handle: String, exceptPub: String): Peer? {
+    val name = handleWithoutTag(handle)
+    if (name.isBlank()) return null
+    return peers.firstOrNull {
+        it.publicKeyB64 != exceptPub && it.relationship == PeerRelationship.ACCEPTED &&
+            handleWithoutTag(it.handle).equals(name, ignoreCase = true)
+    }
+}
+
+/**
  * D02: index of who a media file belongs to, so the media ACL is one indexed lookup
  * instead of a full scan + substring match on every chunk request.
  *

@@ -77,7 +77,8 @@ class HandshakePacketHandler(
             nonce = nonce,
             timestamp = pay.timestamp,
             authorAvatarB64 = pay.authorAvatarB64,
-            bio = pay.bio
+            bio = pay.bio,
+            intro = pay.intro
         )
         return CryptoService.verify(v2Payload, signature, pay.fromUserId)
     }
@@ -194,7 +195,7 @@ class HandshakePacketHandler(
         val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         var handleToUse = if (connPay.fromUsername.isNotBlank()) connPay.fromUsername else existingPeer?.handle ?: "Unknown"
-        if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+        handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
         val signedEncKey = connPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() }
 
         val burnable = repo.getBurnableIdentity()
@@ -202,26 +203,29 @@ class HandshakePacketHandler(
 
         if (existingPeer != null && existingPeer.relationship == PeerRelationship.ACCEPTED) {
             // A friend re-requesting (reinstall, lost our row). Re-send our handshake echoing THEIR
-            // nonce. Never silently replace their encryption key: a change waits for the user (C02).
+            // nonce. D10b: a new encryption key signed by their identity key (C02) is applied, the
+            // in-person verification (for the old key) is cleared and the chat shows a notice.
             if (isOldPacket) {
                 Logger.debug(TAG, "Ignored old CONNECTION_REQUEST from accepted peer ${existingPeer.handle}.")
                 return true
             }
             val keyChanged = signedEncKey != null && existingPeer.encPublicKeyB64.isNotBlank() &&
-                signedEncKey != existingPeer.encPublicKeyB64
+                !CryptoService.sameX25519PublicKey(signedEncKey, existingPeer.encPublicKeyB64)
             if (keyChanged) {
-                Logger.warn(TAG, "Safety key changed for ACCEPTED peer ${existingPeer.handle} (via CONNECTION_REQUEST); held in pendingEncKey")
+                Logger.warn(TAG, "Encryption key changed for ACCEPTED peer ${existingPeer.handle} (via CONNECTION_REQUEST, signed by their identity key); applied")
             }
             peerDao.insertPeer(existingPeer.copy(
                 handle = handleToUse,
                 onionAddress = connPay.fromHomeNode.ifBlank { existingPeer.onionAddress },
-                encPublicKeyB64 = if (existingPeer.encPublicKeyB64.isBlank()) (signedEncKey ?: "") else existingPeer.encPublicKeyB64,
-                pendingEncKey = if (keyChanged) signedEncKey else existingPeer.pendingEncKey,
+                encPublicKeyB64 = if (keyChanged || existingPeer.encPublicKeyB64.isBlank()) (signedEncKey ?: existingPeer.encPublicKeyB64) else existingPeer.encPublicKeyB64,
+                pendingEncKey = null,
+                verifiedFingerprint = if (keyChanged) null else existingPeer.verifiedFingerprint,
                 pendingNonce = nonce,
                 authorAvatarB64 = connPay.authorAvatarB64 ?: existingPeer.authorAvatarB64,
                 bio = connPay.bio ?: existingPeer.bio,
                 lastSeenAt = System.currentTimeMillis()
             ))
+            if (keyChanged) repo.recordKeyChange(existingPeer.publicKeyB64)
             Logger.info(TAG, "Recent CONNECTION_REQUEST from accepted peer ${existingPeer.handle}; re-sending USER_HANDSHAKE")
             repo.acceptConnectionRequest(existingPeer, replyChannelIfFresh())
             return true
@@ -256,6 +260,14 @@ class HandshakePacketHandler(
         db.appSettingDao().insertSetting(
             AppSetting("requested_identity_${connPay.fromUserId}", if (requestedBurnable) "burnable" else "main")
         )
+        // D10b: the requester says (signed, see isV2HandshakeSignature) that they scanned our QR code
+        // with their camera. If the user accepts after comparing name and check code, the contact is
+        // marked verified in person (NoSlopRepository.acceptConnectionRequest).
+        if (connPay.intro == ContactIntro.QR_CAMERA) {
+            db.appSettingDao().insertSetting(AppSetting("request_intro_${connPay.fromUserId}", ContactIntro.QR_CAMERA))
+        } else {
+            db.appSettingDao().removeSetting("request_intro_${connPay.fromUserId}")
+        }
 
         // C01/D06: INCOMING_PENDING, merged onto any existing row (group stub, discoverable node).
         val base = existingPeer ?: Peer(
@@ -427,7 +439,7 @@ class HandshakePacketHandler(
         val tripcode = CryptoService.deriveTripcode(pubBytes)
 
         var handleToUse = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else peer.handle
-        if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+        handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
 
         // C01: Relationship state transition enforcement
         val isOutgoingPending = peer.relationship == PeerRelationship.OUTGOING_PENDING
@@ -494,15 +506,14 @@ class HandshakePacketHandler(
             return true
 
         } else if (isAlreadyAccepted) {
-            // C02: Key change detection for already accepted peer
-            var pendingKeyAlert: String? = peer.pendingEncKey
-            var encKey = peer.encPublicKeyB64
-            if (encPub.isNotBlank() && peer.encPublicKeyB64.isNotBlank() && encPub != peer.encPublicKeyB64) {
-                Logger.warn(TAG, "Safety key changed for ACCEPTED peer ${peer.handle}! Storing in pendingEncKey for user acknowledgement.")
-                pendingKeyAlert = encPub
+            // C02/D10b: a changed encryption key, signed by the contact's identity key, is applied.
+            // The in-person verification (for the old key) is cleared and the chat shows a notice.
+            val keyChanged = encPub.isNotBlank() && peer.encPublicKeyB64.isNotBlank() &&
+                !CryptoService.sameX25519PublicKey(encPub, peer.encPublicKeyB64)
+            if (keyChanged) {
+                Logger.warn(TAG, "Encryption key changed for ACCEPTED peer ${peer.handle} (signed by their identity key); applied")
             }
-
-            if (peer.encPublicKeyB64.isBlank() && encPub.isNotBlank()) encKey = encPub
+            val encKey = if (encPub.isNotBlank() && (keyChanged || peer.encPublicKeyB64.isBlank())) encPub else peer.encPublicKeyB64
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 lastSeenAt = System.currentTimeMillis(),
@@ -510,9 +521,11 @@ class HandshakePacketHandler(
                 encPublicKeyB64 = encKey,
                 authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64,
                 bio = handPay.bio ?: peer.bio,
-                pendingEncKey = pendingKeyAlert,
+                pendingEncKey = null,
+                verifiedFingerprint = if (keyChanged) null else peer.verifiedFingerprint,
                 pendingNonce = if (!peer.pendingNonce.isNullOrBlank() && handPay.inReplyToNonce == peer.pendingNonce) null else peer.pendingNonce
             ))
+            if (keyChanged) repo.recordKeyChange(peer.publicKeyB64)
             Logger.info(TAG, "Refreshed profile details for already ACCEPTED peer ${peer.handle}")
             return true
 
@@ -647,7 +660,7 @@ class HandshakePacketHandler(
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         
         var handleToUse = announcePay.handle
-        if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+        handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
         
         val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
         if (peer == null) {
@@ -806,7 +819,7 @@ class HandshakePacketHandler(
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             
             var handleToUse = if (identityPay.handle.isNotBlank()) identityPay.handle else peer.handle
-            if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+            handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
             
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,

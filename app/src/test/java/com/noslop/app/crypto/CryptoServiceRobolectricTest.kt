@@ -33,7 +33,7 @@ class CryptoServiceRobolectricTest {
         val id = CryptoService.generateIdentity("alice")
 
         assertEquals("display name is handle.tripcode", "alice.${id.tripcode}", id.displayName)
-        assertEquals("tripcode is 6 chars", 6, id.tripcode.length)
+        assertEquals("tripcode is 8 chars (D10b)", 8, id.tripcode.length)
         assertEquals("onion is a v3 address", 62, id.onionAddress.length)
         assertTrue(id.onionAddress.endsWith(".onion"))
         assertTrue("public keys are present", id.publicKeyB64.isNotBlank() && id.encPublicKeyB64.isNotBlank())

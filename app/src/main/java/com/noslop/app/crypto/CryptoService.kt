@@ -209,7 +209,62 @@ object CryptoService {
         return sb.toString()
     }
 
+    /** D10b: length of the identity tag shown after a handle ("alice.wdbuab42"). */
+    const val TRIPCODE_LENGTH = 8
+    private const val LEGACY_TRIPCODE_LENGTH = 6
+    private const val TRIPCODE_SALT = "noslop-tag-v2"
+    private const val TRIPCODE_CACHE_SIZE = 4096
+    private val tripcodeCache = object : LinkedHashMap<String, String>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+            size > TRIPCODE_CACHE_SIZE
+    }
+    private val tripcodeArgon2Lock = Any()
+
+    private fun hexOf(bytes: ByteArray): String {
+        val sb = StringBuilder(bytes.size * 2)
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            sb.append("0123456789abcdef"[v shr 4]).append("0123456789abcdef"[v and 0x0F])
+        }
+        return sb.toString()
+    }
+
+    /**
+     * D10b: the identity tag, 8 characters of base32(Argon2id(raw Ed25519 public key,
+     * salt "noslop-tag-v2", t=2, m=19456 KiB, p=1, 16-byte output)). Argon2id makes a key whose tag
+     * copies someone else's about 2^40 Argon2 runs away, instead of 2^30 hashes for the old
+     * 6-character SHA3 tag. Results are cached per key (the tag is derived on every load and for
+     * every incoming post), and only one Argon2 run happens at a time so memory stays at ~19 MiB.
+     */
     fun deriveTripcode(encodedPubKeyBytes: ByteArray): String {
+        val rawKeyBytes = getEd25519PublicKeyParams(encodedPubKeyBytes).encoded
+        val cacheKey = hexOf(rawKeyBytes)
+        synchronized(tripcodeCache) { tripcodeCache[cacheKey]?.let { return it } }
+        val tag = synchronized(tripcodeArgon2Lock) {
+            synchronized(tripcodeCache) { tripcodeCache[cacheKey] } ?: run {
+                val params = org.bouncycastle.crypto.params.Argon2Parameters.Builder(org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_id)
+                    .withVersion(org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_VERSION_13)
+                    .withIterations(2)
+                    .withMemoryAsKB(19456)
+                    .withParallelism(1)
+                    .withSalt(TRIPCODE_SALT.toByteArray(Charsets.UTF_8))
+                    .build()
+                val generator = org.bouncycastle.crypto.generators.Argon2BytesGenerator()
+                generator.init(params)
+                val out = ByteArray(16)
+                generator.generateBytes(rawKeyBytes, out, 0, out.size)
+                base32(out).take(TRIPCODE_LENGTH)
+            }
+        }
+        synchronized(tripcodeCache) { tripcodeCache[cacheKey] = tag }
+        return tag
+    }
+
+    /**
+     * D10b: the 6-character tag used before D10b (first 6 base32 characters of SHA3-256(raw key)).
+     * Only used to recognise old stored tags and handles so they can be rewritten.
+     */
+    fun deriveLegacyTripcode(encodedPubKeyBytes: ByteArray): String {
         val pubKeyParams = getEd25519PublicKeyParams(encodedPubKeyBytes)
         val rawKeyBytes = pubKeyParams.encoded
 
@@ -218,7 +273,34 @@ object CryptoService {
         digest.update(rawKeyBytes, 0, rawKeyBytes.size)
         digest.doFinal(hash, 0)
 
-        return base32(hash).take(6)
+        return base32(hash).take(LEGACY_TRIPCODE_LENGTH)
+    }
+
+    /** D10b: whether [tag] is this key's tag, in the current or the legacy (pre-D10b) form. */
+    fun isTripcodeOf(encodedPubKeyBytes: ByteArray, tag: String): Boolean = try {
+        tag.isNotBlank() && (tag == deriveTripcode(encodedPubKeyBytes) || tag == deriveLegacyTripcode(encodedPubKeyBytes))
+    } catch (_: Exception) {
+        false
+    }
+
+    /** D10b: [handle] without a trailing ".tag" of this key (current or legacy form). */
+    fun stripIdentityTag(handle: String, encodedPubKeyBytes: ByteArray): String {
+        val tags = try {
+            listOf(deriveTripcode(encodedPubKeyBytes), deriveLegacyTripcode(encodedPubKeyBytes))
+        } catch (_: Exception) {
+            return handle
+        }
+        for (tag in tags) {
+            if (handle.endsWith(".$tag")) return handle.removeSuffix(".$tag")
+        }
+        return handle
+    }
+
+    /** D10b: the tag of a Base64 public key, or null when the key can't be read. */
+    fun tripcodeOfKey(publicKeyB64: String): String? = try {
+        deriveTripcode(Base64.decode(publicKeyB64, Base64.DEFAULT))
+    } catch (_: Exception) {
+        null
     }
 
     fun deriveOnionAddress(encodedPubKeyBytes: ByteArray): String {
@@ -263,19 +345,27 @@ object CryptoService {
         nonce: String,
         timestamp: Long,
         authorAvatarB64: String? = null,
-        bio: String? = null
-    ): String = encodeForSigning(
-        "noslop-hs-v2",
-        fromUserId,
-        fromUsername,
-        fromHomeNode,
-        fromEncryptionPublicKey,
-        targetUserId,
-        nonce,
-        timestamp.toString(),
-        authorAvatarB64,
-        bio
-    )
+        bio: String? = null,
+        intro: String? = null
+    ): String {
+        val parts = mutableListOf<String?>(
+            "noslop-hs-v2",
+            fromUserId,
+            fromUsername,
+            fromHomeNode,
+            fromEncryptionPublicKey,
+            targetUserId,
+            nonce,
+            timestamp.toString(),
+            authorAvatarB64,
+            bio
+        )
+        // D10b: the signed "intro" of a CONNECTION_REQUEST (ContactIntro.QR_CAMERA). Appended only
+        // when present, so packets without it sign exactly as before. The length-prefixed encoding
+        // keeps the two forms distinct: adding or removing the field breaks the signature.
+        if (intro != null) parts.add(intro)
+        return encodeForSigning(*parts.toTypedArray())
+    }
 
     fun sign(payload: String, privateKeyB64: String): String {
         val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
@@ -565,6 +655,14 @@ object CryptoService {
             null
         }
     }
+
+    /**
+     * D10b: the short check code people compare before approving a request: the first two groups
+     * of the safety fingerprint (`ABCD-EFGH`). It is shown next to name.tag; matching both by
+     * accident needs a key that matches the Argon2id tag as well. Null when the fingerprint is.
+     */
+    fun deriveCheckCode(edPublicKeyB64: String, encPublicKeyB64: String): String? =
+        deriveSafetyFingerprint(edPublicKeyB64, encPublicKeyB64)?.take(9)
 
     /**
      * D09: the X25519 public key of [privateB64], in the encoding identities store

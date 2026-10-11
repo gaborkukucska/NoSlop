@@ -749,12 +749,13 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
         if (showScanScreen) {
             QRScanScreen(
-                onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub ->
+                onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub, intro ->
                     viewModel.requestConnection(
                         handle = scannedHandle,
                         publicKeyB64 = pubKey,
                         onionAddress = onion,
-                        encPublicKeyB64 = encPub
+                        encPublicKeyB64 = encPub,
+                        intro = intro
                     )
                 },
                 onDismiss = { 

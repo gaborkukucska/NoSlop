@@ -313,7 +313,7 @@ class PeerTrustInvariantTest {
     }
 
     @Test
-    fun d06_requestFromAcceptedFriend_staysAccepted_andKeyChangeIsHeldForUser() = runBlocking {
+    fun d06_requestFromAcceptedFriend_staysAccepted_andSignedKeyChangeIsApplied() = runBlocking {
         db.peerDao().insertPeer(
             Peer(bob.publicKeyB64, "bob", "t", bob.onionAddress, encPublicKeyB64 = bob.encPublicKeyB64,
                 relationship = PeerRelationship.ACCEPTED, customFolder = "Family")
@@ -324,8 +324,10 @@ class PeerTrustInvariantTest {
         val p = peer(bob.publicKeyB64)!!
         assertEquals(PeerRelationship.ACCEPTED, p.relationship)
         assertEquals("Family", p.customFolder)
-        assertEquals("encryption key must not be replaced silently", bob.encPublicKeyB64, p.encPublicKeyB64)
-        assertEquals(newEncPub, p.pendingEncKey)
+        // D10b: the new key is signed by bob's identity key, so it is applied (with a chat notice).
+        assertEquals(newEncPub, p.encPublicKeyB64)
+        assertNull(p.pendingEncKey)
+        assertNotNull(repo.keyChangedAt(bob.publicKeyB64))
     }
 
     @Test

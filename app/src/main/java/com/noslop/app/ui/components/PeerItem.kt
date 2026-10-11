@@ -187,16 +187,17 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
 }
 
 /**
- * D10: a contact's safety fingerprint and whether the user verified it. "Verified" holds only while
- * the stored fingerprint equals the current one; after a key change the contact shows as changed and
- * has to be compared again. Only accepted contacts with no key change pending can be marked.
+ * D10b: whether this contact is verified in person, and their safety fingerprint (C11) on request.
+ * A contact is verified in person when one of you scanned the other's QR code with the camera and the
+ * other approved (see NoSlopRepository.acceptConnectionRequest). The mark holds only while the stored
+ * fingerprint equals the current one; after a key change it shows as changed until the next scan.
  */
 @Composable
-fun SafetyFingerprintPanel(peer: Peer, fingerprint: String, viewModel: NoSlopViewModel?) {
+fun SafetyFingerprintPanel(peer: Peer, fingerprint: String) {
     val stored = peer.verifiedFingerprint
     val isVerified = stored != null && stored == fingerprint
     val isStale = stored != null && stored != fingerprint
-    val canVerify = peer.relationship == com.noslop.app.data.PeerRelationship.ACCEPTED && peer.pendingEncKey == null
+    var showKeys by remember(peer.publicKeyB64) { mutableStateOf(false) }
 
     Spacer(modifier = Modifier.height(16.dp))
     Column(
@@ -207,75 +208,115 @@ fun SafetyFingerprintPanel(peer: Peer, fingerprint: String, viewModel: NoSlopVie
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            when {
+                isVerified -> {
+                    Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Verified in person".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                }
+                isStale -> {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Changed since you verified it".tr, color = DestructiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                }
+                else -> Text("Not verified in person".tr, color = TextMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            }
+            TextButton(onClick = { showKeys = !showKeys }) {
+                Text(if (showKeys) "Hide keys".tr else "Compare keys".tr, color = AccentGreen, fontSize = 12.sp)
+            }
+        }
+        if (!isVerified) {
+            Text(
+                text = "Scan each other's QR code with the camera when you meet to verify.".tr,
+                color = TextMuted,
+                fontSize = 11.sp
+            )
+        }
+        if (showKeys) {
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = "Safety Fingerprint".tr,
                 color = TextMuted,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-                modifier = Modifier.weight(1f)
+                letterSpacing = 1.sp
             )
-            when {
-                isVerified -> {
-                    Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Verified".tr, color = AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                isStale -> {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Changed since you verified it".tr, color = DestructiveRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-                else -> Text("Not verified".tr, color = TextMuted, fontSize = 11.sp)
-            }
+            Text(
+                text = fingerprint,
+                color = TextLight,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Their own ID card shows the same fingerprint. The first two groups are the check code.".tr,
+                color = TextMuted,
+                fontSize = 11.sp
+            )
         }
-        Spacer(modifier = Modifier.height(6.dp))
+    }
+}
+
+/**
+ * D10b: who sent a connection request, for the user to compare before accepting: name.tag (the tag is
+ * derived from their key), the check code, a note when they scanned our QR code with the camera
+ * (accepting then verifies them in person), and a warning when a contact already has this name.
+ */
+@Composable
+fun ConnectionRequestIdentity(peer: Peer, viewModel: NoSlopViewModel) {
+    val peers by viewModel.peers.collectAsState()
+    val checkCode = remember(peer.publicKeyB64, peer.encPublicKeyB64) {
+        com.noslop.app.crypto.CryptoService.deriveCheckCode(peer.publicKeyB64, peer.encPublicKeyB64)
+    }
+    val fromScan by produceState(initialValue = false, peer.publicKeyB64) {
+        value = viewModel.requestCameFromScan(peer.publicKeyB64)
+    }
+    val sameName = remember(peers, peer.handle, peer.publicKeyB64) {
+        com.noslop.app.data.sameNameContact(peers, peer.handle, peer.publicKeyB64)
+    }
+    val name = com.noslop.app.data.handleWithoutTag(peer.handle)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = fingerprint,
-            color = TextLight,
-            fontFamily = FontFamily.Monospace,
+            text = if (peer.tripcode.isNotBlank()) "$name.${peer.tripcode}" else name,
+            color = AccentGreen,
             fontWeight = FontWeight.Bold,
-            fontSize = 15.sp
+            fontFamily = FontFamily.Monospace,
+            fontSize = 16.sp
         )
-        Spacer(modifier = Modifier.height(6.dp))
+        if (checkCode != null) {
+            Text(
+                text = "Check code: {code}".tr.replace("{code}", checkCode),
+                color = TextLight,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Compare this with the fingerprint on your contact's own ID card, in person or on another channel you trust. If they match, mark it verified.".tr,
+            text = "Ask them to read the name and check code from their own ID card, in person or over a chat you already trust. Accept only if both match.".tr,
             color = TextMuted,
             fontSize = 11.sp
         )
-        if (peer.pendingEncKey != null) {
-            Spacer(modifier = Modifier.height(6.dp))
+        if (fromScan) {
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "This contact's encryption key changed. Open the chat to review the change.".tr,
-                color = DestructiveRed,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+                text = "They scanned your QR code with their camera. If the check code matches, accepting marks them as verified in person.".tr,
+                color = AccentGreen,
+                fontSize = 12.sp
             )
         }
-        if (viewModel != null && canVerify) {
-            Spacer(modifier = Modifier.height(8.dp))
-            if (isVerified) {
-                OutlinedButton(
-                    onClick = { viewModel.setPeerVerified(peer.publicKeyB64, false) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, BorderSubtle),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
-                ) {
-                    Text("Remove Verification".tr, fontSize = 12.sp)
-                }
-            } else {
-                Button(
-                    onClick = { viewModel.setPeerVerified(peer.publicKeyB64, true) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) {
-                    Icon(Icons.Default.VerifiedUser, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Mark Verified".tr, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
+        if (sameName != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "You already have a contact named {name}. If this is meant to be the same person, compare the check code with them before you continue.".tr
+                    .replace("{name}", "${com.noslop.app.data.handleWithoutTag(sameName.handle)}.${sameName.tripcode}"),
+                color = DestructiveRed,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -634,22 +675,24 @@ fun ContactCardDialog(
                 }
             }
 
-            // D10: safety fingerprint (C11) with "Mark verified".
+            // D10b: a pending request shows what to compare before accepting it.
+            if (peer.relationship == com.noslop.app.data.PeerRelationship.INCOMING_PENDING && viewModel != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                ConnectionRequestIdentity(peer = peer, viewModel = viewModel)
+            }
+
+            // D10/D10b: verified in person or not, and the safety fingerprint (C11) on request.
             val fingerprint = remember(peer.publicKeyB64, peer.encPublicKeyB64) {
                 com.noslop.app.crypto.CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, peer.encPublicKeyB64)
             }
-            if (fingerprint != null) {
-                SafetyFingerprintPanel(peer = peer, fingerprint = fingerprint, viewModel = viewModel)
+            if (fingerprint != null && peer.relationship != com.noslop.app.data.PeerRelationship.INCOMING_PENDING) {
+                SafetyFingerprintPanel(peer = peer, fingerprint = fingerprint)
             }
 
             val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
-            val userPosts = remember(authorPosts, peer.publicKeyB64, peer.handle) {
-                authorPosts.filter { post ->
-                    !post.isOrphaned && (
-                        post.authorPublicKeyB64 == peer.publicKeyB64 ||
-                        (post.authorHandle.isNotBlank() && post.authorHandle.equals(peer.handle, ignoreCase = true))
-                    )
-                }
+            // D10b: by key only. Anyone can post under the same handle.
+            val userPosts = remember(authorPosts, peer.publicKeyB64) {
+                authorPosts.filter { post -> !post.isOrphaned && post.authorPublicKeyB64 == peer.publicKeyB64 }
             }
 
             if (userPosts.isNotEmpty()) {

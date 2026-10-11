@@ -1015,9 +1015,14 @@ class MeshSocialRepository(
         publicKeyB64: String,
         onionAddress: String,
         encPublicKeyB64: String = "",
-        useBurnableIdentity: Boolean = false
+        useBurnableIdentity: Boolean = false,
+        intro: String = ContactIntro.NETWORK
     ): Boolean = withContext(Dispatchers.IO) {
         val existing = peerDao.getPeerByPublicKey(publicKeyB64)
+        // D10b: scanning their QR code with the camera verifies them in person, for the keys in the code.
+        val scanPin = if (intro == ContactIntro.QR_CAMERA && encPublicKeyB64.isNotBlank()) {
+            CryptoService.deriveSafetyFingerprint(publicKeyB64, encPublicKeyB64)
+        } else null
         if (existing != null && existing.relationship == PeerRelationship.BLOCKED) {
             Logger.warn(TAG, "Not sending CONNECTION_REQUEST to blocked peer ${publicKeyB64.take(12)}")
             return@withContext false
@@ -1025,6 +1030,9 @@ class MeshSocialRepository(
         if (existing != null && existing.relationship == PeerRelationship.INCOMING_PENDING) {
             // They already asked us; the user asking them back is consent.
             Logger.info(TAG, "Connection request to a peer with a pending incoming request: accepting instead")
+            if (scanPin != null && scanPin == CryptoService.deriveSafetyFingerprint(existing.publicKeyB64, existing.encPublicKeyB64)) {
+                peerDao.setVerifiedFingerprint(publicKeyB64, scanPin)
+            }
             return@withContext acceptConnectionRequest(existing)
         }
 
@@ -1037,6 +1045,10 @@ class MeshSocialRepository(
             // Re-sending to a friend (e.g. the DM screen's "reconnect"): keep ACCEPTED and every
             // stored field; their handshake reply is processed as a profile refresh.
             Logger.info(TAG, "Re-sending CONNECTION_REQUEST to already-accepted peer ${existing.handle}")
+            // D10b: scanned in person; verified only if the code carries the keys we already use.
+            if (scanPin != null && scanPin == CryptoService.deriveSafetyFingerprint(existing.publicKeyB64, existing.encPublicKeyB64)) {
+                peerDao.setVerifiedFingerprint(publicKeyB64, scanPin)
+            }
         } else {
             val pending = (existing ?: Peer(
                 publicKeyB64 = publicKeyB64,
@@ -1050,7 +1062,8 @@ class MeshSocialRepository(
                 isTemporary = (existing?.isTemporary ?: false) || useBurnableIdentity,
                 lastSeenAt = System.currentTimeMillis(),
                 relationship = PeerRelationship.OUTGOING_PENDING,
-                pendingNonce = nonce
+                pendingNonce = nonce,
+                verifiedFingerprint = scanPin ?: existing?.verifiedFingerprint
             )
             peerDao.insertPeer(pending)
         }
@@ -1072,7 +1085,13 @@ class MeshSocialRepository(
                 // Nonce is only needed if the peer lost us; store it so their echo can be matched.
                 peerDao.getPeerByPublicKey(publicKeyB64)?.let { peerDao.insertPeer(it.copy(pendingNonce = nonce)) }
             }
-            val packet = buildConnectionRequestPacket(me, publicKeyB64, nonce)
+            // D10b: remembered so the pending-request probes carry the same signed intro.
+            if (intro == ContactIntro.QR_CAMERA) {
+                db.appSettingDao().insertSetting(AppSetting("outgoing_intro_$publicKeyB64", intro))
+            } else {
+                db.appSettingDao().removeSetting("outgoing_intro_$publicKeyB64")
+            }
+            val packet = buildConnectionRequestPacket(me, publicKeyB64, nonce, intro)
             dispatchPacket(targetOnion, packet)
             if (existing?.relationship != PeerRelationship.ACCEPTED) {
                 startOutgoingRequestPoll(publicKeyB64, nonce)
@@ -1088,7 +1107,8 @@ class MeshSocialRepository(
     private suspend fun buildConnectionRequestPacket(
         me: RoutedIdentity,
         targetPub: String,
-        nonce: String
+        nonce: String,
+        intro: String = ContactIntro.NETWORK
     ): com.noslop.app.mesh.NetworkPacket {
         // D04: the profile of the identity we ask from (the creator profile for a creator request).
         val myKeys = me.keys
@@ -1107,7 +1127,9 @@ class MeshSocialRepository(
             signature = null,
             requestNonce = nonce,
             targetUserId = targetPub,
-            version = 2
+            version = 2,
+            // D10b: only a camera scan is announced; everything else sends no intro.
+            intro = intro.takeIf { it == ContactIntro.QR_CAMERA }
         )
         val payloadToSign = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
             fromUserId = myKeys.publicKeyB64,
@@ -1118,7 +1140,8 @@ class MeshSocialRepository(
             nonce = nonce,
             timestamp = now,
             authorAvatarB64 = avatarB64,
-            bio = reqPay.bio
+            bio = reqPay.bio,
+            intro = reqPay.intro
         )
         val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         return com.noslop.app.mesh.NetworkPacket(
@@ -1150,7 +1173,8 @@ class MeshSocialRepository(
         if (row.relationship != PeerRelationship.OUTGOING_PENDING || nonce.isNullOrBlank()) return null
         val useBurnable = db.appSettingDao().getSetting("contact_identity_$peerPub") == "burnable"
         val me = (if (useBurnable) identityRouter.creator() else identityRouter.main()) ?: return null
-        return buildConnectionRequestPacket(me, peerPub, nonce)
+        val intro = db.appSettingDao().getSetting("outgoing_intro_$peerPub") ?: ContactIntro.NETWORK
+        return buildConnectionRequestPacket(me, peerPub, nonce, intro)
     }
 
     /**
@@ -1221,6 +1245,8 @@ class MeshSocialRepository(
         }
         db.appSettingDao().removeSetting("requested_identity_${current.publicKeyB64}")
         db.appSettingDao().removeSetting("declined_request_${current.publicKeyB64}")
+        // D10b: read (if needed) by NoSlopRepository.acceptConnectionRequest before this point.
+        db.appSettingDao().removeSetting("request_intro_${current.publicKeyB64}")
         val isTemp = current.isTemporary || contactIdentity == "burnable"
         val replyNonce = current.pendingNonce ?: ""
         peerDao.insertPeer(current.copy(isTemporary = isTemp, relationship = PeerRelationship.ACCEPTED, pendingNonce = null))
@@ -1541,7 +1567,8 @@ class MeshSocialRepository(
         val mediaIdsToDelete = mutableListOf<String>()
         try {
             val posts = postDao.getAllPostsList().filter { 
-                it.authorPublicKeyB64 == targetPub || (targetHandle != null && targetHandle.isNotBlank() && it.authorHandle.equals(targetHandle, ignoreCase = true)) 
+                // D10b: by key only. Anyone can post under the same handle.
+                it.authorPublicKeyB64 == targetPub
             }
             posts.forEach { p ->
                 p.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }

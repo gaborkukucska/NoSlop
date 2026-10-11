@@ -76,6 +76,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     init {
         Logger.initialize(application)
         logFilePath = Logger.getLogFilePath()
+        // D10b: one-time tag migration and held-key apply (a no-op once done; retried if it fails).
+        viewModelScope.launch {
+            try {
+                repository.migrateIdentityTagsV2()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.warn("REPOSITORY", "Identity tag migration failed, will retry next start: ${e.message}")
+            }
+        }
     }
 
     fun checkForUpdateNow() {
@@ -2738,8 +2748,16 @@ fun toggleAggregator() {
         viewModelScope.launch { repository.deleteComment(commentId) }
     }
 
-    fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "", useBurnableIdentity: Boolean = false) {
-        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity) }
+    /** D10b: [intro] says how the identity was obtained (ContactIntro); only a camera scan verifies. */
+    fun requestConnection(
+        handle: String,
+        publicKeyB64: String,
+        onionAddress: String,
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false,
+        intro: String = com.noslop.app.data.ContactIntro.NETWORK
+    ) {
+        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro) }
     }
 
     fun setDiscoverableEnabled(enabled: Boolean) {
@@ -2934,7 +2952,8 @@ fun toggleAggregator() {
 
     fun acceptHandshake(peer: Peer) { 
         viewModelScope.launch { 
-            repository.acceptConnectionRequest(peer) 
+            // D10b: every caller shows name.tag and the check code (ConnectionRequestIdentity).
+            repository.acceptConnectionRequest(peer, confirmedByUser = true) 
             repository.deleteNotification("conn_req_${peer.publicKeyB64}")
             repository.deleteNotificationsBySender(peer.publicKeyB64)
             // Trigger rubbish dump to clean up any orphaned content
@@ -2977,40 +2996,35 @@ fun toggleAggregator() {
     /** D07: whether this peer was last seen running the pre-v0.7.0 handshake protocol. */
     suspend fun isPeerOnLegacyProtocol(peerPub: String): Boolean = repository.isPeerOnLegacyProtocol(peerPub)
 
-    /** D10: mark a contact's current safety fingerprint as verified (or remove the mark). */
-    fun setPeerVerified(peerPub: String, verified: Boolean) {
-        viewModelScope.launch { repository.setPeerVerified(peerPub, verified) }
+    /** D10b: when the contact's encryption key last changed, while the chat notice is not dismissed. */
+    suspend fun keyChangedAt(peerPub: String): Long? = repository.keyChangedAt(peerPub)
+
+    /** D10b: hides the "security key changed" notice in the chat. */
+    fun dismissKeyChangeNotice(peerPub: String) {
+        viewModelScope.launch { repository.dismissKeyChangeNotice(peerPub) }
     }
 
-    /** D10: accept the contact's changed encryption key (held in pendingEncKey). */
-    fun acceptPeerKeyChange(peerPub: String) {
-        viewModelScope.launch { repository.acceptPeerKeyChange(peerPub) }
-    }
-
-    /** D10: keep the contact's old encryption key and drop the pending one. */
-    fun rejectPeerKeyChange(peerPub: String) {
-        viewModelScope.launch { repository.rejectPeerKeyChange(peerPub) }
-    }
+    /** D10b: whether a pending request was signed as coming from a camera scan of our QR code. */
+    suspend fun requestCameFromScan(peerPub: String): Boolean = repository.requestCameFromScan(peerPub)
 
     /** D08/D10: false when a mesh post's media is not covered by its author's signature. */
     suspend fun isMeshPostMediaVerified(post: MeshPost): Boolean = repository.isMeshPostMediaVerified(post)
     fun removePeer(peerPub: String) { 
         viewModelScope.launch { 
-            val peer = peers.value.find { it.publicKeyB64 == peerPub }
-            val handle = peer?.handle
             repository.deletePeer(peerPub) 
             
-            // Instantly clear all their posts (by public key AND handle) from the active UI and caches
+            // Instantly clear all their posts from the active UI and caches. D10b: by key only;
+            // anyone can post under the same handle.
             val currentFeed = _unifiedFeed.value.toMutableList()
             currentFeed.removeAll { 
-                it is UnifiedItem.Mesh && (it.post.authorPublicKeyB64 == peerPub || (handle != null && handle.isNotBlank() && it.post.authorHandle.equals(handle, ignoreCase = true))) 
+                it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub
             }
             _unifiedFeed.value = currentFeed
             cachedDefaultFeed = cachedDefaultFeed.filterNot { 
-                it is UnifiedItem.Mesh && (it.post.authorPublicKeyB64 == peerPub || (handle != null && handle.isNotBlank() && it.post.authorHandle.equals(handle, ignoreCase = true))) 
+                it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub
             }
             sessionLoadedIds.removeAll { id -> 
-                allMeshes.any { it.id == id && (it.authorPublicKeyB64 == peerPub || (handle != null && handle.isNotBlank() && it.authorHandle.equals(handle, ignoreCase = true))) } 
+                allMeshes.any { it.id == id && it.authorPublicKeyB64 == peerPub }
             }
             if (_selectedPeerPub.value == peerPub) {
                 _selectedPeerPub.value = null
@@ -3150,7 +3164,8 @@ fun toggleAggregator() {
     fun acceptConnectionFromNotification(notifId: String, senderPub: String) {
         viewModelScope.launch {
             val peer = repository.peerDao.getPeerByPublicKey(senderPub)
-            if (peer != null) repository.acceptConnectionRequest(peer)
+            // D10b: the notification card shows name.tag and the check code (ConnectionRequestIdentity).
+            if (peer != null) repository.acceptConnectionRequest(peer, confirmedByUser = true)
             repository.deleteNotification(notifId)
         }
     }

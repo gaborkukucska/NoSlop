@@ -64,8 +64,8 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
 
         if (showQRScanner) {
             QRScanScreen(
-                onPeerScannedAndAccepted = { handle, pub, onion, encPub ->
-                    viewModel.requestConnection(handle, pub, onion, encPub)
+                onPeerScannedAndAccepted = { handle, pub, onion, encPub, intro ->
+                    viewModel.requestConnection(handle, pub, onion, encPub, intro = intro)
                 },
                 viewModel = viewModel,
                 onDismiss = { showQRScanner = false }
