@@ -1625,10 +1625,8 @@ class MeshSocialRepository(
             voteDao.deleteVotesByAuthor(targetPub)
             chatReactionDao.deleteChatReactionsByAuthor(targetPub)
             commentReactionDao.deleteCommentReactionsByAuthor(targetPub)
+            // D10b: by key only. Anyone can post under the same handle.
             postDao.deletePostsByAuthor(targetPub)
-            if (!targetHandle.isNullOrBlank()) {
-                db.openHelper.writableDatabase.execSQL("DELETE FROM mesh_posts WHERE authorHandle = ?", arrayOf(targetHandle))
-            }
             db.notificationDao().deleteNotificationsBySender(targetPub)
             db.pendingGroupMessageDao().deleteForMember(targetPub)
             db.appSettingDao().removeSetting("contact_identity_$targetPub")
@@ -2458,18 +2456,9 @@ class MeshSocialRepository(
             }
             connectedPeers.forEach { validPubKeys.add(it.publicKeyB64) }
 
-            val validHandles = mutableSetOf<String>()
-            val localH = getLocalHandle()
-            if (localH.isNotBlank()) validHandles.add(localH.lowercase().trim())
-            connectedPeers.forEach {
-                if (it.handle.isNotBlank()) validHandles.add(it.handle.lowercase().trim())
-            }
-
+            // D10b: by key only. A stranger posting under a contact's (or our) handle is not kept.
             val allPosts = postDao.getAllPostsList()
-            val orphanedPosts = allPosts.filter { post ->
-                post.authorPublicKeyB64 !in validPubKeys &&
-                post.authorHandle.lowercase().trim() !in validHandles
-            }
+            val orphanedPosts = allPosts.filter { post -> post.authorPublicKeyB64 !in validPubKeys }
 
             if (orphanedPosts.isNotEmpty()) {
                 val mediaIdsToDelete = mutableListOf<String>()

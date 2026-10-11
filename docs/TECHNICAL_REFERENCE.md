@@ -262,7 +262,8 @@ net).
   copy of the same key is not a change. Keys still held in `pendingEncKey` from
   D10 are applied once by `migrateIdentityTagsV2` (`PeerDao.applyEncKeyChange`).
 - **Matching.** Removing a contact (`MeshSocialRepository.deletePeer`,
-  `NoSlopViewModel.removePeer`) and the contact card's post list match posts by
+  `NoSlopViewModel.removePeer`), the orphan clean-up
+  (`purgeOrphanedPeerContent`) and the contact card's post list match posts by
   author key only, never by handle.
 - **Unverified media (D08).** `NoSlopRepository.isMeshPostMediaVerified(post)`
   re-verifies the stored post signature in the v2 form

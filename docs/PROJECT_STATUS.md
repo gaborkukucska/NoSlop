@@ -28,7 +28,8 @@ Testers found D10's manual "Mark verified" step tedious. This round replaces it:
 
 ### Matching people by key, not name
 
-* `MeshSocialRepository.deletePeer`, `NoSlopViewModel.removePeer` and the contact card's post list used to match posts by handle as well as by key. Anyone can post under the same handle, so removing a contact could delete someone else's posts. They now match by key only.
+* `MeshSocialRepository.deletePeer` (two places), `NoSlopViewModel.removePeer` and the contact card's post list used to match posts by handle as well as by key. Anyone can post under the same handle, so removing a contact could delete someone else's posts. They now match by key only.
+* `MeshSocialRepository.purgeOrphanedPeerContent` (the 30-minute clean-up, also run after accepting a request) kept a stranger's posts when their handle matched a contact's or our own. It now keeps only posts whose author key is ours or a stored contact's.
 
 ## Completed Changes (2026-10-11) — Round D10: Status Honesty, Safety Fingerprints, Key Changes, Unverified Media (v0.7.0-alpha)
 

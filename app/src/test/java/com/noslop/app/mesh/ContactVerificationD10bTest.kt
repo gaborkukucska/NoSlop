@@ -391,4 +391,18 @@ class ContactVerificationD10bTest {
         assertNull(db.postDao().getPostById("p-bob"))
         assertNotNull("posts are matched by key, not by handle", db.postDao().getPostById("p-imposter"))
     }
+
+    @Test
+    fun orphanPurge_dropsAStrangerUsingAContactsName_andKeepsContactsAndOwnPosts() = runBlocking {
+        accepted(bob)
+        db.postDao().insertPost(post("p-bob", bob, "bob", bob.tripcode))
+        db.postDao().insertPost(post("p-own", alice, "alice", alice.tripcode))
+        db.postDao().insertPost(post("p-imposter", mallory, "bob", mallory.tripcode))
+        db.postDao().insertPost(post("p-imposter-me", carol, "alice", carol.tripcode))
+        repo.purgeOrphanedPeerContent()
+        assertNotNull(db.postDao().getPostById("p-bob"))
+        assertNotNull(db.postDao().getPostById("p-own"))
+        assertNull("a contact's name does not keep a stranger's post", db.postDao().getPostById("p-imposter"))
+        assertNull("our own name does not keep a stranger's post", db.postDao().getPostById("p-imposter-me"))
+    }
 }
