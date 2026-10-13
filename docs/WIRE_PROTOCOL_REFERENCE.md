@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-08)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-13)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -27,6 +27,15 @@ to look up any packet's shape.
 > the sender's key is remembered, and the user is told ("Older NoSlop
 > Version"; the DMs tab's *Sent requests* list marks such peers).
 >
+> **⚠️ Breaking change (2026-10-13, round E2, review C09): envelope signature
+> on every packet.** Every packet must carry a valid `env_v` / `env_ts` /
+> `env_sig` envelope signature by its `sender_id` (§1.1). Packets without one
+> are dropped on arrival, so nodes before E2 and E2 nodes can no longer talk to
+> each other — **both sides must update** (owner decision: hard break). Same
+> round: `ANNOUNCE_PEER` is signed over its onion address (v2, S2; v1 refused)
+> and `GROUP_QUERY` is answered only for members (G1). Round E4: a
+> `GROUP_QUERY` keeps its sender on every copy.
+>
 > **2026-10-07/08 additions** (no other envelope or payload changes):
 > the handshake reply path (§3.1), `media_metadata` on `CommentSyncData`
 > and v2 (media-hash) signature acceptance in `SYNC_RESPONSE` (§3, §4.3),
@@ -49,7 +58,10 @@ data class NetworkPacket(
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
     val type: String,
-    val payload: JsonElement? = null
+    val payload: JsonElement? = null,
+    @SerializedName("env_v") val envV: Int? = null,
+    @SerializedName("env_ts") val envTs: Long? = null,
+    @SerializedName("env_sig") val envSig: String? = null
 )
 ```
 
@@ -62,11 +74,14 @@ data class NetworkPacket(
 | `signature` | String | No | Ed25519 signature (only meaningful for packet types that use it — see §6) |
 | `type` | String | Yes | Packet type string, e.g. `"POST"`, `"MESSAGE"` |
 | `payload` | Object | No | The specific payload for the type |
+| `env_v` | Integer | Yes (since E2) | Envelope signature version, `1` (§1.1) |
+| `env_ts` | Long | Yes (since E2) | When the envelope was signed, epoch ms |
+| `env_sig` | String | Yes (since E2) | Base64 Ed25519 envelope signature by `sender_id` (§1.1) |
 
 Wire format: newline-delimited JSON over the SOCKS5/Tor mesh transport
 (`MeshTransport`, port 9999, loopback-bound — see TECHNICAL_REFERENCE.md
-§4.1). One `NetworkPacket` per line, serialized via a fresh `Gson()` instance
-each call (`toJson()`/`fromJson()`).
+§4.1). One `NetworkPacket` per line, serialized with the shared
+`Json.gson` instance (`toJson()`/`fromJson()`), which leaves out null fields.
 
 13 typed payload accessor methods on `NetworkPacket` (`getPostPayload()`,
 `getMessagePayload()`, etc.) each guard on `type == "<TYPE>"` before
@@ -75,6 +90,36 @@ type mismatch or `payload == null`.
 
 All JSON wire fields use `snake_case` via `@SerializedName`, while Kotlin
 properties use `camelCase`.
+
+### 1.1 Envelope signature (round E2, 2026-10-13; review C09)
+
+`mesh/EnvelopeAuth.kt`. Before E2, `sender_id` was taken on trust: for the
+packet types with no signature of their own (`TYPING`, `READ_RECEIPT`,
+`SYNC_REQUEST`, `INVENTORY_SYNC_REQUEST`, `DM_SYNC_REQUEST`, `GROUP_QUERY`,
+`MEDIA_TRANSFER_ACK`), anyone who could reach an onion could claim to be one
+of its contacts, and the firewall, rate limits and cooldown reset trusted it.
+
+- **Signed string:**
+  `encodeForSigning("noslop-env-v1", id, type, sender_id, target_user_id, signature, env_ts, payloadDigest)`,
+  with `""` for an absent id, target or inner signature. Signed with the
+  private key of `sender_id`; `env_sig` is the Base64 Ed25519 signature.
+- **`payloadDigest`:** lowercase hex SHA-256 of the payload as the receiver
+  sees it: Gson's rendering of the payload tree with object members whose
+  value is null removed (Gson leaves those out on the wire; nulls inside
+  arrays stay). A missing or JSON-null payload hashes as the empty string.
+- **Not covered:** `hops`, which relays decrement. A relay that keeps the
+  original `sender_id` keeps the original envelope; a relay re-stamped with
+  the relaying node's key gets that node's envelope.
+- **Receiver rules** (`MeshTransport`, before any handler): drop if the
+  envelope is missing, `env_v` is not 1, `env_ts` is more than 1 hour from
+  the receiver's clock either way (`MAX_SKEW_MS`), the signature does not
+  verify, or the same `sender_id` | `id` | `env_sig` was already processed
+  (replay guard). Applies to the listener and to replies read on a
+  handshake connection (§3.1). A packet the app cannot sign as one of its own
+  identities, and that carries no envelope, is never sent.
+- **Not checked:** packets built inside the app that never cross the socket
+  (Hub pulls, Hub web-UI DMs) — a known gap (PROJECT_STATUS.md, 2026-10-13).
+- Tested (unit: `EnvelopeAuthTest`, `HandshakeReplyPathTest`, `WireProtocolTest`).
 
 ---
 
@@ -129,7 +174,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 11 | `COMMENT_REACTION` | `CommentReactionPayload` | `commentId\|reactionType\|authorId\|timestamp` | `ReactionPacketHandler.handleCommentReaction` | `commentReactionDao.insertReaction`/`deleteReactionById` |
 | 12 | `VOTE` | `VotePayload` | `postId\|voteType\|authorId\|timestamp` | `ReactionPacketHandler.handleVote` | `voteDao.insertVote`/`deleteVoteById` per `action` |
 | 13 | `COMMENT_VOTE` | `CommentVotePayload` | `commentId\|voteType\|authorId\|timestamp` | `ReactionPacketHandler.handleCommentVote` | `commentVoteDao.insertVote`/`deleteVoteById` |
-| 14 | `ANNOUNCE_PEER` | `AnnouncePeerPayload` | `authorId\|timestamp` (signed) | `HandshakePacketHandler.handleAnnouncePeer` | `peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = now))` |
+| 14 | `ANNOUNCE_PEER` | `AnnouncePeerPayload` | `canonicalAnnouncePeerV2(authorId, onionAddress, timestamp)` (signed, v2 only since E2) | `HandshakePacketHandler.handleAnnouncePeer` | `peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = now))` |
 | 15 | `IDENTITY_UPDATE` | `IdentityUpdatePayload` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) | `HandshakePacketHandler.handleIdentityUpdate` | updates `Peer.handle`/`Peer.authorAvatarB64` for `userId` |
 | 16 | `USER_EXIT` | `UserExitPayload` | `userId\|timestamp` (signed) | `HandshakePacketHandler.handleUserExit` | `peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = now))` |
 | 17 | `EDIT_POST` | `EditPostPayload` | `postId\|authorId\|content\|timestamp` | `PostPacketHandler.handleEditPost` | updates `mesh_posts.content` if `!isOrphaned && timestamp >= existingPost.timestamp` |
@@ -144,7 +189,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
 | 27 | `GROUP_MESSAGE` | *(retired)* | *(retired)* | *(retired — unencrypted cleartext packet eliminated per C22; all group messaging strictly uses pairwise E2EE `MESSAGE` fan-out)* | none |
 | 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
-| 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Replies with `GROUP_SYNC` containing full group schema and `memberDetails` |
+| 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (envelope signature only; queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Answered only for a member or the admin, not banned, with `requester_id` = `sender_id` (G1); replies with `GROUP_SYNC` containing full group schema and `memberDetails` to the sender's stored onion (broadcast when none is stored — open) |
 | 30 | `GROUP_SYNC` | `GroupSyncPayload` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
 | 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) (dual-mode: encodeForSigning & pipe in verifier & handler) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
 | 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` (dual-mode: encodeForSigning & pipe) | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
@@ -166,7 +211,8 @@ Notes:
   like `POST`'s `hops = 6`) and is signed — every other "heartbeat style"
   packet (`SYNC_REQUEST`, `MEDIA_REQUEST`, etc.) has no signature field at
   all, making `ANNOUNCE_PEER` the only repeatedly-broadcast, low-TTL packet
-  that is nonetheless signature-checked.
+  that is nonetheless signature-checked. (Since round E2 every packet,
+  heartbeat-style ones included, also carries the envelope signature, §1.1.)
 - Row 15 (`IDENTITY_UPDATE`): the payload's field is named `handle` (not
   `displayName`), and the signed string uses that same field name —
   `userId|handle|timestamp`.
@@ -410,9 +456,9 @@ onion address from the `ANNOUNCE_PEER` presence heartbeat (`onion_address`).
 | Field | Type | Description |
 |---|---|---|
 | `author_id` | String | Sender's public key |
-| `onion_address`? | String | Sender's current onion address — **not covered by the signature** (open finding S2: a replayed fresh announce can rewrite a friend's stored onion) |
+| `onion_address`? | String | Sender's current onion address. Covered by the signature since round E2 (S2); stored only when it is the onion derived from `author_id` (`CryptoService.isOnionOf`) |
 | `timestamp` | Long | Epoch timestamp |
-| `signature` | String | Ed25519 signature over `authorId\|timestamp` |
+| `signature` | String | Ed25519 signature over `canonicalAnnouncePeerV2(authorId, onionAddress, timestamp)` = `encodeForSigning("noslop-announce-v2", authorId, onionAddress or "", timestamp)`. The v1 form (`authorId\|timestamp`, which left the onion unsigned) is refused |
 
 ### ANNOUNCE_DISCOVERABLE
 **Type:** `ANNOUNCE_DISCOVERABLE` · class `AnnounceDiscoverablePayload`
@@ -653,8 +699,21 @@ signer is recovered and what each role is permitted to change.
 | Field | Type | Description |
 |---|---|---|
 | `group_id` | String | Group identifier |
-| `requester_id` | String | Public key of the member requesting group catch-up |
+| `requester_id` | String | Public key of the member requesting group catch-up; must equal the envelope `sender_id` |
 | `timestamp` | Long | Epoch milliseconds |
+
+**Who gets an answer (G1, round E2, 2026-10-13; `groupQueryRefusal`).** The
+answer is the whole group record (member keys, names, onion addresses), so a
+node answers only when the envelope-authenticated `sender_id` is the
+`requester_id`, is in its member list or is the admin, and is not banned. The
+`GROUP_SYNC` goes to the sender's stored onion (the requester's address is no
+longer used). Before, groups that allow member invites answered anyone who
+knew the group id (former members included). **Open:** when the sender has no
+stored onion, the answer is broadcast, and `GossipService.broadcast` sends it
+to all trusted contacts as well as group members. A user invited by a member is answered only by members whose copy
+already lists them. **Sender (E4):** `GossipService.broadcast` sends a
+`GROUP_QUERY` unchanged (or as a relay that keeps its sender), never
+re-stamped per peer, so the requester always matches the sender. Tested (unit: `AnnouncePeerAndGroupQueryE2Test`, `IdentityLeftoversE4Test`).
 
 ### GROUP_SYNC
 **Type:** `GROUP_SYNC` · class `GroupSyncPayload`
@@ -880,12 +939,16 @@ format. Accepted items are inserted via `commentDao` / `reactionDao`.
 ### 5.1 `ANNOUNCE_PEER`
 
 - Broadcast every **60 seconds** (`MeshSocialRepository.startPresenceHeartbeat`)
-  to trusted peers, with `hops = 1`, carrying the sender's `authorId` and
-  timestamp, signed.
+  to trusted peers, with `hops = 1`, carrying the sender's `authorId`, onion
+  address and timestamp, signed with the v2 form, which covers the onion
+  (round E2, S2).
 - `handleAnnouncePeer` verifies the signature and, on failure, logs
   `"Rejected ANNOUNCE_PEER: Signature verification failed"` and drops the
   packet.
 - On success: `peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = now))`.
+  The announced onion replaces the stored one only when it is derived from
+  the sender's key; otherwise presence is still updated and the onion is not
+  stored (logged).
 - **Staleness is actively swept, not just UI-derived**: the same
   60-second heartbeat loop that broadcasts `ANNOUNCE_PEER` also iterates all
   known peers and, for any peer whose `lastSeenAt` is older than **3
@@ -1036,6 +1099,7 @@ and still accurate.
 
 | Packet type | Signed string |
 |---|---|
+| *every packet* (envelope, since E2) | `encodeForSigning("noslop-env-v1", id, type, senderId, targetUserId, signature, envTs, sha256(payload))` in `env_sig`, by `senderId` (§1.1) |
 | `POST` / `SYNC_RESPONSE.posts[i]` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl, sha256)`. Otherwise canonical 8-field `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Both forms are accepted by the live handler and, since 2026-10-08, by sync. Legacy unauthenticated fallback restricted strictly to public posts without attachments (`id\|authorId\|content\|timestamp` + optional avatar). |
 | `COMMENT` / `SYNC_RESPONSE.comments[i]` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(postId, commentId, content, timestamp, authorAvatarB64, sha256)`. Otherwise `encodeForSigning(postId, commentId, content, timestamp, authorAvatarB64)`, `encodeForSigning(postId, commentId, content, timestamp)`, or pipe `postId\|commentId\|content\|timestamp` (+`\|authorAvatarB64`) |
 | `REACTION` / `SYNC_RESPONSE.reactions[i]` | `postId\|reactionType\|authorId\|timestamp` |
@@ -1043,7 +1107,7 @@ and still accurate.
 | `COMMENT_REACTION` | `commentId\|reactionType\|authorId\|timestamp` |
 | `VOTE` | `postId\|voteType\|authorId\|timestamp` |
 | `COMMENT_VOTE` | `commentId\|voteType\|authorId\|timestamp` |
-| `ANNOUNCE_PEER` | `authorId\|timestamp` (`onion_address` unsigned — S2, open) |
+| `ANNOUNCE_PEER` | `encodeForSigning("noslop-announce-v2", authorId, onionAddress, timestamp)` (v2 only since E2; v1 `authorId\|timestamp` refused) |
 | `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
 | `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
@@ -1062,7 +1126,7 @@ and still accurate.
 | `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) (supporting encodeForSigning and pipe) |
 | `DELETE_COMMENT` | `postId|commentId|authorId|timestamp` (supporting encodeForSigning and pipe) |
 | `FOLLOW` / `UNFOLLOW` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (supporting encodeForSigning and pipe) |
-| `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
+| `TYPING` / `READ_RECEIPT` | *(no inner signature by design; envelope signature only)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64
 no-wrap encoding, over the UTF-8 bytes of the literal pipe-delimited string.

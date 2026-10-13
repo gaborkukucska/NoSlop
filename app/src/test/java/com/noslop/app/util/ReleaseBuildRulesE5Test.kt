@@ -77,13 +77,19 @@ class ReleaseBuildRulesE5Test {
         val start = source.indexOf("class AdaptiveTorLoadControl")
         assertTrue(start >= 0)
         val wrapper = source.substring(start)
-        for (method in listOf(
-            "onPrepared(playerId", "onTracksSelected(parameters", "onStopped(playerId", "onReleased(playerId",
-            "getAllocator(playerId", "getBackBufferDurationUs(playerId", "retainBackBufferFromKeyframe(playerId",
-            "shouldContinueLoading(parameters", "shouldStartPlayback(parameters", "shouldContinuePreloading(playerId"
+        for ((method, firstParameter) in listOf(
+            "onPrepared" to "playerId", "onTracksSelected" to "parameters", "onStopped" to "playerId",
+            "onReleased" to "playerId", "getAllocator" to "playerId", "getBackBufferDurationUs" to "playerId",
+            "retainBackBufferFromKeyframe" to "playerId", "shouldContinueLoading" to "parameters",
+            "shouldStartPlayback" to "parameters", "shouldContinuePreloading" to "playerId"
         )) {
-            assertTrue("AdaptiveTorLoadControl does not implement $method", wrapper.contains("override fun $method"))
+            // Parameters may start on the next line.
+            val override = Regex("""override\s+fun\s+$method\(\s*$firstParameter\s*:""")
+            assertTrue("AdaptiveTorLoadControl does not implement $method($firstParameter: ...)", override.containsMatchIn(wrapper))
         }
-        assertFalse("a pre-1.4 LoadControl method is still implemented", wrapper.contains("override fun onPrepared()"))
+        assertFalse(
+            "a pre-1.4 LoadControl method is still implemented",
+            Regex("""override\s+fun\s+onPrepared\(\s*\)""").containsMatchIn(wrapper)
+        )
     }
 }

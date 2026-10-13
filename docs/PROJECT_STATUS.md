@@ -1,5 +1,145 @@
 # Project Status - NoSlop
 
+## Review Round 2 Follow-up (Rounds E1–E5, E5s, E5s2, 2026-10-13): Summary and Known Gaps (v0.7.0-alpha)
+
+These rounds close what was still open from review round 2 (`isues.txt`: D11, D12 and the C-findings they carry) and the leftovers of D04. The legacy Android app only; the MVP is out of scope. Each round has its own entry below, newest first.
+
+* **Verified so far.** Unit tests pass (`./gradlew testGithubDebugUnitTest testPlayDebugUnitTest --rerun-tasks`) after every round. The app was built and installed after every round. On device: search (E5s, E5s2), and video, audio and seeking on Media3 1.11.1 (E5).
+* **Not yet verified.**
+  * Backup export and restore on a device (E3).
+  * A minified release build, using the new checklist `docs/RELEASE_SMOKE_TEST.md` (E5). Unit tests run the debug build, which R8 does not shrink, so they cannot catch a missing keep rule.
+* **Owner decisions recorded (2026-10-13).**
+  * **C09: hard protocol break.** A packet without a valid envelope signature is dropped. Builds before E2 can no longer talk to E2 builds; both sides must update.
+  * **C16:** kept as it is, with the red warning banner. No passphrase option is added.
+  * **C27** (persistent per-peer connections) and **R4d** (handshake budget): deferred.
+  * **Default creator node:** the same legacy app, without a Hub.
+  * **Search:** results depend only on the search terms and the filters in the search modal. They are listed newest first and loaded page by page as the user swipes. Items already seen may appear. Blocked creators, banned channels, banned nodes and anything the user voted down stay hidden.
+* **Known gaps** (open, not fixed in these rounds).
+  * **Packets pulled from a Hub skip the envelope check.** Hub pulls and Hub web-UI DMs are built inside the app and never cross the mesh socket, which is the only place the envelope is checked (`EnvelopeAuth` in `MeshTransport`).
+  * **The Hub's onion address is not checked against its key.** Peers' announced onions are (S2), but the Hub's address is taken as configured.
+  * **Clocks must agree to within 1 hour.** A packet whose envelope time is further from the receiver's clock is dropped as stale (`EnvelopeAuth.MAX_SKEW_MS`).
+  * **A group catch-up answer can reach non-members.** When the member asking (`GROUP_QUERY`) has no stored onion address, `handleGroupQuery` broadcasts the `GROUP_SYNC` answer. `GossipService.broadcast` sends it to every trusted contact and every group member, so friends who are not in the group receive its member keys, names and onion addresses. Found while writing these docs; not fixed yet.
+  * **Users invited by a member get group catch-up late.** A `GROUP_QUERY` is answered only for a key in the answering node's member list (G1). Someone invited by a member, not the admin, is answered only by members whose copy already lists them.
+  * **Older downvotes still show in search.** Downvotes made before E5s were stored only as swipes and cannot be told apart, so they are not hidden.
+  * **Search quality.** It works, but needs more work later (owner, 2026-10-13).
+  * **Hub relaying (D04).** With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying rules.
+
+## Completed Changes (2026-10-13) — Round E5: Media3 1.11.1, Narrower Bouncy Castle Keep Rule, Release Smoke Test (v0.7.0-alpha)
+
+Closes C24 and the Media3 item of D11, and the smoke-test half of C27 (D12). Unit tests: `AdaptiveTorLoadControlE5Test` and `ReleaseBuildRulesE5Test` (new). On device: video swiping, seeking, audio and video attachments work. The minified release build has not been checked yet.
+
+* **Media3 1.3.1 → 1.11.1.** All seven Media3 libraries (`exoplayer`, `transformer`, `effect`, `exoplayer-hls`, `exoplayer-dash`, `ui`, `datasource-okhttp`) move together.
+  * **Why the version bump alone would have broken video.** Since 1.4, Media3 calls the `LoadControl` methods that take a `PlayerId` (and, for decisions, a `Parameters` object). The old methods still exist, but their default implementations throw. `AdaptiveTorLoadControl` (`ui/PreloadManager.kt`) implemented only the old ones, so the app would have built and then failed on the first video.
+  * **Fix.** `AdaptiveTorLoadControl` now implements the same ten methods as Media3's own `DefaultLoadControl`: `onPrepared`, `onTracksSelected`, `onStopped`, `onReleased`, `getAllocator`, `getBackBufferDurationUs`, `retainBackBufferFromKeyframe`, `shouldContinueLoading`, `shouldStartPlayback` and `shouldContinuePreloading`. Lifecycle calls go to both inner controls (preload and on-screen); decisions go to the active one. The buffer sizes are unchanged.
+  * Since 1.9 Media3 needs API 23 or newer; the app's minimum is 24.
+* **Bouncy Castle keep rule narrowed.** `-keep class org.bouncycastle.** { *; }` is replaced by keeping only the provider packages: `org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**` and `org.bouncycastle.pqc.jcajce.provider.**` (plus `-dontwarn org.bouncycastle.**`).
+  * The app calls the lightweight API directly (Ed25519, X25519, HKDF, Argon2, ChaCha20-Poly1305, SHA-3, PBKDF2), so R8 can see what it needs and keeps it.
+  * Only the provider registered in `NoSlopApp` loads classes by name, and no app code asks it for an algorithm by name.
+* **Release smoke test.** New `docs/RELEASE_SMOKE_TEST.md`: a step-by-step check of a minified release build on two devices (identity, DMs, backup, media, Tor), with the log strings to look for. Shrinking problems only show up in that build.
+* **Tests.**
+  * `AdaptiveTorLoadControlE5Test` runs a player through prepare, track selection, stop and release on the wrapper, with a one-item streaming timeline. It checks that the back buffer switches between preload (none) and on screen (60 s).
+  * `ReleaseBuildRulesE5Test` fails if any of these comes back: Bouncy Castle kept whole; app code asking the provider for an algorithm by name; Media3 libraries on different versions or older than 1.4; the wrapper missing one of the ten methods, or still overriding an old one.
+  * First run: two test-only failures, fixed in E5b. The test passed an empty timeline, which `DefaultLoadControl` cannot handle, and the source check did not allow an override's parameters on the next line.
+
+## Completed Changes (2026-10-13) — Search Round, Part 2 (E5s2): Every Source Pages (v0.7.0-alpha)
+
+Unit tests: `SearchPagingE5s2Test` (new) and `SearchPagingE5sTest` (updated). On device: searches in each tab page through as expected.
+
+* **Images, audio and articles page too.** Part 1 paged only YouTube, Invidious and Reddit. Every source that can page now does, as the user swipes (`feeds/api/SourcePage.kt`).
+  * **Images** (Openverse, Wikimedia, Pexels, NASA): by relevance, because these sources have no dates or cannot sort by them.
+  * **Articles:** Wikipedia by relevance. Hacker News, NewsAPI and the Guardian newest first.
+  * **Audio:** Openverse, and the Internet Archive, which now pages newest first instead of by most downloaded. Podcast Index cannot page, so it only fills the first page.
+  * **All:** NewsAPI, Jamendo and Pexels page too, next to YouTube, Invidious and Reddit.
+* **Limits.**
+  * NewsAPI stops after 5 pages. Its free plan serves only the first 100 results, and every page uses one of its 100 daily requests.
+  * A source with no key set, or one that fails 3 times in a row, stops for that search, so it does not hold the search open.
+* **Logs.** Jamendo no longer writes search terms to the log (C19).
+
+## Completed Changes (2026-10-13) — Search Round, Part 1 (E5s): Paging Instead of Random Extra Words (v0.7.0-alpha)
+
+Owner decisions: searches depend only on the search terms and the search-modal filters, are listed newest first with no date limit and keep loading as the user swipes; already-seen items may appear; blocked and banned content and downvoted items stay hidden. Unit tests: `SearchPagingE5sTest` (new). On device: search works; it needs more work later.
+
+* **Cause.** After E2b, testers found searches worse: not the most relevant results, and not everything for the terms. E2b was not the cause. The causes were:
+  * "All" searches went through the background interest-feed path, which asks YouTube for this year's uploads only.
+  * Invidious searches were limited to the last month (`date=month`).
+  * When the results ran out, the search ran again with a random extra word ("review", "vlog", …), up to 3 times.
+  * Results were sorted videos first.
+* **Fix.**
+  * **Paging.** A search fetches the next page of the same terms and filter, newest first, with no date limit: YouTube continuation tokens (sorted by upload date), Invidious page numbers (`sort_by=upload_date`, every date), and Reddit listing cursors (`sort=new`, `after`). Where each source has got to is kept in `PublicApiService.SearchCursor`, one per search. The next page starts loading while the user is still swiping through the current results.
+  * **When paging stops** (`ui/SearchPaging.kt`): every source has reported its end, or 3 pages in a row added nothing new, or the search has fetched 50 pages.
+  * **Order.** Results show page by page, newest first within each page. Videos no longer jump to the front (this replaces the "videos first" sort of §20.6 in TECHNICAL_REFERENCE).
+  * **"All" searches** have their own path and no longer use the interest-feed one.
+  * Searches made outside the search window send the same requests as before.
+* **Hidden from search results.**
+  * Blocked creators and banned channels, as before.
+  * Anything the user votes down (downvote, slop, vomit, clown, NoSlop), from now on. The keys are stored in the app setting `downvoted_items` (newest 3,000 kept). Downvoted items also stay out of the Videos, Audio, Images and Articles tabs, but still show in History, Liked, Saved and My Content.
+  * Posts from banned nodes.
+* **Logs (C19).** Reddit no longer logs full URLs, which carried the search terms. YouTube no longer logs response bodies.
+* **Known gap.** Downvotes made before this round were stored only as swipes, so they cannot be hidden.
+
+## Completed Changes (2026-10-13) — Round E4: Reactions and Votes as the Post's Identity, Share Permanent Identity, GROUP_QUERY Sender (v0.7.0-alpha)
+
+Closes two D04 leftovers and a group catch-up failure seen on device after E2. Unit tests: `IdentityLeftoversE4Test` (new). App built and installed; tests pass.
+
+* **Reactions and votes (D04 leftover).**
+  * **Cause.** Reactions and votes on posts and comments were always made by the personal identity. Relays carried them to creator contacts, which linked the two identities.
+  * **Fix.** A reaction or vote is made by the identity that comments on that post (`IdentityRouter.forPostAuthor`): the creator identity on our own creator posts and on posts by peers who know us as a creator, the personal identity otherwise. Taking one back always goes out from the identity that made it, including reactions made before this round.
+* **"Share Permanent Identity" in a temporary chat (D04 leftover).**
+  * **Cause.** The request was sent as the secondary identity, because the contact was bound to it.
+  * **Fix.** The request now comes from the personal identity. The contact stays bound to the secondary identity, so the temporary chat keeps working, until they answer. Only the answer to that request's nonce moves the contact to the personal identity and makes it permanent (`MeshSocialRepository.completeMainIdentityShare`; the nonce is kept in `main_share_nonce_<key>`). While the request is pending, it is probed from the personal identity too.
+* **Group catch-up was refused (G1, after E2).**
+  * **Cause.** `GossipService.broadcast` re-stamped the sender of every group packet per peer, while the `GROUP_QUERY` payload kept naming the original requester. Since E2 a query is answered only when the requester is the sender, so peers that knew our other identity refused it.
+  * **Fix.** `GROUP_QUERY` takes the per-identity route of other broadcasts (`outboundFor`): sent unchanged, as a relay that keeps its sender, or not at all.
+* **Still open from D04:** Hub relaying (a linked Hub relays on its own terms).
+
+## Completed Changes (2026-10-13) — Rounds E2b and E3: Release-Build JSON Reads, Streaming NSG2 Backups (v0.7.0-alpha)
+
+Closes C07 and C06 (D12). Unit tests: `BackupArchiveFormatE3Test`, `BackupNsg2E3Test`, `PreferencesRepositoryE2bTest`, `GroupChatParsingE2bTest` (new); `CodeHygieneArchitectureTest`, `BackupImportResultD09Test`, `BackupWordCloudFormsTest`, `WordCloudRuleTest` (updated). App built and installed; tests pass. **Backup export and restore have not been checked on a device yet.**
+
+* **E2b: settings that release builds never read.**
+  * **Cause.** In R8 full mode, `-keepattributes Signature` only applies to kept classes, so an anonymous `TypeToken` subclass lost its type argument and threw at run time. In release builds, saved categories, genres, keywords, banned nodes, and group bans and member names were never read back.
+  * **Fix.** These values are parsed through array classes or `JsonObject` (`PreferencesRepository`, `GroupChat.parseGroupMemberHandles` / `parseGroupBannedMembers`). Gson's recommended `TypeToken` keep rules are added for libraries. `CodeHygieneArchitectureTest` now fails if app code uses `TypeToken` again.
+  * **Logs (C19).** Invidious search, channel-search and resolve request labels no longer carry search terms or video ids. The hygiene test forbids that too.
+* **E3: backups are "NSG2" (C07, C06).**
+  * **Before.** "NSG1" encrypted the whole file with one AES-256-GCM stream under the first 32 bytes of the Word Cloud seed (the same seed the identity keys come from). A plaintext zip was written to disk on export and on restore, and the group messages went to a plaintext file.
+  * **Format** (`data/BackupArchiveFormat.kt`):
+    * header = `"NSG2"` | version (1) | salt (16) | nonce prefix (7);
+    * key = HKDF-SHA256 of the Word Cloud seed, with the archive's salt and the info `noslop-backup-v2`, so every archive has its own key and the key is never the raw seed;
+    * body = the chunk records of the creator identity file (NSC1, D10d): AES-256-GCM over at most 1 MiB each, the chunk number and a last-chunk flag in the nonce, the header as associated data.
+  * **Streaming.** The zip is encrypted as it is written and decrypted as it is read, so no plaintext backup, zip or group-message file is written to disk on export or restore. Each chunk is authenticated before its bytes are used.
+  * **Refused before anything changes:** a truncated, reordered, modified or extended archive, and an export that failed part way.
+  * **Older backups.** NSG1 and pre-NSG1 CBC backups still restore; a CBC backup only after the user confirms, because it is not authenticated. `secureDelete()` (claimed in 2026-10-06, never written) is not needed any more.
+  * Tests that read exports as NSG1 now go through `BackupArchiveTestSupport`.
+
+## Completed Changes (2026-10-13) — Round E2: Envelope Signature on Every Packet, ANNOUNCE_PEER v2, GROUP_QUERY for Members Only (v0.7.0-alpha)
+
+Closes C09 and S2 (D12), and most of G1, found while tracing C09. **Hard protocol break** (owner decision): nodes before E2 can no longer talk to E2 nodes. Unit tests: `EnvelopeAuthTest`, `AnnouncePeerAndGroupQueryE2Test` (new); `HandshakeReplyPathTest`, `MeshPacketVerifierTest`, `WireProtocolTest` (extended). App built and installed; tests pass.
+
+* **Envelope signature (C09).**
+  * **Cause.** `sender_id` was taken on trust. Anyone who could reach an onion could claim to be one of its contacts for the packet types with no signature of their own (`TYPING`, `READ_RECEIPT`, `SYNC_REQUEST`, `INVENTORY_SYNC_REQUEST`, `DM_SYNC_REQUEST`, `GROUP_QUERY`, `MEDIA_TRANSFER_ACK`). The firewall, the rate limits and the cooldown reset all trusted it.
+  * **Fix** (`mesh/EnvelopeAuth.kt`). Every packet carries `env_v`, `env_ts` and `env_sig`: an Ed25519 signature by the identity named in `sender_id` over the packet id, type, sender, target, inner signature, envelope time and a SHA-256 of the payload. Only `hops` is left out, because relays change it.
+  * **Sending.** `MeshTransport` signs every packet as the identity that sends it. A relay that keeps the original sender keeps that sender's envelope. A packet that cannot be signed is not sent.
+  * **Receiving.** On the listener and on the handshake reply path, a packet that is unsigned, invalid, more than 1 hour from our clock, or a replay is dropped before any handler runs.
+* **ANNOUNCE_PEER v2 (S2).**
+  * **Cause.** The signature covered only the author and the time, so a relay could replace the onion address in a fresh announce, and receivers stored it.
+  * **Fix.** The signature now covers the onion address (`CryptoService.canonicalAnnouncePeerV2`, label `noslop-announce-v2`); v1 announces are refused. Only an onion address derived from the sender's key is stored (`CryptoService.isOnionOf`).
+* **GROUP_QUERY for members only (G1).**
+  * **Cause.** The answer is the whole group record (member keys, names, onion addresses). Groups that allow member invites answered anyone who knew the group id, former members included.
+  * **Fix** (`groupQueryRefusal`). A query is answered only for the authenticated sender, when it is a member or the admin, is not banned, and is also the requester named in the query. The answer goes to the sender's stored onion address; the requester's address is no longer used.
+  * **Still open** (found in the docs round, see Known Gaps): when the sender has no stored onion address, the answer is still broadcast, which sends the group record to all trusted contacts as well as to group members.
+
+## Completed Changes (2026-10-13) — Round E1: Smaller Items from D11 (v0.7.0-alpha)
+
+Closes D11, apart from the Media3 upgrade (E5). Released together with E2 (commit `c40654e`). Unit tests: `LoggerRedactTest`, `CodeHygieneArchitectureTest` (new); `MeshSocialRepositoryTest` (extended). App built and installed; tests pass.
+
+* **"Open in Tor Browser" never appeared.** On API 30 and newer, the app cannot see another package without a `<queries>` entry. The manifest now lists `org.torproject.torbrowser` and `org.torproject.torbrowser_alpha`. The button opens whichever is installed; with only the alpha installed, it used to target the stable package and do nothing. It never falls back to the default browser, which would leave Tor.
+* **Search terms and video ids in logs (C19).** About 20 INFO/WARN/ERROR logs carried them. Release logs now show `Logger.redact(value)` instead: an 8-character tag and the length, the same within one run. Debug builds that allow sensitive logs keep the value.
+* **DMs to a contact without an encryption key.** `sendDirectMessage` used the contact's Ed25519 key in place of a missing X25519 key, so the contact could never decrypt the message. Nothing is stored or sent now, and the user sees "Message not sent: this contact's encryption key is missing. Ask them to reconnect."
+* **Coroutine scopes (C25).** Fire-and-forget `CoroutineScope(Dispatchers…)` calls use `AppScopes`. Scopes owned by a class keep their owner and gain a `SupervisorJob` and the logging exception handler, which now logs the stack trace too.
+* **Silent catches.** Catches that hid a real failure now log it. Those deliberately kept silent (cleanup, best-effort parsing, expected failures) are listed per file in `CodeHygieneArchitectureTest`, which fails on any new one.
+* **Stale comment.** The Invidious mention in `MeshPacketVerifier` (C05 leftover) is gone.
+* **Already done before this round:** the two substring membership checks (R3), and the update-certificate check, which logs a WARN when certificates cannot be read.
+
 ## Completed Changes (2026-10-13) — Round D10e: Creator Identity Import on the Studio Page, Settings Tab Order (v0.7.0-alpha)
 
 Follow-up to D10d after device testing. Unit tests: `CreatorIdentityArchiveD10dTest` (updated). Not yet verified on device.
@@ -2038,26 +2178,26 @@ same-device backup export/import. Multi-device testing is next.
 | **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Resolved** — bounds ✔; deny-by-default ACL (D02, Round B); relay removed (D03); `accessKey` deliberately not used | `MediaManagerSecurityTest`, `MediaChunkWindowTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
 | **C04** | P0 | Article WebView Tor leak elimination & external browser gating | **Resolved** | `TorLeakArchitectureTest` |
 | **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
-| **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Partial** — internal staging ✔; plaintext zip still written; no `secureDelete()` exists (D10/D12) | `BackupManagerTest` |
-| **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Open** — still NSG1 (whole-file GCM, `seed[0:32]` key); NSG2 is planned in D12 (corrected 2026-10-11; was listed as Resolved) | — |
+| **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Resolved** with E3 (2026-10-13; backup and restore not yet checked on device) — NSG2 encrypts the zip as it is written and decrypts it as it is read, so no plaintext zip or group-message file is written on export or restore; `secureDelete()` is not needed and does not exist | `BackupNsg2E3Test`, `BackupArchiveFormatE3Test` |
+| **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** with E3 (2026-10-13; not yet checked on device) — NSG2: 1 MiB AES-256-GCM chunks (chunk number and last flag in the nonce, header as associated data), a per-archive HKDF-SHA256 key instead of `seed[0:32]`; truncated, reordered, modified or extended archives refused before anything changes; NSG1 and confirmed CBC backups still restore | `BackupArchiveFormatE3Test`, `BackupNsg2E3Test` |
 | **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** with D05 (2026-10-10) — v1 latched per key, ACK has its own AAD label | `CryptoServiceRobolectricTest`, `DmProtocolD05Test` |
-| **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** | `GossipServiceTest` |
+| **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** — hops capped; membership checks parse the list (R3); envelope signature on every packet (E2, 2026-10-13; hard protocol break by owner decision): Ed25519 by `sender_id` over everything but `hops`, 1-hour clock window, replay guard | `GossipServiceTest`, `EnvelopeAuthTest`, `HandshakeReplyPathTest` |
 | **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** with D04 (Round C, 2026-10-09) — see D04 | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
 | **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** (Rounds D10/D10b, 2026-10-11; not yet device-verified) — on the contact card and the ID card; verified in person by camera scan plus approval; check code; key changes applied with a notice | `SafetyFingerprintD10Test`, `ContactVerificationD10bTest` |
 | **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
 | **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
 | **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
 | **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** — X25519 public key also reconciled; mismatch reported as recovery-required (D09, 2026-10-10) | `BackupManagerTest`, `BackupImportResultD09Test` |
-| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** — the test cited on 2026-10-06 (IdentityRepositoryTest) never existed | — |
+| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** — the test cited on 2026-10-06 (IdentityRepositoryTest) never existed. Decision (owner, 2026-10-13): kept as it is, with the red warning banner; no passphrase option | — |
 | **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** with D08 (2026-10-10) — v2 binding via live, sync and re-issue; unsigned digests never used; "Unverified media" label since Round D10 (2026-10-11) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test` |
 | **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** — ACK sent off the inbound path (R1); outbox expiry → FAILED with retry, group legs not held for ACKs (R3) | `CryptoServiceRobolectricTest`, `WireProtocolTest`, `OutboxExpiryTest` |
-| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Implemented (untested)** — ~20 logs still carry search terms / bare IDs (D11); the test cited on 2026-10-06 (LoggerTest) never existed | — |
+| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Resolved** (E1, E2b, E5s, E5s2; 2026-10-13) — search terms and video ids redacted in release logs (`Logger.redact`), request labels never carry them, Reddit, YouTube, Invidious and Jamendo logs fixed. The test cited on 2026-10-06 (LoggerTest) never existed | `LoggerRedactTest`, `CodeHygieneArchitectureTest`, `SearchPagingE5sTest` |
 | **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** — the test cited on 2026-10-06 (JamendoApiClientTest) never existed | — |
 | **C21** | P2 | Respected NXDOMAIN in cascading DNS (DoH opt-in only) | **Resolved** | `TorLeakArchitectureTest` |
 | **C22** | P2 | Click-to-load prompts for remote GIFs & retired cleartext GROUP_MESSAGE | **Resolved** | `TorLeakArchitectureTest` |
 | **C23** | P2 | Translation key parity (`content_en.json`), pre-install APK cert verification, docs sync | **Resolved** | `TranslationParityTest` |
-| **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Partial** — jtorctl/netcipher pruned, OkHttp rules narrowed; the Bouncy Castle keep-all rule is unchanged (corrected 2026-10-11) | — |
-| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** — the unused `IdentityViewModel` copy was deleted (R6b, 2026-10-11); the account code lives in `NoSlopViewModel` | — |
+| **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Resolved** (E5, 2026-10-13; playback checked on device; minified release not yet checked, see `docs/RELEASE_SMOKE_TEST.md`) — jtorctl/netcipher pruned, OkHttp rules narrowed; the Bouncy Castle keep-all rule narrowed to its JCA provider packages; Media3 1.3.1 → 1.11.1 | `ReleaseBuildRulesE5Test`, `AdaptiveTorLoadControlE5Test` |
+| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** — the unused `IdentityViewModel` copy was deleted (R6b, 2026-10-11); the account code lives in `NoSlopViewModel`; ad-hoc coroutine scopes moved to `AppScopes` (E1, 2026-10-13) | `CodeHygieneArchitectureTest` |
 | **C26** | P2 | Canonical presence-encoded signing formats (`ABSENT` / `CLEAR` / `SET:`) | **Resolved** | `GroupMessageSecurityTest` |
 | **W01** | P0 | Synchronized Feed sync cancellation deadlock fix | **Resolved** | `FeedRepositoryTest` |
 | **W02** | P0 | Eliminated legacy 4-field GROUP_UPDATE bypass | **Resolved** | `GroupMessageSecurityTest` |
@@ -2068,22 +2208,22 @@ same-device backup export/import. Multi-device testing is next.
 | **W07** | P1 | Content-matching signature upgrades on equal timestamps | **Resolved** — avatar and recorded digest also compared since D08 (2026-10-10) | `PostPacketHandlerTest`, `PostDigestBindingD08Test` |
 | **W08** | P1 | Asynchronous recovery StateFlow & runBlocking elimination | **Implemented (untested)** | `OnboardingScreen` is a composable, not a test |
 
-### Review round 2 (D01–D12) and git-history regressions — status 2026-10-08
+### Review round 2 (D01–D12) and git-history regressions — status 2026-10-13
 
 | Finding ID | Severity | Description | Status | Validation / Test Suite |
 |---|---|---|---|---|
 | **D01** | P1 | Startup "heal" granted trust without consent; one trust rule (`relationship`, `Peer.isFriend`) | **Resolved** | `PeerTrustInvariantTest`, `Migration18To19Test` |
 | **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Resolved** (Round B) — index-only, deny by default; `accessKey` deliberately not issued (see TECHNICAL_REFERENCE §6.1.1) | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
 | **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Resolved** (Round B) — relay removed; one-hop recovery behind the ACL | `MediaAccessRoundBTest` |
-| **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Resolved** (Round C, 2026-10-09; follow-ups D10c–D10e, 2026-10-11/13, device-tested) — `IdentityRouter`, `outboundFor`, sync exclusion; post identity follows privacy, attachments name the sending identity (D10c); one profile by default with Studio overrides (user decision), creator identity backup/import/restore, burn warnings (D10d); burned or replaced identity's contacts forgotten (D10e). Still open: reactions/votes as the creator identity, Hub relaying, "Share Permanent Identity" in a temporary chat sends as the secondary identity | `CreatorIdentityCaptureTest`, `IdentityRoutingTest`, `CreatorPostIdentityD10cTest`, `CreatorIdentityArchiveD10dTest` |
+| **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Resolved** (Round C, 2026-10-09; follow-ups D10c–D10e, 2026-10-11/13, device-tested; E4, 2026-10-13) — `IdentityRouter`, `outboundFor`, sync exclusion; post identity follows privacy, attachments name the sending identity (D10c); one profile by default with Studio overrides (user decision), creator identity backup/import/restore, burn warnings (D10d); burned or replaced identity's contacts forgotten (D10e); reactions and votes made by the post's identity, "Share Permanent Identity" asks from the personal identity (E4). Still open: Hub relaying | `CreatorIdentityCaptureTest`, `IdentityRoutingTest`, `CreatorPostIdentityD10cTest`, `CreatorIdentityArchiveD10dTest`, `IdentityLeftoversE4Test` |
 | **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Resolved** (2026-10-10; not yet device-verified) — outbox expiry + FAILED/retry (R3); v1 latch, ACK domain label + "ACK" check (Round D05). "Sent final for v1 peers" deliberately not done (see Round D05) | `OutboxExpiryTest`, `DmProtocolD05Test` |
 | **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
 | **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
 | **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "Unverified media" label added in Round D10 (2026-10-11) | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test`, `SafetyFingerprintD10Test` |
 | **D09** | P2 | Cross-device restore mismatch reported after commit | **Resolved** (2026-10-10; not yet device-verified) — typed `ImportResult`, pre-commit identity plan, restart into recovery, X25519 reconciliation | `BackupImportResultD09Test` |
 | **D10** | P1 | Status document claims tests/code that don't exist | **Resolved** (Rounds D10/D10b, 2026-10-11; not yet device-verified) — claims corrected and checked by a test, `IdentityViewModel` deleted (R6b), fingerprint UI, verification by camera scan (D10b, replaced "Mark verified"), automatic key changes with a notice, 8-character Argon2id tags, per-language translation report | `StatusDocCitationTest`, `SafetyFingerprintD10Test`, `ContactVerificationD10bTest`, `TranslationParityTest` |
-| **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Open** (one substring membership check fixed in R3) | — |
-| **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Open** | — |
+| **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Resolved** (E1, 2026-10-13; Media3 in E5) — Tor Browser `<queries>`, redacted log terms, AppScopes, logged catches, no Ed25519 key in place of a missing X25519 key; substring membership (R3) and the certificate WARN were already done | `CodeHygieneArchitectureTest`, `LoggerRedactTest`, `MeshSocialRepositoryTest`, `ReleaseBuildRulesE5Test` |
+| **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Resolved** except C27 — C07 and C06 (E3), C09 (E2), release smoke-test checklist (E5). C27 persistent per-peer connections: deferred (owner, 2026-10-13) | `BackupNsg2E3Test`, `EnvelopeAuthTest` |
 | **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |
 | **QR** | — | Camera QR frames never decoded (row padding / pixel stride) | **Resolved** | `QrFrameDecodeTest` |
 | **KB** | — | Keyboard did not open in DMs/comments (`6f6dffe`) | **Resolved** (device-verified) | `GifEditTextTest` |
@@ -2094,11 +2234,14 @@ same-device backup export/import. Multi-device testing is next.
 | **R3b, R3c** | — | Group media requester identity; "You (admin)" row; group attachment origin; sender-onion download; no discoverable announce for group media | **Resolved** (device-verified) | `GroupLifecycleRestoreTest` |
 | **R7d–R7f** | — | Invitee bootstrap; reinstall recovery; update freshness gate | **Reviewed, no change** (see 2026-10-08 R3 entry) | — |
 | **R6b, R6c** | — | Non-contact media replies (signed requests, derived reply onion); silent media drops; media flood | **Resolved** (Round B) | `MediaAccessRoundBTest` |
-| **R4d** | — | Handshake budget | **Open** | — |
-| **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Open** | — |
+| **R4d** | — | Handshake budget | **Deferred** (owner, 2026-10-13) | — |
+| **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Resolved** (E2, 2026-10-13) — v2 signature covers the onion, v1 refused; only a key-derived onion is stored | `AnnouncePeerAndGroupQueryE2Test` |
 | **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
 | **IU1** | — | `IDENTITY_UPDATE` signed with `encodeForSigning` but verified only in pipe form (handler and `MeshPacketVerifier`); never accepted (2026-10-09) | **Resolved** (not yet device-verified) | `IdentityRoutingTest`, `MeshPacketVerifierTest` |
 | **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `OnionAddressUpdateTest` |
+| **G1** | — | `GROUP_QUERY` answered to anyone who knew a member-invite group's id; sender re-stamped per peer so members refused our queries (2026-10-13) | **Partial** (E2, E4) — members and the admin only, requester = sender; `GROUP_QUERY` keeps its sender. Still open: the answer is broadcast to all trusted contacts when the sender has no stored onion | `AnnouncePeerAndGroupQueryE2Test`, `IdentityLeftoversE4Test` |
+| **RB1** | — | Release builds never read saved categories, genres, keywords, banned nodes or group bans (Gson `TypeToken` under R8 full mode) (2026-10-13) | **Resolved** (E2b) | `PreferencesRepositoryE2bTest`, `GroupChatParsingE2bTest`, `CodeHygieneArchitectureTest` |
+| **SR1** | — | Search: random extra words instead of paging, "All" limited to this year, Invidious to the last month, videos sorted first, downvoted items and banned nodes shown (2026-10-13) | **Resolved** (E5s, E5s2; device-checked) — paged newest first; older downvotes not hidden; quality to improve later | `SearchPagingE5sTest`, `SearchPagingE5s2Test` |
 
 ## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
 
@@ -3400,3 +3543,14 @@ The following tasks have been aggregated from all historical gap analyses, audit
 *   Add more no-auth image and video sources.
 *   Enhance WebView with ad-blocking or reader mode if possible.
 *   Further optimize preloading for diverse media types.
+
+### 7. Known Gaps after the Review Round 2 Follow-up (2026-10-13)
+*   **Hub-pulled packets skip the envelope check** (C09): Hub pulls and Hub web-UI DMs never cross the mesh socket, where `EnvelopeAuth` is applied.
+*   **The Hub's onion address is not checked against its key** (S2 covers peers only).
+*   **Clocks must agree to within 1 hour**, or packets are dropped as stale (`EnvelopeAuth.MAX_SKEW_MS`).
+*   **A `GROUP_SYNC` answer to a member with no stored onion is broadcast** to all trusted contacts and group members, so non-member friends receive the group record (G1 leftover; found 2026-10-13, not fixed).
+*   **Member-invited users get group catch-up only from members whose copy already lists them** (G1).
+*   **Downvotes made before the search round** count only as swipes and are not hidden from search.
+*   **Search quality**: works, to be improved later.
+*   **Deferred by the owner:** C27 (persistent per-peer connections) and R4d (handshake budget).
+*   **Not yet checked:** backup export and restore on a device (E3); a minified release build (`docs/RELEASE_SMOKE_TEST.md`, E5).

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.6.9--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.0--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
@@ -50,6 +50,7 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 * 🚫 **1-Tap Channel Banning** — React with 🚫 to immediately blacklist content creators and purge their slides from your feed.
 * 📅 **Content Farm Cut-Off Filter** — Exclude automated channels created after a set date (e.g. drop post-2022 AI content farms).
 * 🔖 **Saved & History Feeds** — Bookmark items with 1 tap; browse your full chronological history with instant full-text search.
+* 🔎 **Search That Keeps Going** — Results depend only on your search terms and filters. They're listed newest first and keep loading as you swipe. Blocked creators, banned channels and nodes, and anything you voted down stay hidden.
 * 🧘 **Mindful Exit & Break Reminders** — User-controlled wellbeing prompts injected at customizable intervals (time spent or slide count) with 1-tap exit and continue controls.
 
 ---
@@ -60,10 +61,11 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 * 📬 **End-to-End Encrypted DMs** — Secure messaging via directional X25519 key agreement and ChaCha20-Poly1305 AEAD (v2) with AAD binding and delivery acknowledgments.
 * 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
-* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish public broadcasts under a separate key and onion address; friends-only posts stay with the personal identity. The creator identity shows your profile unless you set a different name, bio or picture on the Studio page. Back it up to a passphrase-protected file, and import or restore it on another node with its followers, posts and media. Creator contacts are never sent the personal key or onion address. Reactions and votes are still made by the personal identity, and a linked Hub relays on its own terms.
+* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish public broadcasts under a separate key and onion address; friends-only posts stay with the personal identity. The creator identity shows your profile unless you set a different name, bio or picture on the Studio page. Back it up to a passphrase-protected file, and import or restore it on another node with its followers, posts and media. Creator contacts are never sent the personal key or onion address. Reactions and votes on a creator post are made by the creator identity, and "Share Permanent Identity" in a temporary chat asks from your personal identity. A linked Hub relays on its own terms.
 * 🏠 **Home HUBs & Admin AI** — Link or auto-deploy an always-on home server over SSH as your sovereign master database and private LLM assistant.
 * 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post.
 * 🛡️ **Gossip Firewall & Mesh Filters** — 6-hop flood routing with LRU deduplication, packet verification, and granular toggles for incoming and outgoing media types.
+* ✍️ **Every Packet Signed** — Each packet carries an Ed25519 envelope signature by its sender, so nobody can pose as one of your contacts. Unsigned, forged, replayed or badly out-of-date packets are dropped, so device clocks must be within an hour. Versions before v0.7.0-alpha can't connect to this one: both sides must update.
 
 ---
 
@@ -72,7 +74,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🔐 **Ed25519 + X25519 Keys** — Generated locally using Bouncy Castle pure lightweight cryptographic engine.
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts and for following discovered creators. One router picks the identity for every packet.
-* ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
+* ☁️ **Word Cloud Backup** — 12-word recovery mnemonic, and a backup encrypted with AES-256-GCM in authenticated chunks, under its own key derived from the Word Cloud. It's encrypted as it's written and decrypted as it's read, so no unencrypted copy ever touches the disk, and a damaged or altered file is refused before anything changes. Older backups still restore.
 * 🪪 **Verified in Person** — 8-character tags (Argon2id) after every name, and a check code on every ID card. Scan a friend's QR code with your camera, they approve after comparing name and check code, and you both show as verified in person. Codes from pictures or pasted IDs come with a warning, and so do new contacts whose name you already know. If a contact's encryption key changes, it's applied and the chat says so.
 
 ---

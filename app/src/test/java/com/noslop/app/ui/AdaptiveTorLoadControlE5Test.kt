@@ -1,6 +1,7 @@
 package com.noslop.app.ui
 
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.analytics.PlayerId
@@ -30,10 +31,35 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class AdaptiveTorLoadControlE5Test {
 
+    /**
+     * One streamed item. DefaultLoadControl looks the period up in the timeline (to tell local files
+     * from streams), so the timeline has to contain it, as a player's always does.
+     */
+    private class OneStreamTimeline(private val periodUid: Any) : Timeline() {
+        override fun getWindowCount() = 1
+        override fun getWindow(windowIndex: Int, window: Window, defaultPositionProjectionUs: Long): Window {
+            window.mediaItem = MediaItem.fromUri("https://example.org/video.mp4")
+            window.firstPeriodIndex = 0
+            window.lastPeriodIndex = 0
+            return window
+        }
+        override fun getPeriodCount() = 1
+        override fun getPeriod(periodIndex: Int, period: Period, setIds: Boolean): Period {
+            period.uid = periodUid
+            period.id = periodUid
+            period.windowIndex = 0
+            return period
+        }
+        override fun getIndexOfPeriod(uid: Any): Int = if (uid == periodUid) 0 else C.INDEX_UNSET
+        override fun getUidOfPeriod(periodIndex: Int): Any = periodUid
+    }
+
+    private val periodUid = Any()
+
     private fun parameters(playerId: PlayerId) = LoadControl.Parameters(
         playerId,
-        Timeline.EMPTY,
-        MediaSource.MediaPeriodId(Any()),
+        OneStreamTimeline(periodUid),
+        MediaSource.MediaPeriodId(periodUid),
         /* playbackPositionUs = */ 0L,
         /* bufferedDurationUs = */ 0L,
         /* playbackSpeed = */ 1f,

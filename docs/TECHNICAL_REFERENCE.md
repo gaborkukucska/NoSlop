@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.6.9-alpha`, Room schema version 19 — see §10, compileSdk/targetSdk
+versionName `0.7.0-alpha`, Room schema version 19 — see §10, compileSdk/targetSdk
 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -418,7 +418,9 @@ The creator (burnable) identity has its own keys and onion address and is never 
 - **Users** (all sends towards a specific peer): handshakes (request, probe, accept: creator handle, bio, avatar), DMs, DM sync answers (now look up the messages we sent *as that identity*, and resend as it), chat reactions, typing, follow, peer removal, inventory sync requests, sync answers, media requester/responder identity, creator posts and edits (creator handle and avatar), comments (`forPostAuthor`), comment edits, and the group member handle for our own keys (`NoSlopRepository.ownHandleFor`).
 - **Sync to a creator contact** (`SyncPacketHandler`, `requestInventorySync`) leaves out everything the personal identity wrote: its posts, comments on them, and its own comments and reactions. The answer's envelope is the routed identity. In creator mode it used to be the creator key for everyone, so friends also dropped the friends-only posts in the answer.
 - **Presence.** The personal `ANNOUNCE_PEER` goes only to contacts of the personal identity. The creator identity sends its own `ANNOUNCE_PEER` (creator contacts never had one before) and, when discoverable, the `ANNOUNCE_DISCOVERABLE` with the creator profile. Both go out from `announceCreatorPresence`, a random 5–50 s after the personal announce, so the two never arrive together.
-- **Not changed:** reactions and votes on posts are still made by the personal identity (the feed's "my reaction" state is keyed to it). `GossipService.outboundFor` keeps them away from creator contacts directly; relays by third parties can still carry them. Group traffic keeps its own identity rules (`groupMemberIdentity`). With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying.
+- **Reactions and votes (E4, 2026-10-13).** Reactions and votes on posts and comments are made by the identity that comments on that post (`forPostAuthor`): the creator identity on our own creator posts and on posts by creator contacts, the personal identity otherwise. Taking one back goes out from the identity that made it (`MeshSocialRepository.ownIdentityWith`), so reactions made by the personal identity before E4 are still removed correctly. Before E4 they were always made by the personal identity, and third-party relays could carry them to creator contacts.
+- **"Share Permanent Identity" (E4).** In a temporary chat (a contact bound to the secondary identity), the request comes from the personal identity (`sendConnectionRequest(..., shareMainIdentity = true)`); its nonce is kept in `main_share_nonce_<key>`. The contact stays bound to the secondary identity until the `USER_HANDSHAKE` answering that nonce arrives; `completeMainIdentityShare` then removes the binding and clears `isTemporary`. A pending request is probed from the personal identity too.
+- **Not changed:** group traffic keeps its own identity rules (`groupMemberIdentity`). With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying (still open from D04).
 - Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`, `CreatorPostIdentityD10cTest`, `CreatorIdentityArchiveD10dTest`).
 
 ### 3.7.2 Creator Identity File (`CreatorIdentityArchive`, D10d/D10e, 2026-10-13)
@@ -435,7 +437,7 @@ The creator identity can be backed up, and restored or moved to another node, on
   - `key` = Argon2id(passphrase, salt, iterations, memory, parallelism 1), 32 bytes.
   - `body` = chunks, each: last flag (1 byte) | length (4) | AES-256-GCM of at most 1 MiB of plaintext. The nonce is the nonce prefix, the chunk number (4) and the last flag; the associated data is the header.
   - The last chunk is always written (it may be empty) and nothing may follow it, so a truncated, reordered, modified or extended file is refused. The plaintext is a zip: `manifest.json`, `contacts.json`, `posts.json`, `media/<media id>`.
-  - Each chunk is authenticated on its own, so a large video never has to fit in memory (the full backup's single GCM stream must be held until its tag is checked).
+  - Each chunk is authenticated on its own, so a large video never has to fit in memory. Since round E3 the full backup uses the same chunk records (NSG2, §17.8).
 - **Restore rules.**
   - Everything is staged and authenticated before anything on the node changes. The burnable-key checks are the full backup's (`IdentityRepository.burnableIdentityProblem`).
   - The restore installs the keys, Studio profile and donation link, and turns creator mode on. It then adds contacts (bound to the creator identity), posts (if not present) and media (marked as our own), and registers the creator onion with Tor.
@@ -469,6 +471,21 @@ checksum word). The mnemonic seeds the PBKDF2-HMAC-SHA512 key used by
   blank lines, drops an unterminated trailing frame, throws
   `FrameTooLargeException` past `MAX_PACKET_CHARS` = 4 M chars). At most 16
   inbound connections are served at once; read timeout 45 s.
+- **Envelope signature (review C09, round E2, 2026-10-13; hard protocol
+  break).** Every packet on the wire carries `env_v`, `env_ts` and `env_sig`
+  (`mesh/EnvelopeAuth.kt`; format in WIRE_PROTOCOL_REFERENCE.md §1.1).
+  Outbound, `prepareForWire` signs with whichever of our identities is the
+  `senderId`; a relay that keeps someone else's sender
+  (`GossipService.preservesOriginalSender`) travels with that sender's own
+  envelope, which stays valid because `hops` is not covered; anything else is
+  not sent. Inbound, the listener and the handshake reply path call
+  `acceptEnvelope` before `handleIncomingPacket`: a packet that is unsigned,
+  of another version, more than `MAX_SKEW_MS` (1 h) from our clock, badly
+  signed, or a replay is dropped. A packet is recorded as processed (replay
+  guard, 20,000 entries, kept for twice the clock window) only after a
+  handler accepted it, so one dropped earlier (firewall, not yet trusted) is
+  judged afresh next time. Packets built inside the app (Hub pulls, Hub web-UI
+  DMs) never cross the socket and are not checked (known gap).
 - **Reply channel (2026-10-07, Round A2)**: every inbound connection gets a
   write-serialised `ReplyChannel = suspend (NetworkPacket) -> Boolean`, passed
   through `NoSlopRepository.handleIncomingPacket(packet, reply)` →
@@ -550,6 +567,8 @@ processed locally by `MeshPacketHandler`):
 - Builds a **new** `NetworkPacket` with:
   - same `id`, `type`, `payload`, `signature`, `targetUserId`
   - `hops = currentHops - 1`
+  - the original envelope fields when the sender is kept (see §4.1, Envelope
+    signature); otherwise MeshTransport signs the new envelope
   - **`senderId` re-stamped to the local node's public key** — this is the
     "sender re-stamping" privacy mechanism: a peer receiving a forwarded
     packet sees *you* as the sender, not the original (possibly
@@ -573,7 +592,10 @@ copy goes through `outboundFor(packet, peerKnowsCreator, mainPub, creatorPub)`:
   `GROUP_*`). `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT`, `FOLLOW`,
   `UNFOLLOW` and `PEER_REMOVED` are never sent across identities;
 - anything else → the envelope names the identity the peer knows.
-Group and friends-only packets keep their existing envelope rule. Before, every
+Group and friends-only packets keep their existing envelope rule, except
+`GROUP_QUERY` (E4, 2026-10-13): it names its requester in the payload, and the
+answering node requires requester = sender (G1, round E2), so it takes the
+`outboundFor` route above instead of being re-stamped per peer. Before, every
 copy was re-stamped per peer, so creator contacts received our personal posts,
 comments, reactions, presence (with the personal onion) and profile from the
 creator node, and friends received creator posts stamped with the personal key.
@@ -1259,32 +1281,41 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | Setting | Value |
 |---|---|
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
-| `compileSdk` / `targetSdk` | 35 |
+| `compileSdk` / `targetSdk` | 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 1 / `0.1.0` |
+| `versionCode` / `versionName` | 70 / `0.7.0-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
-| ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
+| ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true` (R8 full mode). Rules in `app/proguard-rules.pro`: `tor-android`; Bouncy Castle **provider packages only** (`org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**`, `org.bouncycastle.pqc.jcajce.provider.**`, plus `-dontwarn org.bouncycastle.**`; round E5 — the app calls the lightweight API directly, so R8 keeps what it uses, and nothing asks the provider for an algorithm by name); Gson's `TypeToken` rules (E2b; app code uses no `TypeToken`); Room, mesh packets and settings models. Unit tests run the unshrunk debug build, so check a release build with [RELEASE_SMOKE_TEST.md](RELEASE_SMOKE_TEST.md) after any rule or dependency change. `ReleaseBuildRulesE5Test` fails if the Bouncy Castle keep-all rule returns. |
 | `GITHUB_PAT` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_PAT`. When non-blank, enables in-app GitHub issue submission via REST API (`POST /repos/gaborkukucska/NoSlop/issues`). When blank, the Submit button in `ReportIssueScreen` is disabled. |
 | `GITHUB_ASSIGNEE` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_ASSIGNEE`. When non-blank, auto-assigns the specified GitHub user to all submitted issues. |
 
 ### Key Dependencies
 
-- **Tor**: `info.guardianproject:tor-android:0.4.8.16`,
-  `info.guardianproject:jtorctl:0.4.5.7`,
-  `info.guardianproject.netcipher:netcipher:2.1.0`
-- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`, `com.goterl:lazysodium-android:5.1.0`, `net.java.dev.jna:jna:5.13.0`
+- **Tor**: `info.guardianproject:tor-android:0.4.8.16` (jtorctl and netcipher
+  were removed, C24; control goes through `TorControlChannel`, §17.1)
+- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1` (Lazysodium and JNA were removed, C13)
 - **Networking**: `okhttp:4.10.0` (`gradle/libs.versions.toml`),
   `okhttp-dnsoverhttps:4.12.0` (hardcoded in `app/build.gradle.kts`) — this is
   a genuine, currently-real minor version mismatch between the two OkHttp
   artifacts (confirmed by reading both files directly), `gson:2.10.1`
-- **Media**: `androidx.media3` 1.3.1 (`exoplayer`, `exoplayer-hls`,
-  `exoplayer-dash`, `ui`, `datasource-okhttp`)
+- **Media**: `androidx.media3` **1.11.1** (`exoplayer`, `transformer`,
+  `effect`, `exoplayer-hls`, `exoplayer-dash`, `ui`, `datasource-okhttp`; all
+  seven on one version, round E5). Since 1.4 the player calls the
+  `LoadControl` methods that take a `PlayerId` / `Parameters`, and the old
+  ones throw by default, so `AdaptiveTorLoadControl` (`ui/PreloadManager.kt`)
+  implements the ten methods `DefaultLoadControl` does (`onPrepared`,
+  `onTracksSelected`, `onStopped`, `onReleased`, `getAllocator`,
+  `getBackBufferDurationUs`, `retainBackBufferFromKeyframe`,
+  `shouldContinueLoading`, `shouldStartPlayback`, `shouldContinuePreloading`):
+  lifecycle calls go to both inner controls (preload and on-screen),
+  decisions to the active one; preload keeps no back buffer, on screen 60 s.
+  Media3 1.9+ needs API 23; minSdk is 24. Tested (unit: `AdaptiveTorLoadControlE5Test`, `ReleaseBuildRulesE5Test`).
 - **Security**: `androidx.security.crypto` (alpha, per `libs.versions.toml`)
 - **Persistence**: Room (`runtime`, `ktx`, `ksp` compiler)
-- **QR**: `mlkit barcode-scanning`, `zxing:core`
+- **QR**: `zxing:core` 3.5.3 (ML Kit removed, C12)
 - **Camera**: `androidx.camera.*` (`core`, `camera2`, `lifecycle`, `view`)
 - **Background**: `androidx.work.runtime.ktx`
 - **Testing**: JUnit, MockK, `kotlinx-coroutines-test`, Robolectric
@@ -1409,7 +1440,7 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 ### 15.3 Identity Key Isolation & Fallback Storage Hardening
 - **Primary Storage**: Private Ed25519 signing keys, X25519 encryption keys, and BIP39 mnemonics are stored in `EncryptedSharedPreferences` (AES-256-GCM encrypted, MasterKey in Android Keystore).
 - **Hardened Fallback Storage**: On devices where Android Keystore fails (e.g. custom ROMs or broken OEM Keystore implementations), `IdentityRepository.kt` encrypts private key strings and mnemonics in memory with `AES-256-GCM` (`secureFallbackWrite` / `secureFallbackRead` using hardware-derived secret key) before writing to `noslop_identity_fallback` `SharedPreferences`.
-- **Authenticated Backup Encryption**: `BackupManager.kt` exports database and preferences using `AES-256-GCM` with a 4-byte `"NSG1"` magic header, a 12-byte random IV, and a 128-bit AEAD tag. On import, `BackupManager.kt` automatically detects `"NSG1"` for GCM decryption while maintaining backward compatibility for legacy `AES-256-CBC` archives.
+- **Authenticated Backup Encryption**: since round E3 (2026-10-13) backups are written as `"NSG2"`: chunked AES-256-GCM under a per-archive HKDF-SHA256 key, encrypted as written and decrypted as read, so no plaintext copy reaches disk (§17.8). `"NSG1"` (whole-file GCM) and legacy `AES-256-CBC` archives still restore, CBC only after the user confirms.
 
 ### 15.4 Mesh Transport & Peer Failure Cooldown
 - **Exponential Cooldown Backoff**: `GossipService.kt` puts a peer's onion in cooldown after 3 send failures, each within `PEER_FAILURE_WINDOW_MS` (5 min) of the previous one: 30 s, then 60 s, then 120 s maximum (`cooldownFor`, `PEER_MAX_COOLDOWN_MS`). Failures further apart never accumulate. A successful send, or any authenticated inbound packet from that peer (`processIncoming` → `recordSendSuccess` on the sender's stored onion), clears the cooldown. Only background presence is skipped during cooldown (§4.1). History: commits `679a5a1`/`fd958b9` had stretched the failure memory to 2 h and `4579860` removed the inbound clear, leaving peers cooled down for hours; restored 2026-10-07 (`PeerCooldownRestoreTest`). Tests inject time through `GossipService.clock`.
@@ -2119,13 +2150,37 @@ case before comparing. Burnable private keys go through `secureFallbackWrite`.
 
 ### 17.8 Backup — `NOSLOP_BACKUP_STREAMING_V1`
 
-Both directions stream through a 64KB buffer. GCM `update()` emits plaintext
-that is not yet authenticated, so the decrypted archive is written to a temp
-file and unzipped only after `doFinal()` returns without throwing; a tampered
-archive is deleted before a single entry is read. Zip entry names are validated
-as plain file names and every destination is confirmed inside its intended
-parent by canonical path. The plaintext temp archive is deleted in a `finally`,
-success or failure.
+**NSG2 (review C07/C06, round E3, 2026-10-13).** The container is
+`data/BackupArchiveFormat.kt` (integers big-endian):
+
+- `header` = `"NSG2"` | version (1 byte, 1) | salt (16) | nonce prefix (7), 28 bytes.
+- `key` = HKDF-SHA256(`MnemonicGenerator.deriveSeed`(canonical Word Cloud), salt,
+  info `"noslop-backup-v2"`), 32 bytes. Each archive has its own salt, so no two
+  archives share a key, and the key is never the raw seed (NSG1 used
+  `seed[0:32]`, the seed the identity keys come from).
+- `body` = the chunk records of the creator identity file (§3.7.2): last flag
+  (1) | length (4) | AES-256-GCM of at most 1 MiB of the zip; nonce = nonce
+  prefix | chunk number (4) | last flag; associated data = the header. The last
+  chunk is always written and nothing may follow it.
+
+`BackupManager` writes the zip straight into `BackupArchiveFormat`'s stream
+and reads it straight out of the decrypting stream: no plaintext zip, and no
+plaintext group-message file, is written on export or restore. Nothing taken
+from the stream is used until it has been read to its end (`drain`), which is
+where a truncated NSG2 file (and the NSG1 tag, or CBC padding) is checked, so a
+truncated, reordered, modified or extended archive, or an export that failed
+part way, changes nothing. `openForReading` returns `Opened.Readable`,
+`ConfirmLegacy` (CBC, unauthenticated, until the user confirms), `NewerVersion`,
+`WrongWordCloud`, `Damaged` or `TooSmall`. Still read: `"NSG1"` (header `"NSG1"` | IV (12), whole-file
+GCM, key `seed[0:32]`) and pre-NSG1 CBC (header = IV (16), same key), each
+decrypted as it is read with the tag or padding checked at the end. Tests:
+`BackupArchiveFormatE3Test` (the container), `BackupNsg2E3Test` (export and
+restore end to end); test helpers that open exports: `BackupArchiveTestSupport`.
+Before E3, the archive was decrypted to a plaintext temp file, unzipped only
+after `doFinal()`, and deleted in a `finally`.
+
+Zip entry names are validated as plain file names and every destination is
+confirmed inside its intended parent by canonical path.
 
 `preferences.xml` in the archive is sealed by a non-exportable Keystore key.
 `canOpenRestoredIdentity()` probes it after a restore. Since 2026-10-10
@@ -2221,6 +2276,17 @@ Base64 blobs and 64-hex digests in addition to onion addresses.
 
 Note the log export surfaces only the active file, not the rotated `.log.1`.
 
+**User-chosen values (review C19/D11, rounds E1–E5s2, 2026-10-13).** Search
+terms and video ids are logged through `Logger.redact(value)`: in release
+builds an 8-hex tag and the length (`#1a2b3c4d(len 9)`), the same for the same
+value within one run; builds that show sensitive logs keep the value
+(`LoggerRedactTest`). HTTP request labels never carry them, Reddit logs no
+URLs (they contain the query), YouTube logs no response bodies, and Jamendo
+and Invidious log no terms. `CodeHygieneArchitectureTest` fails on a log or
+request label that interpolates a search term or video id, on a coroutine
+scope without `SupervisorJob` and a logging handler, on a silent `catch` not
+on its per-file allow list, and on app code using Gson `TypeToken`.
+
 ### 17.16 R8-Safe Zero-Reflection Dynamic Localization (`NOSLOP_I18N_R8_SAFE_V1`)
 
 In release builds (`assembleRelease`), R8 minification strips generic signatures from anonymous subclasses. `LanguageManager.loadLanguage()` constructed an anonymous `TypeToken<Map<String, String>>() {}`, causing a fatal `RuntimeException: Missing type parameter` on every non-English language load. The exception handler silently caught the error and fell back to reloading English, completely disabling language switching in production builds:
@@ -2291,6 +2357,67 @@ Changelog: PROJECT_STATUS.md (2026-10-08 R3 entry). Mechanism:
 - Not changed, by decision: the `GROUP_UPDATE` freshness gate stays before the
   signer check (R7f). Accepting member updates older than the stored revision
   would let a replayed old leave remove a member who was re-added.
+
+### 17.25 Review Round 2 Follow-up — Rounds E1–E5, E5s, E5s2 (2026-10-13)
+
+Changelog, decisions and known gaps: PROJECT_STATUS.md (2026-10-13 entries).
+Mechanism detail lives in the sections it changed:
+
+- **Envelope signature (C09, E2)** — §4.1 and WIRE_PROTOCOL_REFERENCE.md §1.1.
+- **`ANNOUNCE_PEER` v2 (S2) and `GROUP_QUERY` rules (G1), E2/E4** —
+  WIRE_PROTOCOL_REFERENCE.md §3 and §5.1; the `GROUP_QUERY` sender rule in §4.2.
+- **Reactions, votes and "Share Permanent Identity" (D04 leftovers, E4)** — §3.7.1.
+- **NSG2 backups (C07/C06, E3)** — §17.8.
+- **Release-build JSON reads (E2b).** In R8 full mode an anonymous
+  `TypeToken` subclass loses its type argument. `PreferencesRepository` (saved
+  categories, genres, keywords, banned nodes) and `GroupChat`
+  (`parseGroupMemberHandles`, `parseGroupBannedMembers`) parse through array
+  classes or `JsonObject`; unreadable values fall back to the defaults.
+  `PreferencesRepositoryE2bTest`, `GroupChatParsingE2bTest`.
+- **Logging, scopes, silent catches (C19/C25/D11, E1)** — §17.15.
+- **Tor Browser detection (D11, E1).** `AndroidManifest.xml` `<queries>` lists
+  `org.torproject.torbrowser` and `org.torproject.torbrowser_alpha`
+  (package visibility, API 30+); the article dialog's button (`ui/MediaComponents.kt`) opens whichever is
+  installed and never falls back to an unrestricted intent.
+- **DM without an X25519 key (D11, E1).** `MeshSocialRepository.sendDirectMessage`
+  returns false and stores nothing when the contact's `encPublicKeyB64` is
+  blank; it used to seal to the Ed25519 key. `MeshSocialRepositoryTest`.
+- **Media3 1.11.1 and the Bouncy Castle keep rule (C24, E5)** — §12. Release
+  check: [RELEASE_SMOKE_TEST.md](RELEASE_SMOKE_TEST.md).
+- **Search paging (E5s, E5s2).** A search from the search modal goes through
+  `FeedRepository.searchCustomFeedPage(query, filterMode, cursor, firstPage)`,
+  which calls `PublicApiService.fetchItemsForCategory` with the search's
+  `SearchCursor` (`nextPagesOnly` after the first page). What it finds depends
+  on the query and the modal's filter only, never on the user's categories,
+  genres or keywords. `NoSlopViewModel.fetchNextSearchPage` asks for the next
+  page of the same terms while the user is still swiping (a prefetch), or
+  when the list has run out, instead of searching again with a random extra
+  word. One page at a time per search.
+  - `PublicApiService.SearchCursor` holds one search's place in each source
+    (YouTube continuation token, Invidious page, Reddit `after`, and per-source
+    pages from `feeds/api/SourcePage.kt`). A source is done when it reports the
+    end, has no key, or failed 3 times in a row; a failed request keeps its
+    place. A source page that has not arrived when the fetch's time is up is
+    cancelled, and the same page is asked for next time.
+  - Newest first where the source can sort by date (`SEARCH_NEWEST_FIRST`):
+    YouTube (upload date), Invidious (`sort_by=upload_date`, every date),
+    Reddit (`sort=new`), Hacker News, NewsAPI, the Guardian, the Internet
+    Archive. By relevance: Openverse, Wikimedia, Pexels, NASA, Wikipedia.
+    Podcast Index fills the first page only. NewsAPI stops after 5 pages (its
+    free plan serves 100 results).
+  - Searches made outside the search window (background interest feeds) send
+    the same requests as before; "All" searches have their own category
+    (`userSearchCategory`).
+  - `ui/SearchPaging.kt`: display order (page, then newest first, undated last
+    in a page); paging stops after 3 pages in a row with nothing new
+    (`MAX_EMPTY_PAGES`), after 50 pages (`MAX_PAGES`), or when every source is
+    done; local-only filters (History, Liked, Saved, My Content, Mesh) don't page.
+  - Hidden from search and the content tabs: blocked creators, banned channels,
+    banned nodes' posts, and anything voted down since E5s (keys in the app
+    setting `downvoted_items`, newest 3,000). Voted-down items still show in
+    History, Liked, Saved and My Content. Already-seen items may appear in
+    search. Downvotes made before E5s were stored only as swipes.
+  - Tested (unit: `SearchPagingE5sTest`, `SearchPagingE5s2Test`).
 
 ### 17.22 Protocol Canonicalization, Atomic Post Persistence & Safe Staging (2026-10-04)
 
@@ -2495,7 +2622,7 @@ In `takeRoundRobin()`, sorting priority creator queues strictly by `effectiveDat
 ### 20.6 Search Relevance & Concurrency Unblocking
 - `NoSlopViewModel.searchAndCreateCustomFeed()` runs even when background feed sync is active (`isRefreshingFeeds`).
 - `syncFilterMode()` preserves `activeSearchQuery` during active searches.
-- Search feed sorting prioritizes videos at the top and preserves exact relevance order from the search API (`lastSearchResultIds`), preventing date-disparity from burying videos beneath generic Wikipedia articles.
+- ~~Search feed sorting prioritizes videos at the top and preserves exact relevance order from the search API (`lastSearchResultIds`).~~ **Replaced in the search round (2026-10-13):** results are ordered page by page, newest first within a page, and paged as the user swipes (§17.25).
 - Search results replace the active feed instead of appending to the live feed.
 
 ### 20.8 History Filter Chronological Ordering, 30-Slide Batches & Instant Return
