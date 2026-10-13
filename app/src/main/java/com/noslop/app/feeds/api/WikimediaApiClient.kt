@@ -87,12 +87,20 @@ object WikimediaApiClient {
         query: String,
         sourceId: String = "api-wikimedia-featured",
         limit: Int = 20
-    ): List<FeedItem> {
-        if (query.isBlank()) return fetchFeaturedPictures(sourceId)
+    ): List<FeedItem> = searchImagesPage(query, 1, sourceId, limit).items
+
+    /** E5s2: one page of [searchImages] (pages numbered from 1; Commons pages by result offset). */
+    suspend fun searchImagesPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-wikimedia-featured",
+        limit: Int = 20
+    ): SourcePage {
+        if (query.isBlank()) return SourcePage(fetchFeaturedPictures(sourceId), hasMore = false)
         return try {
             val q = java.net.URLEncoder.encode("$query filetype:bitmap", "UTF-8")
             val url = "https://commons.wikimedia.org/w/api.php?action=query&generator=search" +
-                      "&gsrsearch=$q&gsrnamespace=6&gsrlimit=$limit" +
+                      "&gsrsearch=$q&gsrnamespace=6&gsrlimit=$limit" + (if (page > 1) "&gsroffset=${(page - 1) * limit}" else "") +
                       "&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=" + thumbWidthForQuality() + "&format=json"
 
             val request = Request.Builder()
@@ -103,17 +111,19 @@ object WikimediaApiClient {
             val body = client.newCall(request).execute().use { res ->
                 if (!res.isSuccessful) {
                     Logger.warn(TAG, "Wikimedia search returned ${res.code}")
-                    return emptyList()
+                    return SourcePage.failed()
                 }
                 res.body?.string()
-            } ?: return emptyList()
+            } ?: return SourcePage.failed()
 
-            val items = parsePages(gson.fromJson(body, JsonObject::class.java), sourceId)
-            Logger.info(TAG, "Wikimedia search '${Logger.redact(query)}': ${items.size} items")
-            items
+            val root = gson.fromJson(body, JsonObject::class.java)
+            val items = parsePages(root, sourceId)
+            Logger.info(TAG, "Wikimedia search '${Logger.redact(query)}': ${items.size} items" + pageSuffix(page))
+            // Commons names the offset of the next page in "continue" while there is one.
+            SourcePage(items, hasMore = root.getAsJsonObject("continue")?.has("gsroffset") == true)
         } catch (e: Exception) {
             Logger.error(TAG, "Wikimedia search failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 

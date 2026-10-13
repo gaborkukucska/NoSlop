@@ -28,13 +28,27 @@ object HackerNewsApiClient {
         query: String,
         sourceId: String = "api-hackernews-search",
         limit: Int = 15
-    ): List<FeedItem> {
-        if (query.isBlank()) return emptyList()
+    ): List<FeedItem> = searchStoriesPage(query, 1, newestFirst = false, sourceId = sourceId, limit = limit).items
+
+    /**
+     * E5s2: one page of [searchStories] (pages numbered from 1; Algolia numbers them from 0).
+     * [newestFirst] uses Algolia's search_by_date, which lists matches newest first.
+     */
+    suspend fun searchStoriesPage(
+        query: String,
+        page: Int,
+        newestFirst: Boolean,
+        sourceId: String = "api-hackernews-search",
+        limit: Int = 15
+    ): SourcePage {
+        if (query.isBlank()) return SourcePage.NONE
 
         return try {
             val q = java.net.URLEncoder.encode(query, "UTF-8")
-            val url = "https://hn.algolia.com/api/v1/search?query=$q" +
-                "&tags=story&hitsPerPage=$limit"
+            val endpoint = if (newestFirst) "search_by_date" else "search"
+            val url = "https://hn.algolia.com/api/v1/$endpoint?query=$q" +
+                "&tags=story&hitsPerPage=$limit" +
+                (if (page > 1) "&page=${page - 1}" else "")
 
             val request = Request.Builder()
                 .url(url)
@@ -44,13 +58,13 @@ object HackerNewsApiClient {
             val body = client.newCall(request).execute().use { res ->
                 if (!res.isSuccessful) {
                     Logger.warn(TAG, "Hacker News returned ${res.code}")
-                    return emptyList()
+                    return SourcePage.failed()
                 }
                 res.body?.string()
-            } ?: return emptyList()
+            } ?: return SourcePage.failed()
 
             val root = gson.fromJson(body, JsonObject::class.java)
-            val hits = root.getAsJsonArray("hits") ?: return emptyList()
+            val hits = root.getAsJsonArray("hits") ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             for (element in hits) {
@@ -100,11 +114,11 @@ object HackerNewsApiClient {
                 }
             }
 
-            Logger.info(TAG, "Hacker News '${Logger.redact(query)}': ${items.size} stories")
-            items
+            Logger.info(TAG, "Hacker News '${Logger.redact(query)}': ${items.size} stories" + pageSuffix(page))
+            SourcePage(items, hasMore = hits.size() > 0 && page < (root.intField("nbPages") ?: 0))
         } catch (e: Exception) {
             Logger.error(TAG, "Hacker News request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 }

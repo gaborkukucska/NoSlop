@@ -69,18 +69,26 @@ object OpenverseApiClient {
         query: String,
         sourceId: String = "api-openverse-images",
         limit: Int = 20
-    ): List<FeedItem> {
-        if (query.isBlank()) return emptyList()
+    ): List<FeedItem> = searchImagesPage(query, 1, sourceId, limit).items
+
+    /** E5s2: one page of [searchImages] (pages numbered from 1). */
+    suspend fun searchImagesPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-openverse-images",
+        limit: Int = 20
+    ): SourcePage {
+        if (query.isBlank()) return SourcePage.NONE
 
         val now = System.currentTimeMillis()
         if (now < rateLimitedUntilMs) {
             Logger.info(TAG, "Skipping Openverse images — rate limited")
-            return emptyList()
+            return SourcePage.NONE
         }
 
         return try {
             val q = java.net.URLEncoder.encode(query, "UTF-8")
-            val url = "https://api.openverse.org/v1/images/?q=$q&page_size=$limit&mature=false"
+            val url = "https://api.openverse.org/v1/images/?q=$q&page_size=$limit&mature=false" + pageParam(page)
 
             val request = Request.Builder()
                 .url(url)
@@ -91,17 +99,17 @@ object OpenverseApiClient {
                 if (res.code == 429) {
                     rateLimitedUntilMs = System.currentTimeMillis() + RATE_LIMIT_COOLDOWN_MS
                     Logger.warn(TAG, "Openverse rate limit (429) on images — backing off")
-                    return emptyList()
+                    return SourcePage.NONE
                 }
                 if (!res.isSuccessful) {
                     Logger.warn(TAG, "Openverse images returned ${res.code}")
-                    return emptyList()
+                    return SourcePage.failed()
                 }
                 res.body?.string()
-            } ?: return emptyList()
+            } ?: return SourcePage.failed()
 
             val root = gson.fromJson(body, JsonObject::class.java)
-            val results = root.getAsJsonArray("results") ?: return emptyList()
+            val results = root.getAsJsonArray("results") ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             for (element in results) {
@@ -145,11 +153,11 @@ object OpenverseApiClient {
                 }
             }
 
-            Logger.info(TAG, "Openverse images: fetched ${items.size} for '${Logger.redact(query)}'")
-            items
+            Logger.info(TAG, "Openverse images: fetched ${items.size} for '${Logger.redact(query)}'" + pageSuffix(page))
+            SourcePage(items, hasMore = results.size() > 0 && page < (root.intField("page_count") ?: page))
         } catch (e: Exception) {
             Logger.error(TAG, "Openverse image request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 
@@ -157,19 +165,27 @@ object OpenverseApiClient {
         query: String,
         sourceId: String = "api-openverse-audio",
         limit: Int = 20
-    ): List<FeedItem> {
+    ): List<FeedItem> = searchAudioPage(query, 1, sourceId, limit).items
+
+    /** E5s2: one page of [searchAudio] (pages numbered from 1). */
+    suspend fun searchAudioPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-openverse-audio",
+        limit: Int = 20
+    ): SourcePage {
         val now = System.currentTimeMillis()
         if (now < rateLimitedUntilMs) {
             Logger.info(
                 TAG,
                 "Skipping Openverse — rate limited for another ${(rateLimitedUntilMs - now) / 1000}s"
             )
-            return emptyList()
+            return SourcePage.NONE
         }
 
         return try {
             val q = java.net.URLEncoder.encode(query.ifBlank { "music" }, "UTF-8")
-            val url = "$BASE_URL?q=$q&page_size=$limit&mature=false"
+            val url = "$BASE_URL?q=$q&page_size=$limit&mature=false" + pageParam(page)
 
             val request = Request.Builder()
                 .url(url)
@@ -180,17 +196,17 @@ object OpenverseApiClient {
                 if (res.code == 429) {
                     rateLimitedUntilMs = System.currentTimeMillis() + RATE_LIMIT_COOLDOWN_MS
                     Logger.warn(TAG, "Openverse rate limit (429) — backing off for 1h")
-                    return emptyList()
+                    return SourcePage.NONE
                 }
                 if (!res.isSuccessful) {
                     Logger.warn(TAG, "Openverse returned ${res.code}")
-                    return emptyList()
+                    return SourcePage.failed()
                 }
                 res.body?.string()
-            } ?: return emptyList()
+            } ?: return SourcePage.failed()
 
             val root = gson.fromJson(body, JsonObject::class.java)
-            val results = root.getAsJsonArray("results") ?: return emptyList()
+            val results = root.getAsJsonArray("results") ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             var skippedUnplayable = 0
@@ -266,12 +282,12 @@ object OpenverseApiClient {
 
             Logger.info(
                 TAG,
-                "Openverse: fetched ${items.size} tracks for '${Logger.redact(query)}' (skipped $skippedUnplayable unplayable)"
+                "Openverse: fetched ${items.size} tracks for '${Logger.redact(query)}' (skipped $skippedUnplayable unplayable)" + pageSuffix(page)
             )
-            items
+            SourcePage(items, hasMore = results.size() > 0 && page < (root.intField("page_count") ?: page))
         } catch (e: Exception) {
             Logger.error(TAG, "Openverse request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 }

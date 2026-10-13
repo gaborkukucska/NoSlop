@@ -67,7 +67,8 @@ object PublicApiService {
             }
         }
 
-        fun fetchAsync(sourceId: String, block: suspend () -> List<FeedItem>) {
+        // E5s2: returns whether the source runs (it may be switched off, or need a key it does not have).
+        fun fetchAsync(sourceId: String, block: suspend () -> List<FeedItem>): Boolean {
             val isKeylessApiSource = sourceId.startsWith("api-archive") || sourceId.startsWith("api-openverse") ||
                     sourceId.startsWith("api-yt") || sourceId.startsWith("api-invidious") ||
                     sourceId.startsWith("api-jamendo") || sourceId.startsWith("api-reddit") ||
@@ -82,7 +83,17 @@ object PublicApiService {
                         emptyList()
                     }
                 })
+                return true
             }
+            return false
+        }
+
+        // E5s2: the next page of a source that numbers its pages, for a user search (see SearchCursor).
+        // A source that does not run here is done for this search.
+        fun pagedAsync(sourceId: String, source: String, fetchPage: suspend (Int) -> SourcePage) {
+            val cursor = searchCursor ?: return
+            if (cursor.isDone(source)) return
+            if (!fetchAsync(sourceId) { numberedSearchPage(cursor, source, fetchPage) }) cursor.markDone(source)
         }
 
         try {
@@ -204,16 +215,21 @@ object PublicApiService {
                     //     which is why audio results looked wrong.
                     //   JamendoApiClient — has been returning "failed", and
                     //     Openverse indexes Jamendo anyway, so nothing is lost.
-                    // E5s: only Reddit pages here; the other sources answer the first page.
-                    if (!nextPagesOnly) {
+                    if (searchCursor == null) {
                         addLocal(mediaType = "audio")
                         fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
                         fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                         fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
-                    }
-                    if (searchCursor == null) {
                         fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                     } else {
+                        // E5s2: every source here pages except Podcast Index, which has no pages and
+                        // answers the first page only.
+                        if (!nextPagesOnly) addLocal(mediaType = "audio")
+                        pagedAsync("api-openverse-audio", SearchCursor.OPENVERSE_AUDIO) { page -> OpenverseApiClient.searchAudioPage(query, page) }
+                        if (!nextPagesOnly) {
+                            fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
+                        }
+                        pagedAsync("api-archive-audio", SearchCursor.ARCHIVE_AUDIO) { page -> InternetArchiveClient.searchAudioPage(query, page, SEARCH_NEWEST_FIRST) }
                         fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, null) }
                     }
                 }
@@ -221,14 +237,6 @@ object PublicApiService {
                     // --- NOSLOP_IMAGE_SEARCH_V1 ---
                     // Every source here must honour the query. fetchFeaturedPictures()
                     // did not, and was padding each search with 25 arbitrary photos.
-                    // E5s: only Reddit pages here; the other sources answer the first page.
-                    if (!nextPagesOnly) {
-                        addLocal(mediaType = "image")  // NOSLOP_LOCAL_SEARCH_V1
-                        // --- NOSLOP_SEARCH_SOURCES_V1 --- now actually registered, so it runs
-                        fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
-                        fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
-                        fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    }
                     // --- NOSLOP_SEARCH_SOURCES_V1 ---
                     // Art Institute removed from image SEARCH. It is a museum
                     // catalogue whose search fuzzy-matches anything, so it
@@ -236,37 +244,49 @@ object PublicApiService {
                     // for "hasanabi" — half of every result set was noise. It
                     // stays in the Art category, where browsing a collection is
                     // the whole point.
-                    if (searchCursor == null) {
-                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
-                    } else {
-                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "image") }
-                    }
-                    // Images only: see NasaApiClient — the video path costs ~1.3s per
+                    // Images only from NASA: see NasaApiClient — the video path costs ~1.3s per
                     // item sequentially and used to consume the whole category budget.
-                    if (!nextPagesOnly) {
+                    if (searchCursor == null) {
+                        addLocal(mediaType = "image")  // NOSLOP_LOCAL_SEARCH_V1
+                        fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
+                        fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
+                        fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
                         fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query, includeVideo = false) }
+                    } else {
+                        // E5s2: every source here pages. These sources are undated or have no date
+                        // order, so they page by relevance.
+                        if (!nextPagesOnly) addLocal(mediaType = "image")
+                        pagedAsync("api-openverse-images", SearchCursor.OPENVERSE_IMAGES) { page -> OpenverseApiClient.searchImagesPage(query, page) }
+                        pagedAsync("api-wikimedia-featured", SearchCursor.WIKIMEDIA) { page -> WikimediaApiClient.searchImagesPage(query, page) }
+                        pagedAsync("api-pexels-photo", SearchCursor.PEXELS) { page -> PexelsApiClient.searchPhotosPage(query, page, apiKeyRepo) }
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "image") }
+                        pagedAsync("api-nasa-library", SearchCursor.NASA) { page -> NasaApiClient.searchImageLibraryPage(query, page, includeVideo = false) }
                     }
                 }
                 "Search Articles" -> {
                     // --- NOSLOP_LOCAL_SEARCH_V1 ---
                     // The only source here that works without an API key and
                     // without the Reddit proxy. Backed by synced RSS items.
-                    // E5s: only Reddit pages here; the other sources answer the first page.
-                    if (!nextPagesOnly) {
+                    // --- NOSLOP_SEARCH_SOURCES_V1 ---
+                    // Wikipedia and Hacker News are the first sources here that can
+                    // answer an arbitrary query without a key. Local search returns
+                    // nothing when the RSS corpus simply does not cover the subject,
+                    // which is exactly what happened with "gabor mate".
+                    if (searchCursor == null) {
                         addLocal(articlesOnly = true)
-                        // --- NOSLOP_SEARCH_SOURCES_V1 ---
-                        // The first sources here that can answer an arbitrary query
-                        // without a key. Local search returns nothing when the RSS
-                        // corpus simply does not cover the subject, which is exactly
-                        // what happened with "gabor mate".
                         fetchAsync("api-wikipedia-search") { WikipediaApiClient.searchArticles(query, language = language) }
                         fetchAsync("api-hackernews-search") { HackerNewsApiClient.searchStories(query) }
                         fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                         fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
-                    }
-                    if (searchCursor == null) {
                         fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
                     } else {
+                        // E5s2: every source here pages; Hacker News, NewsAPI and the Guardian newest first.
+                        if (!nextPagesOnly) addLocal(articlesOnly = true)
+                        pagedAsync("api-wikipedia-search", SearchCursor.WIKIPEDIA) { page -> WikipediaApiClient.searchArticlesPage(query, page, language = language) }
+                        pagedAsync("api-hackernews-search", SearchCursor.HACKERNEWS) { page -> HackerNewsApiClient.searchStoriesPage(query, page, newestFirst = SEARCH_NEWEST_FIRST) }
+                        pagedAsync("api-newsapi-headlines", SearchCursor.NEWSAPI) { page -> NewsApiClient.searchArticlesPage(query, page, apiKeyRepo, newestFirst = SEARCH_NEWEST_FIRST, language = language) }
+                        pagedAsync("api-guardian", SearchCursor.GUARDIAN) { page -> GuardianApiClient.searchArticlesPage(query, page, apiKeyRepo, newestFirst = SEARCH_NEWEST_FIRST) }
                         fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "article") }
                     }
                 }
@@ -275,20 +295,23 @@ object PublicApiService {
                     // else branch below, which serves the background creator/interest searches and so asks
                     // YouTube for this year's uploads only and Invidious for the last month only. Same
                     // sources as that branch, with no date limit.
-                    if (!nextPagesOnly) addLocal()
                     if (searchCursor == null) {
+                        addLocal()
                         fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
                         fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideosPage(query, lastMonthOnly = false) ?: emptyList() }
                         fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
-                    } else {
-                        fetchAsync("api-yt-search") { youTubeSearchPage(query, searchCursor) }
-                        fetchAsync("api-invidious-search") { invidiousSearchPage(query, searchCursor) }
-                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, null) }
-                    }
-                    if (!nextPagesOnly) {
                         fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                         fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                         fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    } else {
+                        // E5s2: every source here pages.
+                        if (!nextPagesOnly) addLocal()
+                        fetchAsync("api-yt-search") { youTubeSearchPage(query, searchCursor) }
+                        fetchAsync("api-invidious-search") { invidiousSearchPage(query, searchCursor) }
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, null) }
+                        pagedAsync("api-newsapi-headlines", SearchCursor.NEWSAPI) { page -> NewsApiClient.searchArticlesPage(query, page, apiKeyRepo, newestFirst = SEARCH_NEWEST_FIRST, language = language) }
+                        pagedAsync("api-jamendo-music", SearchCursor.JAMENDO) { page -> JamendoApiClient.searchTracksPage(query, page, newestFirst = SEARCH_NEWEST_FIRST) }
+                        pagedAsync("api-pexels-photo", SearchCursor.PEXELS) { page -> PexelsApiClient.searchPhotosPage(query, page, apiKeyRepo) }
                     }
                 }
                 else -> {
@@ -426,16 +449,83 @@ object PublicApiService {
             if (after == null) redditDone = true
         }
 
+        // E5s2: sources that number their pages, by name (the constants below).
+        private class NumberedSource {
+            @Volatile var next = 1
+            @Volatile var done = false
+            @Volatile var failures = 0
+        }
+        private val numbered = java.util.concurrent.ConcurrentHashMap<String, NumberedSource>()
+        private fun numberedSource(source: String): NumberedSource = numbered.getOrPut(source) { NumberedSource() }
+
+        /** E5s2: the page to ask [source] for next (numbered from 1). */
+        fun nextPage(source: String): Int = numberedSource(source).next
+
+        /** E5s2: whether [source] has nothing more for this search. */
+        fun isDone(source: String): Boolean = numberedSource(source).done
+
+        /** E5s2: [source] has nothing for this search (it does not run here, or needs a key it lacks). */
+        fun markDone(source: String) {
+            numberedSource(source).done = true
+        }
+
+        /**
+         * E5s2: [source] answered its page with [page]. A failed request keeps the place (the same page is
+         * asked for again) until MAX_FAILURES in a row; a page with no successor, or the source's last
+         * allowed page ([maxPageFor]), ends it.
+         */
+        fun onNumberedPage(source: String, page: SourcePage) {
+            val state = numberedSource(source)
+            if (page.failed) {
+                if (++state.failures >= MAX_FAILURES) state.done = true
+                return
+            }
+            state.failures = 0
+            state.next++
+            if (!page.hasMore || state.next > maxPageFor(source)) state.done = true
+        }
+
         /** Whether a source that [category] pages through can still return more. */
-        fun hasMore(category: String): Boolean = when (category) {
-            "Search Videos", "Search All" -> !youTubeDone || !invidiousDone || !redditDone
-            "Search Audio", "Search Images", "Search Articles" -> !redditDone
-            else -> false
+        fun hasMore(category: String): Boolean {
+            val numberedLeft = NUMBERED_SOURCES[category].orEmpty().any { !isDone(it) }
+            return when (category) {
+                "Search Videos", "Search All" -> !youTubeDone || !invidiousDone || !redditDone || numberedLeft
+                "Search Audio", "Search Images", "Search Articles" -> !redditDone || numberedLeft
+                else -> false
+            }
         }
 
         companion object {
             const val MAX_FAILURES = 3
             const val MAX_INVIDIOUS_MISSES = 2
+
+            // E5s2: the sources that number their pages.
+            const val OPENVERSE_AUDIO = "openverse-audio"
+            const val ARCHIVE_AUDIO = "archive-audio"
+            const val OPENVERSE_IMAGES = "openverse-images"
+            const val WIKIMEDIA = "wikimedia"
+            const val PEXELS = "pexels"
+            const val NASA = "nasa"
+            const val WIKIPEDIA = "wikipedia"
+            const val HACKERNEWS = "hackernews"
+            const val NEWSAPI = "newsapi"
+            const val GUARDIAN = "guardian"
+            const val JAMENDO = "jamendo"
+
+            /** The numbered-page sources each user-search category pages through. */
+            val NUMBERED_SOURCES: Map<String, List<String>> = mapOf(
+                "Search Videos" to emptyList(),
+                "Search Audio" to listOf(OPENVERSE_AUDIO, ARCHIVE_AUDIO),
+                "Search Images" to listOf(OPENVERSE_IMAGES, WIKIMEDIA, PEXELS, NASA),
+                "Search Articles" to listOf(WIKIPEDIA, HACKERNEWS, NEWSAPI, GUARDIAN),
+                "Search All" to listOf(NEWSAPI, JAMENDO, PEXELS)
+            )
+
+            /**
+             * The last page a source may be asked for. NewsAPI's free plan serves the first 100 results
+             * (five pages of 20) and spends a request of its 100-a-day allowance on every page.
+             */
+            fun maxPageFor(source: String): Int = if (source == NEWSAPI) 5 else Int.MAX_VALUE
         }
     }
 
@@ -464,7 +554,25 @@ object PublicApiService {
     private suspend fun redditSearchPage(query: String, cursor: SearchCursor, mediaType: String?): List<FeedItem> {
         if (cursor.redditDone) return emptyList()
         val page = RedditApiClient.searchRedditPage(query, cursor.redditAfter, mediaType, newestFirst = SEARCH_NEWEST_FIRST)
+        kotlinx.coroutines.yield()  // E5s2: cancelled on the way: keep the place
         cursor.onRedditPage(page?.after, failed = page == null)
         return page?.items ?: emptyList()
+    }
+
+    /**
+     * E5s2: the next page of a source that numbers its pages. These clients block on their request, so
+     * it runs in withContext and yield() checks for cancellation before the cursor moves: a page cancelled
+     * on the way (the category deadline) is asked for again next time instead of being skipped.
+     */
+    private suspend fun numberedSearchPage(
+        cursor: SearchCursor,
+        source: String,
+        fetchPage: suspend (Int) -> SourcePage
+    ): List<FeedItem> {
+        val pageNumber = cursor.nextPage(source)
+        val page = kotlinx.coroutines.withContext(Dispatchers.IO) { fetchPage(pageNumber) }
+        kotlinx.coroutines.yield()
+        cursor.onNumberedPage(source, page)
+        return page.items
     }
 }

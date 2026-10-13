@@ -34,8 +34,17 @@ object WikipediaApiClient {
         sourceId: String = "api-wikipedia-search",
         limit: Int = 12,
         language: String = "en"
-    ): List<FeedItem> {
-        if (query.isBlank()) return emptyList()
+    ): List<FeedItem> = searchArticlesPage(query, 1, sourceId, limit, language).items
+
+    /** E5s2: one page of [searchArticles] (pages numbered from 1; Wikipedia pages by result offset). */
+    suspend fun searchArticlesPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-wikipedia-search",
+        limit: Int = 12,
+        language: String = "en"
+    ): SourcePage {
+        if (query.isBlank()) return SourcePage.NONE
 
         return try {
             val q = java.net.URLEncoder.encode(query, "UTF-8")
@@ -43,6 +52,7 @@ object WikipediaApiClient {
             // so one request gets both the hit list and readable summaries.
             val url = "https://$language.wikipedia.org/w/api.php?action=query" +
                 "&generator=search&gsrsearch=$q&gsrlimit=$limit&gsrnamespace=0" +
+                (if (page > 1) "&gsroffset=${(page - 1) * limit}" else "") +
                 "&prop=extracts|pageimages|info&exintro=1&explaintext=1&exlimit=max" +
                 "&piprop=thumbnail|original&pithumbsize=800&pilicense=any&inprop=url&format=json&formatversion=2"
 
@@ -54,14 +64,14 @@ object WikipediaApiClient {
             val body = client.newCall(request).execute().use { res ->
                 if (!res.isSuccessful) {
                     Logger.warn(TAG, "Wikipedia returned ${res.code}")
-                    return emptyList()
+                    return SourcePage.failed()
                 }
                 res.body?.string()
-            } ?: return emptyList()
+            } ?: return SourcePage.failed()
 
             val root = gson.fromJson(body, JsonObject::class.java)
             val pages = root.getAsJsonObject("query")?.getAsJsonArray("pages")
-                ?: return emptyList()
+                ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             for (element in pages) {
@@ -123,11 +133,12 @@ object WikipediaApiClient {
                 }
             }
 
-            Logger.info(TAG, "Wikipedia '${Logger.redact(query)}': ${items.size} articles")
-            items
+            Logger.info(TAG, "Wikipedia '${Logger.redact(query)}': ${items.size} articles" + pageSuffix(page))
+            // Wikipedia names the offset of the next page in "continue" while there is one.
+            SourcePage(items, hasMore = root.getAsJsonObject("continue")?.has("gsroffset") == true)
         } catch (e: Exception) {
             Logger.error(TAG, "Wikipedia request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 }

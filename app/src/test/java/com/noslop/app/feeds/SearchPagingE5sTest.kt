@@ -199,7 +199,12 @@ class SearchPagingE5sTest {
         assertTrue(c.hasMore("Search Images"))
         c.onRedditPage(null, failed = false)
         assertTrue(c.redditDone)
-        assertFalse("images page through Reddit only", c.hasMore("Search Images"))
+        // E5s2: the other sources of each filter page too, so the filter has more until they end.
+        assertTrue("Openverse, Wikimedia, Pexels and NASA still have pages", c.hasMore("Search Images"))
+        for (category in listOf("Search Images", "Search Audio", "Search Articles", "Search All")) {
+            PublicApiService.SearchCursor.NUMBERED_SOURCES.getValue(category).forEach { c.markDone(it) }
+        }
+        assertFalse(c.hasMore("Search Images"))
         assertFalse(c.hasMore("Search Audio"))
         assertFalse(c.hasMore("Search Articles"))
         assertTrue("YouTube and Invidious still have pages", c.hasMore("Search Videos"))

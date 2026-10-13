@@ -102,7 +102,16 @@ object NasaApiClient {
         sourceId: String = "api-nasa-library",
         pageSize: Int = 20,
         includeVideo: Boolean = true
-    ): List<FeedItem> {
+    ): List<FeedItem> = searchImageLibraryPage(query, 1, sourceId, pageSize, includeVideo).items
+
+    /** E5s2: one page of [searchImageLibrary] (pages numbered from 1). */
+    suspend fun searchImageLibraryPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-nasa-library",
+        pageSize: Int = 20,
+        includeVideo: Boolean = true
+    ): SourcePage {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         // --- NOSLOP_IMAGE_SEARCH_V1 ---
         // Each video result costs a separate, sequential asset-manifest fetch
@@ -110,7 +119,7 @@ object NasaApiClient {
         // during an IMAGE search, blowing the 20s category budget so the whole
         // category returned nothing. Image searches now ask for images only.
         val mediaTypes = if (includeVideo) "image,video" else "image"
-        val url = "https://images-api.nasa.gov/search?q=$encodedQuery&media_type=$mediaTypes&page_size=$pageSize"
+        val url = "https://images-api.nasa.gov/search?q=$encodedQuery&media_type=$mediaTypes&page_size=$pageSize" + pageParam(page)
         // Declared here, not beside the item list: this must live inside
         // searchImageLibrary, and several functions in this file open with
         // an identically-worded `val items = mutableListOf<FeedItem>()`.
@@ -125,13 +134,13 @@ object NasaApiClient {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "NASA Image Library returned ${response.code}")
-                return emptyList()
+                return SourcePage.failed()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
-            val collection = root.getAsJsonObject("collection") ?: return emptyList()
-            val itemsArray = collection.getAsJsonArray("items") ?: return emptyList()
+            val collection = root.getAsJsonObject("collection") ?: return SourcePage.END
+            val itemsArray = collection.getAsJsonArray("items") ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             for (element in itemsArray) {
@@ -189,11 +198,15 @@ object NasaApiClient {
                 }
             }
 
-            Logger.info(TAG, "NASA Image Library: fetched ${items.size} items for '${Logger.redact(query)}'")
-            items
+            Logger.info(TAG, "NASA Image Library: fetched ${items.size} items for '${Logger.redact(query)}'" + pageSuffix(page))
+            // The collection links to its next page while there is one.
+            val hasNext = collection.getAsJsonArray("links")?.any { link ->
+                (link as? JsonObject)?.get("rel")?.takeIf { it.isJsonPrimitive }?.asString == "next"
+            } == true
+            SourcePage(items, hasMore = itemsArray.size() > 0 && hasNext)
         } catch (e: Exception) {
             Logger.error(TAG, "NASA Image Library request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 

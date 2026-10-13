@@ -28,14 +28,29 @@ object JamendoApiClient {
         tags: String,
         sourceId: String = "api-jamendo-music",
         apiKeyRepo: com.noslop.app.data.ApiKeyRepository? = null
-    ): List<FeedItem> {
+    ): List<FeedItem> = searchTracksPage(tags, 1, newestFirst = false, sourceId = sourceId, apiKeyRepo = apiKeyRepo).items
+
+    /** E5s2: the tracks one page asks for. */
+    private const val PAGE_SIZE = 20
+
+    /**
+     * E5s2: one page of [searchTracks] (pages numbered from 1; Jamendo pages by result offset).
+     * [newestFirst] sorts a search by release date, newest first.
+     */
+    suspend fun searchTracksPage(
+        tags: String,
+        page: Int,
+        newestFirst: Boolean,
+        sourceId: String = "api-jamendo-music",
+        apiKeyRepo: com.noslop.app.data.ApiKeyRepository? = null
+    ): SourcePage {
         // C20: Disallow bundled third-party keys; strictly require user-configured client ID
         val effectiveClientId = apiKeyRepo?.getKey("jamendo")?.takeIf { it.isNotBlank() }
             ?: userClientId?.takeIf { it.isNotBlank() }
 
         if (effectiveClientId.isNullOrBlank()) {
             Logger.debug(TAG, "Jamendo client ID not configured by user; skipping tracks fetch")
-            return emptyList()
+            return SourcePage.NONE
         }
 
         return try {
@@ -45,7 +60,9 @@ object JamendoApiClient {
             } else {
                 "search=" + java.net.URLEncoder.encode(cleanQuery, "UTF-8")
             }
-            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=20&$queryParam&include=musicinfo" 
+            val url = "$BASE_URL/tracks/?client_id=$effectiveClientId&format=json&limit=$PAGE_SIZE&$queryParam&include=musicinfo" +
+                (if (page > 1) "&offset=${(page - 1) * PAGE_SIZE}" else "") +
+                (if (newestFirst && queryParam.startsWith("search=")) "&order=releasedate_desc" else "")
             
             var response: okhttp3.Response? = null
 
@@ -72,16 +89,16 @@ object JamendoApiClient {
                     response = client.newCall(directReq).execute()
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Jamendo direct request failed: ${e.message}")
-                    return emptyList()
+                    return SourcePage.failed()
                 }
             }
 
             if (response == null || !response.isSuccessful) {
                 Logger.warn(TAG, "Jamendo returned ${response?.code}")
-                return emptyList()
+                return SourcePage.failed()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
             
             val headers = root.getAsJsonObject("headers")
@@ -89,11 +106,11 @@ object JamendoApiClient {
             if (status != "success") {
                 val code = headers?.get("code")?.asInt ?: -1
                 val errorMsg = headers?.get("error_message")?.asString ?: ""
-                Logger.warn(TAG, "Jamendo API returned status: $status (code=$code, msg=$errorMsg) for query: $tags")
-                return emptyList()
+                Logger.warn(TAG, "Jamendo API returned status: $status (code=$code, msg=$errorMsg) for query: ${Logger.redact(tags)}")
+                return SourcePage.END
             }
             
-            val resultsArray = root.getAsJsonArray("results") ?: return emptyList()
+            val resultsArray = root.getAsJsonArray("results") ?: return SourcePage.END
             val items = mutableListOf<FeedItem>()
 
             for (element in resultsArray) {
@@ -135,11 +152,12 @@ object JamendoApiClient {
                 }
             }
 
-            Logger.info(TAG, "Jamendo: fetched ${items.size} tracks for tags: $tags")
-            items
+            Logger.info(TAG, "Jamendo: fetched ${items.size} tracks for tags: ${Logger.redact(tags)}" + pageSuffix(page))
+            // A full page may have a successor; a short one is the last.
+            SourcePage(items, hasMore = resultsArray.size() >= PAGE_SIZE)
         } catch (e: Exception) {
             Logger.error(TAG, "Jamendo request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 }

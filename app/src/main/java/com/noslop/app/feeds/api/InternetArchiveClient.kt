@@ -89,6 +89,33 @@ object InternetArchiveClient {
     }
 
     /**
+     * E5s2: one page of [searchAudio] for a user search (pages numbered from 1). [newestFirst] sorts by
+     * the date the item was published on the Archive instead of by downloads.
+     */
+    suspend fun searchAudioPage(
+        query: String,
+        page: Int,
+        newestFirst: Boolean,
+        sourceId: String = "api-archive-audio",
+        rows: Int = 20
+    ): SourcePage {
+        val qTerm = query.trim()
+        val queryPart = if (qTerm.isBlank()) "collection:(etree OR netlabels OR 78rpm) AND mediatype:audio" else "($qTerm) AND (collection:etree OR collection:netlabels OR collection:78rpm OR mediatype:audio)"
+        val encodedQuery = java.net.URLEncoder.encode(
+            "$queryPart AND -subject:youtube",
+            "UTF-8"
+        )
+        resetMetadataBudget()  // NOSLOP_ARCHIVE_BUDGET_V1
+        val sort = if (newestFirst) "publicdate+desc" else "downloads+desc"
+        val url = "https://archive.org/advancedsearch.php?" +
+                "q=$encodedQuery&" +
+                "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
+                "sort[]=$sort&" +
+                "rows=$rows&page=$page&output=json"
+        return fetchAndParsePage(url, "audio", sourceId)
+    }
+
+    /**
      * Get popular audio recordings, music collections, podcasts, and vintage radio.
      */
     suspend fun getPopularAudio(
@@ -144,7 +171,11 @@ object InternetArchiveClient {
         return fetchAndParse(url, defaultMediaType, sourceId)
     }
 
-    private suspend fun fetchAndParse(url: String, defaultMediaType: String, sourceId: String): List<FeedItem> {
+    private suspend fun fetchAndParse(url: String, defaultMediaType: String, sourceId: String): List<FeedItem> =
+        fetchAndParsePage(url, defaultMediaType, sourceId).items
+
+    /** E5s2: [fetchAndParse], with whether the search has a further page. */
+    private suspend fun fetchAndParsePage(url: String, defaultMediaType: String, sourceId: String): SourcePage {
         return try {
             val request = Request.Builder()
                 .url(url)
@@ -154,13 +185,13 @@ object InternetArchiveClient {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "Internet Archive API returned ${response.code}")
-                return emptyList()
+                return SourcePage.failed()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
-            val docs = root.getAsJsonObject("response")
-                ?.getAsJsonArray("docs") ?: return emptyList()
+            val responseObj = root.getAsJsonObject("response") ?: return SourcePage.END
+            val docs = responseObj.getAsJsonArray("docs") ?: return SourcePage.END
 
             val items = coroutineScope {
                 docs.mapNotNull { doc ->
@@ -314,10 +345,13 @@ object InternetArchiveClient {
             }
 
             Logger.info(TAG, "Internet Archive: fetched ${items.size} items")
-            items
+            // numFound counts every match; start is where this page began.
+            val numFound = responseObj.intField("numFound") ?: 0
+            val start = responseObj.intField("start") ?: 0
+            SourcePage(items, hasMore = docs.size() > 0 && start + docs.size() < numFound)
         } catch (e: Exception) {
             Logger.error(TAG, "Internet Archive API request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 }

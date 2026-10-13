@@ -28,19 +28,44 @@ object GuardianApiClient {
         return fetch("https://content.guardianapis.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}$sectionParam&show-fields=byline,trailText,thumbnail$dateParam", apiKey, sourceId)
     }
 
+    /**
+     * E5s2: one page of a user search (pages numbered from 1), newest first when [newestFirst],
+     * otherwise by relevance as [searchArticles].
+     */
+    suspend fun searchArticlesPage(
+        query: String,
+        page: Int,
+        apiKeyRepo: ApiKeyRepository,
+        newestFirst: Boolean,
+        sourceId: String = "api-guardian-search"
+    ): SourcePage {
+        val apiKey = apiKeyRepo.getKey("guardian")
+        if (apiKey.isNullOrBlank()) return SourcePage.NONE
+        val order = if (newestFirst) "&order-by=newest" else ""
+        return fetchPage(
+            "https://content.guardianapis.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&show-fields=byline,trailText,thumbnail$order" + pageParam(page),
+            apiKey, sourceId
+        )
+    }
+
     suspend fun searchSection(section: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-guardian-section"): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("guardian")
         if (apiKey.isNullOrBlank()) return emptyList()
         return fetch("https://content.guardianapis.com/search?section=$section&show-fields=byline,trailText,thumbnail", apiKey, sourceId)
     }
 
-    private fun fetch(url: String, apiKey: String, sourceId: String): List<FeedItem> {
+    private fun fetch(url: String, apiKey: String, sourceId: String): List<FeedItem> =
+        fetchPage(url, apiKey, sourceId).items
+
+    /** E5s2: [fetch], with whether the Guardian has a further page. */
+    private fun fetchPage(url: String, apiKey: String, sourceId: String): SourcePage {
         return try {
             val request = Request.Builder().url(url).header("api-key", apiKey).build()
             val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
-            val results = root.getAsJsonObject("response")?.getAsJsonArray("results") ?: return emptyList()
+            val responseObj = root.getAsJsonObject("response") ?: return SourcePage.END
+            val results = responseObj.getAsJsonArray("results") ?: return SourcePage.END
             val items = mutableListOf<FeedItem>()
             for (el in results) {
                 try {
@@ -61,8 +86,10 @@ object GuardianApiClient {
                         apiSource = "guardian"))
                 } catch (e: Exception) { Logger.debug(TAG, "Skipping Guardian result: ${e.message}") }
             }
-            Logger.info(TAG, "Guardian: fetched ${items.size} articles"); items
-        } catch (e: Exception) { Logger.error(TAG, "Guardian request failed", e.message); emptyList() }
+            Logger.info(TAG, "Guardian: fetched ${items.size} articles")
+            val currentPage = responseObj.intField("currentPage") ?: 1
+            SourcePage(items, hasMore = results.size() > 0 && currentPage < (responseObj.intField("pages") ?: 0))
+        } catch (e: Exception) { Logger.error(TAG, "Guardian request failed", e.message); SourcePage.failed() }
     }
 
 
