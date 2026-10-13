@@ -522,6 +522,13 @@ object PreloadManager {
  * Dynamically switches between background preloading buffers (10s-20s) and
  * active foreground playback buffers (50s-75s with 60s backbuffer) so Tor bandwidth
  * is conserved during preloading while active playback never starves or stalls mid-stream.
+ *
+ * E5 (Media3 1.3.1 -> 1.11.1): Media3 1.4 moved LoadControl to methods that take the player's
+ * [PlayerId] (or [LoadControl.Parameters]), and DefaultLoadControl keeps its state per player. The
+ * pre-1.4 methods this class used to implement are still declared, but their default bodies throw, so
+ * this implements exactly the methods DefaultLoadControl implements. Every lifecycle call goes to both
+ * inner controls, so each knows the player whichever one is active (a DefaultLoadControl that was never
+ * told about a player throws when asked about it); decisions go to the active one.
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AdaptiveTorLoadControl(
@@ -539,70 +546,55 @@ class AdaptiveTorLoadControl(
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()
 
-    private val activeControl: androidx.media3.exoplayer.LoadControl
+    private val activeControl: DefaultLoadControl
         get() = if (isForeground()) foregroundControl else backgroundControl
 
-    override fun onPrepared() {
-        foregroundControl.onPrepared()
-        backgroundControl.onPrepared()
+    override fun onPrepared(playerId: androidx.media3.exoplayer.analytics.PlayerId) {
+        foregroundControl.onPrepared(playerId)
+        backgroundControl.onPrepared(playerId)
     }
 
     override fun onTracksSelected(
+        parameters: androidx.media3.exoplayer.LoadControl.Parameters,
+        trackGroups: androidx.media3.exoplayer.source.TrackGroupArray,
+        trackSelections: Array<out androidx.media3.exoplayer.trackselection.ExoTrackSelection?>
+    ) {
+        foregroundControl.onTracksSelected(parameters, trackGroups, trackSelections)
+        backgroundControl.onTracksSelected(parameters, trackGroups, trackSelections)
+    }
+
+    override fun onStopped(playerId: androidx.media3.exoplayer.analytics.PlayerId) {
+        foregroundControl.onStopped(playerId)
+        backgroundControl.onStopped(playerId)
+    }
+
+    override fun onReleased(playerId: androidx.media3.exoplayer.analytics.PlayerId) {
+        foregroundControl.onReleased(playerId)
+        backgroundControl.onReleased(playerId)
+    }
+
+    // ExoPlayer asks for the allocator once, when the player is built (a preload, so the background
+    // control's), as before the upgrade.
+    override fun getAllocator(playerId: androidx.media3.exoplayer.analytics.PlayerId): androidx.media3.exoplayer.upstream.Allocator =
+        activeControl.getAllocator(playerId)
+
+    override fun getBackBufferDurationUs(playerId: androidx.media3.exoplayer.analytics.PlayerId): Long =
+        activeControl.getBackBufferDurationUs(playerId)
+
+    override fun retainBackBufferFromKeyframe(playerId: androidx.media3.exoplayer.analytics.PlayerId): Boolean =
+        activeControl.retainBackBufferFromKeyframe(playerId)
+
+    override fun shouldContinueLoading(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean =
+        activeControl.shouldContinueLoading(parameters)
+
+    override fun shouldStartPlayback(parameters: androidx.media3.exoplayer.LoadControl.Parameters): Boolean =
+        activeControl.shouldStartPlayback(parameters)
+
+    override fun shouldContinuePreloading(
+        playerId: androidx.media3.exoplayer.analytics.PlayerId,
         timeline: androidx.media3.common.Timeline,
         mediaPeriodId: androidx.media3.exoplayer.source.MediaSource.MediaPeriodId,
-        renderers: Array<out androidx.media3.exoplayer.Renderer>,
-        trackGroups: androidx.media3.exoplayer.source.TrackGroupArray,
-        trackSelections: Array<out androidx.media3.exoplayer.trackselection.ExoTrackSelection>
-    ) {
-        foregroundControl.onTracksSelected(timeline, mediaPeriodId, renderers, trackGroups, trackSelections)
-        backgroundControl.onTracksSelected(timeline, mediaPeriodId, renderers, trackGroups, trackSelections)
-    }
-
-    override fun onTracksSelected(
-        renderers: Array<out androidx.media3.exoplayer.Renderer>,
-        trackGroups: androidx.media3.exoplayer.source.TrackGroupArray,
-        trackSelections: Array<out androidx.media3.exoplayer.trackselection.ExoTrackSelection>
-    ) {
-        foregroundControl.onTracksSelected(renderers, trackGroups, trackSelections)
-        backgroundControl.onTracksSelected(renderers, trackGroups, trackSelections)
-    }
-
-    override fun onStopped() {
-        foregroundControl.onStopped()
-        backgroundControl.onStopped()
-    }
-
-    override fun onReleased() {
-        foregroundControl.onReleased()
-        backgroundControl.onReleased()
-    }
-
-    override fun getAllocator(): androidx.media3.exoplayer.upstream.Allocator = activeControl.allocator
-    override fun getBackBufferDurationUs(): Long = activeControl.backBufferDurationUs
-    override fun retainBackBufferFromKeyframe(): Boolean = activeControl.retainBackBufferFromKeyframe()
-
-    override fun shouldContinueLoading(playbackPositionUs: Long, bufferedDurationUs: Long, playbackSpeed: Float): Boolean {
-        return activeControl.shouldContinueLoading(playbackPositionUs, bufferedDurationUs, playbackSpeed)
-    }
-
-    override fun shouldStartPlayback(
-        timeline: androidx.media3.common.Timeline,
-        mediaPeriodId: androidx.media3.exoplayer.source.MediaSource.MediaPeriodId,
-        bufferedDurationUs: Long,
-        playbackSpeed: Float,
-        rebuffering: Boolean,
-        targetLiveOffsetUs: Long
-    ): Boolean {
-        return activeControl.shouldStartPlayback(timeline, mediaPeriodId, bufferedDurationUs, playbackSpeed, rebuffering, targetLiveOffsetUs)
-    }
-
-    override fun shouldStartPlayback(
-        bufferedDurationUs: Long,
-        playbackSpeed: Float,
-        rebuffering: Boolean,
-        targetLiveOffsetUs: Long
-    ): Boolean {
-        return activeControl.shouldStartPlayback(bufferedDurationUs, playbackSpeed, rebuffering, targetLiveOffsetUs)
-    }
+        bufferedDurationUs: Long
+    ): Boolean = activeControl.shouldContinuePreloading(playerId, timeline, mediaPeriodId, bufferedDurationUs)
 }
 

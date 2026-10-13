@@ -241,13 +241,15 @@ dependencies {
     implementation(libs.coil.gif)
 
     // --- Media (ExoPlayer) ---
-    implementation("androidx.media3:media3-exoplayer:1.3.1")
-    implementation("androidx.media3:media3-transformer:1.3.1")
-    implementation("androidx.media3:media3-effect:1.3.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
-    implementation("androidx.media3:media3-exoplayer-dash:1.3.1")
-    implementation("androidx.media3:media3-ui:1.3.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    // E5 (review C24/D11): was 1.3.1. Keep every Media3 artifact on one version (ReleaseBuildRulesE5Test).
+    // 1.4 changed the LoadControl interface (see AdaptiveTorLoadControl); 1.9 raised minSdk to 23.
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-transformer:1.11.1")
+    implementation("androidx.media3:media3-effect:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
 
     // --- Bouncy Castle ---
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78.1")

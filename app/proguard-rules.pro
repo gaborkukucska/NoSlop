@@ -1,5 +1,12 @@
-# Bouncy Castle — required for crypto engine and JCA provider across all API levels
--keep class org.bouncycastle.** { *; }
+# Bouncy Castle (E5, review C24/D10: was "-keep class org.bouncycastle.** { *; }").
+# App code calls the lightweight API directly (Ed25519, X25519, HKDF, Argon2, ChaCha20-Poly1305,
+# SHA-3, PBKDF2, the ASN.1 key factories), and R8 follows those calls like any other code. Only the JCA
+# provider registered in NoSlopApp and CryptoService finds its algorithm classes by name at run time,
+# so only the provider packages are kept whole. Nothing asks that provider for an algorithm by name
+# (ReleaseBuildRulesE5Test); docs/RELEASE_SMOKE_TEST.md covers the paths a minified build must pass.
+-keep class org.bouncycastle.jce.provider.** { *; }
+-keep class org.bouncycastle.jcajce.provider.** { *; }
+-keep class org.bouncycastle.pqc.jcajce.provider.** { *; }
 -dontwarn org.bouncycastle.**
 
 # Room — granular entity and DAO keep rules
