@@ -5,12 +5,9 @@ import android.content.Context
 import com.noslop.app.crypto.MnemonicGenerator
 import com.noslop.app.debug.Logger
 import java.io.*
-import java.security.SecureRandom
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
-import javax.crypto.Cipher
-import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 class LegacyBackupConfirmationRequiredException : Exception("Legacy unauthenticated backup archive detected")
@@ -76,15 +73,20 @@ object BackupManager {
 
     private const val BUFFER_BYTES = 64 * 1024
 
-    /** 4-byte header identifying an authenticated AES-GCM archive. */
-    private val MAGIC_GCM = "NSG1".toByteArray(Charsets.UTF_8)
+    // E3: the archive format itself (NSG2; reading NSG1 and CBC) is in BackupArchiveFormat.
+    private const val WORD_CLOUD_MISMATCH = "The Word Cloud does not match this backup"
+    private const val ARCHIVE_DAMAGED = "The backup file is damaged or was modified"
 
     fun createEncryptedBackupFile(context: Context, mnemonic: String): File? {
         val backupFile = File(context.cacheDir, "noslop_backup_export.enc")
         return try {
-            FileOutputStream(backupFile).use { fos ->
-                val success = exportData(context, mnemonic, fos)
-                if (success) backupFile else null
+            val success = FileOutputStream(backupFile).use { fos -> exportData(context, mnemonic, fos) }
+            if (success) {
+                backupFile
+            } else {
+                // E3: an export that failed has no last chunk and can't be restored; don't keep it.
+                backupFile.delete()
+                null
             }
         } catch (e: Exception) {
             Logger.error(TAG, "createEncryptedBackupFile failed: ${e.message}")
@@ -99,9 +101,9 @@ object BackupManager {
         mediaOption: BackupMediaOption = BackupMediaOption.OWNED_ONLY
     ): Boolean {
         Logger.info(TAG, "Starting data export...", "mediaOption=$mediaOption")
-        // C06: Internal storage only; never write plaintext backup archives to shared external storage
-        val tempDir = File(context.cacheDir, "backup_ops").apply { mkdirs() }
-        val tempZip = File(tempDir, "noslop_backup_${System.currentTimeMillis()}.zip")
+        // C06 / C07 (E3): the zip is encrypted as it is written (BackupArchiveFormat, NSG2). No plaintext
+        // copy of the backup, or of the group messages in it, is written anywhere.
+        var archiveSealed = false
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
 
@@ -120,7 +122,10 @@ object BackupManager {
                 Logger.warn(TAG, "WAL checkpoint failed: ${e.message}")
             }
 
-            ZipOutputStream(BufferedOutputStream(FileOutputStream(tempZip))).use { zos ->
+            // R5: the canonical Word Cloud, so the archive opens however the phrase is typed at restore.
+            val zipBytes = CountingOutputStream(BackupArchiveFormat.openForWriting(targetStream, MnemonicGenerator.normalize(mnemonic)))
+            // Not `use`: after a failure the zip must not be finished nor its last chunk sealed (see finally).
+            ZipOutputStream(BufferedOutputStream(zipBytes, BUFFER_BYTES)).let { zos ->
                 if (dbFile.exists()) {
                     addToZip(zos, dbFile, "database.db")
                 }
@@ -173,16 +178,15 @@ object BackupManager {
                     Logger.warn(TAG, "Failed to export identity JSON: ${e.message}")
                 }
 
-                // F10 / R11: Export decrypted group chat messages streaming into portable backup JSON
-                var tempGroupMsgsFile: File? = null
+                // F10 / R11: Export decrypted group chat messages streaming into portable backup JSON.
+                // C06 (E3): straight into the archive; this used to go through a plaintext temp file. Each row
+                // is encoded in full before it is written, so a failure between rows still leaves valid JSON
+                // (the rows so far) rather than a broken entry that would make the whole restore fail.
+                var groupEntryOpen = false
+                var exportedCount = 0
                 try {
                     val db = NoSlopDatabase.getDatabase(context)
-                    var exportedCount = 0
                     var failedDecryptCount = 0
-                    tempGroupMsgsFile = File(tempDir, "group_msgs_${System.currentTimeMillis()}.json")
-                    val writer = BufferedWriter(OutputStreamWriter(FileOutputStream(tempGroupMsgsFile), Charsets.UTF_8))
-                    val jsonWriter = com.google.gson.stream.JsonWriter(writer)
-                    jsonWriter.beginArray()
 
                     db.openHelper.readableDatabase.query(
                         "SELECT id, chatWithPeerPub, senderPub, ciphertext, nonce, timestamp, mediaId, mediaType, replyToMessageId, isRead FROM chat_messages WHERE chatWithPeerPub LIKE '%-%' OR chatWithPeerPub IN (SELECT groupId FROM group_chats)"
@@ -201,38 +205,47 @@ object BackupManager {
 
                             val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decryptOrNull(ciphertext, nonce, groupId, id)
                             if (plaintext != null) {
-                                jsonWriter.beginObject()
-                                jsonWriter.name("id").value(id)
-                                jsonWriter.name("groupId").value(groupId)
-                                jsonWriter.name("senderPub").value(senderPub)
-                                jsonWriter.name("plaintext").value(plaintext)
-                                jsonWriter.name("timestamp").value(ts)
-                                if (!mediaId.isNullOrBlank()) jsonWriter.name("mediaId").value(mediaId)
-                                if (!mediaType.isNullOrBlank()) jsonWriter.name("mediaType").value(mediaType)
-                                if (!replyTo.isNullOrBlank()) jsonWriter.name("replyToMessageId").value(replyTo)
-                                jsonWriter.name("isRead").value(isRead != 0)
-                                jsonWriter.endObject()
+                                val row = StringWriter()
+                                com.google.gson.stream.JsonWriter(row).use { jsonWriter ->
+                                    jsonWriter.beginObject()
+                                    jsonWriter.name("id").value(id)
+                                    jsonWriter.name("groupId").value(groupId)
+                                    jsonWriter.name("senderPub").value(senderPub)
+                                    jsonWriter.name("plaintext").value(plaintext)
+                                    jsonWriter.name("timestamp").value(ts)
+                                    if (!mediaId.isNullOrBlank()) jsonWriter.name("mediaId").value(mediaId)
+                                    if (!mediaType.isNullOrBlank()) jsonWriter.name("mediaType").value(mediaType)
+                                    if (!replyTo.isNullOrBlank()) jsonWriter.name("replyToMessageId").value(replyTo)
+                                    jsonWriter.name("isRead").value(isRead != 0)
+                                    jsonWriter.endObject()
+                                }
+                                if (!groupEntryOpen) {
+                                    zos.putNextEntry(ZipEntry("group_messages_backup.json"))
+                                    zos.write('['.code)
+                                    groupEntryOpen = true
+                                } else {
+                                    zos.write(','.code)
+                                }
+                                zos.write(row.toString().toByteArray(Charsets.UTF_8))
                                 exportedCount++
                             } else {
                                 failedDecryptCount++
                             }
                         }
                     }
-                    jsonWriter.endArray()
-                    jsonWriter.close()
 
                     if (failedDecryptCount > 0) {
                         Logger.warn(TAG, "Group message export: $failedDecryptCount message(s) could not be decrypted with current key")
                     }
-
-                    if (exportedCount > 0) {
-                        addToZip(zos, tempGroupMsgsFile, "group_messages_backup.json")
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Failed exporting portable group messages: ${e.message}" +
+                        (if (groupEntryOpen) " (the $exportedCount exported before the failure are kept)" else ""))
+                } finally {
+                    if (groupEntryOpen) {
+                        zos.write(']'.code)
+                        zos.closeEntry()
                         Logger.info(TAG, "Exported $exportedCount portable group message(s) to archive")
                     }
-                } catch (e: Exception) {
-                    Logger.warn(TAG, "Failed exporting portable group messages: ${e.message}")
-                } finally {
-                    tempGroupMsgsFile?.delete()
                 }
 
                 // Add API keys as JSON for cross-device portability (S10: always export manifest even if empty)
@@ -330,6 +343,7 @@ object BackupManager {
                                         try {
                                             addToZip(zos, file, "media/$dirType/${file.name}")
                                         } catch (e: Exception) {
+                                            if (zipBytes.failed) throw e
                                             Logger.warn(TAG, "Skipping unreadable media file ${file.name}: ${e.message}")
                                         }
                                     }
@@ -338,42 +352,27 @@ object BackupManager {
                         }
                     }
                 }
+                // E3: a section above may have logged a failure of the archive stream itself and carried on.
+                if (zipBytes.failed) throw IOException("Writing the encrypted archive failed")
+                // Finishes the zip, seals the last chunk and closes targetStream.
+                zos.close()
             }
+            archiveSealed = true
 
-            // R5: the canonical Word Cloud, so the archive opens however the phrase is typed at restore.
-            val seed = MnemonicGenerator.deriveSeed(MnemonicGenerator.normalize(mnemonic))
-            val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            val iv = ByteArray(12)
-            SecureRandom().nextBytes(iv)
-            cipher.init(Cipher.ENCRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
-
-            BufferedInputStream(FileInputStream(tempZip)).use { input ->
-                targetStream.use { output ->
-                    output.write(MAGIC_GCM)
-                    output.write(iv)
-                    val buffer = ByteArray(BUFFER_BYTES)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        val encrypted = cipher.update(buffer, 0, read)
-                        if (encrypted != null && encrypted.isNotEmpty()) output.write(encrypted)
-                    }
-                    val final = cipher.doFinal()
-                    if (final != null && final.isNotEmpty()) output.write(final)
-                    output.flush()
-                }
-            }
-
-            Logger.info(TAG, "Export completed to OutputStream using AES-256-GCM", "archiveSourceBytes=${tempZip.length()}")
+            Logger.info(TAG, "Export completed to OutputStream (NSG2, chunked AES-256-GCM)", "archiveSourceBytes=${zipBytes.count}")
             true
         } catch (e: Exception) {
             Logger.error(TAG, "Export failed: ${e.message}")
             false
         } finally {
-            try {
-                if (tempZip.exists()) tempZip.delete()
-            } catch (e: Exception) {
-                Logger.debug(TAG, "Failed to clean up temp export zip: ${e.message}")
+            // C07 (E3): after a failure the last chunk is never sealed, so the partial file can't be restored
+            // as if it were a complete backup; only the target is closed.
+            if (!archiveSealed) {
+                try {
+                    targetStream.close()
+                } catch (e: Exception) {
+                    Logger.debug(TAG, "Failed to close the export target after a failure: ${e.message}")
+                }
             }
         }
     }
@@ -404,77 +403,29 @@ object BackupManager {
         Logger.info(TAG, "Starting data import...")
         // D09: set once the commit phase starts replacing live state; an exception before that leaves the device untouched.
         var commitStarted = false
-        // C06: Internal cache only for decrypting restore archive
+        // C06: internal cache only (media rollback snapshots). E3: the archive itself is never decrypted to a file.
         val tempDir = File(context.cacheDir, "backup_ops").apply { mkdirs() }
-        val tempZip = File(tempDir, "noslop_restore_${System.currentTimeMillis()}.zip")
         return try {
-            val input = BufferedInputStream(sourceStream)
-
-            val header = ByteArray(16)
-            if (!readFully(input, header)) {
-                Logger.error(TAG, "Import failed: backup file is too small to contain a header")
-                return ImportResult.Failed(rolledBack = true, reason = "Backup file is too small")
-            }
-
-            val isGcm = header[0] == MAGIC_GCM[0] && header[1] == MAGIC_GCM[1] &&
-                header[2] == MAGIC_GCM[2] && header[3] == MAGIC_GCM[3]
-            if (!isGcm && !allowLegacyUnauthenticated) {
-                Logger.warn(TAG, "Legacy unauthenticated archive detected. Confirmation required.")
-                return ImportResult.ConfirmLegacy
-            }
-
-            // R5: archives used to be encrypted under the Word Cloud exactly as typed at export (an
-            // auto-capitalised first word, a trailing space). Pick the form whose key turns the first
-            // cipher block into a zip header; the full authenticated decryption below still decides.
-            val firstBlock = ByteArray(16)
-            input.mark(64)
-            val hasFirstBlock = readFully(input, firstBlock)
-            input.reset()
-            val candidates = MnemonicGenerator.restoreCandidates(mnemonic)
-            val keyMnemonic = if (hasFirstBlock) {
-                candidates.firstOrNull { firstBlockIsZip(aesKeyFor(it), header, firstBlock, isGcm) }
-            } else null
-            if (keyMnemonic == null) {
-                Logger.warn(TAG, "No form of the entered Word Cloud opens this backup (tried ${candidates.size})")
-            } else if (keyMnemonic != candidates.first()) {
-                Logger.info(TAG, "Backup was encrypted under a differently typed form of the Word Cloud (case or spacing); using it")
-            }
-            val key = aesKeyFor(keyMnemonic ?: candidates.firstOrNull() ?: mnemonic)
-
-            val cipher: Cipher
-            if (isGcm) {
-                Logger.info(TAG, "Decrypting authenticated AES-256-GCM backup archive...")
-                val iv = header.copyOfRange(4, 16)
-                cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
-            } else {
-                Logger.info(TAG, "Decrypting legacy AES-256-CBC backup archive (user confirmed)...")
-                cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-                cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(header))
-            }
-
-            try {
-                BufferedOutputStream(FileOutputStream(tempZip)).use { out ->
-                    val buffer = ByteArray(BUFFER_BYTES)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        val chunk = cipher.update(buffer, 0, read)
-                        if (chunk != null && chunk.isNotEmpty()) out.write(chunk)
-                    }
-                    val final = cipher.doFinal()
-                    if (final != null && final.isNotEmpty()) out.write(final)
+            // C07 / C06 (E3): decrypted as it is read (BackupArchiveFormat: NSG2, and NSG1 / CBC from older builds).
+            val archive = when (val opened = BackupArchiveFormat.openForReading(BufferedInputStream(sourceStream, BUFFER_BYTES), mnemonic, allowLegacyUnauthenticated)) {
+                is BackupArchiveFormat.Opened.Readable -> opened
+                BackupArchiveFormat.Opened.TooSmall -> {
+                    Logger.error(TAG, "Import failed: backup file is too small to contain a header")
+                    return ImportResult.Failed(rolledBack = true, reason = "Backup file is too small")
                 }
-            } catch (e: Exception) {
-                try {
-                    tempZip.delete()
-                } catch (delEx: Exception) {
-                    Logger.debug(TAG, "Failed to clean up temp zip on decryption failure: ${delEx.message}")
+                BackupArchiveFormat.Opened.ConfirmLegacy -> return ImportResult.ConfirmLegacy
+                BackupArchiveFormat.Opened.NewerVersion -> {
+                    Logger.error(TAG, "Import failed: the backup was made by a newer version of NoSlop")
+                    return ImportResult.Failed(rolledBack = true, reason = "This backup was made by a newer version of NoSlop")
                 }
-                Logger.error(TAG, "Import failed during decryption — wrong Word Cloud, or archive corrupt/modified: ${e.message}")
-                return ImportResult.Failed(
-                    rolledBack = true,
-                    reason = if (keyMnemonic == null) "The Word Cloud does not match this backup" else "The backup file is damaged or was modified"
-                )
+                BackupArchiveFormat.Opened.WrongWordCloud -> {
+                    Logger.error(TAG, "Import failed: no form of the entered Word Cloud opens this backup")
+                    return ImportResult.Failed(rolledBack = true, reason = WORD_CLOUD_MISMATCH)
+                }
+                BackupArchiveFormat.Opened.Damaged -> {
+                    Logger.error(TAG, "Import failed: the backup file is cut short or malformed")
+                    return ImportResult.Failed(rolledBack = true, reason = ARCHIVE_DAMAGED)
+                }
             }
 
             var restoredKeystoreSealedIdentity = false
@@ -487,57 +438,71 @@ object BackupManager {
             var legacyRederivation: LegacyRederivation? = null
 
             try {
-                ZipInputStream(BufferedInputStream(FileInputStream(tempZip))).use { zis ->
-                    var entry: ZipEntry?
-                    while (zis.nextEntry.also { entry = it } != null) {
-                        val name = entry!!.name
-                        when {
-                            name == "database.db" -> {
-                                val stagedDb = File(stageDir, "database.db")
-                                restoreFile(zis, stagedDb)
-                                hasStagedDb = true
-                            }
-                            name == "identity_backup.json" -> {
-                                val stagedId = File(stageDir, "identity_backup.json")
-                                restoreFile(zis, stagedId)
-                                hasPortableIdentity = true
-                            }
-                            name == "group_messages_backup.json" -> {
-                                val stagedGroupMsgs = File(stageDir, "group_messages_backup.json")
-                                restoreFile(zis, stagedGroupMsgs)
-                                stagedGroupMessagesJson = stagedGroupMsgs.readText(Charsets.UTF_8)
-                            }
-                            name == "api_keys_backup.json" -> {
-                                val stagedApi = File(stageDir, "api_keys_backup.json")
-                                restoreFile(zis, stagedApi)
-                            }
-                            name == "preferences.xml" -> {
-                                restoreFile(zis, File(stageDir, "preferences.xml"))
-                            }
-                            name == "preferences_fallback.xml" -> {
-                                restoreFile(zis, File(stageDir, "preferences_fallback.xml"))
-                            }
-                            name.startsWith("api_keys/") -> {
-                                val fileName = name.removePrefix("api_keys/")
-                                if (isSafeEntryName(fileName)) {
-                                    val apiDir = File(stageDir, "api_keys").apply { mkdirs() }
-                                    restoreFile(zis, File(apiDir, fileName))
+                try {
+                    ZipInputStream(archive.plaintext).use { zis ->
+                        var entry: ZipEntry?
+                        while (zis.nextEntry.also { entry = it } != null) {
+                            val name = entry!!.name
+                            when {
+                                name == "database.db" -> {
+                                    val stagedDb = File(stageDir, "database.db")
+                                    restoreFile(zis, stagedDb)
+                                    hasStagedDb = true
                                 }
-                            }
-                            name.startsWith("media/") -> {
-                                val parts = name.split("/")
-                                if (parts.size == 3) {
-                                    val dirType = parts[1]
-                                    val fileName = parts[2]
-                                    if (isSafeEntryName(dirType) && isSafeEntryName(fileName)) {
-                                        val mDir = File(stageDir, "media/$dirType").apply { mkdirs() }
-                                        restoreFile(zis, File(mDir, fileName))
+                                name == "identity_backup.json" -> {
+                                    val stagedId = File(stageDir, "identity_backup.json")
+                                    restoreFile(zis, stagedId)
+                                    hasPortableIdentity = true
+                                }
+                                name == "group_messages_backup.json" -> {
+                                    val stagedGroupMsgs = File(stageDir, "group_messages_backup.json")
+                                    restoreFile(zis, stagedGroupMsgs)
+                                    stagedGroupMessagesJson = stagedGroupMsgs.readText(Charsets.UTF_8)
+                                }
+                                name == "api_keys_backup.json" -> {
+                                    val stagedApi = File(stageDir, "api_keys_backup.json")
+                                    restoreFile(zis, stagedApi)
+                                }
+                                name == "preferences.xml" -> {
+                                    restoreFile(zis, File(stageDir, "preferences.xml"))
+                                }
+                                name == "preferences_fallback.xml" -> {
+                                    restoreFile(zis, File(stageDir, "preferences_fallback.xml"))
+                                }
+                                name.startsWith("api_keys/") -> {
+                                    val fileName = name.removePrefix("api_keys/")
+                                    if (isSafeEntryName(fileName)) {
+                                        val apiDir = File(stageDir, "api_keys").apply { mkdirs() }
+                                        restoreFile(zis, File(apiDir, fileName))
+                                    }
+                                }
+                                name.startsWith("media/") -> {
+                                    val parts = name.split("/")
+                                    if (parts.size == 3) {
+                                        val dirType = parts[1]
+                                        val fileName = parts[2]
+                                        if (isSafeEntryName(dirType) && isSafeEntryName(fileName)) {
+                                            val mDir = File(stageDir, "media/$dirType").apply { mkdirs() }
+                                            restoreFile(zis, File(mDir, fileName))
+                                        }
                                     }
                                 }
                             }
+                            zis.closeEntry()
                         }
-                        zis.closeEntry()
+                        // C07 (E3): read to the end before anything staged is used. The end is where a
+                        // truncated NSG2 file, and the NSG1 tag or CBC padding, is checked.
+                        BackupArchiveFormat.drain(archive.plaintext)
                     }
+                } catch (e: StagingWriteException) {
+                    Logger.error(TAG, "Import failed: could not stage the backup on this device: ${e.message}")
+                    return ImportResult.Failed(rolledBack = true, reason = "Could not stage the backup on this device: ${e.message}")
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Import failed while reading the archive — wrong Word Cloud, or archive corrupt/modified: ${e.message}")
+                    return ImportResult.Failed(
+                        rolledBack = true,
+                        reason = if (archive.keyMnemonic == null) WORD_CLOUD_MISMATCH else ARCHIVE_DAMAGED
+                    )
                 }
 
                 // 1. Verify staged database integrity before committing (F13 / R09)
@@ -985,12 +950,6 @@ object BackupManager {
             // The commit phase handles (and rolls back) its own failures; anything reaching here before it
             // started left the device as it was.
             ImportResult.Failed(rolledBack = !commitStarted, reason = e.message ?: "Import failed")
-        } finally {
-            try {
-                if (tempZip.exists()) tempZip.delete()
-            } catch (e: Exception) {
-                Logger.debug(TAG, "Failed to clean up temp import zip: ${e.message}")
-            }
         }
     }
 
@@ -1058,35 +1017,9 @@ object BackupManager {
         }
     }
 
-    private fun aesKeyFor(mnemonic: String) =
-        SecretKeySpec(MnemonicGenerator.deriveSeed(mnemonic).copyOfRange(0, 32), "AES")
-
-    /**
-     * R5: whether [key] turns the archive's first cipher block into a zip local-file header
-     * ("PK\u0003\u0004"); a wrong key does so with probability 2^-32. Unauthenticated by itself — it only
-     * chooses the key; the full decryption (GCM tag, or CBC padding plus zip parsing) is the check.
-     * GCM is CTR mode: block 0 of the payload is XORed with AES(key, IV || 00000002). CBC: block 0
-     * decrypts to AES^-1(key, C0) XOR IV, the IV being the 16-byte header.
-     */
-    internal fun firstBlockIsZip(key: SecretKeySpec, header: ByteArray, firstBlock: ByteArray, isGcm: Boolean): Boolean = try {
-        val plain = if (isGcm) {
-            val counter = header.copyOfRange(4, 16) + byteArrayOf(0, 0, 0, 2)
-            val keystream = Cipher.getInstance("AES/ECB/NoPadding").run {
-                init(Cipher.ENCRYPT_MODE, key)
-                doFinal(counter)
-            }
-            ByteArray(16) { (firstBlock[it].toInt() xor keystream[it].toInt()).toByte() }
-        } else {
-            val raw = Cipher.getInstance("AES/ECB/NoPadding").run {
-                init(Cipher.DECRYPT_MODE, key)
-                doFinal(firstBlock)
-            }
-            ByteArray(16) { (raw[it].toInt() xor header[it].toInt()).toByte() }
-        }
-        plain[0] == 0x50.toByte() && plain[1] == 0x4B.toByte() && plain[2] == 0x03.toByte() && plain[3] == 0x04.toByte()
-    } catch (e: Exception) {
-        false
-    }
+    /** R5: the NSG1 / CBC first-block key probe; see [BackupArchiveFormat.firstBlockIsZip]. */
+    internal fun firstBlockIsZip(key: SecretKeySpec, header: ByteArray, firstBlock: ByteArray, isGcm: Boolean): Boolean =
+        BackupArchiveFormat.firstBlockIsZip(key, header, firstBlock, isGcm)
 
     private fun canOpenRestoredIdentity(context: Context): Boolean {
         return try {
@@ -1124,16 +1057,6 @@ object BackupManager {
         }
     }
 
-    private fun readFully(input: InputStream, buf: ByteArray): Boolean {
-        var offset = 0
-        while (offset < buf.size) {
-            val read = input.read(buf, offset, buf.size - offset)
-            if (read == -1) return false
-            offset += read
-        }
-        return true
-    }
-
     private fun addToZip(zos: ZipOutputStream, file: File, name: String) {
         zos.putNextEntry(ZipEntry(name))
         FileInputStream(file).use { input ->
@@ -1142,10 +1065,78 @@ object BackupManager {
         zos.closeEntry()
     }
 
+    /**
+     * Copies the current zip entry to [targetFile] (staging). E3: a failure to write on this device is a
+     * [StagingWriteException]; any other failure comes from reading the archive.
+     */
     private fun restoreFile(zis: ZipInputStream, targetFile: File) {
-        targetFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
-        BufferedOutputStream(FileOutputStream(targetFile)).use { output ->
-            zis.copyTo(output, BUFFER_BYTES)
+        val output = try {
+            targetFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
+            BufferedOutputStream(FileOutputStream(targetFile), BUFFER_BYTES)
+        } catch (e: IOException) {
+            throw StagingWriteException(e)
         }
+        try {
+            val buffer = ByteArray(BUFFER_BYTES)
+            while (true) {
+                val read = zis.read(buffer)
+                if (read == -1) break
+                try {
+                    output.write(buffer, 0, read)
+                } catch (e: IOException) {
+                    throw StagingWriteException(e)
+                }
+            }
+            try {
+                output.flush()
+            } catch (e: IOException) {
+                throw StagingWriteException(e)
+            }
+        } finally {
+            try {
+                output.close()
+            } catch (e: IOException) {
+                Logger.warn(TAG, "Could not close a staged restore file: ${e.message}")
+            }
+        }
+    }
+
+    /** E3: writing a staged restore file failed on this device (not a problem with the archive). */
+    private class StagingWriteException(cause: IOException) : IOException(cause.message, cause)
+
+    /**
+     * Counts the zip bytes on their way into the encryption (for the export log), and remembers whether
+     * writing them failed: some export sections log a failure and carry on, but once the encrypted stream
+     * has failed the archive is unusable and the export must fail.
+     */
+    private class CountingOutputStream(private val out: OutputStream) : OutputStream() {
+        var count = 0L
+            private set
+        var failed = false
+            private set
+
+        override fun write(b: Int) {
+            try {
+                out.write(b)
+            } catch (e: IOException) {
+                failed = true
+                throw e
+            }
+            count++
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            try {
+                out.write(b, off, len)
+            } catch (e: IOException) {
+                failed = true
+                throw e
+            }
+            count += len
+        }
+
+        override fun flush() = out.flush()
+
+        override fun close() = out.close()
     }
 }

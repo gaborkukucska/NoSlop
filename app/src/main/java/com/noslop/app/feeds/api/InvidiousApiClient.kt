@@ -229,7 +229,7 @@ object InvidiousApiClient {
         // 1. Race Piped API instances over Tor (6s budget)
         val pipedHealthy = healthyPipedInstances()
         val pipedResult = raceInstances(
-            label = "resolvePiped($videoId)",
+            label = "resolvePiped(${Logger.redact(videoId)})",
             instances = pipedHealthy,
             deadlineMs = System.currentTimeMillis() + 6_000L,
             urlFor = { "$it/streams/$videoId" },
@@ -240,7 +240,7 @@ object InvidiousApiClient {
         // 2. Race Invidious instances (8s budget)
         val invidiousHealthy = healthyInvidiousInstances()
         return raceInstances(
-            label = "resolveInvidious($videoId)",
+            label = "resolveInvidious(${Logger.redact(videoId)})",
             instances = invidiousHealthy,
             deadlineMs = System.currentTimeMillis() + 8_000L,
             urlFor = { "$it/api/v1/videos/$videoId?local=true" },
@@ -357,7 +357,7 @@ object InvidiousApiClient {
     suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         return raceInstances(
-            label = "search '$query'",
+            label = "search '${Logger.redact(query)}'",
             instances = healthyInvidiousInstances(),
             deadlineMs = System.currentTimeMillis() + 15_000L,
             urlFor = { "$it/api/v1/search?q=$encodedQuery&type=video&date=month" },
@@ -386,7 +386,7 @@ object InvidiousApiClient {
     suspend fun searchChannels(query: String): List<String> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         return raceInstances(
-            label = "channel search '$query'",
+            label = "channel search '${Logger.redact(query)}'",
             instances = healthyInvidiousInstances(),
             deadlineMs = System.currentTimeMillis() + 10_000L,
             urlFor = { "$it/api/v1/search?q=$encodedQuery&type=channel" },

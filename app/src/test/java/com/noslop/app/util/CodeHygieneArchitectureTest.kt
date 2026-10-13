@@ -16,6 +16,10 @@ import java.io.File
  * 3. INFO/WARN/ERROR logs never interpolate a search term or video id directly; use
  *    `Logger.redact(...)`. (A property of a payload named `query`, e.g. `${query.groupId}`, is fine.)
  * 4. The manifest can see the Tor Browser packages (API 30+ package visibility).
+ * 5. (E2b) App code does not use Gson's TypeToken: R8 strips the type argument of the anonymous
+ *    subclass in release builds, and the read then fails every time. Parse through an array class or
+ *    a JsonObject instead. ProGuard keeps Gson's own TypeToken rules for library code.
+ * 6. (E2b) Request labels (`label = "..."`, logged on every failure) never carry a search term or video id.
  */
 class CodeHygieneArchitectureTest {
 
@@ -113,6 +117,33 @@ class CodeHygieneArchitectureTest {
             }
         }
         assertTrue("Use Logger.redact(...) for:\n" + violations.joinToString("\n"), violations.isEmpty())
+    }
+
+    @Test
+    fun appCodeDoesNotUseGsonTypeToken() {
+        val violations = mutableListOf<String>()
+        for (file in sources()) {
+            file.readLines().forEachIndexed { i, l ->
+                val code = l.trim()
+                val comment = code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")
+                if (!comment && Regex("""\bTypeToken\b""").containsMatchIn(l)) violations += "${rel(file)}:${i + 1}: $code"
+            }
+        }
+        assertTrue("Gson TypeToken breaks under R8 (release); use an array class or JsonObject:\n" + violations.joinToString("\n"), violations.isEmpty())
+        val rules = File(srcMain, "../../proguard-rules.pro").readText()
+        assertTrue(rules.contains("-keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken"))
+    }
+
+    @Test
+    fun requestLabelsNeverCarrySearchTermsOrVideoIds() {
+        val label = Regex("""\blabel\s*=\s*"[^"]*\$\{?\s*(query|videoId|searchQuery|cleanQuery|searchTerm)\b(?!\s*\.)""")
+        val violations = mutableListOf<String>()
+        for (file in sources()) {
+            file.readLines().forEachIndexed { i, l ->
+                if (label.containsMatchIn(l)) violations += "${rel(file)}:${i + 1}: ${l.trim()}"
+            }
+        }
+        assertTrue("Use Logger.redact(...) in:\n" + violations.joinToString("\n"), violations.isEmpty())
     }
 
     @Test

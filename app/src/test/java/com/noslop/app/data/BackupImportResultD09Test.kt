@@ -67,20 +67,9 @@ class BackupImportResultD09Test {
         return out.toByteArray()
     }
 
-    private fun decryptArchive(bytes: ByteArray): Map<String, ByteArray> {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(4, 16)))
-        val zip = cipher.doFinal(bytes.copyOfRange(16, bytes.size))
-        val entries = linkedMapOf<String, ByteArray>()
-        ZipInputStream(ByteArrayInputStream(zip)).use { zis ->
-            var e = zis.nextEntry
-            while (e != null) {
-                entries[e.name] = zis.readBytes()
-                e = zis.nextEntry
-            }
-        }
-        return entries
-    }
+    /** E3: exports are NSG2. Older archives (NSG1, built by [encryptArchive]) must still restore. */
+    private fun decryptArchive(bytes: ByteArray): Map<String, ByteArray> =
+        BackupArchiveTestSupport.entries(BackupArchiveTestSupport.zipOf(bytes, mnemonic))
 
     private fun encryptArchive(entries: Map<String, ByteArray>): ByteArray {
         val zipOut = ByteArrayOutputStream()

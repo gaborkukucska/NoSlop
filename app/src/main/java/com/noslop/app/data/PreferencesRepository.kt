@@ -45,8 +45,7 @@ class PreferencesRepository(
         val json = appSettingDao.getSetting("selected_categories")
         if (!json.isNullOrBlank()) {
             try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
+                parseStringList(json)?.let { return@withContext it }
             } catch (e: Exception) {
                 com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'selected_categories' is unreadable; using the default: ${e.message}")
             }
@@ -68,8 +67,7 @@ class PreferencesRepository(
         val json = appSettingDao.getSetting("keywords_$category")
         if (!json.isNullOrBlank()) {
             try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
+                parseStringList(json)?.let { return@withContext it }
             } catch (e: Exception) {
                 com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'keywords_$category' is unreadable; using the default: ${e.message}")
             }
@@ -115,8 +113,7 @@ class PreferencesRepository(
         val json = appSettingDao.getSetting("selected_music_genres")
         if (!json.isNullOrBlank()) {
             try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
+                parseStringList(json)?.let { return@withContext it }
             } catch (e: Exception) {
                 com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'selected_music_genres' is unreadable; using the default: ${e.message}")
             }
@@ -135,8 +132,7 @@ class PreferencesRepository(
         val json = appSettingDao.getSetting("selected_video_genres")
         if (!json.isNullOrBlank()) {
             try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
+                parseStringList(json)?.let { return@withContext it }
             } catch (e: Exception) {
                 com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'selected_video_genres' is unreadable; using the default: ${e.message}")
             }
@@ -244,9 +240,11 @@ class PreferencesRepository(
         val json = appSettingDao.getSetting("banned_nodes") ?: ""
         if (json.isBlank()) return@withContext emptyList()
         try {
-            val type = object : com.google.gson.reflect.TypeToken<List<BannedNode>>() {}.type
-            com.noslop.app.util.Json.gson.fromJson(json, type) ?: emptyList()
-        } catch (_: Exception) {
+            // E2b: an array class, not a TypeToken (see parseStringList). BannedNode is @Keep, so its
+            // field names survive R8.
+            com.noslop.app.util.Json.gson.fromJson(json, Array<BannedNode?>::class.java)?.filterNotNull() ?: emptyList()
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'banned_nodes' is unreadable; no node is banned: ${e.message}")
             emptyList()
         }
     }
@@ -287,4 +285,12 @@ class PreferencesRepository(
         val month = appSettingDao.getSetting("channel_cutoff_month")?.toIntOrNull() ?: 1
         Triple(enabled, year, month)
     }
+
+    /**
+     * E2b: a stored JSON list of strings, or null when the stored value is JSON `null`. Parsed through an
+     * array class because `object : TypeToken<List<String>>() {}` loses its type argument when R8 strips
+     * the generic signature of the anonymous class, and then throws on every read (release builds only).
+     */
+    private fun parseStringList(json: String): List<String>? =
+        com.noslop.app.util.Json.gson.fromJson(json, Array<String?>::class.java)?.filterNotNull()
 }

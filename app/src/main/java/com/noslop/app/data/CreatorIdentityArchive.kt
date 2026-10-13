@@ -65,9 +65,9 @@ sealed class CreatorRestoreResult {
  * reordered or extended file is refused. The plaintext is a zip: manifest.json, contacts.json,
  * posts.json and media/<media id>.
  *
- * Each chunk is authenticated on its own, so a large video never has to fit in memory (the full
- * backup's single GCM stream has to be held until its tag is checked). A restore stages everything and
- * changes nothing on the device until the whole file has been read and authenticated.
+ * Each chunk is authenticated on its own, so a large video never has to fit in memory. A restore stages
+ * everything and changes nothing on the device until the whole file has been read and authenticated.
+ * E3: the full backup (BackupArchiveFormat, NSG2) uses these same chunk streams.
  */
 object CreatorIdentityArchive {
     private const val TAG = "CREATOR_ARCHIVE"

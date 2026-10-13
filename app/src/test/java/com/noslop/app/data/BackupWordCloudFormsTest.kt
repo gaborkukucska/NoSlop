@@ -55,17 +55,9 @@ class BackupWordCloudFormsTest {
     private fun restore(bytes: ByteArray, typed: String) =
         BackupManager.importBackup(context, typed, ByteArrayInputStream(bytes))
 
-    /** Re-encrypts an archive under exactly [typedAtExport], as builds before this round did. */
-    private fun asOldBuildWouldHaveWritten(canonicalArchive: ByteArray, typedAtExport: String): ByteArray {
-        fun key(m: String) = SecretKeySpec(MnemonicGenerator.deriveSeed(m).copyOfRange(0, 32), "AES")
-        val dec = Cipher.getInstance("AES/GCM/NoPadding")
-        dec.init(Cipher.DECRYPT_MODE, key(canonical), GCMParameterSpec(128, canonicalArchive.copyOfRange(4, 16)))
-        val zip = dec.doFinal(canonicalArchive.copyOfRange(16, canonicalArchive.size))
-        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-        val enc = Cipher.getInstance("AES/GCM/NoPadding")
-        enc.init(Cipher.ENCRYPT_MODE, key(typedAtExport), GCMParameterSpec(128, iv))
-        return "NSG1".toByteArray(Charsets.UTF_8) + iv + enc.doFinal(zip)
-    }
+    /** Re-encrypts an archive as NSG1 under exactly [typedAtExport], as builds before R5 (and E3) did. */
+    private fun asOldBuildWouldHaveWritten(canonicalArchive: ByteArray, typedAtExport: String): ByteArray =
+        BackupArchiveTestSupport.nsg1(BackupArchiveTestSupport.zipOf(canonicalArchive, canonical), typedAtExport)
 
     @Test
     fun normalize_lowercasesAndCollapsesSpacing() {
@@ -115,7 +107,8 @@ class BackupWordCloudFormsTest {
 
     @Test
     fun firstBlockProbe_recognisesTheRightKeyOnly() {
-        val archive = export(canonical)
+        // E3: exports are NSG2 now; the probe is for NSG1 (and CBC) archives.
+        val archive = BackupArchiveTestSupport.nsg1(BackupArchiveTestSupport.zipOf(export(canonical), canonical), canonical)
         val header = archive.copyOfRange(0, 16)
         val first = archive.copyOfRange(16, 32)
         fun key(m: String) = SecretKeySpec(MnemonicGenerator.deriveSeed(m).copyOfRange(0, 32), "AES")

@@ -57,11 +57,10 @@ class WordCloudRuleTest {
         return out.toByteArray()
     }
 
+    /** E3: exports are NSG2 (chunked, per-archive key); BackupArchiveTestSupport opens them. */
     private fun archivedIdentity(archive: ByteArray, typed: String): JSONObject {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        val key = SecretKeySpec(MnemonicGenerator.deriveSeed(MnemonicGenerator.normalize(typed)).copyOfRange(0, 32), "AES")
-        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, archive.copyOfRange(4, 16)))
-        ZipInputStream(ByteArrayInputStream(cipher.doFinal(archive.copyOfRange(16, archive.size)))).use { zis ->
+        val zip = BackupArchiveTestSupport.zipOf(archive, typed)
+        ZipInputStream(ByteArrayInputStream(zip)).use { zis ->
             var e = zis.nextEntry
             while (e != null) {
                 if (e.name == "identity_backup.json") return JSONObject(String(zis.readBytes(), Charsets.UTF_8))

@@ -18,6 +18,13 @@
 # Keep source file line numbers and generic signatures for Gson TypeToken reflection
 -keepattributes SourceFile,LineNumberTable,Signature,InnerClasses,EnclosingMethod,*Annotation*
 
+# E2b: in R8 full mode, -keepattributes Signature only applies to kept classes, so an anonymous
+# `object : TypeToken<List<String>>() {}` lost its type argument and threw at run time (release builds:
+# saved categories, genres, keywords, banned nodes and group bans were never read). App code no longer
+# uses TypeToken (CodeHygieneArchitectureTest forbids it); Gson's recommended rules cover libraries.
+-keep,allowobfuscation,allowshrinking class com.google.gson.reflect.TypeToken
+-keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken
+
 # tor-android — embedded Tor daemon native wrapper
 -keep class org.torproject.android.** { *; }
 -keep class org.torproject.jni.** { *; }
