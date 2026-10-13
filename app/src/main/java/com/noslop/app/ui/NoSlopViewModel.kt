@@ -219,6 +219,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val allSearchResultItemIds = mutableSetOf<String>()
     private var searchExhaustedCount = 0
     private var isLoadingMoreFeedItems = false
+    // E5s: paging of the active search (fetchNextSearchPage). The cursor belongs to one search, the
+    // query and the search-modal filter in searchCursorKey. searchResultPage records the page each
+    // result arrived on: the list shows earlier pages first, each newest first. searchExhaustedCount
+    // now counts pages in a row that added nothing new (SearchPaging.MAX_EMPTY_PAGES ends the paging).
+    private var searchCursor: com.noslop.app.feeds.PublicApiService.SearchCursor? = null
+    private var searchCursorKey: String? = null
+    private var searchFetchInFlight: com.noslop.app.feeds.PublicApiService.SearchCursor? = null
+    private var searchListWaiting = false
+    private var searchPagesFetched = 0
+    private val searchResultPage = HashMap<String, Int>()
+    // E5s: hidden from every list but the user's own records (loadMoreFeedItems).
+    private var cachedDownvotedKeys: Set<String> = emptySet()
+    private var cachedBannedNodeKeys: Set<String> = emptySet()
+    private val downvoteMutex = kotlinx.coroutines.sync.Mutex()
     private var hasShownCreatorDepletionInSession = false
 
     // Session stats for Break / Exit Reminders
@@ -858,12 +872,33 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 isSearchModeActive = true
                 searchExhaustedCount = 0
                 activeSearchQuery = query
+                // E5s: a new search pages on its own. A page of the previous search still on its way is
+                // dropped when it lands (it belongs to another cursor).
+                val cursor = com.noslop.app.feeds.PublicApiService.SearchCursor()
+                searchCursor = cursor
+                searchCursorKey = searchKey(query, filterMode ?: "Live Feed")
+                searchFetchInFlight = null
+                searchListWaiting = false
+                searchPagesFetched = 0
+                searchResultPage.clear()
+                refreshSearchExclusions()
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 
                 val isLocalOnly = filterMode in listOf("History", "Liked", "Saved", "My Content", "Mesh")
                 if (!isLocalOnly) {
-                    val searchResultList = repository.searchCustomFeed(query, filterMode)
+                    // E5s: the first page of a paged search, newest first and with no date limit.
+                    searchFetchInFlight = cursor
+                    val searchResultList = try {
+                        repository.searchCustomFeedPage(query, filterMode, cursor, firstPage = true)
+                    } finally {
+                        if (searchFetchInFlight === cursor) searchFetchInFlight = null
+                    }
+                    // A newer search started while this one was fetching: the list is its now.
+                    if (searchCursor !== cursor) return@launch
+                    searchPagesFetched = 1
+                    if (searchResultList.isEmpty()) searchExhaustedCount = 1
+                    rememberSearchPage(searchResultList, 1)
                     lastSearchResultIds = searchResultList.toSet()
                     allSearchResultItemIds.addAll(searchResultList)
 
@@ -1037,6 +1072,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 activeSearchQuery = ""
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
+                // E5s: the search's paging ends with it.
+                searchCursor = null
+                searchCursorKey = null
+                if (searchListWaiting) {
+                    searchListWaiting = false
+                    _isRefreshingFeeds.value = false
+                }
                 
                 _unifiedFeed.value = cachedDefaultFeed.toList()
                 
@@ -1371,6 +1413,26 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        // E5s: posts from banned nodes stay hidden in every list, search included. Banning removed them
+        // from the list on screen only, and they came back with a later batch.
+        if (cachedBannedNodeKeys.isNotEmpty()) {
+            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 !in cachedBannedNodeKeys }
+        }
+        // E5s: what the user voted down (downvote, slop, vomit, clown, NoSlop) stays hidden in every list
+        // except their own records: History, Liked, Saved, My Content. Search lists show seen and swiped
+        // items, and a downvote only recorded a swipe, so downvoted items came back in search.
+        if (cachedDownvotedKeys.isNotEmpty() && actualFilter !in SearchPaging.KEEPS_DOWNVOTED) {
+            unseenFeeds = unseenFeeds.filter { item ->
+                item.id !in cachedDownvotedKeys &&
+                    normalizeFeedItemId(item.id, item.url ?: "") !in cachedDownvotedKeys &&
+                    com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item)) !in cachedDownvotedKeys
+            }
+            unseenMeshes = unseenMeshes.filter { post ->
+                post.id !in cachedDownvotedKeys &&
+                    com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(post)) !in cachedDownvotedKeys
+            }
+        }
+
         // Channel creation date cut-off filtering (exempt during explicit creator/channel search)
         val cutoff = _channelCutoffSettings.value
         if (cutoff.first && !isSearchActive) {
@@ -1420,35 +1482,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) {
-            if (isSearchActive && searchExhaustedCount < 3) {
-                searchExhaustedCount++
-                val modifiers = when (actualFilter) {
-                    "Images" -> listOf("photo", "picture", "art", "gallery", "wallpaper", "high res")
-                    "Videos" -> listOf("video", "clip", "watch", "trailer", "vlog", "gameplay")
-                    "Audio" -> listOf("podcast", "music", "song", "audio", "track", "interview")
-                    "Articles" -> listOf("article", "news", "blog", "post", "story", "read")
-                    else -> listOf("review", "latest", "update", "new", "guide", "analysis", "explained", "interview", "podcast", "vlog")
-                }
-                val randomMod = modifiers.random()
-                val newQuery = "$activeSearchQuery $randomMod"
-                Logger.info("VM", "Search results exhausted. Fetching more with query: $newQuery")
-                viewModelScope.launch {
-                    _isRefreshingFeeds.value = true
-                    try {
-                        val isLocalOnly = actualFilter in listOf("History", "Liked", "Saved", "My Content", "Mesh")
-                        if (!isLocalOnly) {
-                            val newIds = repository.searchCustomFeed(newQuery, actualFilter)
-                            if (newIds.isNotEmpty()) {
-                                lastSearchResultIds = lastSearchResultIds + newIds
-                                allSearchResultItemIds.addAll(newIds)
-                            }
-                        }
-                        loadMoreFeedItems(actualFilter, isInjection = false)
-                    } finally {
-                        _isRefreshingFeeds.value = false
-                    }
-                }
-            }
+            // E5s: a search that has shown everything it found fetches the next page of the same search
+            // (same terms, same filter, newest first). It used to search again with a random extra word
+            // ("review", "vlog", ...), which drifted away from what the user asked for.
+            if (isSearchActive) fetchNextSearchPage(actualFilter, listIsWaiting = true)
             return
         }
 
@@ -1521,17 +1558,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 val unconsumedSaved = matchedSaved.filter { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) !in currentLoadedKeys }
                 batch.addAll(unconsumedSaved.take(specificNeeded).map { UnifiedItem.Feed(it) })
             } else if (isSearchActive) {
-                val searchOrder = lastSearchResultIds.toList()
+                // E5s: in the order the pages arrived, newest first within a page; matches found on the
+                // device count as the first page. Videos no longer go first: a search lists what matches,
+                // in date order, whatever its type.
                 val allMatches = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
-                val sortedSearch = allMatches.sortedWith(compareBy(
-                    // 1. Videos have top priority in search results
-                    { !(it is UnifiedItem.Feed && it.item.mediaType?.contains("video") == true) },
-                    // 2. Exact search API relevance rank
-                    { val idx = searchOrder.indexOf(it.id); if (idx >= 0) idx else Int.MAX_VALUE },
-                    // 3. Fallback timestamp
-                    { -it.timestamp }
-                ))
+                val sortedSearch = SearchPaging.order(allMatches, { searchResultPage[it.id] }, { it.timestamp.toLong() })
                 batch.addAll(sortedSearch.take(specificNeeded))
+                // Keep the next page coming while the user is still swiping through this one.
+                if (allMatches.size - batch.size < specificNeeded) {
+                    fetchNextSearchPage(actualFilter, listIsWaiting = false)
+                }
             } else {
                 if (actualFilter == "History") {
                     val viewedIdsList = viewedHistoryIds.value.toList()
@@ -2399,11 +2435,150 @@ fun toggleAggregator() {
         } catch (e: Exception) {
             com.noslop.app.debug.Logger.warn("VIEWMODEL", "Could not refresh reacted items; keeping the previous list: ${e.message}")
         }
+        refreshSearchExclusions()  // E5s
     }
 
     fun updateActiveSearchQuery(query: String) {
         activeSearchQuery = query
     }
+
+    /** E5s: one search's paging belongs to its query and its search-modal filter. */
+    private fun searchKey(query: String, filter: String) = "$filter\n${query.trim()}"
+
+    /** E5s: records the page [ids] arrived on, for the search order (an id keeps its first page). */
+    private fun rememberSearchPage(ids: List<String>, page: Int) {
+        for (id in ids) {
+            if (id !in searchResultPage) searchResultPage[id] = page
+        }
+    }
+
+    /**
+     * E5s: fetches the next page of the active search in the background and adds what it finds to the
+     * search results. [listIsWaiting]: the list has nothing left to show, so the spinner shows and the
+     * list is refilled when the page lands; otherwise this is a prefetch while the user is still
+     * swiping, and its results join the pool the next batch draws from.
+     *
+     * One page at a time per search. Stops when every source of this filter has reported the end of its
+     * results, after SearchPaging.MAX_EMPTY_PAGES pages in a row that added nothing new, or after
+     * SearchPaging.MAX_PAGES pages.
+     */
+    private fun fetchNextSearchPage(filter: String, listIsWaiting: Boolean) {
+        val query = activeSearchQuery
+        if (query.isBlank() || filter in SearchPaging.LOCAL_ONLY_FILTERS) return
+        val key = searchKey(query, filter)
+        val existing = searchCursor
+        val cursor = if (existing != null && searchCursorKey == key) existing else {
+            // The query or the filter changed without a new search (updateActiveSearchQuery, a mode
+            // switch with the query still set): page that search from its start.
+            com.noslop.app.feeds.PublicApiService.SearchCursor().also {
+                searchCursor = it
+                searchCursorKey = key
+                searchFetchInFlight = null
+                searchPagesFetched = 0
+                searchExhaustedCount = 0
+                searchResultPage.clear()
+            }
+        }
+        if (searchFetchInFlight === cursor) {
+            // A prefetch is already on its way: it refills the list when it lands.
+            if (listIsWaiting) {
+                searchListWaiting = true
+                _isRefreshingFeeds.value = true
+            }
+            return
+        }
+        if (!SearchPaging.shouldFetchMore(searchExhaustedCount, searchPagesFetched)) return
+        val firstPage = searchPagesFetched == 0
+        if (!firstPage && !repository.searchHasMorePages(filter, cursor)) return
+
+        searchFetchInFlight = cursor
+        if (listIsWaiting) {
+            searchListWaiting = true
+            _isRefreshingFeeds.value = true
+        }
+        viewModelScope.launch {
+            try {
+                val ids = repository.searchCustomFeedPage(query, filter, cursor, firstPage)
+                if (searchCursor !== cursor) return@launch  // the user has moved on to another search
+                searchPagesFetched++
+                val fresh = ids.filter { it !in lastSearchResultIds }
+                searchExhaustedCount = if (fresh.isEmpty()) searchExhaustedCount + 1 else 0
+                rememberSearchPage(fresh, searchPagesFetched)
+                lastSearchResultIds = lastSearchResultIds + fresh
+                allSearchResultItemIds.addAll(fresh)
+                Logger.info("VM", "Search page $searchPagesFetched: ${fresh.size} new results")
+                if (searchListWaiting && fresh.isNotEmpty()) {
+                    // As for the first page: give the database a moment to deliver the new items.
+                    val freshSet = fresh.toSet()
+                    var waitCount = 0
+                    while (waitCount < 15 && allFeeds.none { it.id in freshSet }) {
+                        kotlinx.coroutines.delay(100)
+                        waitCount++
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                searchExhaustedCount++
+                Logger.warn("VM", "Search page fetch failed: ${e.message}")
+            } finally {
+                if (searchFetchInFlight === cursor) searchFetchInFlight = null
+            }
+            if (searchCursor !== cursor || !searchListWaiting) return@launch
+            searchListWaiting = false
+            _isRefreshingFeeds.value = false
+            // Refill the list. If the page added nothing it can show, this asks for the following page,
+            // within the limits above.
+            loadMoreFeedItems(filter, isInjection = false)
+        }
+    }
+
+    /** E5s: reloads what the lists hide on top of the swipe and view records (loadMoreFeedItems). */
+    private suspend fun refreshSearchExclusions() {
+        try {
+            cachedDownvotedKeys = SearchPaging.parseDownvotes(repository.getAppSetting(SearchPaging.DOWNVOTED_SETTING))
+            cachedBannedNodeKeys = repository.getBannedNodes().map { it.publicKeyB64 }.toSet()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.warn("VM", "Could not refresh downvoted items and banned nodes: ${e.message}")
+        }
+    }
+
+    /**
+     * E5s: remembers that the user voted down the item with these [keys] (its id, normalized id and
+     * canonical key), so it stays out of every list but their own records. Kept in app settings, one
+     * key per line, the newest SearchPaging.MAX_DOWNVOTED_KEYS of them.
+     */
+    private suspend fun rememberDownvote(keys: Collection<String>) {
+        try {
+            downvoteMutex.lock()
+            try {
+                val merged = SearchPaging.mergeDownvotes(repository.getAppSetting(SearchPaging.DOWNVOTED_SETTING), keys)
+                repository.putAppSetting(SearchPaging.DOWNVOTED_SETTING, merged.joinToString("\n"))
+                cachedDownvotedKeys = merged.toSet()
+            } finally {
+                downvoteMutex.unlock()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.warn("VM", "Could not record a downvote: ${e.message}")
+        }
+    }
+
+    /** E5s: the keys a downvoted clearnet item is remembered by. */
+    private fun downvoteKeys(item: FeedItem): List<String> = listOf(
+        item.id,
+        normalizeFeedItemId(item.id, item.url ?: ""),
+        com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item))
+    )
+
+    /** E5s: the keys a downvoted mesh post is remembered by. */
+    private fun downvoteKeys(postId: String): List<String> = listOfNotNull(
+        postId,
+        allMeshes.find { it.id == postId }?.let { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
+    )
 
     fun ensurePostInFeed(postId: String) {
         viewModelScope.launch {
@@ -3141,6 +3316,7 @@ fun toggleAggregator() {
         viewModelScope.launch {
             if (reactionType == "noslop") {
                 recordItemSwiped(item.id)
+                rememberDownvote(downvoteKeys(item))  // E5s
                 _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 val author = item.author
                 if (!author.isNullOrBlank()) {
@@ -3150,6 +3326,7 @@ fun toggleAggregator() {
             }
             if (reactionType in setOf("downvote", "slop", "vomit", "clown")) {
                 recordItemSwiped(item.id)
+                rememberDownvote(downvoteKeys(item))  // E5s
                 _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 return@launch
             }
@@ -3205,6 +3382,7 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.banNode(publicKeyB64, handle)
             _bannedNodes.value = repository.getBannedNodes()
+            refreshSearchExclusions()  // E5s
             val currentFeed = _unifiedFeed.value.toMutableList()
             currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == publicKeyB64 }
             _unifiedFeed.value = currentFeed
@@ -3215,6 +3393,7 @@ fun toggleAggregator() {
         if (publicKeyB64.isBlank()) return
         viewModelScope.launch {
             repository.unbanNode(publicKeyB64)
+            refreshSearchExclusions()  // E5s
             _bannedNodes.value = repository.getBannedNodes()
         }
     }
@@ -3237,6 +3416,8 @@ fun toggleAggregator() {
         markItemViewed(postId, isMesh = true)
         if (reactionType == "noslop" || reactionType in setOf("downvote", "slop", "vomit", "clown")) {
             recordItemSwiped(postId)
+            val keys = downvoteKeys(postId)
+            viewModelScope.launch { rememberDownvote(keys) }  // E5s
             _unifiedFeed.value = _unifiedFeed.value.filter { it.id != postId }
         }
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToMeshPost(postId, reactionType) }

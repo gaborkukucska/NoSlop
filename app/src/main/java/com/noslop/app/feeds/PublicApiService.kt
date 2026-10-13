@@ -27,7 +27,15 @@ object PublicApiService {
         userKeywords: List<String>,
         apiKeyRepo: ApiKeyRepository,
         activeApiSourceIds: List<String>,
-        language: String = "en"
+        language: String = "en",
+        /**
+         * E5s: set for a user search from the search modal. The sources that can page (YouTube,
+         * Invidious, Reddit) then fetch newest first, with no date limit, and record in the cursor where
+         * they got to. Null for every other caller, which get exactly what they always got.
+         */
+        searchCursor: SearchCursor? = null,
+        /** E5s: with [searchCursor]: only the next page of the sources that page, nothing else. */
+        nextPagesOnly: Boolean = false
     ): List<FeedItem> = supervisorScope {
         if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
             Logger.warn(TAG, "Tor not ready — skipping category fetch for $category")
@@ -177,10 +185,17 @@ object PublicApiService {
                     }
                 }
                 "Search Videos" -> {
-                    addLocal(mediaType = "video")  // NOSLOP_LOCAL_SEARCH_V1
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
-                    fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
+                    if (!nextPagesOnly) addLocal(mediaType = "video")  // NOSLOP_LOCAL_SEARCH_V1
+                    if (searchCursor == null) {
+                        fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                        fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
+                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
+                    } else {
+                        // E5s: paged, newest first, every date (see SearchCursor).
+                        fetchAsync("api-yt-search") { youTubeSearchPage(query, searchCursor) }
+                        fetchAsync("api-invidious-search") { invidiousSearchPage(query, searchCursor) }
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "video") }
+                    }
                 }
                 "Search Audio" -> {
                     // --- NOSLOP_LOCAL_SEARCH_V1 ---
@@ -189,21 +204,31 @@ object PublicApiService {
                     //     which is why audio results looked wrong.
                     //   JamendoApiClient — has been returning "failed", and
                     //     Openverse indexes Jamendo anyway, so nothing is lost.
-                    addLocal(mediaType = "audio")
-                    fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
-                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
-                    fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
+                    // E5s: only Reddit pages here; the other sources answer the first page.
+                    if (!nextPagesOnly) {
+                        addLocal(mediaType = "audio")
+                        fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
+                        fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
+                        fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
+                    }
+                    if (searchCursor == null) {
+                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
+                    } else {
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, null) }
+                    }
                 }
                 "Search Images" -> {
                     // --- NOSLOP_IMAGE_SEARCH_V1 ---
                     // Every source here must honour the query. fetchFeaturedPictures()
                     // did not, and was padding each search with 25 arbitrary photos.
-                    addLocal(mediaType = "image")  // NOSLOP_LOCAL_SEARCH_V1
-                    // --- NOSLOP_SEARCH_SOURCES_V1 --- now actually registered, so it runs
-                    fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
-                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
-                    fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    // E5s: only Reddit pages here; the other sources answer the first page.
+                    if (!nextPagesOnly) {
+                        addLocal(mediaType = "image")  // NOSLOP_LOCAL_SEARCH_V1
+                        // --- NOSLOP_SEARCH_SOURCES_V1 --- now actually registered, so it runs
+                        fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
+                        fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
+                        fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    }
                     // --- NOSLOP_SEARCH_SOURCES_V1 ---
                     // Art Institute removed from image SEARCH. It is a museum
                     // catalogue whose search fuzzy-matches anything, so it
@@ -211,26 +236,60 @@ object PublicApiService {
                     // for "hasanabi" — half of every result set was noise. It
                     // stays in the Art category, where browsing a collection is
                     // the whole point.
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
+                    if (searchCursor == null) {
+                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
+                    } else {
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "image") }
+                    }
                     // Images only: see NasaApiClient — the video path costs ~1.3s per
                     // item sequentially and used to consume the whole category budget.
-                    fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query, includeVideo = false) }
+                    if (!nextPagesOnly) {
+                        fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query, includeVideo = false) }
+                    }
                 }
                 "Search Articles" -> {
                     // --- NOSLOP_LOCAL_SEARCH_V1 ---
                     // The only source here that works without an API key and
                     // without the Reddit proxy. Backed by synced RSS items.
-                    addLocal(articlesOnly = true)
-                    // --- NOSLOP_SEARCH_SOURCES_V1 ---
-                    // The first sources here that can answer an arbitrary query
-                    // without a key. Local search returns nothing when the RSS
-                    // corpus simply does not cover the subject, which is exactly
-                    // what happened with "gabor mate".
-                    fetchAsync("api-wikipedia-search") { WikipediaApiClient.searchArticles(query, language = language) }
-                    fetchAsync("api-hackernews-search") { HackerNewsApiClient.searchStories(query) }
-                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
-                    fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
+                    // E5s: only Reddit pages here; the other sources answer the first page.
+                    if (!nextPagesOnly) {
+                        addLocal(articlesOnly = true)
+                        // --- NOSLOP_SEARCH_SOURCES_V1 ---
+                        // The first sources here that can answer an arbitrary query
+                        // without a key. Local search returns nothing when the RSS
+                        // corpus simply does not cover the subject, which is exactly
+                        // what happened with "gabor mate".
+                        fetchAsync("api-wikipedia-search") { WikipediaApiClient.searchArticles(query, language = language) }
+                        fetchAsync("api-hackernews-search") { HackerNewsApiClient.searchStories(query) }
+                        fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                        fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
+                    }
+                    if (searchCursor == null) {
+                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
+                    } else {
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "article") }
+                    }
+                }
+                "Search All" -> {
+                    // E5s: "All" in the search modal. User searches with no type filter used to land in the
+                    // else branch below, which serves the background creator/interest searches and so asks
+                    // YouTube for this year's uploads only and Invidious for the last month only. Same
+                    // sources as that branch, with no date limit.
+                    if (!nextPagesOnly) addLocal()
+                    if (searchCursor == null) {
+                        fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                        fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideosPage(query, lastMonthOnly = false) ?: emptyList() }
+                        fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
+                    } else {
+                        fetchAsync("api-yt-search") { youTubeSearchPage(query, searchCursor) }
+                        fetchAsync("api-invidious-search") { invidiousSearchPage(query, searchCursor) }
+                        fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, null) }
+                    }
+                    if (!nextPagesOnly) {
+                        fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                        fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
+                        fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    }
                 }
                 else -> {
                     addLocal()  // NOSLOP_LOCAL_SEARCH_V1 — any type
@@ -280,6 +339,11 @@ object PublicApiService {
                         }
                     }
                 }
+                if (searchCursor != null) {
+                    // E5s: a search page still on its way is cancelled rather than left to finish unseen:
+                    // its source then keeps its place, and the same page is asked for next time.
+                    deferredItems.filter { !it.isCompleted }.forEach { it.cancel() }
+                }
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Error harvesting API results for '$category'", e.message)
@@ -292,5 +356,115 @@ object PublicApiService {
         val deduplicated = items.distinctBy { it.id }
         Logger.info(TAG, "Category '$category': ${deduplicated.size} items (${items.size} before dedup)")
         deduplicated
+    }
+
+    /**
+     * E5s: user searches list results newest first, as asked: the first page and every later page in
+     * upload order, with no date limit. False pages through results by relevance instead.
+     */
+    private const val SEARCH_NEWEST_FIRST = true
+
+    /**
+     * E5s: how far one user search has got in each source that can page: YouTube (continuation token),
+     * Invidious (page number) and Reddit (listing cursor). One cursor per search. A source is done when
+     * it reports the end of its results, or after a few failed requests in a row; a failed request
+     * leaves its place unchanged, so the same page is asked for again.
+     */
+    class SearchCursor {
+        @Volatile var youTubeToken: String? = null
+            private set
+        @Volatile var youTubeDone = false
+            private set
+        @Volatile private var youTubeFailures = 0
+
+        /** The next Invidious page to ask for. */
+        @Volatile var invidiousPage = 1
+            private set
+        @Volatile var invidiousDone = false
+            private set
+        @Volatile private var invidiousMisses = 0
+
+        @Volatile var redditAfter: String? = null
+            private set
+        @Volatile var redditDone = false
+            private set
+        @Volatile private var redditFailures = 0
+
+        /** A YouTube page arrived with [nextToken] (null: the last page), or [failed]. */
+        fun onYouTubePage(nextToken: String?, failed: Boolean) {
+            if (failed) {
+                if (++youTubeFailures >= MAX_FAILURES) youTubeDone = true
+                return
+            }
+            youTubeFailures = 0
+            youTubeToken = nextToken
+            if (nextToken == null) youTubeDone = true
+        }
+
+        /**
+         * An Invidious page came back with [itemCount] results, or null when no instance answered with
+         * any. Invidious ends its results with an empty page, so an empty answer is either the end or a
+         * failure: the same page is asked for once more before Invidious counts as done.
+         */
+        fun onInvidiousPage(itemCount: Int?) {
+            if (itemCount == null || itemCount == 0) {
+                if (++invidiousMisses >= MAX_INVIDIOUS_MISSES) invidiousDone = true
+                return
+            }
+            invidiousMisses = 0
+            invidiousPage++
+        }
+
+        /** A Reddit page arrived with [after] (null: the last page), or [failed]. */
+        fun onRedditPage(after: String?, failed: Boolean) {
+            if (failed) {
+                if (++redditFailures >= MAX_FAILURES) redditDone = true
+                return
+            }
+            redditFailures = 0
+            redditAfter = after
+            if (after == null) redditDone = true
+        }
+
+        /** Whether a source that [category] pages through can still return more. */
+        fun hasMore(category: String): Boolean = when (category) {
+            "Search Videos", "Search All" -> !youTubeDone || !invidiousDone || !redditDone
+            "Search Audio", "Search Images", "Search Articles" -> !redditDone
+            else -> false
+        }
+
+        companion object {
+            const val MAX_FAILURES = 3
+            const val MAX_INVIDIOUS_MISSES = 2
+        }
+    }
+
+    // E5s: one page from each source that pages. Each records the outcome in the cursor only after the
+    // request returned: a page cancelled on the way leaves its source where it was.
+
+    private suspend fun youTubeSearchPage(query: String, cursor: SearchCursor): List<FeedItem> {
+        if (cursor.youTubeDone) return emptyList()
+        val page = YouTubeInternalClient.searchVideosPage(query, cursor.youTubeToken, newestFirst = SEARCH_NEWEST_FIRST)
+        cursor.onYouTubePage(page.nextPageToken, page.failed)
+        return page.items
+    }
+
+    private suspend fun invidiousSearchPage(query: String, cursor: SearchCursor): List<FeedItem> {
+        if (cursor.invidiousDone) return emptyList()
+        val items = InvidiousApiClient.searchVideosPage(
+            query,
+            page = cursor.invidiousPage,
+            newestFirst = SEARCH_NEWEST_FIRST,
+            lastMonthOnly = false
+        )
+        cursor.onInvidiousPage(items?.size)
+        return items ?: emptyList()
+    }
+
+    private suspend fun redditSearchPage(query: String, cursor: SearchCursor, mediaType: String?): List<FeedItem> {
+        if (cursor.redditDone) return emptyList()
+        val page = RedditApiClient.searchRedditPage(query, cursor.redditAfter, mediaType, newestFirst = SEARCH_NEWEST_FIRST)
+        cursor.onRedditPage(page?.after, failed = page == null)
+        return page?.items ?: emptyList()
     }
 }

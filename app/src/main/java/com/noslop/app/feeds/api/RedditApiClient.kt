@@ -5,6 +5,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.Request
 
 /**
@@ -64,7 +66,60 @@ object RedditApiClient {
         return items.take(25)
     }
 
-    private fun fetchAndParse(url: String, sourceId: String): List<FeedItem> {
+    private fun fetchAndParse(url: String, sourceId: String): List<FeedItem> =
+        fetchListing(url, sourceId)?.items ?: emptyList()
+
+    /**
+     * E5s: one page of a user search. [after] is the listing cursor the previous page returned (null for
+     * the first page); the result's [SearchPage.after] fetches the next page and is null at the end of
+     * the results. Newest first unless [newestFirst] is false, with no date limit. Returns null when the
+     * request failed, so the caller asks for the same page again instead of taking a dropped connection
+     * for the end of the results.
+     */
+    suspend fun searchRedditPage(
+        query: String,
+        after: String?,
+        requiredMediaType: String? = null,
+        newestFirst: Boolean = true,
+        sourceId: String = "api-reddit-hot",
+        limit: Int = 100
+    ): SearchPage? {
+        // withContext, although the request below blocks: a cancelled page then ends here, before the
+        // caller moves its cursor past a page it never received.
+        val page = withContext(Dispatchers.IO) {
+            fetchListing(searchPageUrl(query, after, newestFirst, limit), sourceId)
+        } ?: return null
+        return page.copy(items = filterByMediaType(page.items, requiredMediaType))
+    }
+
+    /** E5s: one page of results and the cursor of the next page (null at the end). */
+    data class SearchPage(val items: List<FeedItem>, val after: String?)
+
+    /** E5s: the URL of one page of a search for [query]. */
+    internal fun searchPageUrl(query: String, after: String?, newestFirst: Boolean, limit: Int = 100): String {
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val sort = if (newestFirst) "new" else "relevance"
+        val afterParam = if (after.isNullOrBlank()) "" else "&after=" + java.net.URLEncoder.encode(after, "UTF-8")
+        return "https://www.reddit.com/search.json?q=$encodedQuery&sort=$sort&limit=$limit&raw_json=1$afterParam"
+    }
+
+    /** E5s: the media-type rule of [searchReddit], for one page. */
+    internal fun filterByMediaType(items: List<FeedItem>, requiredMediaType: String?): List<FeedItem> {
+        if (requiredMediaType == null) return items
+        return items.filter {
+            if (requiredMediaType == "article") it.mediaType == null || it.mediaType == "article"
+            else it.mediaType == requiredMediaType
+        }
+    }
+
+    /**
+     * E5s: the URL without its query string, for the log. Search URLs carry the search terms, and the
+     * log is shared in bug reports.
+     */
+    private fun loggableUrl(url: String): String = url.substringBefore('?')
+
+    /** The posts of one listing and its next-page cursor, or null when the request failed. */
+    private fun fetchListing(url: String, sourceId: String): SearchPage? {
         return try {
             var response: okhttp3.Response? = null
 
@@ -96,43 +151,49 @@ object RedditApiClient {
                     response = client.newCall(directReq).execute()
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Reddit direct request failed: ${e.message}")
-                    return emptyList()
+                    return null
                 }
             }
 
             val body = response.use { res ->
                 if (!res.isSuccessful) {
-                    Logger.warn(TAG, "Reddit API returned ${res.code} for $url")
-                    return emptyList()
+                    Logger.warn(TAG, "Reddit API returned ${res.code} for ${loggableUrl(url)}")
+                    return null
                 }
                 res.body?.string()
-            } ?: return emptyList()
+            } ?: return null
 
-            val rootEl = try {
-                com.google.gson.JsonParser.parseString(body)
-            } catch (_: Exception) { null }
-
-            val root = if (rootEl != null && rootEl.isJsonObject) rootEl.asJsonObject else return emptyList()
-            val children = root.getAsJsonObject("data")
-                ?.getAsJsonArray("children") ?: return emptyList()
-
-            val items = mutableListOf<FeedItem>()
-            for (child in children) {
-                try {
-                    val data = child.asJsonObject.getAsJsonObject("data") ?: continue
-                    val item = parsePost(data, sourceId)
-                    if (item != null) items.add(item)
-                } catch (e: Exception) {
-                    Logger.debug(TAG, "Skipping malformed Reddit post: ${e.message}")
-                }
-            }
-
-            Logger.info(TAG, "Reddit: fetched ${items.size} items from $url")
-            items
+            val page = parseListing(body, sourceId) ?: return null
+            Logger.info(TAG, "Reddit: fetched ${page.items.size} items from ${loggableUrl(url)}")
+            page
         } catch (e: Exception) {
             Logger.error(TAG, "Reddit API request failed", e.message)
-            emptyList()
+            null
         }
+    }
+
+    /** E5s: the posts in one listing response and its `after` cursor; null when it is not a listing. */
+    internal fun parseListing(body: String, sourceId: String): SearchPage? {
+        val rootEl = try {
+            com.google.gson.JsonParser.parseString(body)
+        } catch (_: Exception) { null }
+
+        val root = if (rootEl != null && rootEl.isJsonObject) rootEl.asJsonObject else return null
+        val data = root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+        val children = data.get("children")?.takeIf { it.isJsonArray }?.asJsonArray ?: return null
+
+        val items = mutableListOf<FeedItem>()
+        for (child in children) {
+            try {
+                val postData = child.asJsonObject.getAsJsonObject("data") ?: continue
+                val item = parsePost(postData, sourceId)
+                if (item != null) items.add(item)
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Skipping malformed Reddit post: ${e.message}")
+            }
+        }
+        val after = data.get("after")?.takeIf { it.isJsonPrimitive }?.asString?.takeIf { it.isNotBlank() }
+        return SearchPage(items, after)
     }
 
     private fun parsePost(data: JsonObject, sourceId: String): FeedItem? {

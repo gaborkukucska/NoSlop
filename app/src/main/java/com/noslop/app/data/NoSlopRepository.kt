@@ -2101,6 +2101,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =
         feedRepository.searchCustomFeed(query, filterMode)
 
+    /** E5s: one page of a search from the search modal (see FeedRepository.searchCustomFeedPage). */
+    suspend fun searchCustomFeedPage(
+        query: String,
+        filterMode: String?,
+        cursor: com.noslop.app.feeds.PublicApiService.SearchCursor,
+        firstPage: Boolean
+    ): List<String> = feedRepository.searchCustomFeedPage(query, filterMode, cursor, firstPage)
+
+    fun searchHasMorePages(filterMode: String?, cursor: com.noslop.app.feeds.PublicApiService.SearchCursor): Boolean =
+        feedRepository.searchHasMorePages(filterMode, cursor)
+
     // --- User Preferences for API Pipeline (delegated to PreferencesRepository) ---
     // These thin pass-throughs preserve the repository's public API while the persistence logic
     // lives in the extracted, single-responsibility PreferencesRepository (Stage 0.3).

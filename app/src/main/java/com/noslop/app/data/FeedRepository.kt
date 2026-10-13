@@ -55,6 +55,18 @@ internal fun matchesNegativeKeywords(text: String, negativeKeywords: List<String
     return false
 }
 
+/**
+ * E5s: the PublicApiService category for a user search with this search-modal filter. "All" (any
+ * other filter) is its own category; it used to share the background interest searches' one.
+ */
+internal fun userSearchCategory(filterMode: String?): String = when (filterMode) {
+    "Videos" -> "Search Videos"
+    "Audio" -> "Search Audio"
+    "Images" -> "Search Images"
+    "Articles" -> "Search Articles"
+    else -> "Search All"
+}
+
 class FeedRepository(
     private val context: Context,
     private val feedDao: FeedDao,
@@ -577,26 +589,83 @@ class FeedRepository(
                 language = langPref
             )
 
-            if (apiItems.isNotEmpty()) {
-                val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
-                val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
-
-                val filteredApiItems = apiItems.filter { item ->
-                    val text = "${item.title} ${item.excerpt}".lowercase()
-                    !matchesNegativeKeywords(text, allNegative)
-                }
-
-                if (filteredApiItems.isNotEmpty()) {
-                    feedDao.insertItems(filteredApiItems)
-                    Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '${Logger.redact(query)}'")
-                    return@withContext filteredApiItems.map { it.id }
-                }
-            }
+            return@withContext storeSearchResults(query, apiItems)
         } catch (e: Exception) {
             Logger.error(TAG, "Search pipeline failed for query '${Logger.redact(query)}'", e.message)
         }
         return@withContext emptyList()
     }
+
+    /**
+     * Stores the search results that pass the negative keywords (the content floor and the user's own
+     * block list) and returns their ids, in the order the sources gave them. Shared by both searches.
+     */
+    private suspend fun storeSearchResults(query: String, apiItems: List<FeedItem>): List<String> {
+        if (apiItems.isEmpty()) return emptyList()
+        val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
+        val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+
+        val filteredApiItems = apiItems.filter { item ->
+            val text = "${item.title} ${item.excerpt}".lowercase()
+            !matchesNegativeKeywords(text, allNegative)
+        }
+
+        if (filteredApiItems.isEmpty()) return emptyList()
+        feedDao.insertItems(filteredApiItems)
+        Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '${Logger.redact(query)}'")
+        return filteredApiItems.map { it.id }
+    }
+
+    /**
+     * E5s: a search from the search modal, one page at a time. [cursor] belongs to this search: the
+     * [firstPage] call asks every source (and the local library) for its first page, each later call
+     * only the sources that page (YouTube, Invidious, Reddit) for their next one. Newest first, every
+     * date. What it finds depends on [query] and the modal's [filterMode] only: never on the user's
+     * categories, genres or keywords. Returns the ids of the stored results, in source order.
+     */
+    suspend fun searchCustomFeedPage(
+        query: String,
+        filterMode: String?,
+        cursor: com.noslop.app.feeds.PublicApiService.SearchCursor,
+        firstPage: Boolean
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) return@withContext emptyList()
+        // --- NOSLOP_TOR_GATE_UI_V1 --- see refreshFeeds
+        if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+            Logger.warn(TAG, "Tor not ready — skipping search rather than fetching outside Tor")
+            return@withContext emptyList()
+        }
+        val category = userSearchCategory(filterMode)
+        if (!firstPage && !cursor.hasMore(category)) return@withContext emptyList()
+        Logger.info(TAG, "Search ${if (firstPage) "first page" else "next page"} for query: ${Logger.redact(query)} and filter: $filterMode")
+        try {
+            val apiKeyRepo = ApiKeyRepository(context)
+            // Use all built-in API sources for custom searches to ensure we search across all platforms
+            val activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
+            val langPrefList = preferencesRepository.getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
+
+            val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
+                category = category,
+                userKeywords = listOf(query),
+                apiKeyRepo = apiKeyRepo,
+                activeApiSourceIds = activeApiSourceIds,
+                language = langPref,
+                searchCursor = cursor,
+                nextPagesOnly = !firstPage
+            )
+            return@withContext storeSearchResults(query, apiItems)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.error(TAG, "Search page failed for query '${Logger.redact(query)}'", e.message)
+        }
+        return@withContext emptyList()
+    }
+
+    /** E5s: whether [cursor]'s sources can still return more for this search-modal filter. */
+    fun searchHasMorePages(filterMode: String?, cursor: com.noslop.app.feeds.PublicApiService.SearchCursor): Boolean =
+        cursor.hasMore(userSearchCategory(filterMode))
 
     /** Check if the clearnet aggregator is enabled (true by default). */
     suspend fun isAggregatorEnabled(): Boolean = withContext(Dispatchers.IO) {

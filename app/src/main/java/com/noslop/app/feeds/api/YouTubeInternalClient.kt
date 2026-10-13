@@ -206,7 +206,8 @@ object YouTubeInternalClient {
             
             val bodyStr = response?.body?.string() ?: ""
             if (response == null || !response.isSuccessful) {
-                Logger.error(TAG, "Search failed: HTTP ${response?.code ?: -1}, Body: $bodyStr")
+                // E5s: the body's size only. Search responses echo the query and suggest related ones.
+                Logger.error(TAG, "Search failed: HTTP ${response?.code ?: -1} (${bodyStr.length} bytes)")
                 return@withContext emptyList()
             }
             
@@ -229,55 +230,8 @@ object YouTubeInternalClient {
                     for (item in sectionContents) {
                         val obj = item.asJsonObject
                         val videoRenderer = obj.getAsJsonObject("videoRenderer") ?: continue
-                        
-                        val videoId = videoRenderer.get("videoId")?.asString ?: continue
-                        
-                        val title = videoRenderer.getAsJsonObject("title")
-                            ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
-                            ?.get("text")?.asString ?: continue
-                        
-                        val author = videoRenderer.getAsJsonObject("ownerText")
-                            ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
-                            ?.get("text")?.asString ?: "YouTube"
-                        
-                        val thumbnails = videoRenderer.getAsJsonObject("thumbnail")?.getAsJsonArray("thumbnails")
-                        val bestThumb = if (thumbnails != null && thumbnails.size() > 0) {
-                            val thumbUrl = thumbnails.get(thumbnails.size() - 1).asJsonObject.get("url").asString
-                            if (thumbUrl.startsWith("//")) "https:$thumbUrl" else thumbUrl
-                        } else {
-                            "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
-                        }
-                        
-                        val lengthText = videoRenderer.getAsJsonObject("lengthText")
-                            ?.get("simpleText")?.asString
-                            ?: videoRenderer.getAsJsonObject("lengthText")
-                                ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
-                                ?.get("text")?.asString ?: "Video"
-                            
-                        val viewsText = videoRenderer.getAsJsonObject("viewCountText")
-                            ?.get("simpleText")?.asString ?: ""
-                            
-                        val publishedTimeText = videoRenderer.getAsJsonObject("publishedTimeText")
-                            ?.get("simpleText")?.asString
-                            ?: videoRenderer.getAsJsonObject("publishedTimeText")
-                                ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
-                                ?.get("text")?.asString
-                                
-                        val publishedAtTime = parseRelativeTime(publishedTimeText)
-
-                        items.add(FeedItem(
-                            id = "yt_$videoId",
-                            sourceId = "api-yt",
-                            title = title,
-                            url = "https://www.youtube.com/watch?v=$videoId",
-                            author = author,
-                            excerpt = "$lengthText • $viewsText",
-                            publishedAt = publishedAtTime,
-                            thumbnailUrl = bestThumb,
-                            mediaUrl = "https://www.youtube.com/watch?v=$videoId",
-                            mediaType = "video",
-                            apiSource = "youtube"
-                        ))
+                        // E5s: read by parseVideoRenderer, which searchVideosPage shares.
+                        items.add(parseVideoRenderer(videoRenderer) ?: continue)
                         
                         if (items.size >= maxResults) break
                     }
@@ -286,7 +240,7 @@ object YouTubeInternalClient {
             }
             
             if (items.isEmpty()) {
-                Logger.warn(TAG, "Parsed 0 videos! Raw body: ${bodyStr.take(1000)}")
+                Logger.warn(TAG, "Parsed 0 videos from ${bodyStr.length} bytes (top-level keys: ${root.keySet().joinToString()})")
             } else {
                 Logger.info(TAG, "Fetched ${items.size} videos from InnerTube proxy for query: ${Logger.redact(query)}")
             }
@@ -298,6 +252,149 @@ object YouTubeInternalClient {
         }
     }
 
+    /** One videoRenderer as a FeedItem, or null when it has no id or title. */
+    private fun parseVideoRenderer(videoRenderer: JsonObject): FeedItem? {
+        val videoId = videoRenderer.get("videoId")?.asString ?: return null
+
+        val title = videoRenderer.getAsJsonObject("title")
+            ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
+            ?.get("text")?.asString ?: return null
+
+        val author = videoRenderer.getAsJsonObject("ownerText")
+            ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
+            ?.get("text")?.asString ?: "YouTube"
+
+        val thumbnails = videoRenderer.getAsJsonObject("thumbnail")?.getAsJsonArray("thumbnails")
+        val bestThumb = if (thumbnails != null && thumbnails.size() > 0) {
+            val thumbUrl = thumbnails.get(thumbnails.size() - 1).asJsonObject.get("url").asString
+            if (thumbUrl.startsWith("//")) "https:$thumbUrl" else thumbUrl
+        } else {
+            "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+        }
+
+        val lengthText = videoRenderer.getAsJsonObject("lengthText")
+            ?.get("simpleText")?.asString
+            ?: videoRenderer.getAsJsonObject("lengthText")
+                ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
+                ?.get("text")?.asString ?: "Video"
+
+        val viewsText = videoRenderer.getAsJsonObject("viewCountText")
+            ?.get("simpleText")?.asString ?: ""
+
+        val publishedTimeText = videoRenderer.getAsJsonObject("publishedTimeText")
+            ?.get("simpleText")?.asString
+            ?: videoRenderer.getAsJsonObject("publishedTimeText")
+                ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
+                ?.get("text")?.asString
+
+        val publishedAtTime = parseRelativeTime(publishedTimeText)
+
+        return FeedItem(
+            id = "yt_$videoId",
+            sourceId = "api-yt",
+            title = title,
+            url = "https://www.youtube.com/watch?v=$videoId",
+            author = author,
+            excerpt = "$lengthText • $viewsText",
+            publishedAt = publishedAtTime,
+            thumbnailUrl = bestThumb,
+            mediaUrl = "https://www.youtube.com/watch?v=$videoId",
+            mediaType = "video",
+            apiSource = "youtube"
+        )
+    }
+
+    /**
+     * E5s: one page of a video search, and the token that fetches the next page (null at the end of
+     * the results). [failed]: the request failed, so the same page should be asked for again.
+     */
+    data class VideoSearchPage(
+        val items: List<FeedItem>,
+        val nextPageToken: String?,
+        val failed: Boolean = false
+    )
+
+    /** E5s: InnerTube search params "sort by upload date" (the sp=CAI%3D of a YouTube results URL). */
+    private const val SORT_BY_UPLOAD_DATE = "CAI="
+
+    /**
+     * E5s: one page of a user search. The first page ([pageToken] null) is newest first unless
+     * [newestFirst] is false, with no date limit (unlike [searchVideos] with recentOnly, which the
+     * background interest searches use). Each later page is fetched with the token the previous page
+     * returned and continues the same order.
+     */
+    suspend fun searchVideosPage(
+        query: String,
+        pageToken: String? = null,
+        newestFirst: Boolean = true
+    ): VideoSearchPage = withContext(Dispatchers.IO) {
+        try {
+            val payload = buildPayload(query)
+            if (pageToken != null) {
+                // A continuation request names the page by its token alone.
+                payload.remove("query")
+                payload.addProperty("continuation", pageToken)
+            } else if (newestFirst) {
+                payload.addProperty("params", SORT_BY_UPLOAD_DATE)
+            }
+            val response = executeSearchRequest(payload.toString())
+                ?: return@withContext VideoSearchPage(emptyList(), pageToken, failed = true)
+            val bodyStr = response.use { res ->
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Search page failed: HTTP ${res.code}")
+                    return@withContext VideoSearchPage(emptyList(), pageToken, failed = true)
+                }
+                res.body?.string() ?: ""
+            }
+            if (bodyStr.isEmpty()) return@withContext VideoSearchPage(emptyList(), pageToken, failed = true)
+            val page = parseSearchPage(gson.fromJson(bodyStr, JsonObject::class.java), isContinuation = pageToken != null)
+            Logger.info(TAG, "Search page: ${page.items.size} videos" + (if (page.nextPageToken == null) ", end of results" else ""))
+            page
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.error(TAG, "Search page request failed: ${e.message}")
+            VideoSearchPage(emptyList(), pageToken, failed = true)
+        }
+    }
+
+    /**
+     * E5s: the videos in one search response and the next page's token. The first page lists its
+     * results under contents; a continuation appends them through onResponseReceivedCommands. Either
+     * way the token is in the continuationItemRenderer that follows the results.
+     */
+    internal fun parseSearchPage(root: JsonObject, isContinuation: Boolean): VideoSearchPage {
+        val sections: JsonArray? = if (isContinuation) {
+            root.getAsJsonArray("onResponseReceivedCommands")?.firstNotNullOfOrNull { command ->
+                (command as? JsonObject)?.getAsJsonObject("appendContinuationItemsAction")?.getAsJsonArray("continuationItems")
+            }
+        } else {
+            root.getAsJsonObject("contents")
+                ?.getAsJsonObject("twoColumnSearchResultsRenderer")
+                ?.getAsJsonObject("primaryContents")
+                ?.getAsJsonObject("sectionListRenderer")
+                ?.getAsJsonArray("contents")
+        }
+        val items = mutableListOf<FeedItem>()
+        var next: String? = null
+        for (section in sections ?: JsonArray()) {
+            val obj = section as? JsonObject ?: continue
+            obj.getAsJsonObject("continuationItemRenderer")?.let { renderer ->
+                next = renderer.getAsJsonObject("continuationEndpoint")
+                    ?.getAsJsonObject("continuationCommand")
+                    ?.get("token")?.takeIf { it.isJsonPrimitive }?.asString
+                    ?.takeIf { it.isNotBlank() }
+            }
+            val contents = obj.getAsJsonObject("itemSectionRenderer")?.getAsJsonArray("contents") ?: continue
+            for (element in contents) {
+                val videoRenderer = (element as? JsonObject)?.getAsJsonObject("videoRenderer") ?: continue
+                val item = try { parseVideoRenderer(videoRenderer) } catch (_: Exception) { null } ?: continue
+                items.add(item)
+            }
+        }
+        return VideoSearchPage(items.distinctBy { it.id }, next)
+    }
+
     suspend fun searchChannels(query: String, maxResults: Int = 10): List<String> = withContext(Dispatchers.IO) {
         try {
             val payload = buildPayload(query)
@@ -307,7 +404,7 @@ object YouTubeInternalClient {
             
             val bodyStr = response?.body?.string() ?: ""
             if (response == null || !response.isSuccessful) {
-                Logger.error(TAG, "Channel search failed: HTTP ${response?.code ?: -1}, Body: $bodyStr")
+                Logger.error(TAG, "Channel search failed: HTTP ${response?.code ?: -1} (${bodyStr.length} bytes)")
                 return@withContext emptyList()
             }
             

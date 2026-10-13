@@ -354,20 +354,47 @@ object InvidiousApiClient {
         } catch (_: Exception) { null }
     }
 
-    suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> {
+    suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> =
+        searchVideosPage(query, sourceId = sourceId) ?: emptyList()
+
+    /**
+     * E5s: one page of a video search. The defaults are what [searchVideos] has always asked for (first
+     * page, by relevance, uploads of the last month). A user search asks for every date, newest first,
+     * and then for page 2, 3, ... Returns null when no instance answered with results: Invidious ends the
+     * results with an empty page, so null means "failed or no more", and the caller treats it as such.
+     */
+    suspend fun searchVideosPage(
+        query: String,
+        page: Int = 1,
+        newestFirst: Boolean = false,
+        lastMonthOnly: Boolean = true,
+        sourceId: String = "api-invidious-search"
+    ): List<FeedItem>? {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         return raceInstances(
-            label = "search '${Logger.redact(query)}'",
+            label = "search '${Logger.redact(query)}'" + (if (page > 1) " page $page" else ""),
             instances = healthyInvidiousInstances(),
             deadlineMs = System.currentTimeMillis() + 15_000L,
-            urlFor = { "$it/api/v1/search?q=$encodedQuery&type=video&date=month" },
+            urlFor = { searchUrl(it, encodedQuery, page, newestFirst, lastMonthOnly) },
             parse = { _, body ->
                 jsonArrayOrNull(body)
                     ?.let { arr -> parseVideoArray(arr, sourceId) }
                     ?.takeIf { it.isNotEmpty() }
             }
-        ) ?: emptyList()
+        )
     }
+
+    /**
+     * E5s: the search URL. `sort` is the current API's name for the order and `sort_by` the one older
+     * instances still read; each ignores the other.
+     */
+    internal fun searchUrl(instance: String, encodedQuery: String, page: Int, newestFirst: Boolean, lastMonthOnly: Boolean): String =
+        buildString {
+            append("$instance/api/v1/search?q=$encodedQuery&type=video")
+            if (lastMonthOnly) append("&date=month")
+            if (newestFirst) append("&sort=date&sort_by=upload_date")
+            if (page > 1) append("&page=$page")
+        }
 
     suspend fun getTrendingVideos(sourceId: String = "api-invidious-trending"): List<FeedItem> {
         return raceInstances(
