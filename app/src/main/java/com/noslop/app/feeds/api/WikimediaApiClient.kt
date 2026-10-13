@@ -109,7 +109,7 @@ object WikimediaApiClient {
             } ?: return emptyList()
 
             val items = parsePages(gson.fromJson(body, JsonObject::class.java), sourceId)
-            Logger.info(TAG, "Wikimedia search '$query': ${items.size} items")
+            Logger.info(TAG, "Wikimedia search '${Logger.redact(query)}': ${items.size} items")
             items
         } catch (e: Exception) {
             Logger.error(TAG, "Wikimedia search failed", e.message)

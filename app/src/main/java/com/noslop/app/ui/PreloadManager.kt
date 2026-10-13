@@ -262,7 +262,7 @@ object PreloadManager {
     private val preloadQueue = Channel<PreloadTask>(Channel.UNLIMITED)
 
     init {
-        CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+        com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) {
             for (task in preloadQueue) {
                 try {
                     doWarmUp(task.context, task.rawUrl, task.resolvedUrl, task.expiresAtMs)
@@ -493,7 +493,7 @@ object PreloadManager {
                 it.player.release()
             }
         } else {
-            kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+            com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) {
                 preloadedPlayers.remove(cacheKey)?.let {
                     Logger.info("PRELOAD", "Invalidated preloaded player for $cacheKey")
                     it.player.release()
@@ -509,7 +509,7 @@ object PreloadManager {
         val playersToRelease = preloadedPlayers.values.map { it.player }.toList()
         preloadedPlayers.clear()
         if (playersToRelease.isNotEmpty()) {
-            CoroutineScope(Dispatchers.Main).launch {
+            com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) {
                 for (p in playersToRelease) {
                     try { p.release() } catch (_: Exception) {}
                 }

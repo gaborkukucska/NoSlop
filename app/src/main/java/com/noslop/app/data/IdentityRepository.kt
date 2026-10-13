@@ -67,7 +67,9 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             isQuarantined.value = false
             try {
                 appSettingDao.removeSetting("identity_quarantined")
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Could not clear the identity quarantine flag: ${e.message}")
+            }
         }
         return allRenamed
     }
@@ -108,7 +110,9 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                     kotlinx.coroutines.runBlocking {
                         try {
                             appSettingDao.insertSetting(AppSetting("identity_quarantined", "true"))
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            Logger.warn(TAG, "Could not store the identity quarantine flag: ${e.message}")
+                        }
                     }
                     recovered = try {
                         createEncryptedPrefs(context).also {

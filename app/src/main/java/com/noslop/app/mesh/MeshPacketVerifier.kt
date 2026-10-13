@@ -322,8 +322,9 @@ object MeshPacketVerifier {
             Signed(matched, sig, signer)
         }
 
+        // S2 (round E2): v2 only; the signature covers the onion address (see HandshakePacketHandler).
         "ANNOUNCE_PEER" -> packet.getAnnouncePeerPayload()?.let { p ->
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.canonicalAnnouncePeerV2(p.authorId, p.onionAddress, p.timestamp), p.signature, p.authorId)
         }
 
         "ANNOUNCE_DISCOVERABLE" -> packet.getAnnounceDiscoverablePayload()?.let { p ->
@@ -447,8 +448,9 @@ object MeshPacketVerifier {
         // SYNC_REQUEST / SYNC_RESPONSE / INVENTORY_SYNC_REQUEST (inner items
         // verified individually by SyncPacketHandler), GROUP_UPDATE and
         // GROUP_SYNC (signer resolved against stored group state), GROUP_QUERY
-        // and ANNOUNCE_INVIDIOUS_INSTANCE (unsigned), TYPING and READ_RECEIPT
-        // (unsigned by design — see README).
+        // (no inner signature), TYPING and READ_RECEIPT (no inner signature by design).
+        // Since round E2 every packet has already passed the envelope signature check
+        // (EnvelopeAuth, in MeshTransport) by the time it gets here.
         else -> null
     }
 }

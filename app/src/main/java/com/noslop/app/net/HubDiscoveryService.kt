@@ -31,7 +31,7 @@ class HubDiscoveryService(context: Context) {
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     
     // Coroutine scope for active scanning
-    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
     private var scanJob: kotlinx.coroutines.Job? = null
 
     fun startDiscovery() {

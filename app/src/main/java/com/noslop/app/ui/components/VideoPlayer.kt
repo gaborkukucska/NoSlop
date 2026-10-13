@@ -131,7 +131,9 @@ fun invalidateAllOnRouteTransition() {
         oldLoader.memoryCache?.clear()
         oldLoader.diskCache?.clear()
         oldLoader.shutdown()
-    } catch (_: Exception) {}
+    } catch (e: Exception) {
+        Logger.warn("VIDEO_ROUTE", "Rebuilding the image loader failed: ${e.message}")
+    }
     Logger.info("VIDEO_ROUTE", "Invalidated all cached sources, preloaded players, cancelled clearnet requests, and rebuilt image loader on network route transition")
 }
 
@@ -418,7 +420,7 @@ private suspend fun resolveYouTubeSource(url: String, quality: String, isPreload
     val circuitBreakerOpen = !isTor && ytDirectFailCount >= YT_CIRCUIT_BREAKER_THRESHOLD && (now - ytDirectFailTimestamp) < YT_CIRCUIT_BREAKER_RESET_MS
 
     if (circuitBreakerOpen) {
-        Logger.info("VIDEO_RESOLVE", "YouTube direct stream circuit breaker OPEN — skipping to embed for $videoId")
+        Logger.info("VIDEO_RESOLVE", "YouTube direct stream circuit breaker OPEN — skipping to embed for ${Logger.redact(videoId)}")
     } else {
         if ((now - ytDirectFailTimestamp) >= YT_CIRCUIT_BREAKER_RESET_MS) {
             ytDirectFailCount = 0

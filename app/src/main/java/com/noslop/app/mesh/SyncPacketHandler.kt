@@ -28,7 +28,7 @@ class SyncPacketHandler(
 
     /** D10b fix 2: background re-sends of sync replies that were not delivered. */
     private val retryScope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+        kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler
     )
 
     /**

@@ -413,7 +413,7 @@ fun QRScanScreen(
 }
 
 private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> Unit) {
-    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+    com.noslop.app.util.AppScopes.io.launch {
         try {
             val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                 android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->

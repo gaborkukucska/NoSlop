@@ -189,7 +189,7 @@ object NasaApiClient {
                 }
             }
 
-            Logger.info(TAG, "NASA Image Library: fetched ${items.size} items for '$query'")
+            Logger.info(TAG, "NASA Image Library: fetched ${items.size} items for '${Logger.redact(query)}'")
             items
         } catch (e: Exception) {
             Logger.error(TAG, "NASA Image Library request failed", e.message)

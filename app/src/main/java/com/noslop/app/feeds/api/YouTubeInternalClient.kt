@@ -86,7 +86,7 @@ object YouTubeInternalClient {
 
     fun advanceStreamNonce(videoId: String): Int {
         val next = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 } ?: 1
-        Logger.info(TAG, "Advanced stream nonce for $videoId to $next to force fresh Tor circuit")
+        Logger.info(TAG, "Advanced stream nonce for ${Logger.redact(videoId)} to $next to force fresh Tor circuit")
         return next
     }
 
@@ -288,7 +288,7 @@ object YouTubeInternalClient {
             if (items.isEmpty()) {
                 Logger.warn(TAG, "Parsed 0 videos! Raw body: ${bodyStr.take(1000)}")
             } else {
-                Logger.info(TAG, "Fetched ${items.size} videos from InnerTube proxy for query: $query")
+                Logger.info(TAG, "Fetched ${items.size} videos from InnerTube proxy for query: ${Logger.redact(query)}")
             }
             return@withContext items
             
@@ -342,7 +342,7 @@ object YouTubeInternalClient {
                 }
             }
             
-            Logger.info(TAG, "Found ${channels.size} channels for query: $query")
+            Logger.info(TAG, "Found ${channels.size} channels for query: ${Logger.redact(query)}")
             return@withContext channels
             
         } catch (e: Exception) {
@@ -629,11 +629,11 @@ object YouTubeInternalClient {
             if (canRotateCircuit) {
                 Logger.warn(
                     TAG,
-                    "Gave up waiting ${RESOLVE_QUEUE_WAIT_MS / 1000}s for a resolve slot for $videoId — " +
+                    "Gave up waiting ${RESOLVE_QUEUE_WAIT_MS / 1000}s for a resolve slot for ${Logger.redact(videoId)} — " +
                         "earlier resolves are still stuck. Reporting unavailable rather than queueing."
                 )
             } else {
-                Logger.info(TAG, "Preload resolve slot busy — yielding to active video for $videoId")
+                Logger.info(TAG, "Preload resolve slot busy — yielding to active video for ${Logger.redact(videoId)}")
             }
             return null
         }
@@ -645,7 +645,7 @@ object YouTubeInternalClient {
             if (resolved == null) {
                 Logger.warn(
                     TAG,
-                    "Resolve budget of ${RESOLVE_BUDGET_MS / 1000}s exhausted for $videoId"
+                    "Resolve budget of ${RESOLVE_BUDGET_MS / 1000}s exhausted for ${Logger.redact(videoId)}"
                 )
             }
             return resolved
@@ -721,7 +721,7 @@ object YouTubeInternalClient {
             var refusedThisAttempt = 0
             for (config in configs) {
                 if (!kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive.let { it == null || it }) {
-                    Logger.info(TAG, "resolveStreamUrl cancelled for $videoId (slide swiped away)")
+                    Logger.info(TAG, "resolveStreamUrl cancelled for ${Logger.redact(videoId)} (slide swiped away)")
                     return@withContext null
                 }
                 try {
@@ -759,7 +759,7 @@ object YouTubeInternalClient {
                                 root.getAsJsonObject("videoDetails")?.get("isLiveContent")?.asBoolean == true ||
                                 root.getAsJsonObject("playabilityStatus")?.has("liveStreamability") == true
                             if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE" || isAgeOrPrivate || (isTor && isLiveStream)) {
-                                Logger.warn(TAG, "Video $videoId is unplayable over Tor ($playability / $reason / isLive=$isLiveStream). Bailing immediately.")
+                                Logger.warn(TAG, "Video ${Logger.redact(videoId)} is unplayable over Tor ($playability / $reason / isLive=$isLiveStream). Bailing immediately.")
                                 response.close()
                                 return@withContext null
                             }
@@ -767,7 +767,7 @@ object YouTubeInternalClient {
                             if (playability == "OK") {
                                 val url = extractUrlFromPlayerResponse(root, quality)
                                 if (url != null) {
-                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for $videoId")
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for ${Logger.redact(videoId)}")
                                     registerStreamId(url, videoId, currentStreamId)
                                     response.close()
                                     return@withContext url
@@ -786,7 +786,7 @@ object YouTubeInternalClient {
                                         Logger.warn(
                                             TAG,
                                             "$refusedThisAttempt clients refused on circuit $currentStreamId for " +
-                                                "$videoId — advancing stream isolation nonce to escape to a fresh circuit."
+                                                "${Logger.redact(videoId)} — advancing stream isolation nonce to escape to a fresh circuit."
                                         )
                                         streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
                                         break

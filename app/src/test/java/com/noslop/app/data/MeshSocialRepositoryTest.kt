@@ -159,4 +159,22 @@ class MeshSocialRepositoryTest {
         assertNull("the incoming request is cleared", repo.incomingRequestFlow.value)
         coVerify { meshTransport.sendPacket("bob.onion", any(), any()) }
     }
+
+    /** D11 (E1): without the contact's X25519 key nothing is stored or sent (no Ed25519 stand-in). */
+    @Test
+    fun sendDirectMessage_withoutEncryptionKey_failsAndSendsNothing() = runBlocking {
+        val bob = CryptoService.generateIdentity("bob")
+        peerDao.insertPeer(
+            Peer(
+                publicKeyB64 = bob.publicKeyB64, handle = "bob", tripcode = bob.tripcode,
+                onionAddress = "bob.onion", encPublicKeyB64 = "",
+                relationship = PeerRelationship.ACCEPTED,
+            )
+        )
+
+        assertFalse(repo.sendDirectMessage(bob.publicKeyB64, "secret"))
+
+        assertEquals("nothing stored", 0, messageDao.messages.size)
+        coVerify(exactly = 0) { meshTransport.sendPacket(any(), any(), any()) }
+    }
 }

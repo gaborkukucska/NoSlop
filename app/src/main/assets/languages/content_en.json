@@ -1,4 +1,5 @@
 {
+  "Message not sent: this contact's encryption key is missing. Ask them to reconnect.": "Message not sent: this contact's encryption key is missing. Ask them to reconnect.",
   "  or create new  ": "  or create new  ",
   "(Admin)": "(Admin)",
   "({count} selected)": "({count} selected)",

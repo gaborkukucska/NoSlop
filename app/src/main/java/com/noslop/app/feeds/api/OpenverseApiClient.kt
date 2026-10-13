@@ -145,7 +145,7 @@ object OpenverseApiClient {
                 }
             }
 
-            Logger.info(TAG, "Openverse images: fetched ${items.size} for '$query'")
+            Logger.info(TAG, "Openverse images: fetched ${items.size} for '${Logger.redact(query)}'")
             items
         } catch (e: Exception) {
             Logger.error(TAG, "Openverse image request failed", e.message)
@@ -266,7 +266,7 @@ object OpenverseApiClient {
 
             Logger.info(
                 TAG,
-                "Openverse: fetched ${items.size} tracks for '$query' (skipped $skippedUnplayable unplayable)"
+                "Openverse: fetched ${items.size} tracks for '${Logger.redact(query)}' (skipped $skippedUnplayable unplayable)"
             )
             items
         } catch (e: Exception) {

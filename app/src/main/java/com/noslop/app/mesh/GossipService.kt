@@ -852,7 +852,12 @@ object GossipService {
             targetUserId = packet.targetUserId,
             signature = packet.signature,
             type = packet.type,
-            payload = packet.payload
+            payload = packet.payload,
+            // C09 (E2): a relay that keeps the original sender keeps that sender's envelope signature
+            // (`hops` is not covered). A relay stamped with our key is signed again by MeshTransport.
+            envV = packet.envV,
+            envTs = packet.envTs,
+            envSig = packet.envSig
         )
         val router = tx.repository.identityRouter
         val creatorPub = if (preservesOriginalSender(packet.type)) null else tx.repository.getBurnableIdentity()?.publicKeyB64

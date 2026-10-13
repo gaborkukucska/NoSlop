@@ -100,7 +100,9 @@ class MeshTransport(
             val out = socket.getOutputStream()
             val replyChannel: ReplyChannel = { reply ->
                 try {
-                    val bytes = (reply.toJson() + "\n").toByteArray(Charsets.UTF_8)
+                    // C09 (E2): replies are signed like every other packet we send.
+                    val wire = prepareForWire(reply) ?: throw java.io.IOException("no signer for ${reply.type}")
+                    val bytes = (wire.toJson() + "\n").toByteArray(Charsets.UTF_8)
                     synchronized(out) {
                         out.write(bytes)
                         out.flush()
@@ -124,7 +126,10 @@ class MeshTransport(
                     Logger.debug(TAG, "Parsing incoming packet (length: ${packetStr.length})")
                     val packet = NetworkPacket.fromJson(packetStr)
                     Logger.info(TAG, "Received packet over TCP", "type=${packet.type}")
-                    repository.handleIncomingPacket(packet, replyChannel)
+                    // C09 (E2): nothing without a valid envelope signature reaches the mesh code.
+                    if (acceptEnvelope(packet, "inbound connection")) {
+                        if (repository.handleIncomingPacket(packet, replyChannel)) EnvelopeAuth.recordProcessed(packet)
+                    }
                 } catch (e: Exception) {
                     Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}", "bytes=${packetStr.length}")
                 }
@@ -144,10 +149,13 @@ class MeshTransport(
 
     suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         sendInterceptorForTesting?.let { return@withContext it(onionAddress, packet) }
+        // C09 (E2): a packet that cannot be signed (see prepareForWire) is not sent at all. Each socket
+        // attempt signs again in exchangeOverSocket, so every attempt carries a current timestamp.
+        val signedForHub = prepareForWire(packet) ?: return@withContext false
         var pushedToHub = false
         val hubStatus = repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
-            pushedToHub = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet) ?: false
+            pushedToHub = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(signedForHub) ?: false
             if (pushedToHub) {
                 com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked and reachable. Delegated packet ${packet.id} to Hub.")
                 // We no longer return early here, so we can also attempt direct Tor routing.
@@ -328,8 +336,10 @@ class MeshTransport(
      * Returns the number of replies handed to the repository (0 or 1).
      */
     internal suspend fun exchangeOverSocket(socket: Socket, packet: NetworkPacket, replyWindowMs: Long): Int {
+        // C09 (E2): signed here, per attempt (also covers the handshake probe path).
+        val wire = prepareForWire(packet) ?: throw java.io.IOException("no signer for ${packet.type} from ${packet.senderId.take(12)}")
         val out = socket.getOutputStream()
-        out.write((packet.toJson() + "\n").toByteArray(Charsets.UTF_8))
+        out.write((wire.toJson() + "\n").toByteArray(Charsets.UTF_8))
         out.flush()
         if (packet.type != "CONNECTION_REQUEST" || replyWindowMs <= 0L) {
             delay(300) // Allow OS and Tor SOCKS proxy to transmit packet frame
@@ -353,9 +363,11 @@ class MeshTransport(
                     Logger.warn(TAG, "Ignoring ${reply.type} reply from an identity we did not contact")
                     continue
                 }
+                // C09 (E2): the answer must carry a valid envelope signature by that identity.
+                if (!acceptEnvelope(reply, "handshake reply")) continue
                 Logger.info(TAG, "Received ${reply.type} reply on our own connection")
                 try {
-                    repository.handleIncomingPacket(reply)
+                    if (repository.handleIncomingPacket(reply)) EnvelopeAuth.recordProcessed(reply)
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Handling ${reply.type} reply failed: ${e.message}")
                 }
@@ -397,6 +409,46 @@ class MeshTransport(
             try { socket?.close() } catch (_: Exception) {}
             probeSemaphore.release()
         }
+    }
+
+    /**
+     * C09 (round E2): the packet as it goes on the wire. Signed with whichever of our identities is the
+     * sender (so always the identity this peer knows, see IdentityRouter). A relay of someone else's
+     * packet that keeps the original sender (GossipService.preservesOriginalSender) already carries that
+     * sender's envelope, which stays valid because `hops` is not covered. Anything else has no signer and
+     * is not sent: under the hard break no receiver would accept it.
+     */
+    internal suspend fun prepareForWire(packet: NetworkPacket): NetworkPacket? {
+        val main = repository.getLocalIdentity()
+        val keys = if (main != null && packet.senderId == main.publicKeyB64) {
+            main
+        } else {
+            repository.getBurnableIdentity()?.takeIf { it.publicKeyB64 == packet.senderId }
+        }
+        if (keys != null) return EnvelopeAuth.sign(packet, keys)
+        if (EnvelopeAuth.hasEnvelope(packet)) return packet
+        Logger.error(TAG, "Not sending ${packet.type} ${packet.id}: the sender is not one of our identities and the packet has no envelope signature")
+        return null
+    }
+
+    /** C09 (round E2): whether an arriving packet may be handled at all (envelope valid, not a replay). */
+    private fun acceptEnvelope(packet: NetworkPacket, from: String): Boolean {
+        when (val verdict = EnvelopeAuth.verify(packet)) {
+            EnvelopeAuth.Verdict.VALID -> Unit
+            EnvelopeAuth.Verdict.MISSING -> {
+                Logger.warn(TAG, "Dropped ${packet.type} from ${packet.senderId.take(12)} ($from): no envelope signature (sender on a NoSlop build before E2?)")
+                return false
+            }
+            else -> {
+                Logger.warn(TAG, "Dropped ${packet.type} from ${packet.senderId.take(12)} ($from): envelope $verdict")
+                return false
+            }
+        }
+        if (EnvelopeAuth.isReplay(packet)) {
+            Logger.debug(TAG, "Dropped a replayed ${packet.type} ${packet.id} ($from)")
+            return false
+        }
+        return true
     }
 
     companion object {

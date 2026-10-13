@@ -588,11 +588,11 @@ class HandshakePacketHandler(
 
     suspend fun handleAnnouncePeer(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnouncePeerPayload() ?: return false
-        val encodePayload = CryptoService.encodeForSigning(announcePay.authorId, announcePay.timestamp.toString())
-        val pipePayload = "${announcePay.authorId}|${announcePay.timestamp}"
-        if (!CryptoService.verify(encodePayload, announcePay.signature, announcePay.authorId) &&
-            !CryptoService.verify(pipePayload, announcePay.signature, announcePay.authorId)) {
-            Logger.warn(TAG, "ANNOUNCE_PEER signature verification failed for ${announcePay.authorId}")
+        // S2 (round E2): only the v2 signature, which covers the onion address, is accepted. v1 signed the
+        // author and time only, so the onion in a relayed announce could be replaced, and it was stored.
+        val v2Payload = CryptoService.canonicalAnnouncePeerV2(announcePay.authorId, announcePay.onionAddress, announcePay.timestamp)
+        if (!CryptoService.verify(v2Payload, announcePay.signature, announcePay.authorId)) {
+            Logger.warn(TAG, "ANNOUNCE_PEER signature verification failed for ${announcePay.authorId} (not v2-signed?)")
             return false
         }
         
@@ -602,7 +602,17 @@ class HandshakePacketHandler(
         val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
         if (peer != null) {
             val wasOffline = !peer.isOnline
-            val newOnion = announcePay.onionAddress?.takeIf { it.isNotBlank() } ?: peer.onionAddress
+            // S2 (round E2): a NoSlop onion address is derived from the identity key, so any other address
+            // is not stored (presence is still updated).
+            val announcedOnion = announcePay.onionAddress?.takeIf { it.isNotBlank() }
+            val newOnion = if (announcedOnion != null && CryptoService.isOnionOf(announcePay.authorId, announcedOnion)) {
+                announcedOnion
+            } else {
+                if (announcedOnion != null && announcedOnion != peer.onionAddress) {
+                    Logger.warn(TAG, "ANNOUNCE_PEER from ${peer.handle}: onion address is not derived from the key; not stored")
+                }
+                peer.onionAddress
+            }
             GossipService.recordSendSuccess(newOnion)
             peerDao.insertPeer(peer.copy(
                 isOnline = true,
@@ -1183,27 +1193,22 @@ class HandshakePacketHandler(
         val group = db.groupChatDao().getGroupChatById(query.groupId) ?: return false
 
         val members = parseMembers(group.membersJson)
-        val pDao = peerDao
-        val senderPeer = pDao.getPeerByPublicKey(packet.senderId)
-        val requesterPeer = pDao.getPeerByPublicKey(query.requesterId)
+        val senderPeer = peerDao.getPeerByPublicKey(packet.senderId)
 
-        val reqId = query.requesterId.trim()
-        val sendId = packet.senderId.trim()
-        val adminId = group.adminPublicKeyB64.trim()
-
-        val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${query.groupId}") != null
-        val requesterInGroup = members.any { it.trim() == reqId || it.trim() == sendId } ||
-            adminId == reqId || adminId == sendId ||
-            group.allowMemberInvites || hasPendingInvite ||
-            (senderPeer != null && (members.any { it.trim() == senderPeer.publicKeyB64.trim() } || adminId == senderPeer.publicKeyB64.trim())) ||
-            (requesterPeer != null && (members.any { it.trim() == requesterPeer.publicKeyB64.trim() } || adminId == requesterPeer.publicKeyB64.trim())) ||
-            pDao.getAllPeersList().any { p -> 
-                val pKey = p.publicKeyB64.trim()
-                (members.any { it.trim() == pKey } || adminId == pKey) && 
-                (pKey == sendId || pKey == reqId || (senderPeer != null && p.onionAddress.isNotBlank() && p.onionAddress == senderPeer.onionAddress))
-            }
-        if (!requesterInGroup) {
-            Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: requester ${query.requesterId} is not a group member or admin")
+        // G1 (round E2): the answer is the whole group record (member keys, names, onion addresses), so only
+        // a member or the admin gets one, never a banned key. The sender is authenticated by the envelope
+        // signature (C09), and the requester named in the query must be that sender. Groups that allow
+        // member invites used to answer anyone who knew the group id (former members included), and the
+        // answer to a sender with no stored address was broadcast to all our contacts.
+        val refusal = groupQueryRefusal(
+            senderId = packet.senderId,
+            requesterId = query.requesterId,
+            members = members,
+            adminPub = group.adminPublicKeyB64,
+            banned = group.getBannedMembers()
+        )
+        if (refusal != null) {
+            Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: $refusal")
             return false
         }
 
@@ -1249,13 +1254,12 @@ class HandshakePacketHandler(
             payload = com.noslop.app.util.Json.gson.toJsonTree(syncPayload)
         )
         val targetOnion = senderPeer?.onionAddress?.takeIf { it.isNotBlank() }
-            ?: requesterPeer?.onionAddress?.takeIf { it.isNotBlank() }
         if (!targetOnion.isNullOrBlank()) {
             repo.dispatchPacket(targetOnion, syncPacket)
         } else {
             GossipService.broadcast(syncPacket)
         }
-        Logger.info(TAG, "Responded to GROUP_QUERY for group ${group.title} (${query.groupId}) to ${packet.senderId}")
+        Logger.info(TAG, "Responded to GROUP_QUERY for group ${query.groupId} to ${packet.senderId}")
         return true
     }
 
@@ -1395,4 +1399,23 @@ class HandshakePacketHandler(
         Logger.info(TAG, "Synced and merged group chat '${mergedGroup.title}' (${group.groupId}) via GROUP_SYNC (members: ${mergedMembers.size})")
         return true
     }
+}
+
+/**
+ * G1 (round E2): why a GROUP_QUERY must not be answered, or null when it may be. [senderId] is the
+ * envelope-authenticated sender (C09); [requesterId] is the requester named in the query.
+ */
+internal fun groupQueryRefusal(
+    senderId: String,
+    requesterId: String,
+    members: Collection<String>,
+    adminPub: String,
+    banned: Collection<String>
+): String? {
+    val sender = senderId.trim()
+    if (requesterId.trim() != sender) return "the requester named in the query is not the sender"
+    if (banned.any { it.trim() == sender }) return "the sender is banned from the group"
+    val isMemberOrAdmin = members.any { it.trim() == sender } || adminPub.trim() == sender
+    if (!isMemberOrAdmin) return "the sender is not a member or the admin"
+    return null
 }

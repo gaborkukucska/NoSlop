@@ -717,7 +717,9 @@ object BackupManager {
                             apiFile.copyTo(apiBak, overwrite = true)
                             apiBackupFiles[apiFile] = apiBak
                         }
-                    } catch (_: Exception) {}
+                    } catch (snapshotError: Exception) {
+                        com.noslop.app.debug.Logger.warn("BACKUP", "Could not snapshot API key preferences before restore; a rollback cannot restore them: ${snapshotError.message}")
+                    }
                 }
 
                 fun restorePrefsFromSnapshot(prefName: String, snapshot: Map<String, *>?, diskFile: File, backupFile: File?) {
@@ -1023,7 +1025,9 @@ object BackupManager {
             } finally {
                 db.close()
             }
-        } catch (_: Exception) {}
+        } catch (readError: Exception) {
+            com.noslop.app.debug.Logger.warn("BACKUP", "Could not read the identity key recorded in the archive: ${readError.message}")
+        }
 
         val cleanMnemonic = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
         val derived = try {

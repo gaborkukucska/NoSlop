@@ -11,7 +11,7 @@ import kotlinx.coroutines.SupervisorJob
  */
 object AppScopes {
     val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
-        Logger.error("APP_SCOPE", "Unhandled coroutine exception: ${throwable.message}")
+        Logger.error("APP_SCOPE", "Unhandled coroutine exception: ${throwable.message}", throwable.stackTraceToString())
     }
 
     val io = CoroutineScope(Dispatchers.IO + SupervisorJob() + exceptionHandler)

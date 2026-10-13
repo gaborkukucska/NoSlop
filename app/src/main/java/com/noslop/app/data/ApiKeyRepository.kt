@@ -40,7 +40,9 @@ class ApiKeyRepository(context: Context) {
                 apiFile.delete()
                 recovered = createEncryptedPrefs(context)
                 Logger.info(TAG, "Recovered EncryptedSharedPreferences for API keys after clearing foreign file")
-            } catch (_: Exception) {}
+            } catch (recoveryError: Exception) {
+                Logger.warn(TAG, "Recovering API key storage failed: ${recoveryError.message}")
+            }
         }
         recovered ?: run {
             Logger.error(TAG, "EncryptedSharedPreferences init failed for API keys. Falling back to unencrypted.", e.message)

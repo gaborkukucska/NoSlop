@@ -600,7 +600,13 @@ data class NetworkPacket(
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
     val type: String,
-    val payload: JsonElement? = null
+    val payload: JsonElement? = null,
+    /** C09 (round E2): envelope signature version ([EnvelopeAuth.VERSION]). */
+    @SerializedName("env_v") val envV: Int? = null,
+    /** C09: when the envelope was signed (ms); checked against [EnvelopeAuth.MAX_SKEW_MS]. */
+    @SerializedName("env_ts") val envTs: Long? = null,
+    /** C09: Ed25519 signature by [senderId] over everything but `hops` ([EnvelopeAuth.signingString]). */
+    @SerializedName("env_sig") val envSig: String? = null
 ) {
     fun toJson(): String = com.noslop.app.util.Json.gson.toJson(this)
 

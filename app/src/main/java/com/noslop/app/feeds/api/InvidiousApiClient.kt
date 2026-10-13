@@ -85,7 +85,7 @@ object InvidiousApiClient {
     }
 
     fun preWarmInstances() {
-        CoroutineScope(Dispatchers.IO).launch {
+        com.noslop.app.util.AppScopes.io.launch {
             // Proactively warm up healthy instances in background
             healthyInvidiousInstances()
         }
@@ -274,14 +274,14 @@ object InvidiousApiClient {
             }
             val url = chosen.get("url")?.asString
             if (!url.isNullOrBlank()) {
-                Logger.info(TAG, "Resolved Piped stream for $videoId (${chosen.get("quality")?.asString}): $url")
+                Logger.info(TAG, "Resolved Piped stream for ${Logger.redact(videoId)} (${chosen.get("quality")?.asString}): $url")
                 return url
             }
         }
 
         val hls = root.get("hls")?.asString
         if (!hls.isNullOrBlank()) {
-            Logger.info(TAG, "Resolved Piped HLS stream for $videoId: $hls")
+            Logger.info(TAG, "Resolved Piped HLS stream for ${Logger.redact(videoId)}: $hls")
             return hls
         }
 
@@ -329,7 +329,7 @@ object InvidiousApiClient {
                 val pair = byQuality[q]
                 if (pair != null) {
                     val finalUrl = formatStreamUrl(pair.first, pair.second)
-                    Logger.info(TAG, "Resolved Invidious stream for $videoId ($q) via $instance")
+                    Logger.info(TAG, "Resolved Invidious stream for ${Logger.redact(videoId)} ($q) via $instance")
                     return finalUrl
                 }
             }

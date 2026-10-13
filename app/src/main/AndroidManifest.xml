@@ -29,6 +29,9 @@
     <queries>
         <package android:name="com.noslop.app" />
         <package android:name="com.noslop.me.app" />
+        <!-- D11 (E1): Tor Browser detection for "Open in Tor Browser" (package visibility, API 30+) -->
+        <package android:name="org.torproject.torbrowser" />
+        <package android:name="org.torproject.torbrowser_alpha" />
     </queries>
 
     <application

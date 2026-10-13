@@ -165,6 +165,21 @@ class WireProtocolTest {
         assertNull(restored.payload)
     }
 
+    /** C09 (round E2): the envelope signature fields use snake_case keys and round-trip. */
+    @Test
+    fun envelopeFields_roundTrip_withSnakeCaseKeys() {
+        val p = NetworkPacket(senderId = "s", type = "POST", envV = 1, envTs = 1_700_000_000_000L, envSig = "c2ln")
+        val obj = JsonParser.parseString(p.toJson()).asJsonObject
+        assertTrue(obj.has("env_v"))
+        assertTrue(obj.has("env_ts"))
+        assertTrue(obj.has("env_sig"))
+        val restored = NetworkPacket.fromJson(p.toJson())
+        assertEquals(1, restored.envV)
+        assertEquals(1_700_000_000_000L, restored.envTs)
+        assertEquals("c2ln", restored.envSig)
+        assertNull("absent when not set", NetworkPacket.fromJson(NetworkPacket(senderId = "s", type = "POST").toJson()).envSig)
+    }
+
     @Test
     fun groupQueryPayload_roundTrips() {
         val query = GroupQueryPayload(groupId = "grp-1", requesterId = "req-123", timestamp = 1700000000000L)

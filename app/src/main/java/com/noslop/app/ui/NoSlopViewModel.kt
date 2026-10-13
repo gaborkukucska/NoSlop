@@ -2396,7 +2396,9 @@ fun toggleAggregator() {
         cachedExcludedIds = repository.getSwipeExcludedIds()
         try {
             cachedReactedAnchorIds = repository.getReactedAnchorIds()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("VIEWMODEL", "Could not refresh reacted items; keeping the previous list: ${e.message}")
+        }
     }
 
     fun updateActiveSearchQuery(query: String) {
@@ -2734,8 +2736,16 @@ fun toggleAggregator() {
 
     fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
-        viewModelScope.launch { 
-            repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId) 
+        viewModelScope.launch {
+            val sent = repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId)
+            if (!sent) {
+                // D11 (E1): nothing was stored or sent (no encryption key, or no identity for this contact).
+                android.widget.Toast.makeText(
+                    getApplication<android.app.Application>(),
+                    com.noslop.app.util.LanguageManager.translate("Message not sent: this contact's encryption key is missing. Ask them to reconnect."),
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
             repository.syncDmsWithHub()
         }
     }

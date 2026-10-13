@@ -318,6 +318,24 @@ class MeshPacketVerifierTest {
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("EDIT_COMMENT", payloadPipeAvatar)))
     }
 
+    /** S2 (round E2): ANNOUNCE_PEER is v2-signed over author, onion and time; v1 is refused. */
+    @Test
+    fun announcePeer_v2CoversTheOnion_v1Refused() {
+        val ts = 1_700_000_000_000L
+        val v2 = CryptoService.encodeForSigning("noslop-announce-v2", alice.publicKeyB64, alice.onionAddress, ts.toString())
+        assertEquals(v2, CryptoService.canonicalAnnouncePeerV2(alice.publicKeyB64, alice.onionAddress, ts))
+        val good = AnnouncePeerPayload(alice.publicKeyB64, alice.onionAddress, ts, sign(v2))
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("ANNOUNCE_PEER", good)))
+        // The onion swapped in transit.
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("ANNOUNCE_PEER", good.copy(onionAddress = mallory.onionAddress))))
+        // The v1 form (author and time only).
+        val v1 = AnnouncePeerPayload(alice.publicKeyB64, alice.onionAddress, ts, sign(CryptoService.encodeForSigning(alice.publicKeyB64, ts.toString())))
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("ANNOUNCE_PEER", v1)))
+        // The onion address is the one derived from the key.
+        assertEquals(true, CryptoService.isOnionOf(alice.publicKeyB64, alice.onionAddress))
+        assertEquals(false, CryptoService.isOnionOf(alice.publicKeyB64, mallory.onionAddress))
+    }
+
     // --- The types that sign the envelope rather than the payload ---
 
     @Test

@@ -137,6 +137,28 @@ object Logger {
         return out
     }
 
+    // --- Redaction of user-chosen values (D11 / C19, round E1) ---------------
+
+    /** Per-process salt: redacted values can be matched within one run, never across runs. */
+    private val redactSalt: ByteArray = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+
+    /**
+     * A search term, video id or other user-chosen value for a log line. Builds with
+     * SHOW_SENSITIVE_LOGS (all debug builds) log it as is; release builds log a salted 8-hex tag and
+     * the length, e.g. `#3fa94c1e(len 9)`, so lines about the same value can still be matched.
+     */
+    fun redact(value: String?): String = redactWith(value, BuildConfig.SHOW_SENSITIVE_LOGS)
+
+    internal fun redactWith(value: String?, showSensitive: Boolean): String {
+        if (value == null) return "null"
+        if (showSensitive) return value
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update(redactSalt)
+        val digest = md.digest(value.toByteArray(Charsets.UTF_8))
+        val tag = digest.take(4).joinToString("") { "%02x".format(it) }
+        return "#$tag(len ${value.length})"
+    }
+
     // --- File writing -------------------------------------------------------
 
     /**
@@ -167,7 +189,9 @@ object Logger {
                 val prev = File(file.parentFile, file.name + ".1")
                 if (prev.exists()) prev.delete()
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w("NoSlop/LOGGER", "Pruning old logs failed: ${e.message}")
+        }
     }
 
     fun getLogFilePath(): String = logFile?.absolutePath ?: "Not initialised"
@@ -244,7 +268,9 @@ object Logger {
                     allLines.addAll(prev.readLines())
                 }
                 allLines.addAll(file.readLines())
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w("NoSlop/LOGGER", "Reading the log file failed; showing the in-memory log: ${e.message}")
+            }
         }
         if (allLines.isEmpty()) {
             allLines.addAll(ringBuffer.map { it.toString() })

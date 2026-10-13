@@ -123,7 +123,7 @@ object WikipediaApiClient {
                 }
             }
 
-            Logger.info(TAG, "Wikipedia '$query': ${items.size} articles")
+            Logger.info(TAG, "Wikipedia '${Logger.redact(query)}': ${items.size} articles")
             items
         } catch (e: Exception) {
             Logger.error(TAG, "Wikipedia request failed", e.message)

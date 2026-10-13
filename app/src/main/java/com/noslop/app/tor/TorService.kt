@@ -87,7 +87,8 @@ object TorService {
 
     // Unmanaged coroutine scope is fine here — TorService is a process-lifetime singleton.
     // It is initialised once in NoSlopApp.onCreate() and never torn down independently.
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // E1: uncaught exceptions are logged (AppScopes.exceptionHandler) instead of ending the process.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
 
     // FIX: Initial state is IDLE (not STARTING) so that the first startTor() call
     // always proceeds rather than hitting the idempotency guard and returning early.

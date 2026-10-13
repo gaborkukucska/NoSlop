@@ -195,7 +195,9 @@ class MeshSocialRepository(
                                 try {
                                     val pkt = gson.fromJson(item, com.noslop.app.mesh.NetworkPacket::class.java)
                                     if (pkt != null) list.add(pkt)
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {
+                                    Logger.warn(TAG, "Dropped an unreadable outbox entry: ${e.message}")
+                                }
                             }
                             if (list.isNotEmpty()) {
                                 pendingOutboxMessages[peerPub] = java.util.Collections.synchronizedList(list)
@@ -508,7 +510,9 @@ class MeshSocialRepository(
                 try {
                     val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000L
                     db.pendingGroupMessageDao().deleteExpired(sevenDaysAgo)
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Pruning expired group messages failed: ${e.message}")
+                }
 
                 val hasPending = pendingOutboxMessages.values.any { it.isNotEmpty() }
                 if (hasPending) {
@@ -616,7 +620,8 @@ class MeshSocialRepository(
         val creator = identityRouter.creator() ?: return
         val keys = creator.keys
         val timestamp = System.currentTimeMillis()
-        val announceSig = CryptoService.sign(CryptoService.encodeForSigning(keys.publicKeyB64, timestamp.toString()), keys.privateKeyB64)
+        // S2 (E2): the v2 announce signature covers the onion address.
+        val announceSig = CryptoService.sign(CryptoService.canonicalAnnouncePeerV2(keys.publicKeyB64, keys.onionAddress, timestamp), keys.privateKeyB64)
         com.noslop.app.mesh.GossipService.broadcast(
             com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
@@ -696,7 +701,8 @@ class MeshSocialRepository(
                     val myKeys = getLocalIdentity()
                     if (myKeys != null) {
                         val timestamp = System.currentTimeMillis()
-                        val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
+                        // S2 (E2): the v2 announce signature covers the onion address.
+                        val payload = com.noslop.app.crypto.CryptoService.canonicalAnnouncePeerV2(myKeys.publicKeyB64, myKeys.onionAddress, timestamp)
                         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
                         
                         val announcePay = com.noslop.app.mesh.AnnouncePeerPayload(
@@ -1788,7 +1794,13 @@ class MeshSocialRepository(
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getIdentityForPeer(recipientPubB64) ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
-        val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
+        // D11 (E1): a DM is sealed to the contact's X25519 key. Without one, fail clearly: the Ed25519
+        // identity key used to stand in for it, and the contact could never decrypt that message.
+        val recipientEncPub = peer.encPublicKeyB64
+        if (recipientEncPub.isBlank()) {
+            Logger.error(TAG, "DM not sent: no encryption key is known for this contact")
+            return@withContext false
+        }
 
         // Always wrap content with JSON to securely pass metadata over X25519 channel
         val map = mutableMapOf<String, Any>("content" to messageText)

@@ -71,7 +71,7 @@ class FeedRepository(
     private val syncMutex = kotlinx.coroutines.sync.Mutex()
     @Volatile private var activeSyncDeferred: kotlinx.coroutines.Deferred<FeedSyncResult>? = null
     private var currentGeneration = 0L
-    private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
 
     suspend fun cancelSync() {
         val deferred = syncMutex.withLock {
@@ -551,7 +551,7 @@ class FeedRepository(
             Logger.warn(TAG, "Tor not ready — skipping search rather than fetching outside Tor")
             return@withContext emptyList()
         }
-        Logger.info(TAG, "Starting custom search for query: $query and filter: $filterMode")
+        Logger.info(TAG, "Starting custom search for query: ${Logger.redact(query)} and filter: $filterMode")
 
         try {
             val apiKeyRepo = ApiKeyRepository(context)
@@ -588,12 +588,12 @@ class FeedRepository(
 
                 if (filteredApiItems.isNotEmpty()) {
                     feedDao.insertItems(filteredApiItems)
-                    Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '$query'")
+                    Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '${Logger.redact(query)}'")
                     return@withContext filteredApiItems.map { it.id }
                 }
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "Search pipeline failed for query '$query'", e.message)
+            Logger.error(TAG, "Search pipeline failed for query '${Logger.redact(query)}'", e.message)
         }
         return@withContext emptyList()
     }

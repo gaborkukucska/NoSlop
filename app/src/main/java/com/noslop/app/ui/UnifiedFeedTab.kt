@@ -149,7 +149,7 @@ private fun TorStatusOverlay(message: String, onRetry: () -> Unit) {
                 if (message.startsWith("Tor could not connect")) {
                     TextButton(onClick = {
                         com.noslop.app.net.HttpClientProvider.useTorForClearnet = false
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        com.noslop.app.util.AppScopes.io.launch {
                             com.noslop.app.NoSlopApp.repository.setUseTorForClearnet(false)
                         }
                         com.noslop.app.tor.TorService.setTorStatusMessage(null)

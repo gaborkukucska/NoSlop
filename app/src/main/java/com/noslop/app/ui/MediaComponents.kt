@@ -702,16 +702,18 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
         try { android.net.Uri.parse(url).host ?: "external website" } catch (_: Exception) { "external website" }
     }
 
-    val isTorBrowserInstalled = remember(context) {
+    // D11 (E1): the installed Tor Browser package (stable first, then alpha), or null. Visible on
+    // API 30+ only through the <queries> entries in AndroidManifest.xml. The button opens the package
+    // found here; with only the alpha installed it used to target the stable package and do nothing.
+    val torBrowserPackage = remember(context) {
         val pm = context.packageManager
-        try {
-            pm.getPackageInfo("org.torproject.torbrowser", 0) != null
-        } catch (_: Exception) {
+        listOf("org.torproject.torbrowser", "org.torproject.torbrowser_alpha").firstOrNull { pkg ->
             try {
-                pm.getPackageInfo("org.torproject.torbrowser_alpha", 0) != null
+                pm.getPackageInfo(pkg, 0) != null
             } catch (_: Exception) { false }
         }
     }
+    val isTorBrowserInstalled = torBrowserPackage != null
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -761,7 +763,9 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                             try {
                                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                                 context.startActivity(intent)
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                com.noslop.app.debug.Logger.warn("ARTICLE_VIEW", "No app could open the link: ${e.message}")
+                            }
                         }
                     }) {
                         Icon(Icons.Default.Public, contentDescription = "Open in Browser".tr, tint = AccentGreen)
@@ -806,13 +810,20 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                             if (isTorBrowserInstalled) {
                                 Button(
                                     onClick = {
-                                        try {
-                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
-                                                setPackage("org.torproject.torbrowser")
+                                        // Never fall back to an unrestricted intent here: that would open the
+                                        // default browser, outside Tor.
+                                        val pkg = torBrowserPackage
+                                        if (pkg != null) {
+                                            try {
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).apply {
+                                                    setPackage(pkg)
+                                                }
+                                                context.startActivity(intent)
+                                                onDismiss()
+                                            } catch (e: Exception) {
+                                                com.noslop.app.debug.Logger.warn("ARTICLE_VIEW", "Could not open Tor Browser ($pkg): ${e.message}")
                                             }
-                                            context.startActivity(intent)
-                                            onDismiss()
-                                        } catch (_: Exception) {}
+                                        }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                                 ) {
@@ -846,7 +857,9 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                                 settings.databaseEnabled = false
                                 try {
                                     android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {
+                                    com.noslop.app.debug.Logger.warn("ARTICLE_VIEW", "Could not block third-party cookies in the article view: ${e.message}")
+                                }
                                 webViewClient = android.webkit.WebViewClient()
                                 loadUrl(url)
                             }
@@ -879,7 +892,9 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                                 context.startActivity(intent)
                                 onDismiss()
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                com.noslop.app.debug.Logger.warn("ARTICLE_VIEW", "No app could open the link: ${e.message}")
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
                     ) {

@@ -24,7 +24,7 @@ object SshDeployer {
     // NOSLOP_SSH_HOSTKEY_V1 — the NAT keepalive used to run on GlobalScope,
     // which is unstructured and uncancellable. It now has an owner.
     private val keepAliveScope = kotlinx.coroutines.CoroutineScope(
-        Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+        Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler
     )
 
     /**

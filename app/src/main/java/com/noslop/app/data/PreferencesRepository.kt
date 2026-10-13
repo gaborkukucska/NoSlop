@@ -47,7 +47,9 @@ class PreferencesRepository(
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
                 return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'selected_categories' is unreadable; using the default: ${e.message}")
+            }
         }
         // Fallback: derive from active sources
         feedDao.getActiveSourcesList().mapNotNull { it.category }.distinct()
@@ -68,7 +70,9 @@ class PreferencesRepository(
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
                 return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'keywords_$category' is unreadable; using the default: ${e.message}")
+            }
         }
         emptyList()
     }
@@ -113,7 +117,9 @@ class PreferencesRepository(
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
                 return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'selected_music_genres' is unreadable; using the default: ${e.message}")
+            }
         }
         emptyList()
     }
@@ -131,7 +137,9 @@ class PreferencesRepository(
             try {
                 val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
                 return@withContext com.noslop.app.util.Json.gson.fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored setting 'selected_video_genres' is unreadable; using the default: ${e.message}")
+            }
         }
         emptyList()
     }
@@ -170,7 +178,9 @@ class PreferencesRepository(
         if (!json.isNullOrBlank()) {
             try {
                 return@withContext com.noslop.app.util.Json.gson.fromJson(json, UserProfile::class.java)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.warn("PREFERENCES", "Stored user profile is unreadable; using an empty profile: ${e.message}")
+            }
         }
         UserProfile() // Default empty profile
     }

@@ -49,6 +49,7 @@ class HandshakeReplyPathTest {
     @Before
     fun setup() = runBlocking<Unit> {
         GossipService.resetForTesting()
+        EnvelopeAuth.resetForTesting()
         context = RuntimeEnvironment.getApplication()
         db = Room.inMemoryDatabaseBuilder(context, NoSlopDatabase::class.java)
             .allowMainThreadQueries()
@@ -105,14 +106,18 @@ class HandshakeReplyPathTest {
             targetUserId = target,
             version = 2
         )
-        return NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 3,
-            senderId = sender.publicKeyB64,
-            targetUserId = target,
-            type = if (isConnectionRequest) "CONNECTION_REQUEST" else "USER_HANDSHAKE",
-            payload = gson.toJsonTree(payload),
-            signature = sig
+        // C09 (E2): every packet on the wire carries an envelope signature by its sender.
+        return EnvelopeAuth.sign(
+            NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = sender.publicKeyB64,
+                targetUserId = target,
+                type = if (isConnectionRequest) "CONNECTION_REQUEST" else "USER_HANDSHAKE",
+                payload = gson.toJsonTree(payload),
+                signature = sig
+            ),
+            sender
         )
     }
 
@@ -201,8 +206,8 @@ class HandshakeReplyPathTest {
 
         val probe = request(bob, nonce)
         assertEquals(1, sendOverSocket(probe, 5_000).size)
-        // Same signed request, new envelope id (gets past mesh dedup): no second answer.
-        val replay = probe.copy(id = UUID.randomUUID().toString())
+        // Same signed request, new envelope id (gets past mesh dedup; Bob signs the new envelope): no second answer.
+        val replay = EnvelopeAuth.sign(probe.copy(id = UUID.randomUUID().toString()), bob)
         assertTrue(sendOverSocket(replay, 1_500).isEmpty())
         // A genuinely new probe (fresh timestamp) is answered again.
         Thread.sleep(5)
@@ -296,6 +301,8 @@ class HandshakeReplyPathTest {
         ))
 
         answeringNode({ req ->
+            // C09 (E2): the probe went out signed by Alice (an unsigned one makes this throw, so no answer).
+            check(EnvelopeAuth.verify(req) == EnvelopeAuth.Verdict.VALID) { "probe envelope: ${EnvelopeAuth.verify(req)}" }
             handshakePacket(bob, alice.publicKeyB64, req.getConnectionRequestPayload()!!.requestNonce!!, isConnectionRequest = false)
         }) { port ->
             Socket(InetAddress.getLoopbackAddress(), port).use { s ->
@@ -325,6 +332,41 @@ class HandshakeReplyPathTest {
         }
         assertEquals(PeerRelationship.OUTGOING_PENDING, peer(bob.publicKeyB64)!!.relationship)
         assertNull(peer(mallory.publicKeyB64))
+    }
+
+    // ---------------------------------------------------------------- C09 envelope (round E2)
+
+    @Test
+    fun unsignedOrForgedEnvelopes_neverReachAHandler() = runBlocking<Unit> {
+        val signed = request(bob, "bob-nonce-e2")
+        // No envelope at all (a build before E2).
+        assertTrue(sendOverSocket(signed.copy(envV = null, envTs = null, envSig = null), 1_500).isEmpty())
+        // Envelope made by Mallory while the packet names Bob as the sender.
+        val byMallory = EnvelopeAuth.sign(signed.copy(senderId = mallory.publicKeyB64), mallory)
+        assertTrue(sendOverSocket(byMallory.copy(senderId = bob.publicKeyB64), 1_500).isEmpty())
+        // Bob's envelope, payload changed in transit.
+        val tampered = signed.copy(payload = gson.toJsonTree(signed.getConnectionRequestPayload()!!.copy(fromUsername = "evil")))
+        assertTrue(sendOverSocket(tampered, 1_500).isEmpty())
+        Thread.sleep(300)
+        assertNull("nothing reached the handshake handler", peer(bob.publicKeyB64))
+
+        // The genuine packet is handled.
+        sendOverSocket(signed, 1_500)
+        awaitRelationship(bob.publicKeyB64, PeerRelationship.INCOMING_PENDING)
+    }
+
+    @Test
+    fun ourPacketsAreSigned_othersWithoutEnvelopeAreNotSent() = runBlocking<Unit> {
+        val ours = NetworkPacket(id = "o-1", hops = 1, senderId = alice.publicKeyB64, type = "TYPING")
+        val wire = repo.meshTransport.prepareForWire(ours)!!
+        assertEquals(EnvelopeAuth.Verdict.VALID, EnvelopeAuth.verify(wire))
+        // Someone else's packet without an envelope has no signer.
+        assertNull(repo.meshTransport.prepareForWire(NetworkPacket(id = "o-2", hops = 1, senderId = bob.publicKeyB64, type = "POST")))
+        // A relay that keeps the original sender travels with that sender's envelope, unchanged.
+        val bobs = EnvelopeAuth.sign(NetworkPacket(id = "o-3", hops = 6, senderId = bob.publicKeyB64, type = "GROUP_UPDATE"), bob)
+        val relayed = repo.meshTransport.prepareForWire(bobs.copy(hops = 5))!!
+        assertEquals(bobs.envSig, relayed.envSig)
+        assertEquals(EnvelopeAuth.Verdict.VALID, EnvelopeAuth.verify(relayed))
     }
 
     @Test

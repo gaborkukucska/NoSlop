@@ -120,7 +120,7 @@ class MainActivity : ComponentActivity() {
                             if (!firstPreloadUrl.isNullOrBlank()) {
                                 splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Buffering initial media...")
                                 val targetUrl = firstPreloadUrl!!
-                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                com.noslop.app.util.AppScopes.io.launch {
                                     try {
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, targetUrl)
                                     } catch (e: Exception) {
@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
 
                             // 5. Pre-warm Slide 2 asynchronously in the background after splash dismissal
                             secondPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                com.noslop.app.util.AppScopes.io.launch {
                                     try {
                                         kotlinx.coroutines.delay(1000L)
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)

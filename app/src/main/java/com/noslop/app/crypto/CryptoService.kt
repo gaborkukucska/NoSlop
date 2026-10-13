@@ -32,7 +32,9 @@ object CryptoService {
             if (Security.getProvider("BC") == null) {
                 Security.addProvider(BC_PROVIDER)
             }
-        } catch (_: Throwable) {}
+        } catch (t: Throwable) {
+            com.noslop.app.debug.Logger.warn("CRYPTO", "Could not register the Bouncy Castle provider: ${t.message}")
+        }
     }
 
     // Standard ASN.1 headers for 100% legacy mesh compatibility
@@ -365,6 +367,20 @@ object CryptoService {
         // keeps the two forms distinct: adding or removing the field breaks the signature.
         if (intro != null) parts.add(intro)
         return encodeForSigning(*parts.toTypedArray())
+    }
+
+    /**
+     * S2 (round E2): what an ANNOUNCE_PEER is signed over. v1 covered only the author and the time, so the
+     * onion address it carries (which receivers store) could be swapped by anyone relaying it.
+     */
+    fun canonicalAnnouncePeerV2(authorId: String, onionAddress: String?, timestamp: Long): String =
+        encodeForSigning("noslop-announce-v2", authorId, onionAddress ?: "", timestamp.toString())
+
+    /** S2 (round E2): whether [onionAddress] is the onion address derived from [publicKeyB64]. */
+    fun isOnionOf(publicKeyB64: String, onionAddress: String): Boolean = try {
+        deriveOnionAddress(Base64.decode(publicKeyB64, Base64.DEFAULT)).equals(onionAddress.trim(), ignoreCase = true)
+    } catch (_: Exception) {
+        false
     }
 
     fun sign(payload: String, privateKeyB64: String): String {

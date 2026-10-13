@@ -51,7 +51,7 @@ object PublicApiService {
                     articlesOnly = articlesOnly
                 )
                 if (found.isNotEmpty()) {
-                    Logger.info(TAG, "Local library: ${found.size} items for '$query'")
+                    Logger.info(TAG, "Local library: ${found.size} items for '${Logger.redact(query)}'")
                     localItems.addAll(found)
                 }
             } catch (e: Exception) {

@@ -100,7 +100,7 @@ object HackerNewsApiClient {
                 }
             }
 
-            Logger.info(TAG, "Hacker News '$query': ${items.size} stories")
+            Logger.info(TAG, "Hacker News '${Logger.redact(query)}': ${items.size} stories")
             items
         } catch (e: Exception) {
             Logger.error(TAG, "Hacker News request failed", e.message)

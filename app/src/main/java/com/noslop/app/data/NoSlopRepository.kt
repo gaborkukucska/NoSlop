@@ -23,7 +23,7 @@ import org.json.JSONObject
 
 class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
-    private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
 
@@ -2262,13 +2262,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             if (apiPrefFile.exists()) apiPrefFile.delete()
             val sysPrefFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_system.xml")
             if (sysPrefFile.exists()) sysPrefFile.delete()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn(TAG, "Reset: could not delete the API key or system preferences: ${e.message}")
+        }
 
         // 5. Unregister Tor hidden services
         try {
             com.noslop.app.tor.TorService.unregisterHiddenServices()
             com.noslop.app.tor.TorService.unregisterBurnableHiddenService()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn(TAG, "Reset: could not unregister the hidden services: ${e.message}")
+        }
 
         // 6. Reset in-memory states
         com.noslop.app.mesh.GossipService.resetAllState()
