@@ -60,7 +60,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 * 📬 **End-to-End Encrypted DMs** — Secure messaging via directional X25519 key agreement and ChaCha20-Poly1305 AEAD (v2) with AAD binding and delivery acknowledgments.
 * 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
-* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish broadcasts under a separate key, onion address and creator profile (name, bio, picture). Creator contacts are never sent the personal key, onion address or profile. Reactions and votes are still made by the personal identity, and a linked Hub relays on its own terms.
+* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish public broadcasts under a separate key and onion address; friends-only posts stay with the personal identity. The creator identity shows your profile unless you set a different name, bio or picture on the Studio page. Back it up to a passphrase-protected file, and import or restore it on another node with its followers, posts and media. Creator contacts are never sent the personal key or onion address. Reactions and votes are still made by the personal identity, and a linked Hub relays on its own terms.
 * 🏠 **Home HUBs & Admin AI** — Link or auto-deploy an always-on home server over SSH as your sovereign master database and private LLM assistant.
 * 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post.
 * 🛡️ **Gossip Firewall & Mesh Filters** — 6-hop flood routing with LRU deduplication, packet verification, and granular toggles for incoming and outgoing media types.
@@ -71,7 +71,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 
 * 🔐 **Ed25519 + X25519 Keys** — Generated locally using Bouncy Castle pure lightweight cryptographic engine.
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
-* 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity, with its own creator profile, for public creator broadcasts. One router picks the identity for every packet.
+* 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts and for following discovered creators. One router picks the identity for every packet.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
 * 🪪 **Verified in Person** — 8-character tags (Argon2id) after every name, and a check code on every ID card. Scan a friend's QR code with your camera, they approve after comparing name and check code, and you both show as verified in person. Codes from pictures or pasted IDs come with a warning, and so do new contacts whose name you already know. If a contact's encryption key changes, it's applied and the chat says so.
 

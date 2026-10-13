@@ -404,9 +404,13 @@ to determine which backend is actually active at runtime.
 
 ### 3.7.1 Creator Identity Separation (`IdentityRouter`, review D04, 2026-10-09)
 
-The creator (burnable) identity has its own profile and is never sent with the personal one.
+The creator (burnable) identity has its own keys and onion address and is never sent with the personal ones. By default it shows the personal profile; the Studio page can give it a different one.
 
-- **Creator profile.** Stored in `app_settings` under `creator_profile` (`CREATOR_PROFILE_KEY`, `UserProfile` JSON: handle, bio, avatar), edited in Creator Studio (*Creator Profile* card → *Edit Creator Profile*). Until a name is set the handle is `Creator` (`DEFAULT_CREATOR_HANDLE`), never the personal handle. `getBurnableIdentity().displayName` and `generateBurnableIdentity` use it; both used the personal handle before. *Burn ID* clears the profile, so the new identity carries nothing of the old one. Changes are announced to creator contacts with an `IDENTITY_UPDATE` signed by the creator key.
+- **Profile (D10d, user decision 2026-10-13).** Every identity uses the personal username, picture and bio by default. In creator mode, a field set on the Studio page replaces the personal one for the creator identity only; a blank field falls back to the personal one. On a node that is not a creator, the secondary identity (used to follow discovered creators) always uses the personal profile. The Studio fields are stored in `app_settings` under `creator_profile` (`CREATOR_PROFILE_KEY`, `UserProfile` JSON) and edited on the Studio page (*Creator Profile* card → *Edit*); the card says which fields come from the personal profile. The rule is `resolveSecondaryProfile` (`UserProfile.kt`), used by `IdentityRepository` (`getBurnableIdentity().displayName`, `generateBurnableIdentity`), `IdentityRouter.creator()`, `NoSlopRepository.secondaryIdentityProfile()` and the discoverable announcement. Anyone who sees both identities can match the fields left blank; keys are never shared. This replaces D04's separate creator profile with the default name `Creator` (followers saw "Creator" until a name was set) and D10c's personal-handle-only rule. *Burn ID* clears the Studio fields.
+- **Name updates (D10c).** `announceCreatorPresence` sends the secondary identity's current name (`IDENTITY_UPDATE`, signed by that identity) to the contacts that know it, whenever the name differs from the last one sent (`creator_identity_name_sent`) and one of those contacts is online.
+- **A post's identity follows its privacy (D10c).** In creator mode, public posts are signed by the creator identity and friends-only posts by the personal identity (`composeAndBroadcastPost`). A signed post's author cannot change, so an edit that crosses that line moves the post (`MeshSocialRepository.identityMoveFor`, `moveMeshPostToOtherIdentity`): it is published again by the other identity, with a new id and the same time, attachment and clearnet link, and the old copy is deleted. Likes and comments stay with the old copy. The edit sheet explains this; a personal post made public offers *Move to creator* (default) or *Keep personal*. New posts default to Public in creator mode.
+- **Attachments name the sending identity (D10c).** `MediaMetadata.originNode` and `ownerId` are set to the identity that sends the post, comment, DM or group message. The UI fills in the personal ones, which put the personal onion and key into creator posts. These fields are not signed.
+- **Burning or replacing (D10e).** After the old identity's `USER_EXIT`, the contacts bound to it are forgotten (`NoSlopRepository.dropCreatorContacts`), so the new identity never talks to them and links the two. On a replace by import, contacts in the file are kept.
 - **`IdentityRouter`** (`data/IdentityRouter.kt`, `NoSlopRepository.identityRouter`) is the one place that decides which identity and profile a packet for a given peer is built from:
   - `knowsUsAsCreator(peer)`: `contact_identity_<peer>` = burnable; otherwise, before the user decides, `requested_identity_<peer>` = burnable. A peer with neither setting counts as a creator contact only when it is a temporary row we never accepted (a discoverable node, a stranger). An accepted contact without a binding knows the personal identity.
   - `forPeer(peer)`: the creator identity for creator contacts, the personal identity otherwise. **Null** when a creator contact remains but the creator identity is gone (creator mode off). Callers then send nothing. They used to fall back to the personal identity.
@@ -415,7 +419,29 @@ The creator (burnable) identity has its own profile and is never sent with the p
 - **Sync to a creator contact** (`SyncPacketHandler`, `requestInventorySync`) leaves out everything the personal identity wrote: its posts, comments on them, and its own comments and reactions. The answer's envelope is the routed identity. In creator mode it used to be the creator key for everyone, so friends also dropped the friends-only posts in the answer.
 - **Presence.** The personal `ANNOUNCE_PEER` goes only to contacts of the personal identity. The creator identity sends its own `ANNOUNCE_PEER` (creator contacts never had one before) and, when discoverable, the `ANNOUNCE_DISCOVERABLE` with the creator profile. Both go out from `announceCreatorPresence`, a random 5–50 s after the personal announce, so the two never arrive together.
 - **Not changed:** reactions and votes on posts are still made by the personal identity (the feed's "my reaction" state is keyed to it). `GossipService.outboundFor` keeps them away from creator contacts directly; relays by third parties can still carry them. Group traffic keeps its own identity rules (`groupMemberIdentity`). With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying.
-- Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`).
+- Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`, `CreatorPostIdentityD10cTest`, `CreatorIdentityArchiveD10dTest`).
+
+### 3.7.2 Creator Identity File (`CreatorIdentityArchive`, D10d/D10e, 2026-10-13)
+
+The creator identity can be backed up, and restored or moved to another node, on its own.
+
+- **Where.**
+  - *Back up:* the Studio page, *Back Up Creator Identity*. The passphrase is typed twice and needs at least 10 characters; spaces at either end are ignored.
+  - *Import:* the Studio page, *Import Creator Identity*, on a creator node. A warning comes first (with *Back Up First*), and the file's identity then replaces this node's creator identity.
+  - *Restore:* Settings, Creator Node, *Restore Creator Identity*, on a node that is not a creator yet. A different secondary identity already on the node is replaced only after the user confirms.
+- **Contents.** The creator keys, the Studio profile and donation link, the contacts bound to the creator identity, the creator's posts and their media files, and each file's recorded SHA-256. Rows are written as explicit JSON fields, so R8 renaming cannot break the file.
+- **Format "NSC1"** (integers big-endian):
+  - `header` = `"NSC1"` | version (1 byte, 1) | Argon2id iterations (1 byte, 3) | Argon2id memory in KiB (4 bytes, 65536) | salt (16) | nonce prefix (7).
+  - `key` = Argon2id(passphrase, salt, iterations, memory, parallelism 1), 32 bytes.
+  - `body` = chunks, each: last flag (1 byte) | length (4) | AES-256-GCM of at most 1 MiB of plaintext. The nonce is the nonce prefix, the chunk number (4) and the last flag; the associated data is the header.
+  - The last chunk is always written (it may be empty) and nothing may follow it, so a truncated, reordered, modified or extended file is refused. The plaintext is a zip: `manifest.json`, `contacts.json`, `posts.json`, `media/<media id>`.
+  - Each chunk is authenticated on its own, so a large video never has to fit in memory (the full backup's single GCM stream must be held until its tag is checked).
+- **Restore rules.**
+  - Everything is staged and authenticated before anything on the node changes. The burnable-key checks are the full backup's (`IdentityRepository.burnableIdentityProblem`).
+  - The restore installs the keys, Studio profile and donation link, and turns creator mode on. It then adds contacts (bound to the creator identity), posts (if not present) and media (marked as our own), and registers the creator onion with Tor.
+  - A contact the node already knows by its personal identity is left alone and counted.
+  - Restoring the same file again changes nothing.
+  - The result dialog reminds the user to turn creator mode off on the old device: two devices with one creator identity compete for one onion address.
 
 ### 3.8 BIP39 Mnemonic
 
