@@ -5,12 +5,9 @@ import com.noslop.app.crypto.CryptoService
 
 /**
  * One of our two identities, with the profile that goes with it. The personal identity carries the
- * personal handle, bio and avatar; the creator (burnable) identity carries the creator profile
- * (see [CREATOR_PROFILE_KEY]) and never the personal one.
- *
- * D10c: on a node that is not a creator the burnable identity only follows creators; it goes by the
- * personal handle there (see [secondaryIdentityHandle]) and still never carries the personal bio or
- * avatar.
+ * personal handle, bio and avatar. D10d: so does the creator (burnable) identity by default; on a
+ * creator node, each field set on the Studio page ([CREATOR_PROFILE_KEY]) replaces the personal one
+ * (see [resolveSecondaryProfile]).
  */
 data class RoutedIdentity(
     val keys: CryptoService.IdentityKeys,
@@ -58,19 +55,23 @@ class IdentityRouter(
         )
     }
 
-    /** The creator (burnable) identity with the creator profile, or null when there is none. */
+    /**
+     * The creator (burnable) identity with its profile ([resolveSecondaryProfile]), or null when there
+     * is none.
+     */
     suspend fun creator(): RoutedIdentity? {
         val keys = getBurnableIdentity() ?: return null
-        val profile = getCreatorProfile()
+        val profile = resolveSecondaryProfile(
+            isCreatorNode = db.appSettingDao().getSetting(CREATOR_MODE_KEY) == "true",
+            creatorProfile = getCreatorProfile(),
+            personalProfile = getUserProfile(),
+            personalHandle = getLocalHandle()
+        )
         return RoutedIdentity(
             keys = keys,
-            handle = secondaryIdentityHandle(
-                isCreatorNode = db.appSettingDao().getSetting(CREATOR_MODE_KEY) == "true",
-                creatorProfile = profile,
-                personalHandle = getLocalHandle()
-            ),
-            bio = profile.bio.takeIf { it.isNotBlank() },
-            avatarB64 = profile.avatarB64?.takeIf { it.isNotBlank() },
+            handle = profile.handle,
+            bio = profile.bio,
+            avatarB64 = profile.avatarB64,
             isCreator = true
         )
     }

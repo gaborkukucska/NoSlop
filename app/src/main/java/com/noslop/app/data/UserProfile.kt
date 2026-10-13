@@ -13,16 +13,10 @@ data class UserProfile(
 
 /**
  * Review D04: app setting holding the creator (burnable) identity's own profile, as [UserProfile]
- * JSON. It is separate from the personal profile ("user_profile") and is the only profile ever sent
- * with the creator identity.
+ * JSON, edited on the Studio page. D10d: each field set there replaces the personal one for the
+ * creator identity; a blank field falls back to the personal profile ([resolveSecondaryProfile]).
  */
 const val CREATOR_PROFILE_KEY = "creator_profile"
-
-/** The creator handle used until the user sets one. Never the personal handle. */
-const val DEFAULT_CREATOR_HANDLE = "Creator"
-
-/** The handle the creator identity goes by. */
-fun UserProfile.creatorHandle(): String = displayName.trim().ifBlank { DEFAULT_CREATOR_HANDLE }
 
 /** Parses a stored creator profile; an absent or unreadable one is the empty profile. */
 fun parseCreatorProfile(json: String?): UserProfile {
@@ -37,12 +31,29 @@ fun parseCreatorProfile(json: String?): UserProfile {
 /** D10c: the app setting that turns creator mode on ("true"). */
 const val CREATOR_MODE_KEY = "is_creator_enabled"
 
+/** D10d: the handle, bio and avatar an identity goes by (bio and avatar null when there is none). */
+data class ResolvedProfile(val handle: String, val bio: String?, val avatarB64: String?)
+
 /**
- * D10c: the name our secondary (burnable) identity goes by. On a creator node it is the creator
- * identity and goes by the creator profile's handle (D04). On any other node it only exists to follow
- * discovered creators and goes by the personal handle, as it did before D04. D04 gave it the creator
- * profile's handle everywhere, so on a node without a creator profile it went by the default
- * "Creator", and the creators it followed listed the follower as "Creator".
+ * D10d: the profile our secondary (burnable) identity goes by. Every identity uses the personal
+ * profile by default. On a creator node, a field set on the Studio page ([creatorProfile]) replaces the
+ * personal one for the creator identity; on any other node the secondary identity only follows
+ * creators and always uses the personal profile.
+ *
+ * Decided by the user on 2026-10-13. It replaces D04's separate creator profile with the default name
+ * "Creator" (followers saw "Creator" until a name was set) and D10c's personal handle with no bio or
+ * picture on non-creator nodes. Anyone who sees both identities can match the fields left blank.
  */
-fun secondaryIdentityHandle(isCreatorNode: Boolean, creatorProfile: UserProfile, personalHandle: String): String =
-    if (isCreatorNode) creatorProfile.creatorHandle() else personalHandle.trim().ifBlank { "Anonymous" }
+fun resolveSecondaryProfile(
+    isCreatorNode: Boolean,
+    creatorProfile: UserProfile,
+    personalProfile: UserProfile,
+    personalHandle: String
+): ResolvedProfile {
+    val studio = if (isCreatorNode) creatorProfile else UserProfile()
+    return ResolvedProfile(
+        handle = studio.displayName.trim().ifBlank { personalHandle.trim() }.ifBlank { "Anonymous" },
+        bio = studio.bio.takeIf { it.isNotBlank() } ?: personalProfile.bio.takeIf { it.isNotBlank() },
+        avatarB64 = studio.avatarB64?.takeIf { it.isNotBlank() } ?: personalProfile.avatarB64?.takeIf { it.isNotBlank() }
+    )
+}

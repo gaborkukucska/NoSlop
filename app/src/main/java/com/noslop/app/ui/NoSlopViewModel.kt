@@ -2467,6 +2467,72 @@ fun toggleAggregator() {
         viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", "5") }
     }
 
+    /**
+     * D10d: writes the creator identity file (CreatorIdentityArchive) to [uri]. [onResult] gets the
+     * summary, or null and the reason it failed.
+     */
+    fun exportCreatorIdentityToUri(
+        context: Context,
+        passphrase: String,
+        uri: android.net.Uri,
+        onResult: (com.noslop.app.data.CreatorArchiveSummary?, String?) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isBackupExporting.value = true
+            val (summary, error) = try {
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Could not open the file for writing")
+                com.noslop.app.data.CreatorIdentityArchive.export(repository, passphrase, output) to null
+            } catch (e: Exception) {
+                Logger.error("VM", "Creator identity export failed: ${e.message}")
+                null to (e.message ?: "Export failed")
+            } finally {
+                _isBackupExporting.value = false
+            }
+            withContext(Dispatchers.Main) { onResult(summary, error) }
+        }
+    }
+
+    /**
+     * D10d: restores a creator identity file from [uri] and makes this device the creator: registers
+     * the creator onion with Tor and announces it when discoverable. [onResult] gets the outcome;
+     * [com.noslop.app.data.CreatorRestoreResult.ConfirmReplace] means nothing changed yet.
+     */
+    fun restoreCreatorIdentityFromUri(
+        context: Context,
+        passphrase: String,
+        uri: android.net.Uri,
+        replaceExisting: Boolean,
+        onResult: (com.noslop.app.data.CreatorRestoreResult) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = try {
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: throw java.io.IOException("Could not open the file")
+                input.use { com.noslop.app.data.CreatorIdentityArchive.restore(repository, passphrase, it, replaceExisting) }
+            } catch (e: Exception) {
+                Logger.error("VM", "Creator identity restore failed: ${e.message}")
+                com.noslop.app.data.CreatorRestoreResult.Failed(e.message ?: "Restore failed")
+            }
+            if (result is com.noslop.app.data.CreatorRestoreResult.Restored) {
+                _isCreatorEnabled.value = true
+                _creatorProfile.value = repository.getCreatorProfile()
+                _creatorFundMeLink.value = repository.getAppSetting("creator_fundme_link") ?: ""
+                val main = repository.getLocalIdentity()
+                val creator = repository.getBurnableIdentity()
+                if (main != null && creator != null) {
+                    com.noslop.app.tor.TorService.updateKeyAndRegister(main.privateKeyB64, creator.privateKeyB64)
+                }
+                if (_isDiscoverableEnabled.value) {
+                    broadcastDiscoverable()
+                }
+                // The full backup should now include the restored creator keys.
+                _backupPromptReason.value = BackupPromptReason.CREATOR_MODE_CHANGED
+            }
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
     suspend fun ensureBurnableIdentity(): CryptoService.IdentityKeys {
         var burnable = repository.getBurnableIdentity()
         if (burnable == null) {
@@ -2915,9 +2981,9 @@ fun toggleAggregator() {
 
     fun broadcastDiscoverable() {
         viewModelScope.launch {
-            // D04: the creator profile's handle and bio, never the personal ones.
-            val creatorProfile = repository.getCreatorProfile()
-            val handle = creatorProfile.creatorHandle()
+            // D10d: the secondary identity's profile (Studio fields in creator mode, else the personal ones).
+            val secondaryProfile = repository.secondaryIdentityProfile()
+            val handle = secondaryProfile.handle
             val isCreator = _isCreatorEnabled.value
             val link = _creatorFundMeLink.value.takeIf { it.isNotBlank() }
             
@@ -2943,7 +3009,7 @@ fun toggleAggregator() {
             val encKeyB64 = identity.encPublicKeyB64
             val timestamp = System.currentTimeMillis()
             
-            val creatorBio = creatorProfile.bio.takeIf { it.isNotBlank() }
+            val creatorBio = secondaryProfile.bio
             // Omit avatar to save bandwidth on the periodic background heartbeat
             val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}::${creatorBio ?: ""}:${timestamp}"
             val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, identity.privateKeyB64)

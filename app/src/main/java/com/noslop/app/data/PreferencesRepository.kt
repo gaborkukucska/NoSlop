@@ -175,12 +175,12 @@ class PreferencesRepository(
         UserProfile() // Default empty profile
     }
 
-    /** D04: the creator identity's own profile (handle, bio, avatar); never the personal one. */
+    /** D04: the creator identity's own profile, edited on the Studio page (D10d: blank fields fall back to the personal one). */
     suspend fun saveCreatorProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting(CREATOR_PROFILE_KEY, com.noslop.app.util.Json.gson.toJson(profile)))
     }
 
-    /** D04: the creator profile; the empty profile (handle [DEFAULT_CREATOR_HANDLE]) until one is set. */
+    /** D04: the creator profile; the empty profile until one is set (see [resolveSecondaryProfile]). */
     suspend fun getCreatorProfile(): UserProfile = withContext(Dispatchers.IO) {
         parseCreatorProfile(appSettingDao.getSetting(CREATOR_PROFILE_KEY))
     }

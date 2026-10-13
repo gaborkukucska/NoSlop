@@ -1,5 +1,38 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-13) — Round D10d: One Profile by Default, Creator Identity Backup and Restore (v0.7.0-alpha)
+
+Part of the D04 follow-up work (creator identity backup, restore and move; burn warnings). Unit tests: `CreatorIdentityArchiveD10dTest` (new) and `IdentityRoutingTest` (updated). Not yet verified on device.
+
+* **One profile by default (user decision, 2026-10-13).**
+  * Every identity now uses the personal username, picture and bio.
+  * In creator mode, a field set on the Studio page replaces the personal one for the creator identity only. A blank Studio field falls back to the personal one.
+  * On a node that is not a creator, the secondary identity (used to follow discovered creators) always uses the personal profile.
+  * This replaces D04's separate creator profile, whose default name was "Creator", and D10c's personal-handle-only rule. The rule lives in `resolveSecondaryProfile` and is used by `IdentityRepository`, `IdentityRouter`, `NoSlopRepository.secondaryIdentityProfile` and the discoverable announcement.
+  * The Studio card shows which fields come from the personal profile.
+  * **Trade-off, accepted by the user.** Anyone who sees both identities can match the fields the Studio leaves blank. Keys are never shared.
+* **Creator identity backup and restore** (`CreatorIdentityArchive`).
+  * **Back up.** On the Studio page, "Back Up Creator Identity" asks for a passphrase twice (at least 10 characters) and writes one file. It holds:
+    * the creator keys, Studio profile and donation link;
+    * the contacts bound to the creator identity;
+    * the creator's posts and their media files.
+  * **Restore.** In Settings, Creator Node, "Restore Creator Identity" installs the file on this device. It turns creator mode on, registers the creator onion with Tor, and adds the contacts, posts and media.
+  * **Restoring again is safe.** Existing rows are kept, so a second restore of the same file changes nothing.
+  * **What is left out.** A contact this device already knows by its personal identity is not taken over, and is counted in the result.
+  * **Existing secondary identity.** A different secondary identity already on the device is replaced only after the user confirms.
+  * **Moving to another device.** The result dialog reminds the user to turn creator mode off on the old device, because two devices with one creator identity compete for one onion address.
+  * **File format "NSC1".**
+    * Argon2id (3 iterations, 64 MiB) derives the key from the passphrase.
+    * The body is AES-256-GCM in 1 MiB chunks. Each chunk's nonce carries its number and a last-chunk flag, and the header is the associated data.
+    * A large video never has to fit in memory, which the full backup's single GCM stream needs.
+    * A truncated, reordered, modified or extended file is refused before anything on the device changes.
+    * Rows are written as explicit JSON fields, so R8 renaming cannot break the file.
+* **Burn warnings.** Burning the creator identity and turning creator mode off now say that the identity cannot be brought back without a backup. The burn dialog has a "Back Up First" button.
+* **Shared checks.** The burnable-identity checks of a full backup restore (`IdentityRepository.burnableIdentityProblem`) are now shared with the creator restore. Their checks and messages are unchanged.
+* **Still open from D04.**
+  * Reactions and votes are not yet sent as the creator identity.
+  * In a temporary chat, "Share Permanent Identity" still sends the request as the secondary identity, because the contact is bound to it (this predates D04).
+
 ## Completed Changes (2026-10-11) — Round D10c: Creator Posts, Follower Names, Attachment Identity (v0.7.0-alpha)
 
 Testers saw three problems after D10b fix 2: two older creator broadcasts still never reached followers, even after being edited to public; a follower that connected to a discovered creator with its secondary identity was listed by the creator as "Creator"; and new posts in creator mode defaulted to friends-only. Unit tests: `CreatorPostIdentityD10cTest` (new) and `IdentityRoutingTest` (updated). Not yet verified on device.

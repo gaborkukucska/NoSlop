@@ -66,12 +66,12 @@ class IdentityRoutingTest {
     )
 
     @Test
-    fun theCreatorIdentity_neverTakesThePersonalHandle() = runBlocking<Unit> {
-        // D10c: a creator node (on any other node the secondary identity goes by the personal handle).
+    fun theCreatorIdentity_usesTheStudioName_andThePersonalHandleUntilOneIsSet() = runBlocking<Unit> {
+        // D10d: one profile by default; a Studio field replaces the personal one in creator mode.
         repo.putAppSetting(CREATOR_MODE_KEY, "true")
         val burnable = repo.generateBurnableIdentity()
-        assertEquals("default until set", DEFAULT_CREATOR_HANDLE, repo.getBurnableIdentity()!!.displayName)
-        assertEquals("generated from the creator handle", "$DEFAULT_CREATOR_HANDLE.${burnable.tripcode}", burnable.displayName)
+        assertEquals("the personal handle until a Studio name is set", "alice", repo.getBurnableIdentity()!!.displayName)
+        assertEquals("generated from it", "alice.${burnable.tripcode}", burnable.displayName)
         repo.saveCreatorProfile(UserProfile(displayName = "  studio  ", bio = "b"))
         assertEquals("studio", repo.getBurnableIdentity()!!.displayName)
         assertEquals("studio", repo.identityRouter.creator()!!.handle)
@@ -81,24 +81,30 @@ class IdentityRoutingTest {
     }
 
     @Test
-    fun aFollowersSecondaryIdentity_goesByThePersonalHandle() = runBlocking<Unit> {
-        // D10c: a node that is not a creator uses its secondary identity only to follow creators. D04
-        // named it "Creator" there, and the creators it followed listed the follower as "Creator".
+    fun theSecondaryIdentity_usesThePersonalProfile_unlessTheStudioSetsAField() = runBlocking<Unit> {
+        // D10d (user decision): every identity uses the personal profile by default. A node that is not
+        // a creator uses its secondary identity only to follow creators (D04 named it "Creator" there).
         repo.saveUserProfile(UserProfile(displayName = "alice", bio = "personal bio", avatarB64 = "UEVSU09OQUw="))
         val burnable = repo.generateBurnableIdentity()
         assertEquals("generated from the personal handle", "alice.${burnable.tripcode}", burnable.displayName)
         assertEquals("alice", repo.getBurnableIdentity()!!.displayName)
         val secondary = repo.identityRouter.creator()!!
         assertEquals("alice", secondary.handle)
-        assertNull("never the personal bio", secondary.bio)
-        assertNull("never the personal avatar", secondary.avatarB64)
+        assertEquals("personal bio", secondary.bio)
+        assertEquals("UEVSU09OQUw=", secondary.avatarB64)
 
-        // Creator mode on: the creator handle, never the personal one.
-        repo.putAppSetting(CREATOR_MODE_KEY, "true")
-        assertEquals(DEFAULT_CREATOR_HANDLE, repo.getBurnableIdentity()!!.displayName)
-        assertEquals(DEFAULT_CREATOR_HANDLE, repo.identityRouter.creator()!!.handle)
+        // A Studio profile left from creator mode is not used while creator mode is off.
         repo.saveCreatorProfile(UserProfile(displayName = "studio", bio = "b"))
-        assertEquals("studio", repo.identityRouter.creator()!!.handle)
+        assertEquals("alice", repo.identityRouter.creator()!!.handle)
+
+        // Creator mode on: the Studio fields, and the personal ones where the Studio left them blank.
+        repo.putAppSetting(CREATOR_MODE_KEY, "true")
+        val creator = repo.identityRouter.creator()!!
+        assertEquals("studio", creator.handle)
+        assertEquals("b", creator.bio)
+        assertEquals("the personal picture until the Studio sets one", "UEVSU09OQUw=", creator.avatarB64)
+        assertEquals("studio", repo.getBurnableIdentity()!!.displayName)
+        assertEquals("studio", repo.secondaryIdentityProfile().handle)
     }
 
     @Test

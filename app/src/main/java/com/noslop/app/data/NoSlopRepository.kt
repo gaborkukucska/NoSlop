@@ -2170,6 +2170,27 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     /** D04: a burned creator identity starts with an empty profile, so nothing links old and new. */
     suspend fun clearCreatorProfile() = preferencesRepository.clearCreatorProfile()
 
+    /** D10d: the profile the secondary identity goes by (Studio fields in creator mode, else the personal ones). */
+    suspend fun secondaryIdentityProfile(): ResolvedProfile = resolveSecondaryProfile(
+        isCreatorNode = getAppSetting(CREATOR_MODE_KEY) == "true",
+        creatorProfile = getCreatorProfile(),
+        personalProfile = getUserProfile(),
+        personalHandle = getLocalHandle()
+    )
+
+    /** D10d: the checks a burnable identity from a backup or creator identity file must pass (null: none failed). */
+    internal fun burnableIdentityProblem(bObj: org.json.JSONObject): String? = try {
+        identityRepository.burnableIdentityProblem(bObj, "noslop_probe_${System.currentTimeMillis()}")
+    } catch (e: Exception) {
+        e.message ?: "Malformed identity"
+    }
+
+    /** D10d: installs a creator identity from a creator identity file (CreatorIdentityArchive). */
+    suspend fun restoreBurnableIdentity(bObj: org.json.JSONObject): IdentityRestoreResult =
+        identityRepository.restoreBurnableIdentity(bObj).also {
+            if (it is IdentityRestoreResult.Success) _identityUpdateFlow.emit(Unit)
+        }
+
     /** D04: the handle that goes with one of our own keys (creator handle for the creator key). */
     suspend fun ownHandleFor(publicKeyB64: String): String =
         identityRouter.forKey(publicKeyB64)?.handle ?: getLocalHandle()

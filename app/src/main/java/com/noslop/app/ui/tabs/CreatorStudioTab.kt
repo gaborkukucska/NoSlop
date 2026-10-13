@@ -50,12 +50,39 @@ fun CreatorStudioTab(
     var showBurnConfirmDialog by remember { mutableStateOf(false) }
     var burnableIdentity by remember { mutableStateOf<com.noslop.app.crypto.CryptoService.IdentityKeys?>(null) }
     val coroutineScope = rememberCoroutineScope()
-    // D04: everything shown or shared as the creator uses the creator profile, never the personal one.
+    // D10d: the creator identity shows the Studio fields, and the personal ones where those are blank.
     val creatorProfile by viewModel.creatorProfile.collectAsState()
-    val creatorHandle = creatorProfile.displayName.trim().ifBlank { com.noslop.app.data.DEFAULT_CREATOR_HANDLE }
+    val userProfile by viewModel.userProfile.collectAsState()
+    val localHandle by viewModel.localHandle.collectAsState()
+    val shownProfile = com.noslop.app.data.resolveSecondaryProfile(true, creatorProfile, userProfile, localHandle)
+    val creatorHandle = shownProfile.handle
     var showProfileEditor by remember { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // D10d: backing up the creator identity: the passphrase first, then where to save the file.
+    var showBackupPassphrase by remember { mutableStateOf(false) }
+    var pendingBackupPassphrase by remember { mutableStateOf<String?>(null) }
+    val isExporting by viewModel.isBackupExporting.collectAsState()
+    val backupLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val passphrase = pendingBackupPassphrase
+        pendingBackupPassphrase = null
+        if (uri != null && passphrase != null) {
+            viewModel.exportCreatorIdentityToUri(context, passphrase, uri) { summary, error ->
+                val text = if (summary != null) {
+                    com.noslop.app.util.LanguageManager.translate("Creator identity backed up: {contacts} contacts, {posts} posts, {media} media files.")
+                        .replace("{contacts}", summary.contacts.toString())
+                        .replace("{posts}", summary.posts.toString())
+                        .replace("{media}", summary.mediaFiles.toString())
+                } else {
+                    com.noslop.app.util.LanguageManager.translate("Creator identity backup failed: {reason}").replace("{reason}", error ?: "")
+                }
+                android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     // A full-screen dialog over the studio, so the editor always gets the whole screen whatever
     // container Creator Studio is shown in. (As an in-place screen it inherited the host's unbounded
@@ -173,9 +200,14 @@ fun CreatorStudioTab(
         }
 
         CreatorProfileCard(
-            profile = creatorProfile,
-            handle = creatorHandle,
+            studio = creatorProfile,
+            shown = shownProfile,
             onEdit = { showProfileEditor = true }
+        )
+
+        CreatorBackupCard(
+            isExporting = isExporting,
+            onBackup = { showBackupPassphrase = true }
         )
 
         Text(
@@ -227,6 +259,22 @@ fun CreatorStudioTab(
         }
     }
 
+    if (showBackupPassphrase) {
+        com.noslop.app.ui.components.CreatorPassphraseDialog(
+            title = "Back Up Creator Identity".tr,
+            message = "The file holds your creator keys, Studio profile, followers, posts and their media. Anyone with the file and its passphrase can act as your creator identity.".tr,
+            confirmTwice = true,
+            confirmLabel = "Choose Where to Save".tr,
+            onConfirm = { passphrase ->
+                showBackupPassphrase = false
+                pendingBackupPassphrase = passphrase
+                val safeName = creatorHandle.replace(Regex("[^A-Za-z0-9_-]"), "_").take(32).ifBlank { "creator" }
+                backupLauncher.launch("noslop-creator-$safeName.${com.noslop.app.data.CreatorIdentityArchive.FILE_EXTENSION}")
+            },
+            onDismiss = { showBackupPassphrase = false }
+        )
+    }
+
     if (showBurnConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showBurnConfirmDialog = false },
@@ -245,6 +293,19 @@ fun CreatorStudioTab(
                         "All current followers connected via your old Creator ID will permanently lose connectivity. Are you sure?".tr,
                         color = TextMuted
                     )
+                    // D10d: point to the backup before the identity is gone for good.
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        "A burned creator identity cannot be brought back. Back it up first if you may want it again.".tr,
+                        color = DestructiveRed,
+                        fontSize = 13.sp
+                    )
+                    TextButton(onClick = {
+                        showBurnConfirmDialog = false
+                        showBackupPassphrase = true
+                    }) {
+                        Text("Back Up First".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             confirmButton = {
@@ -279,13 +340,21 @@ fun CreatorStudioTab(
     }
 }
 
-/** D04: the creator identity's profile as followers see it, with an edit button. */
+/**
+ * D04: the creator identity's profile as followers see it, with an edit button. D10d: a field left
+ * blank on the Studio page shows the personal one, and the card says which fields those are.
+ */
 @Composable
 private fun CreatorProfileCard(
-    profile: com.noslop.app.data.UserProfile,
-    handle: String,
+    studio: com.noslop.app.data.UserProfile,
+    shown: com.noslop.app.data.ResolvedProfile,
     onEdit: () -> Unit
 ) {
+    val personalFields = listOfNotNull(
+        "name".tr.takeIf { studio.displayName.isBlank() },
+        "picture".tr.takeIf { studio.avatarB64.isNullOrBlank() },
+        "bio".tr.takeIf { studio.bio.isBlank() }
+    )
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         modifier = Modifier
@@ -298,16 +367,12 @@ private fun CreatorProfileCard(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            CreatorAvatar(avatarB64 = profile.avatarB64, size = 44)
+            CreatorAvatar(avatarB64 = shown.avatarB64, size = 44)
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text("Creator Profile".tr, fontSize = 12.sp, color = TextMuted)
-                Text(handle, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextLight)
-                if (profile.displayName.isBlank()) {
-                    Text("Set a creator name. Followers see Creator until you do.".tr, fontSize = 11.sp, color = AccentGreen)
-                } else if (profile.bio.isNotBlank()) {
-                    Text(profile.bio, fontSize = 11.sp, color = TextMuted, maxLines = 2)
-                }
+                Text(shown.handle, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextLight)
+                shown.bio?.let { Text(it, fontSize = 11.sp, color = TextMuted, maxLines = 2) }
             }
             OutlinedButton(
                 onClick = onEdit,
@@ -322,7 +387,12 @@ private fun CreatorProfileCard(
             }
         }
         Text(
-            "Followers and creator contacts only ever see this profile, never your personal one.".tr,
+            if (personalFields.isEmpty()) {
+                "Followers see this profile. Your personal profile is not shown to them.".tr
+            } else {
+                "Uses your personal {fields}. Set them here to keep your creator identity apart from your personal profile.".tr
+                    .replace("{fields}", personalFields.joinToString(", "))
+            },
             fontSize = 11.sp,
             color = TextMuted,
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
@@ -454,7 +524,7 @@ private fun CreatorProfileEditor(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                "Use a name and picture that don't identify your personal profile.".tr,
+                "Leave a field empty to use your personal one. Anyone who sees both profiles can match the fields you leave empty.".tr,
                 fontSize = 12.sp,
                 color = TextMuted
             )
@@ -570,6 +640,38 @@ private fun StudioItemCard(
                 Icon(Icons.Default.Publish, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Publish to Mesh 🚀".tr, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/** D10d: backs up the creator identity (keys, Studio profile, followers, posts and media) to a file. */
+@Composable
+private fun CreatorBackupCard(isExporting: Boolean, onBackup: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("Creator Identity Backup".tr, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextLight)
+            Text(
+                "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Restore it in Settings, Creator Node, on this or another device.".tr,
+                fontSize = 11.sp,
+                color = TextMuted,
+                modifier = Modifier.padding(vertical = 6.dp)
+            )
+            OutlinedButton(
+                onClick = onBackup,
+                enabled = !isExporting,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (isExporting) "Saving...".tr else "Back Up Creator Identity".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

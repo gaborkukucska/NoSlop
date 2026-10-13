@@ -963,10 +963,19 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         }
                                     },
                                     text = {
-                                        Text(
-                                            "Disabling Creator Mode will disconnect your severable Creator ID. Any peers or followers who connected to your node using your Creator ID will permanently lose connection with you. Are you sure you want to proceed?".tr,
-                                            color = TextMuted
-                                        )
+                                        Column {
+                                            Text(
+                                                "Disabling Creator Mode will disconnect your severable Creator ID. Any peers or followers who connected to your node using your Creator ID will permanently lose connection with you. Are you sure you want to proceed?".tr,
+                                                color = TextMuted
+                                            )
+                                            // D10d: point to the backup before the identity is gone for good.
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            Text(
+                                                "Back up your creator identity first (Studio, Back Up Creator Identity) if you may want it back. Without a backup it cannot be restored.".tr,
+                                                color = DestructiveRed,
+                                                fontSize = 13.sp
+                                            )
+                                        }
                                     },
                                     confirmButton = {
                                         Button(
@@ -1017,6 +1026,93 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     )
                                 )
                             }
+
+                            // D10d: restore a creator identity file (a backup, or one moved from another device).
+                            var pendingRestoreUri by remember { mutableStateOf<android.net.Uri?>(null) }
+                            var restorePassphrase by remember { mutableStateOf<String?>(null) }
+                            var showRestorePassphrase by remember { mutableStateOf(false) }
+                            var showReplaceConfirm by remember { mutableStateOf(false) }
+                            var isRestoringCreator by remember { mutableStateOf(false) }
+                            var restoredCreator by remember { mutableStateOf<com.noslop.app.data.CreatorRestoreResult.Restored?>(null) }
+                            val restoreCreatorLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                                if (uri != null) {
+                                    pendingRestoreUri = uri
+                                    showRestorePassphrase = true
+                                }
+                            }
+                            fun runCreatorRestore(replaceExisting: Boolean) {
+                                val uri = pendingRestoreUri ?: return
+                                val passphrase = restorePassphrase ?: return
+                                isRestoringCreator = true
+                                viewModel.restoreCreatorIdentityFromUri(context, passphrase, uri, replaceExisting) { result ->
+                                    isRestoringCreator = false
+                                    when (result) {
+                                        is com.noslop.app.data.CreatorRestoreResult.Restored -> {
+                                            restoredCreator = result
+                                            pendingRestoreUri = null
+                                            restorePassphrase = null
+                                        }
+                                        com.noslop.app.data.CreatorRestoreResult.ConfirmReplace -> showReplaceConfirm = true
+                                        is com.noslop.app.data.CreatorRestoreResult.Failed -> {
+                                            pendingRestoreUri = null
+                                            restorePassphrase = null
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                com.noslop.app.util.LanguageManager.translate("Creator identity not restored: {reason}").replace("{reason}", result.reason),
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            }
+                            if (showRestorePassphrase) {
+                                CreatorPassphraseDialog(
+                                    title = "Restore Creator Identity".tr,
+                                    message = "Enter the passphrase the file was saved with. This device becomes the creator: it gets the creator keys, Studio profile, followers, posts and media.".tr,
+                                    confirmTwice = false,
+                                    confirmLabel = "Restore".tr,
+                                    onConfirm = { passphrase ->
+                                        showRestorePassphrase = false
+                                        restorePassphrase = passphrase
+                                        runCreatorRestore(replaceExisting = false)
+                                    },
+                                    onDismiss = {
+                                        showRestorePassphrase = false
+                                        pendingRestoreUri = null
+                                    }
+                                )
+                            }
+                            if (showReplaceConfirm) {
+                                CreatorReplaceConfirmDialog(
+                                    onReplace = {
+                                        showReplaceConfirm = false
+                                        runCreatorRestore(replaceExisting = true)
+                                    },
+                                    onDismiss = {
+                                        showReplaceConfirm = false
+                                        pendingRestoreUri = null
+                                        restorePassphrase = null
+                                    }
+                                )
+                            }
+                            restoredCreator?.let { restored ->
+                                CreatorRestoreResultDialog(result = restored, onDismiss = { restoredCreator = null })
+                            }
+                            OutlinedButton(
+                                onClick = { restoreCreatorLauncher.launch(arrayOf("*/*")) },
+                                enabled = !isRestoringCreator,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                                border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.6f)),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Text(if (isRestoringCreator) "Restoring creator identity...".tr else "Restore Creator Identity".tr)
+                            }
+                            Text(
+                                "Bring a creator identity to this device from a backup file or from another device.".tr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                            )
 
                             if (isCreatorEnabled) {
                                 val creatorFundMeLink by viewModel.creatorFundMeLink.collectAsState()

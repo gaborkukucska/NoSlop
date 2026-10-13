@@ -323,34 +323,8 @@ class IdentityRepository(private val context: Context, private val appSettingDao
 
             if (identityObj.has("burnable")) {
                 val bObj = identityObj.getJSONObject("burnable")
-                val burnableRequired = listOf(
-                    "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
-                    "tripcode", "onionAddress", "displayName"
-                )
-                for (brf in burnableRequired) {
-                    if (!bObj.has(brf) || bObj.getString(brf).isBlank()) {
-                        return IdentityRestoreResult.Failure("Burnable identity missing required field: $brf")
-                    }
-                }
-                val bPubEd = bObj.getString("publicKeyB64")
-                val bPrivEd = bObj.getString("privateKeyB64")
-                val bPubEnc = bObj.getString("encPublicKeyB64")
-                val bPrivEnc = bObj.getString("encPrivateKeyB64")
-
-                val bSig = CryptoService.sign(probePayload, bPrivEd)
-                if (!CryptoService.verify(probePayload, bSig, bPubEd)) {
-                    return IdentityRestoreResult.Failure("Burnable Ed25519 keypair consistency check failed")
-                }
-                if (!CryptoService.verifyX25519Keypair(bPubEnc, bPrivEnc)) {
-                    return IdentityRestoreResult.Failure("Burnable X25519 keypair consistency check failed")
-                }
-                val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
-                if (bPubBytes == null || !CryptoService.isTripcodeOf(bPubBytes, bObj.getString("tripcode"))) {
-                    return IdentityRestoreResult.Failure("Burnable identity tripcode does not match public key")
-                }
-                if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
-                    return IdentityRestoreResult.Failure("Burnable identity onion address does not match public key")
-                }
+                // D10d: the same checks as a creator identity restore (burnableIdentityProblem).
+                burnableIdentityProblem(bObj, probePayload)?.let { return IdentityRestoreResult.Failure(it) }
             }
             IdentityRestoreResult.Success
         } catch (e: Exception) {
@@ -407,35 +381,8 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             var hasBurnable = false
             if (identityObj.has("burnable")) {
                 val bObj = identityObj.getJSONObject("burnable")
-                val burnableRequired = listOf(
-                    "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
-                    "tripcode", "onionAddress", "displayName"
-                )
-                for (brf in burnableRequired) {
-                    if (!bObj.has(brf) || bObj.getString(brf).isBlank()) {
-                        return IdentityRestoreResult.Failure("Burnable identity missing required field: $brf")
-                    }
-                }
-                val bPubEd = bObj.getString("publicKeyB64")
-                val bPrivEd = bObj.getString("privateKeyB64")
-                val bPubEnc = bObj.getString("encPublicKeyB64")
-                val bPrivEnc = bObj.getString("encPrivateKeyB64")
-
-                val bSig = CryptoService.sign(probePayload, bPrivEd)
-                if (!CryptoService.verify(probePayload, bSig, bPubEd)) {
-                    return IdentityRestoreResult.Failure("Burnable Ed25519 keypair consistency check failed")
-                }
-                // V01: Validate burnable X25519 encryption keypair consistency
-                if (!CryptoService.verifyX25519Keypair(bPubEnc, bPrivEnc)) {
-                    return IdentityRestoreResult.Failure("Burnable X25519 keypair consistency check failed")
-                }
-                val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
-                if (bPubBytes == null || !CryptoService.isTripcodeOf(bPubBytes, bObj.getString("tripcode"))) {
-                    return IdentityRestoreResult.Failure("Burnable identity tripcode does not match public key")
-                }
-                if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
-                    return IdentityRestoreResult.Failure("Burnable identity onion address does not match public key")
-                }
+                // D10d: the same checks as a creator identity restore (burnableIdentityProblem).
+                burnableIdentityProblem(bObj, probePayload)?.let { return IdentityRestoreResult.Failure(it) }
                 hasBurnable = true
             }
 
@@ -681,16 +628,16 @@ class IdentityRepository(private val context: Context, private val appSettingDao
     }
 
     /**
-     * D04: the creator identity goes by the creator profile's handle, never the personal handle (it
-     * used to be [getHandle], which put the personal handle in every creator handshake and announce).
-     * D10c: only on a creator node. On any other node the secondary identity is only used to follow
-     * creators and goes by the personal handle (see [secondaryIdentityHandle]).
+     * D10d: the handle the secondary identity goes by ([resolveSecondaryProfile]): the Studio name on a
+     * creator node when one is set, otherwise the personal handle. The handle does not depend on the
+     * personal bio or picture, so the empty profile stands in for the personal one here.
      */
-    private suspend fun secondaryHandle(): String = secondaryIdentityHandle(
+    private suspend fun secondaryHandle(): String = resolveSecondaryProfile(
         isCreatorNode = appSettingDao.getSetting(CREATOR_MODE_KEY) == "true",
         creatorProfile = parseCreatorProfile(appSettingDao.getSetting(CREATOR_PROFILE_KEY)),
+        personalProfile = UserProfile(),
         personalHandle = getHandle()
-    )
+    ).handle
 
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {
         val burnableHandle = secondaryHandle()
@@ -742,6 +689,78 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             encPublicKeyB64 = finalPubEnc,
             encPrivateKeyB64 = privEnc
         )
+    }
+
+    /**
+     * D10d: why a burnable (creator) identity object cannot be used, or null when it can: every field
+     * present, both keypairs consistent, and the tag and onion address belonging to the public key. The
+     * checks (and messages) a full backup restore always made, shared with the creator identity
+     * restore. [probePayload] is signed and verified with the Ed25519 pair. Throws on malformed keys,
+     * as before; callers treat that as a failure.
+     */
+    internal fun burnableIdentityProblem(bObj: JSONObject, probePayload: String): String? {
+        val burnableRequired = listOf(
+            "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+            "tripcode", "onionAddress", "displayName"
+        )
+        for (brf in burnableRequired) {
+            if (!bObj.has(brf) || bObj.getString(brf).isBlank()) {
+                return "Burnable identity missing required field: $brf"
+            }
+        }
+        val bPubEd = bObj.getString("publicKeyB64")
+        val bPrivEd = bObj.getString("privateKeyB64")
+        val bPubEnc = bObj.getString("encPublicKeyB64")
+        val bPrivEnc = bObj.getString("encPrivateKeyB64")
+
+        val bSig = CryptoService.sign(probePayload, bPrivEd)
+        if (!CryptoService.verify(probePayload, bSig, bPubEd)) {
+            return "Burnable Ed25519 keypair consistency check failed"
+        }
+        // V01: Validate burnable X25519 encryption keypair consistency
+        if (!CryptoService.verifyX25519Keypair(bPubEnc, bPrivEnc)) {
+            return "Burnable X25519 keypair consistency check failed"
+        }
+        val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+        if (bPubBytes == null || !CryptoService.isTripcodeOf(bPubBytes, bObj.getString("tripcode"))) {
+            return "Burnable identity tripcode does not match public key"
+        }
+        if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
+            return "Burnable identity onion address does not match public key"
+        }
+        return null
+    }
+
+    /**
+     * D10d: installs a creator identity from a creator identity file (CreatorIdentityArchive), after
+     * the checks a full backup restore makes. Replaces any secondary identity stored here; the caller
+     * asks the user first. The stored display name is informational; the handle always comes from
+     * [secondaryHandle].
+     */
+    suspend fun restoreBurnableIdentity(bObj: JSONObject): IdentityRestoreResult {
+        return try {
+            burnableIdentityProblem(bObj, "noslop_probe_${System.currentTimeMillis()}")?.let {
+                return IdentityRestoreResult.Failure(it)
+            }
+            val committed = prefs.edit()
+                .putString("burnable_ed25519_private_key", secureFallbackWrite(bObj.getString("privateKeyB64")))
+                .putString("burnable_enc_private_key", secureFallbackWrite(bObj.getString("encPrivateKeyB64")))
+                .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
+                .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
+                .putString("burnable_tripcode", bObj.getString("tripcode"))
+                .putString("burnable_onion", bObj.getString("onionAddress"))
+                .putString("burnable_display_name", bObj.getString("displayName"))
+                .commit()
+            if (!committed) return IdentityRestoreResult.Failure("Synchronous preference commit failed")
+            val reloaded = getBurnableIdentity()
+            if (reloaded == null || reloaded.publicKeyB64 != bObj.getString("publicKeyB64")) {
+                return IdentityRestoreResult.Failure("Restored creator identity failed reload probe")
+            }
+            Logger.info(TAG, "Creator identity restored: ${reloaded.tripcode}")
+            IdentityRestoreResult.Success
+        } catch (e: Exception) {
+            IdentityRestoreResult.Failure(e.message ?: "Unknown restoration error")
+        }
     }
 
     suspend fun clearBurnableIdentity() {
