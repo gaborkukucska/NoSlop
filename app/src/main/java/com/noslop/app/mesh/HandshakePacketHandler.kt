@@ -468,6 +468,8 @@ class HandshakePacketHandler(
                 bio = handPay.bio ?: peer.bio
             )
             peerDao.insertPeer(updated)
+            // E4: the answer to a "Share Permanent Identity" request moves the contact to that identity.
+            repo.meshSocialRepository.completeMainIdentityShare(handPay.fromUserId, handPay.inReplyToNonce)
 
             GossipService.recordSendSuccess(handPay.fromHomeNode)
             GossipService.flushFirewallBuffer(handPay.fromUserId)
@@ -526,6 +528,8 @@ class HandshakePacketHandler(
                 pendingNonce = if (!peer.pendingNonce.isNullOrBlank() && handPay.inReplyToNonce == peer.pendingNonce) null else peer.pendingNonce
             ))
             if (keyChanged) repo.recordKeyChange(peer.publicKeyB64)
+            // E4: a temporary chat's contact accepting our personal identity ("Share Permanent Identity").
+            repo.meshSocialRepository.completeMainIdentityShare(handPay.fromUserId, handPay.inReplyToNonce)
             Logger.info(TAG, "Refreshed profile details for already ACCEPTED peer ${peer.handle}")
             return true
 

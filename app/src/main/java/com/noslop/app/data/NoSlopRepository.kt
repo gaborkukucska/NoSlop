@@ -2344,7 +2344,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         onionAddress: String,
         encPublicKeyB64: String = "",
         useBurnableIdentity: Boolean = false,
-        intro: String = ContactIntro.NETWORK
+        intro: String = ContactIntro.NETWORK,
+        shareMainIdentity: Boolean = false
     ): Boolean {
         if (useBurnableIdentity && getBurnableIdentity() == null) {
             val newBurnable = generateBurnableIdentity()
@@ -2358,7 +2359,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 waitCount++
             }
         }
-        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro)
+        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity)
     }
 
     /**

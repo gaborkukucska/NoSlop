@@ -1001,7 +1001,11 @@ object GossipService {
             }
             
             scope.launch {
-                val outboundPacket = if (isGroupPacket || isFriendsOnly) {
+                // E4: a GROUP_QUERY names its requester in the payload, and the answering node requires the
+                // requester to be the sender (G1). Re-stamping its sender per peer (the group rule below) made
+                // the answer a refusal for every peer that knows our other identity. It takes the D04 route
+                // instead (outboundFor): sent unchanged, as a relay that keeps its sender, or not at all.
+                val outboundPacket = if ((isGroupPacket && packet.type != "GROUP_QUERY") || isFriendsOnly) {
                     // Group and friends-only traffic keeps its existing per-peer envelope rule.
                     val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
                     val isCreatorTraffic = tx.repository.getAppSetting("is_creator_enabled") == "true"

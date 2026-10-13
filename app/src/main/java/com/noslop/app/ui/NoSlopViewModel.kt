@@ -2856,9 +2856,11 @@ fun toggleAggregator() {
         onionAddress: String,
         encPublicKeyB64: String = "",
         useBurnableIdentity: Boolean = false,
-        intro: String = com.noslop.app.data.ContactIntro.NETWORK
+        intro: String = com.noslop.app.data.ContactIntro.NETWORK,
+        /** E4: "Share Permanent Identity" (see MeshSocialRepository.sendConnectionRequest). */
+        shareMainIdentity: Boolean = false
     ) {
-        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro) }
+        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity) }
     }
 
     fun setDiscoverableEnabled(enabled: Boolean) {

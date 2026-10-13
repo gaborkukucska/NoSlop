@@ -1135,7 +1135,12 @@ class MeshSocialRepository(
         onionAddress: String,
         encPublicKeyB64: String = "",
         useBurnableIdentity: Boolean = false,
-        intro: String = ContactIntro.NETWORK
+        intro: String = ContactIntro.NETWORK,
+        /**
+         * E4: "Share Permanent Identity" in a temporary chat: ask from the personal identity even when the
+         * contact knows our secondary one (see [completeMainIdentityShare]).
+         */
+        shareMainIdentity: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         val existing = peerDao.getPeerByPublicKey(publicKeyB64)
         // D10b: scanning their QR code with the camera verifies them in person, for the keys in the code.
@@ -1194,11 +1199,21 @@ class MeshSocialRepository(
         db.appSettingDao().removeSetting("declined_request_$publicKeyB64")
 
         val boundIdentity = db.appSettingDao().getSetting("contact_identity_$publicKeyB64")
-        val useBurnable = useBurnableIdentity || boundIdentity == "burnable"
+        // E4 (D04 leftover): "Share Permanent Identity" asked from the secondary identity, because a contact
+        // bound to it always got that one. It now asks from the personal identity. The contact stays bound
+        // to the secondary identity (so the temporary chat keeps working) until they accept: the answer to
+        // this request's nonce moves the contact to the personal identity (completeMainIdentityShare).
+        val sharingMain = shareMainIdentity && boundIdentity == "burnable"
+        val useBurnable = !shareMainIdentity && (useBurnableIdentity || boundIdentity == "burnable")
         val me = if (useBurnable) identityRouter.creator() else identityRouter.main()
         if (me != null) {
             if (useBurnable) {
                 db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
+            }
+            if (sharingMain) {
+                db.appSettingDao().insertSetting(AppSetting(mainShareKey(publicKeyB64), nonce))
+            } else {
+                db.appSettingDao().removeSetting(mainShareKey(publicKeyB64))
             }
             if (existing?.relationship == PeerRelationship.ACCEPTED) {
                 // Nonce is only needed if the peer lost us; store it so their echo can be matched.
@@ -1274,6 +1289,26 @@ class MeshSocialRepository(
         )
     }
 
+    /** E4: where the nonce of a pending "Share Permanent Identity" request is kept. */
+    internal fun mainShareKey(peerPub: String) = "main_share_nonce_$peerPub"
+
+    /**
+     * E4: [peerPub] answered (with [inReplyToNonce]) the request we sent from our personal identity with
+     * "Share Permanent Identity". From now on the contact knows our personal identity: it is no longer
+     * bound to the secondary one, and no longer temporary. Only the answer to that request's nonce does
+     * this. Returns whether it did. Called by HandshakePacketHandler on an accepted USER_HANDSHAKE.
+     */
+    internal suspend fun completeMainIdentityShare(peerPub: String, inReplyToNonce: String?): Boolean {
+        val settings = db.appSettingDao()
+        val expected = settings.getSetting(mainShareKey(peerPub))
+        if (expected.isNullOrBlank() || inReplyToNonce.isNullOrBlank() || inReplyToNonce != expected) return false
+        settings.removeSetting("contact_identity_$peerPub")
+        settings.removeSetting(mainShareKey(peerPub))
+        peerDao.getPeerByPublicKey(peerPub)?.let { if (it.isTemporary) peerDao.insertPeer(it.copy(isTemporary = false)) }
+        Logger.info(TAG, "Contact ${peerPub.take(12)} accepted our personal identity; the chat now uses it")
+        return true
+    }
+
     // ---- Round A2: requester-side probing while our request is pending -----------------------
 
     private val outgoingRequestPolls = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
@@ -1290,7 +1325,9 @@ class MeshSocialRepository(
         val row = peerDao.getPeerByPublicKey(peerPub) ?: return null
         val nonce = row.pendingNonce
         if (row.relationship != PeerRelationship.OUTGOING_PENDING || nonce.isNullOrBlank()) return null
-        val useBurnable = db.appSettingDao().getSetting("contact_identity_$peerPub") == "burnable"
+        // E4: a pending "Share Permanent Identity" request is probed from the personal identity.
+        val useBurnable = db.appSettingDao().getSetting("contact_identity_$peerPub") == "burnable" &&
+            db.appSettingDao().getSetting(mainShareKey(peerPub)) != nonce
         val me = (if (useBurnable) identityRouter.creator() else identityRouter.main()) ?: return null
         val intro = db.appSettingDao().getSetting("outgoing_intro_$peerPub") ?: ContactIntro.NETWORK
         return buildConnectionRequestPacket(me, peerPub, nonce, intro)
@@ -2051,11 +2088,17 @@ class MeshSocialRepository(
     }
 
     suspend fun reactToMeshPost(postId: String, reactionType: String, isBridging: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        
+        // E4 (D04 leftover): a reaction is made by the identity that comments on this post
+        // (IdentityRouter.forPostAuthor): the creator identity on our own creator posts and on posts by
+        // peers who know us as a creator, the personal one otherwise. It used to be the personal identity
+        // on every post, and relays carried it to creator contacts. Taking a reaction back always goes out
+        // from the identity that made it.
+        val madeBy = ownIdentityWith { pub -> reactionDao.getReactionById("${postId}_${pub}_$reactionType") != null }
+        val myKeys = madeBy ?: identityRouter.forPostAuthor(postDao.getPostById(postId)?.authorPublicKeyB64)?.keys
+            ?: return@withContext false
+
         val reactionId = "${postId}_${myKeys.publicKeyB64}_$reactionType"
-        val existingReaction = reactionDao.getReactionById(reactionId)
-        val action = if (existingReaction != null) "remove" else "add"
+        val action = if (madeBy != null) "remove" else "add"
 
         val timestamp = System.currentTimeMillis()
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, reactionType, myKeys.publicKeyB64, timestamp.toString())
@@ -2099,11 +2142,13 @@ class MeshSocialRepository(
     }
 
     suspend fun voteToMeshPost(postId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        
+        // E4 (D04 leftover): the identity that comments on this post, as for reactions (reactToMeshPost).
+        val madeBy = ownIdentityWith { pub -> voteDao.getVoteById("${postId}_${pub}_$voteType") != null }
+        val myKeys = madeBy ?: identityRouter.forPostAuthor(postDao.getPostById(postId)?.authorPublicKeyB64)?.keys
+            ?: return@withContext false
+
         val voteId = "${postId}_${myKeys.publicKeyB64}_$voteType"
-        val existingVote = voteDao.getVoteById(voteId)
-        val action = if (existingVote != null) "remove" else "add"
+        val action = if (madeBy != null) "remove" else "add"
 
         val timestamp = System.currentTimeMillis()
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, voteType, myKeys.publicKeyB64, timestamp.toString())
@@ -2145,6 +2190,21 @@ class MeshSocialRepository(
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
+
+    /**
+     * E4: the one of our identities (personal first, then the secondary one) whose public key satisfies
+     * [hasMade], or null. Used to find which identity made a reaction or vote that is being taken back.
+     */
+    private suspend fun ownIdentityWith(hasMade: suspend (String) -> Boolean): CryptoService.IdentityKeys? {
+        for (keys in listOfNotNull(getLocalIdentity(), getBurnableIdentity())) {
+            if (hasMade(keys.publicKeyB64)) return keys
+        }
+        return null
+    }
+
+    /** E4: the author of the post that [commentId] belongs to, when both are stored. */
+    private suspend fun postAuthorOfComment(commentId: String): String? =
+        commentDao.getCommentById(commentId)?.postId?.let { postDao.getPostById(it) }?.authorPublicKeyB64
 
     suspend fun reactToFeedItem(item: FeedItem) {
         reactToFeedItemWithType(item, "like")
@@ -2327,12 +2387,13 @@ class MeshSocialRepository(
     }
 
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
+        // E4 (D04 leftover): the identity that comments on the post this comment belongs to (it used to be
+        // the personal identity everywhere). Taking a reaction back goes out from the identity that made it.
+        val madeBy = ownIdentityWith { pub -> commentReactionDao.getReactionById("${commentId}_${pub}_$reactionType") != null }
+        val myKeys = madeBy ?: identityRouter.forPostAuthor(postAuthorOfComment(commentId))?.keys
+            ?: return@withContext false
         val reactionId = "${commentId}_${myKeys.publicKeyB64}_$reactionType"
-        val existingReaction = commentReactionDao.getReactionById(reactionId)
-        val action = if (existingReaction != null) "remove" else "add"
+        val action = if (madeBy != null) "remove" else "add"
         val timestamp = System.currentTimeMillis()
         
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
@@ -2379,11 +2440,13 @@ class MeshSocialRepository(
     }
 
     suspend fun voteToComment(commentId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        
+        // E4 (D04 leftover): as reactToComment.
+        val madeBy = ownIdentityWith { pub -> commentVoteDao.getVoteById("${commentId}_${pub}_$voteType") != null }
+        val myKeys = madeBy ?: identityRouter.forPostAuthor(postAuthorOfComment(commentId))?.keys
+            ?: return@withContext false
+
         val voteId = "${commentId}_${myKeys.publicKeyB64}_$voteType"
-        val existingVote = commentVoteDao.getVoteById(voteId)
-        val action = if (existingVote != null) "remove" else "add"
+        val action = if (madeBy != null) "remove" else "add"
 
         val timestamp = System.currentTimeMillis()
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(commentId, voteType, myKeys.publicKeyB64, timestamp.toString())

@@ -372,7 +372,7 @@ fun ChatThreadScreen(
         if (peer.isTemporary) {
             Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
                 Button(
-                    onClick = { viewModel.requestConnection(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnableIdentity = false) },
+                    onClick = { viewModel.requestConnection(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnableIdentity = false, shareMainIdentity = true) },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                     border = BorderStroke(1.dp, AccentGreen)
                 ) { Text("Share Permanent Identity".tr) }
