@@ -237,6 +237,15 @@ class CreatorIdentityArchiveD10dTest {
         val file = exportBytes()
         val other = anotherDevice()
         val own = other.generateBurnableIdentity()
+        // D10e: a follower of the identity that is about to be replaced.
+        val oldFan = CryptoService.generateIdentity("oldfan")
+        other.peerDao.insertPeer(
+            Peer(
+                publicKeyB64 = oldFan.publicKeyB64, handle = "oldfan", tripcode = oldFan.tripcode,
+                onionAddress = oldFan.onionAddress, relationship = PeerRelationship.ACCEPTED, isTemporary = true
+            )
+        )
+        other.putAppSetting("contact_identity_${oldFan.publicKeyB64}", "burnable")
 
         assertSame(CreatorRestoreResult.ConfirmReplace, restore(other, file))
         assertEquals("unchanged until confirmed", own.publicKeyB64, other.getBurnableIdentity()!!.publicKeyB64)
@@ -245,6 +254,34 @@ class CreatorIdentityArchiveD10dTest {
         val replaced = restore(other, file, replace = true)
         assertTrue("restored: $replaced", replaced is CreatorRestoreResult.Restored)
         assertEquals(creator.publicKeyB64, other.getBurnableIdentity()!!.publicKeyB64)
+        // D10e: the replaced identity's follower is forgotten, so the restored identity never talks to it.
+        assertNull(other.peerDao.getPeerByPublicKey(oldFan.publicKeyB64))
+        assertNull(other.getAppSetting("contact_identity_${oldFan.publicKeyB64}"))
+        assertNotNull("the file's follower is there", other.peerDao.getPeerByPublicKey(fan.publicKeyB64))
+        assertEquals("burnable", other.getAppSetting("contact_identity_${fan.publicKeyB64}"))
+    }
+
+    @Test
+    fun dropCreatorContacts_forgetsOnlyTheCreatorIdentitysContacts() = runBlocking<Unit> {
+        // D10e: used when the creator identity is burned or replaced.
+        val friend = CryptoService.generateIdentity("friend")
+        val kept = CryptoService.generateIdentity("kept")
+        for ((keys, temporary) in listOf(friend to false, kept to true)) {
+            db.peerDao().insertPeer(
+                Peer(
+                    publicKeyB64 = keys.publicKeyB64, handle = keys.displayName, tripcode = keys.tripcode,
+                    onionAddress = keys.onionAddress, relationship = PeerRelationship.ACCEPTED, isTemporary = temporary
+                )
+            )
+        }
+        repo.putAppSetting("contact_identity_${kept.publicKeyB64}", "burnable")
+
+        assertEquals(1, repo.dropCreatorContacts(keep = setOf(kept.publicKeyB64)))
+        assertNull("the creator's follower is forgotten", repo.peerDao.getPeerByPublicKey(fan.publicKeyB64))
+        assertNull(repo.getAppSetting("contact_identity_${fan.publicKeyB64}"))
+        assertNotNull("a personal friend stays", repo.peerDao.getPeerByPublicKey(friend.publicKeyB64))
+        assertNotNull("a kept contact stays", repo.peerDao.getPeerByPublicKey(kept.publicKeyB64))
+        assertEquals("burnable", repo.getAppSetting("contact_identity_${kept.publicKeyB64}"))
     }
 
     @Test

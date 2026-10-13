@@ -2185,6 +2185,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         e.message ?: "Malformed identity"
     }
 
+    /**
+     * D10e: forgets the contacts bound to the creator identity (contact_identity = burnable), except
+     * [keep]. Called after the creator identity is burned or replaced (and its USER_EXIT sent): those
+     * contacts knew the old identity, and with the binding left in place the new identity would talk to
+     * them and link the two. Their content is cleared later by the orphaned-content purge. Returns how
+     * many were forgotten.
+     */
+    suspend fun dropCreatorContacts(keep: Set<String> = emptySet()): Int {
+        var dropped = 0
+        for (peer in peerDao.getAllPeersList()) {
+            if (peer.publicKeyB64 in keep) continue
+            if (appSettingDao.getSetting("contact_identity_${peer.publicKeyB64}") != "burnable") continue
+            peerDao.deletePeer(peer)
+            appSettingDao.removeSetting("contact_identity_${peer.publicKeyB64}")
+            dropped++
+        }
+        if (dropped > 0) Logger.info("REPOSITORY", "Forgot $dropped contact(s) of the previous creator identity")
+        return dropped
+    }
+
     /** D10d: installs a creator identity from a creator identity file (CreatorIdentityArchive). */
     suspend fun restoreBurnableIdentity(bObj: org.json.JSONObject): IdentityRestoreResult =
         identityRepository.restoreBurnableIdentity(bObj).also {

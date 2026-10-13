@@ -43,9 +43,26 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
     val context = LocalContext.current
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
-    var selectedTabIndex by remember { mutableStateOf(0) }
     val isCreatorEnabled by viewModel.isCreatorEnabled.collectAsState()
-    val tabTitles = if (isCreatorEnabled) listOf("General".tr, "Network".tr, "Content".tr, "System".tr, "Studio".tr) else listOf("General".tr, "Network".tr, "Content".tr, "System".tr)
+    // D10e: tabs are chosen by name, not position, so Studio can sit before System and a tab that
+    // disappears (Studio when creator mode is turned off) falls back to General.
+    var selectedTab by remember { mutableStateOf("general") }
+    val tabKeys = if (isCreatorEnabled) {
+        listOf("general", "network", "content", "studio", "system")
+    } else {
+        listOf("general", "network", "content", "system")
+    }
+    val tabTitles = tabKeys.map { key ->
+        when (key) {
+            "general" -> "General".tr
+            "network" -> "Network".tr
+            "content" -> "Content".tr
+            "studio" -> "Studio".tr
+            else -> "System".tr
+        }
+    }
+    val currentTab = if (selectedTab in tabKeys) selectedTab else "general"
+    val selectedTabIndex = tabKeys.indexOf(currentTab)
     var showDonationModal by remember { mutableStateOf(false) }
     var showAboutModal by remember { mutableStateOf(false) }
 
@@ -96,7 +113,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 tabTitles.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTabIndex == index,
-                        onClick = { selectedTabIndex = index },
+                        onClick = { selectedTab = tabKeys[index] },
                         text = { Text(title, fontWeight = FontWeight.Bold) },
                         selectedContentColor = AccentGreen,
                         unselectedContentColor = TextMuted
@@ -105,7 +122,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
             }
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                if (selectedTabIndex == 0) {
+                if (currentTab == "general") {
                 if (updateInfo != null) {
                     item {
                         Card(
@@ -195,7 +212,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 }
 
                 }
-                if (selectedTabIndex == 1) {
+                if (currentTab == "network") {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
@@ -441,7 +458,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 }
 
                 }
-                if (selectedTabIndex == 0) {
+                if (currentTab == "general") {
                 item {
                     Text(
                         text = "ACCOUNT & PREFERENCES".tr,
@@ -639,7 +656,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 }
 
                 }
-                if (selectedTabIndex == 2) {
+                if (currentTab == "content") {
                 item {
                     Text(
                         text = "MEDIA & PRIVACY".tr,
@@ -904,7 +921,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     }
 
                 }
-                if (selectedTabIndex == 1) {
+                if (currentTab == "network") {
                 item {
                     Text(
                         text = "MESH DISCOVERABILITY".tr,
@@ -1134,7 +1151,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 }
                 }
 
-                if (selectedTabIndex == 2) {
+                if (currentTab == "content") {
                 item {
                     Text(
                         text = "CONTENT AGGREGATOR".tr,
@@ -1315,7 +1332,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
 
                 }
-                if (selectedTabIndex == 1) {
+                if (currentTab == "network") {
                 if (!hubDeploymentStatus.isNullOrBlank()) {
                     item {
                         Text(
@@ -1403,7 +1420,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     }
                 }
                 }
-                if (selectedTabIndex == 3) {
+                if (currentTab == "system") {
                 item {
                     Text(
                         text = "DEVELOPER".tr,
@@ -1944,7 +1961,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                 } // End Tab 3
                 }
 
-                if (selectedTabIndex == 4 && isCreatorEnabled) {
+                if (currentTab == "studio") {
                     item {
                         CreatorStudioTab(viewModel = viewModel)
                     }

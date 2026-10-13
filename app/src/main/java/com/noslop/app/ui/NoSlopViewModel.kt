@@ -2911,6 +2911,8 @@ fun toggleAggregator() {
     fun burnCreatorIdentity() {
         viewModelScope.launch {
             repository.clearBurnableIdentity()
+            // D10e: the burned identity's contacts are forgotten, so the new identity never talks to them.
+            repository.dropCreatorContacts()
             // D04: the new creator identity must not carry the old one's handle, bio or avatar.
             repository.clearCreatorProfile()
             _creatorProfile.value = com.noslop.app.data.UserProfile()

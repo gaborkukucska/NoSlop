@@ -64,6 +64,15 @@ fun CreatorStudioTab(
     var showBackupPassphrase by remember { mutableStateOf(false) }
     var pendingBackupPassphrase by remember { mutableStateOf<String?>(null) }
     val isExporting by viewModel.isBackupExporting.collectAsState()
+
+    // D10e: importing a creator identity here replaces this node's own, after a warning.
+    var showImportWarning by remember { mutableStateOf(false) }
+    var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var isImporting by remember { mutableStateOf(false) }
+    var importedCreator by remember { mutableStateOf<com.noslop.app.data.CreatorRestoreResult.Restored?>(null) }
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> pendingImportUri = uri }
     val backupLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
@@ -207,7 +216,9 @@ fun CreatorStudioTab(
 
         CreatorBackupCard(
             isExporting = isExporting,
-            onBackup = { showBackupPassphrase = true }
+            isImporting = isImporting,
+            onBackup = { showBackupPassphrase = true },
+            onImport = { showImportWarning = true }
         )
 
         Text(
@@ -257,6 +268,71 @@ fun CreatorStudioTab(
                 }
             }
         }
+    }
+
+    if (showImportWarning) {
+        AlertDialog(
+            onDismissRequest = { showImportWarning = false },
+            containerColor = SurfaceDark,
+            title = { Text("Import Creator Identity?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        "The creator identity in the file replaces this node's creator identity, with its keys, Studio profile, followers, posts and media. The current creator identity is removed, and its followers lose it for good.".tr,
+                        color = TextMuted
+                    )
+                    TextButton(onClick = {
+                        showImportWarning = false
+                        showBackupPassphrase = true
+                    }) {
+                        Text("Back Up First".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showImportWarning = false
+                        importLauncher.launch(arrayOf("*/*"))
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                ) { Text("Choose File".tr, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportWarning = false }) { Text("Cancel".tr, color = AccentGreen) }
+            }
+        )
+    }
+
+    pendingImportUri?.let { uri ->
+        com.noslop.app.ui.components.CreatorPassphraseDialog(
+            title = "Import Creator Identity".tr,
+            message = "Enter the passphrase the file was saved with.".tr,
+            confirmTwice = false,
+            confirmLabel = "Import and Replace".tr,
+            onConfirm = { passphrase ->
+                pendingImportUri = null
+                isImporting = true
+                viewModel.restoreCreatorIdentityFromUri(context, passphrase, uri, replaceExisting = true) { result ->
+                    isImporting = false
+                    when (result) {
+                        is com.noslop.app.data.CreatorRestoreResult.Restored -> importedCreator = result
+                        is com.noslop.app.data.CreatorRestoreResult.Failed -> android.widget.Toast.makeText(
+                            context,
+                            com.noslop.app.util.LanguageManager.translate("Creator identity not restored: {reason}").replace("{reason}", result.reason),
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        // Not returned when replacing; nothing was changed.
+                        com.noslop.app.data.CreatorRestoreResult.ConfirmReplace -> Unit
+                    }
+                }
+            },
+            onDismiss = { pendingImportUri = null }
+        )
+    }
+
+    importedCreator?.let { imported ->
+        com.noslop.app.ui.components.CreatorRestoreResultDialog(result = imported, onDismiss = { importedCreator = null })
     }
 
     if (showBackupPassphrase) {
@@ -645,9 +721,12 @@ private fun StudioItemCard(
     }
 }
 
-/** D10d: backs up the creator identity (keys, Studio profile, followers, posts and media) to a file. */
+/**
+ * D10d: backs up the creator identity (keys, Studio profile, followers, posts and media) to a file.
+ * D10e: and imports one, replacing this node's creator identity.
+ */
 @Composable
-private fun CreatorBackupCard(isExporting: Boolean, onBackup: () -> Unit) {
+private fun CreatorBackupCard(isExporting: Boolean, isImporting: Boolean, onBackup: () -> Unit, onImport: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         modifier = Modifier
@@ -657,7 +736,7 @@ private fun CreatorBackupCard(isExporting: Boolean, onBackup: () -> Unit) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text("Creator Identity Backup".tr, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextLight)
             Text(
-                "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Restore it in Settings, Creator Node, on this or another device.".tr,
+                "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Import it here on a creator node, or restore it in Settings, Creator Node, on a node that is not a creator yet.".tr,
                 fontSize = 11.sp,
                 color = TextMuted,
                 modifier = Modifier.padding(vertical = 6.dp)
@@ -672,6 +751,18 @@ private fun CreatorBackupCard(isExporting: Boolean, onBackup: () -> Unit) {
                 Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(if (isExporting) "Saving...".tr else "Back Up Creator Identity".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = onImport,
+                enabled = !isImporting && !isExporting,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = DestructiveRed),
+                border = BorderStroke(1.dp, DestructiveRed.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (isImporting) "Importing...".tr else "Import Creator Identity".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

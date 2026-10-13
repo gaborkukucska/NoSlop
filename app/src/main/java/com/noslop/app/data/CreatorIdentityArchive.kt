@@ -293,7 +293,12 @@ object CreatorIdentityArchive {
             // 3. Apply. Keys first; every later step only adds, so restoring again completes a restore
             // that stopped part way.
             if (!sameIdentity) {
-                if (existing != null) repo.clearBurnableIdentity()
+                if (existing != null) {
+                    // D10e: the replaced identity says goodbye to its contacts, which are then forgotten
+                    // (except those in the file), so the restored identity never talks to them.
+                    repo.clearBurnableIdentity()
+                    repo.dropCreatorContacts(keep = contacts.map { it.publicKeyB64 }.toSet())
+                }
                 val installed = repo.restoreBurnableIdentity(creatorObj)
                 if (installed !is IdentityRestoreResult.Success) {
                     Logger.error(TAG, "Installing the creator keys failed: $installed")

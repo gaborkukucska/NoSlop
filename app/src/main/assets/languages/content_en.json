@@ -930,7 +930,6 @@
   "Uses your personal {fields}. Set them here to keep your creator identity apart from your personal profile.": "Uses your personal {fields}. Set them here to keep your creator identity apart from your personal profile.",
   "Leave a field empty to use your personal one. Anyone who sees both profiles can match the fields you leave empty.": "Leave a field empty to use your personal one. Anyone who sees both profiles can match the fields you leave empty.",
   "Creator Identity Backup": "Creator Identity Backup",
-  "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Restore it in Settings, Creator Node, on this or another device.": "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Restore it in Settings, Creator Node, on this or another device.",
   "Saving...": "Saving...",
   "Back up your creator identity first (Studio, Back Up Creator Identity) if you may want it back. Without a backup it cannot be restored.": "Back up your creator identity first (Studio, Back Up Creator Identity) if you may want it back. Without a backup it cannot be restored.",
   "Creator identity not restored: {reason}": "Creator identity not restored: {reason}",
@@ -951,5 +950,12 @@
   "{count} contacts were left out because this device already knows them by your personal identity.": "{count} contacts were left out because this device already knows them by your personal identity.",
   "{count} posts had no media file on the old device, so their media is not included.": "{count} posts had no media file on the old device, so their media is not included.",
   "If this identity still runs on another device, turn creator mode off there now. Two devices running the same creator identity compete for one address, and followers reach only one of them.": "If this identity still runs on another device, turn creator mode off there now. Two devices running the same creator identity compete for one address, and followers reach only one of them.",
-  "Restore": "Restore"
+  "Restore": "Restore",
+  "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Import it here on a creator node, or restore it in Settings, Creator Node, on a node that is not a creator yet.": "Save your creator keys, Studio profile, followers, posts and media to one file protected by a passphrase. Import it here on a creator node, or restore it in Settings, Creator Node, on a node that is not a creator yet.",
+  "Import Creator Identity?": "Import Creator Identity?",
+  "The creator identity in the file replaces this node's creator identity, with its keys, Studio profile, followers, posts and media. The current creator identity is removed, and its followers lose it for good.": "The creator identity in the file replaces this node's creator identity, with its keys, Studio profile, followers, posts and media. The current creator identity is removed, and its followers lose it for good.",
+  "Choose File": "Choose File",
+  "Import Creator Identity": "Import Creator Identity",
+  "Enter the passphrase the file was saved with.": "Enter the passphrase the file was saved with.",
+  "Import and Replace": "Import and Replace"
 }

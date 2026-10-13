@@ -1,5 +1,21 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-10-13) — Round D10e: Creator Identity Import on the Studio Page, Settings Tab Order (v0.7.0-alpha)
+
+Follow-up to D10d after device testing. Unit tests: `CreatorIdentityArchiveD10dTest` (updated). Not yet verified on device.
+
+* **Import on the Studio page.**
+  * A creator node can now import a creator identity file under "Import Creator Identity", next to the backup.
+  * A warning comes first: the file's identity replaces this node's creator identity, and that identity's followers lose it for good. The warning has a "Back Up First" option.
+  * The user then picks the file and enters its passphrase, and the restore runs, replacing the current creator identity.
+  * The Settings restore stays for nodes that are not creators yet.
+* **Contacts of a replaced or burned identity.**
+  * **Cause.** Replacing or burning a creator identity left its contacts bound to the secondary identity. The new identity would then talk to the old identity's followers and link the two.
+  * **Fix.** After the old identity's `USER_EXIT`, those contacts are forgotten (`NoSlopRepository.dropCreatorContacts`). Contacts in the imported file are kept.
+* **Settings tab order.**
+  * The tabs are now General, Network, Content, Studio, System.
+  * Tabs are chosen by name instead of position, so a tab that disappears (Studio, when creator mode is turned off) falls back to General instead of showing an empty page.
+
 ## Completed Changes (2026-10-13) — Round D10d: One Profile by Default, Creator Identity Backup and Restore (v0.7.0-alpha)
 
 Part of the D04 follow-up work (creator identity backup, restore and move; burn warnings). Unit tests: `CreatorIdentityArchiveD10dTest` (new) and `IdentityRoutingTest` (updated). Not yet verified on device.
