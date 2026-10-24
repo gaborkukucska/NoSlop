@@ -8,11 +8,11 @@ import ComposeApp
 /// prompt needed. The picked asset is copied to a readable temp file; a ~90 px JPEG thumbnail (the same
 /// in-band preview Android posts carry as `thumbnail_b64`) is scaled here where UIImage makes it trivial.
 final class ImagePicker: NSObject, IosImagePicker, PHPickerViewControllerDelegate {
-    private var onResult: ((String?, String?, Int64, String?) -> Void)?
+    private var onResult: ((String?, String?, KotlinLong, String?) -> Void)?
 
-    func pick(onResult: @escaping (String?, String?, Int64, String?) -> Void) {
+    func pick(onResult: @escaping (String?, String?, KotlinLong, String?) -> Void) {
         DispatchQueue.main.async {
-            guard let root = Self.topViewController() else { onResult(nil, nil, 0, nil); return }
+            guard let root = Self.topViewController() else { onResult(nil, nil, KotlinLong(value: 0), nil); return }
             self.onResult = onResult
             var config = PHPickerConfiguration()
             config.filter = .images
@@ -57,7 +57,8 @@ final class ImagePicker: NSObject, IosImagePicker, PHPickerViewControllerDelegat
     private func finish(_ path: String?, _ mime: String?, _ size: Int64, _ thumb: String?) {
         let cb = onResult
         onResult = nil
-        DispatchQueue.main.async { cb?(path, mime, size, thumb) }
+        // Kotlin/Native boxes the `Long` in the callback type as KotlinLong on the Swift side.
+        DispatchQueue.main.async { cb?(path, mime, KotlinLong(value: size), thumb) }
     }
 
     /// ~90 px wide JPEG (quality 0.6), base64 — matches Android's `MediaManager.generateTinyThumbnail`.
