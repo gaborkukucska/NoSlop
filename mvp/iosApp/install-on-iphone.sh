@@ -15,17 +15,19 @@ BUNDLE_ID="com.noslop.app.ios"
 DD="build/dd"
 APP="$DD/Build/Products/Debug-iphoneos/iosApp.app"
 
-# `devicectl list devices` columns: Name  Hostname  Identifier  State  Model. Names and models contain
-# spaces, so pick the Identifier by its UUID shape rather than by column number.
-uuid_re='[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}'
+# `devicectl list devices` columns: Name  Hostname  Identifier  State  Model [Reality]. Names and models
+# contain spaces, so pick the Identifier by shape: Xcode 26 prints a CoreDevice UUID (8-4-4-4-12), Xcode 27
+# prints the UDID (8-16) and also lists simulators, which carry a "simulated" Reality column.
+id_re='[0-9A-F]{8}-[0-9A-F]{16}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}'
 devices=$(xcrun devicectl list devices 2>/dev/null || true)
 device="${1:-}"
 if [ -z "$device" ]; then
-  row=$(printf '%s\n' "$devices" | grep -i iphone | grep -E 'connected' | head -1 || true)
-  [ -n "$row" ] || row=$(printf '%s\n' "$devices" | grep -i iphone | head -1 || true)
-  device=$(printf '%s\n' "$row" | grep -oE "$uuid_re" | head -1 || true)
+  rows=$(printf '%s\n' "$devices" | grep -i iphone | grep -v simulated || true)
+  row=$(printf '%s\n' "$rows" | grep -E 'connected|available' | head -1 || true)
+  [ -n "$row" ] || row=$(printf '%s\n' "$rows" | head -1 || true)
+  device=$(printf '%s\n' "$row" | grep -oE "$id_re" | head -1 || true)
 fi
-[ -n "$device" ] || { echo "No connected iPhone found. Plug it in, unlock it, and run: xcrun devicectl list devices"; exit 1; }
+[ -n "$device" ] || { echo "No connected iPhone found. Plug it in (or keep it on the same Wi-Fi), unlock it, and run: xcrun devicectl list devices"; exit 1; }
 echo "==> Target device: $device"
 
 # "connected (no DDI)" means this Xcode has no developer disk image for the phone's iOS version; the
@@ -51,13 +53,14 @@ fi
 xattr -rc Pods/Tor 2>/dev/null || true
 
 echo "==> Building (this registers the device with the team and refreshes the provisioning profile)"
+rm -rf "$APP"   # never install a stale bundle from a previous build if this one fails
 xcodebuild -workspace iosApp.xcworkspace -scheme iosApp -configuration Debug \
   -destination "id=$device" -derivedDataPath "$DD" \
   -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
   CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" EAGER_LINKING=NO \
   build | grep -E 'error:|warning: .*provision|BUILD (SUCCEEDED|FAILED)' || true
 
-[ -d "$APP" ] || { echo "Build produced no app bundle at $APP"; exit 3; }
+[ -f "$APP/Info.plist" ] || { echo "Build failed (no complete app bundle at $APP). If the errors mention 'No Accounts', sign in to Xcode -> Settings -> Accounts with the Apple ID that owns team $TEAM."; exit 3; }
 
 echo "==> Installing $APP"
 xcrun devicectl device install app --device "$device" "$APP"
