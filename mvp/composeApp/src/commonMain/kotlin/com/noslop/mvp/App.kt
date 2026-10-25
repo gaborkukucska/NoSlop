@@ -991,8 +991,15 @@ private class MeshUiState(private val scope: CoroutineScope) {
         connected = true
         status = "Connected ✓ ${how.ifBlank { "" }}— ${client.linkCount} link(s)".replace("  ", " ")
         if (save) { SavedNodes.add(invite.toUri()); reloadSaved() }
-        // Re-handshake every Android contact through the (now-connected) bridge: dial + signed CONNECTION_REQUEST.
-        contacts.filter { it.onionAddress != null }.forEach { handshakeAndroidContact(it) }
+        // Tell the bridge to dial EVERY Android contact's onion, every time we link. The bridge's peer table is
+        // in-memory, so a restarted bridge knows nobody until we say so — and handshakeAndroidContact() bails
+        // out early for contacts whose handshake already completed, which left accepted contacts (the ones we
+        // actually DM) never dialed: the bridge relayed our DMs to "0 peer(s)" and dropped them. DIAL_PEER is
+        // idempotent on the bridge (peers.put), so re-sending is harmless.
+        val androidContacts = contacts.filter { it.onionAddress != null }
+        scope.launch { androidContacts.forEach { c -> runCatching { client.requestDial(c) } } }
+        // Then the signed CONNECTION_REQUEST for anyone whose handshake isn't complete yet.
+        androidContacts.forEach { handshakeAndroidContact(it) }
         // Engagement sync: ask peers for the last week's posts/comments/reactions we missed while offline.
         // Delayed so the bridge has dialed our Android peers first (a request with 0 linked peers is lost).
         if (!syncRequested) {
