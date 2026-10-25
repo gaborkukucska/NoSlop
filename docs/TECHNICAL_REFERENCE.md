@@ -2,8 +2,8 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.1.0`, Room schema version 23 — see §10, compileSdk/targetSdk
-35, minSdk 24). It is intended to complement — not replace — `README.md` and
+versionName `0.7.0-alpha`, Room schema version 19 — see §10, compileSdk/targetSdk
+36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
 data flow, constants).
@@ -45,8 +45,8 @@ mnemonic, onion address).
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ UI Layer (Jetpack Compose, MainScreen.kt + tabs/*)                │
-│  UnifiedFeedTab │ DMsTab │ SettingsTab │ ContentPreferencesScreen  │
+│ UI Layer (Jetpack Compose, tabs/*)                                  │
+│  UnifiedFeedTab │ DMsTab │ SettingsTab │ ProfileScreen │ ContentPreferencesScreen  │
 └───────────────────────────┬───────────────────────────────────────┘
                              │ NoSlopViewModel (StateFlow)
 ┌───────────────────────────▼───────────────────────────────────────┐
@@ -54,8 +54,8 @@ mnemonic, onion address).
 │  ├─ IdentityRepository (keys, mnemonic, onion, lock state)          │
 │  ├─ MeshPacketHandler  (incoming packet dispatch)                   │
 │  ├─ FeedDao / PostDao / PeerDao / MessageDao / CommentDao /         │
-│  │   MeshVoteDao / CommentVoteDao (Room, v23)                       │
-│  │   ReactionDao / AppSettingDao (Room, v23)                        │
+│  │   MeshVoteDao / CommentVoteDao (Room, v5)                       │
+│  │   ReactionDao / AppSettingDao (Room, v5)                        │
 │  └─ ApiKeyRepository (user-supplied API keys, EncryptedSharedPrefs) │
 └──────┬─────────────────────────────┬───────────────────────────────┘
        │                              │
@@ -67,7 +67,7 @@ mnemonic, onion address).
 │  api/*Client (10x)     │      │  MediaManager / MediaProxyService        │
 │  -> clearnetClient     │      │  CryptoService (Ed25519/X25519/ChaCha20) │
 │     (no proxy)          │      │  TorService (embedded tor-android)       │
-└─────────────────────┘      │  -> torClient (SOCKS5 127.0.0.1:9050)    │
+└─────────────────────┘      │  -> torClient (SOCKS5 127.0.0.1:TOR_SOCKS_PORT) │
                               └─────────────────────────────────────────┘
 ```
 
@@ -84,12 +84,13 @@ com.noslop.app
 │   └── MnemonicGenerator.kt      BIP39 12-word mnemonic (full 2048-word list per milestone 85)
 ├── data/
 │   ├── ApiKeyRepository.kt       User API keys (EncryptedSharedPreferences)
-│   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media)
+│   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media) via SAF streams
 │   ├── Daos.kt                    Room DAOs (Feed, Peer, Post, Message, Comment, Reaction, Vote, AppSetting)
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
-│   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
-│   ├── NoSlopDatabase.kt          Room database, version 23
+│   ├── MediaSettings.kt           Auto-download policy: trust-based (friends/public), file exclusion (JSON in app_settings)
+│   ├── MeshFilterSettings.kt      Mesh broadcast filter toggles (JSON in app_settings)
+│   ├── NoSlopDatabase.kt          Room database, version 5
 │   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
 │   └── UserProfile.kt             Display name / bio / avatar data class
 ├── debug/
@@ -109,23 +110,26 @@ com.noslop.app
 │   ├── MeshTransport.kt             SOCKS5 TCP transport, send retries
 │   └── Packets.kt                   NetworkPacket + all payload data classes
 ├── net/
-│   └── HttpClientProvider.kt        clearnetClient vs torClient OkHttpClient instances
+│   ├── HttpClientProvider.kt        clearnetClient vs torClient OkHttpClient instances
+│   └── SshDeployer.kt               HAI-Net Hub SSH deployment (JSch + JSONObject config injection)
 ├── tor/
 │   └── TorService.kt                Embedded Tor lifecycle, hidden service registration
 ├── ui/
-│   ├── ContentPreferencesScreen.kt  Unified profile/categories/genres/languages/sources
-│   ├── HaiNetTab.kt                 Mesh feed / peers tab
-│   ├── MainScreen.kt                Top-level Compose host (god file, 2,889 LOC pre-refactor)
+│   ├── ContentPreferencesScreen.kt  Content filtering/categories/genres/languages/sources/mix ratios
+│   ├── HaiNetTab.kt                 Home Hub deployment + control interface (delegates to HubSetupScreen)
+│   ├── MeshFiltersScreen.kt         Granular incoming/outgoing mesh filter toggles
+│   ├── MediaUtils.kt                Top-level media resolution utility (formerly MainScreen)
 │   ├── MediaComponents.kt           Shared media UI helpers
 │   ├── NoSlopViewModel.kt            ViewModel exposing repository as StateFlow
-│   ├── OnboardingScreen.kt           6-step onboarding flow
+│   ├── OnboardingScreen.kt           9-step onboarding flow (includes Content Mix step)
+│   ├── ProfileScreen.kt              Standalone profile editor (avatar, name, bio)
 │   ├── PreloadManager.kt             ExoPlayer preload pool
 │   ├── QRScanScreen.kt / QRShareSheet.kt  CameraX+MLKit QR pairing
 │   ├── TorWarningPanel.kt            Tor-not-ready UI card + F-Droid/Orbot deep links
 │   ├── UnifiedFeedTab.kt             VerticalPager feed (mesh + clearnet unified)
 │   ├── components/                  FeedCard, VideoPlayer, AudioPlayer, ChatThreadScreen,
 │   │                                 CommentsBottomSheet, PeerItem
-│   ├── tabs/                        ApiKeysScreen, DMsTab, LogsViewerScreen, SettingsTab
+│   ├── tabs/                        ApiKeysScreen, DMsTab, FeedMixSettingsSection, HubSetupScreen, LogsViewerScreen, ReportIssueScreen, SettingsTab
 │   └── theme/                       Color.kt, Theme.kt, Type.kt (Material3 + custom palette)
 └── util/
     └── Constants.kt                 MESH_PORT = 9999
@@ -143,7 +147,7 @@ com.noslop.app
 |---|---|---|
 | `publicKeyB64` | Base64, X.509 SubjectPublicKeyInfo | Ed25519 signing public key — also the node's primary identifier (`sender_id`, `author_id`, etc.) |
 | `privateKeyB64` | Base64, PKCS#8 | Ed25519 signing private key — never logged, stored only in `EncryptedSharedPreferences` |
-| `tripcode` | 6-char lowercase Base32 | `SHA3-256(raw Ed25519 pubkey bytes)` → Base32 → first 6 chars |
+| `tripcode` | 8-char lowercase Base32 | `Argon2id(raw Ed25519 pubkey bytes)` → Base32 → first 8 chars (§3.3; 6-char SHA3 before D10b) |
 | `onionAddress` | 56-char `.onion` + suffix | Tor v3 address derived from the same Ed25519 key (see §3.3) |
 | `displayName` | `"<handle>.<tripcode>"` | Human-facing identity string |
 | `encPublicKeyB64` | Base64, X.509 | X25519 public key, used for DM key agreement |
@@ -151,14 +155,7 @@ com.noslop.app
 
 ### 3.2 Key Generation (`CryptoService.generateIdentity`)
 
-- **API 33+ (Tiramisu and above)**: `KeyPairGenerator.getInstance("Ed25519")`
-  using the platform Conscrypt provider, **no explicit `initialize()` call**
-  (Conscrypt has a fixed key size).
-- **API 24–32**: `KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)` with
-  `initialize(255, SecureRandom())` — the `255` is a corrected value (see
-  milestone 48: "Key size corrected to 255 for compatibility with Android's
-  Conscrypt cryptographic provider to prevent onboarding page crashes on
-  actual devices").
+- **Bouncy Castle Pure Engine**: Keypairs are generated natively using Bouncy Castle's lightweight `Ed25519KeyPairGenerator` (`KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)`). Raw 32-byte public keys and seeds are manually wrapped in standard ASN.1 PKCS#8 / X.509 headers before Base64 encoding to ensure 100% backwards compatibility with historical mesh peers without external native C/JNA dependencies.
 - X25519 keys are always generated via Bouncy Castle
   (`KeyPairGenerator.getInstance("X25519", BC_PROVIDER)`), regardless of API
   level.
@@ -171,13 +168,20 @@ Both derivations strip the 12-byte X.509 SubjectPublicKeyInfo header when the
 encoded key is 44 bytes (`encodedPubKeyBytes.copyOfRange(12, 44)`), leaving
 the raw 32-byte Ed25519 public key.
 
-**Tripcode** (`deriveTripcode`):
+**Tripcode** (`deriveTripcode`, Round D10b):
 ```
 raw_pubkey (32 bytes)
-  -> SHA3-256                         (32-byte digest)
-  -> Base32 encode (RFC4648 alphabet "abcdefghijklmnopqrstuvwxyz234567")
-  -> take first 6 characters
+  -> Argon2id(password = raw_pubkey, salt = "noslop-tag-v2" (UTF-8),
+              t = 2, m = 19456 KiB, p = 1, version 0x13, 16-byte output)
+  -> Base32 encode (lowercase alphabet "abcdefghijklmnopqrstuvwxyz234567", no padding)
+  -> take first 8 characters            (golden: bytes 0x00..0x1F -> "wdbuab42")
 ```
+Results are cached per key (LRU, 4096 entries) and only one Argon2 run happens
+at a time (~19 MiB). The pre-D10b tag (`deriveLegacyTripcode`: SHA3-256 →
+Base32 → first 6 characters, golden `aufeq4`) is used only to recognise stored
+tags and handle suffixes: `isTripcodeOf` accepts either form on restore,
+`stripIdentityTag` removes either from incoming handles, and
+`NoSlopRepository.migrateIdentityTagsV2` rewrites stored contacts and posts once.
 
 **Onion address** (`deriveOnionAddress`), following the Tor v3 spec:
 ```
@@ -195,10 +199,9 @@ net).
 
 ### 3.4 Signing & Verification
 
-- `sign(payload: String, privateKeyB64)` — `Signature.getInstance("Ed25519")`
-  (Conscrypt on API 33+, BC otherwise), signs the **UTF-8 bytes of the literal
+- `sign(payload: String, privateKeyB64)` — Uses Bouncy Castle's lightweight `Ed25519Signer` directly (bypassing the JCA `Signature` API). Signs the **UTF-8 bytes of the literal
   string** `payload`, returns Base64 (no-wrap).
-- `verify(payload, signatureB64, publicKeyB64)` — mirrors `sign`; returns
+- `verify(payload, signatureB64, publicKeyB64)` — Also uses `Ed25519Signer`; returns
   `false` (never throws) on any exception.
 - **Signed payload formats are pipe-delimited string concatenations**, not
   the JSON object itself. Examples found in `NoSlopRepository`:
@@ -214,6 +217,60 @@ net).
   packet type. `MeshPacketHandler` reconstructs these strings explicitly in
   `handlePost`, `handleComment`, `handleReaction`, `handleVote`, and `handleSyncResponse`.
 
+### 3.4.1 Safety Fingerprints, Verification & Key Changes (review C11/D10, Round D10b, 2026-10-11)
+
+- **Derivation.** `CryptoService.deriveSafetyFingerprint(edPub, encPub)` =
+  first 20 Base32 characters of SHA3-256(`"noslop-safety-fp-v1"` ‖ raw Ed25519
+  public key ‖ raw X25519 public key), upper case, in five groups of four
+  (`ABCD-EFGH-IJKL-MNOP-QRST`). Both keys are reduced to their raw 32 bytes
+  first, so raw and X.509/SPKI encodings agree. Returns `null` when a key is
+  missing or unreadable.
+- **Check code.** `CryptoService.deriveCheckCode(edPub, encPub)` = the first
+  two groups of the fingerprint (`ABCD-EFGH`). People compare it, with the
+  name.tag, before approving a request.
+- **Display.** Own fingerprint and check code: `QRShareSheet` ("My ID" and the
+  Creator Contact Card, each for the identity it shows). A contact:
+  `SafetyFingerprintPanel` in `ContactCardDialog` ("Verified in person" / "Not
+  verified in person" / "Changed since you verified it"; "Compare keys" shows
+  the fingerprint), computed from the stored `publicKeyB64` and
+  `encPublicKeyB64`. A pending request: `ConnectionRequestIdentity` (name.tag,
+  check code, camera-scan note, same-name warning) in the request dialog
+  (`UnifiedFeedTab`), the notification card and the contact card. A scanned
+  code before sending: `ScannedPeerChecks` in `QRScanScreen` (name with the tag
+  derived from the key, check code, source note or warning, edited-tag and
+  same-name warnings).
+- **Verification (D10b).** `peers.verifiedFingerprint` holds the fingerprint
+  that was verified in person; a contact counts as verified only while it equals
+  the current fingerprint, so any key change makes it stale without a write.
+  It is set in two places only. (1) The scanner:
+  `MeshSocialRepository.sendConnectionRequest(…, intro = ContactIntro.QR_CAMERA)`
+  pins the fingerprint of the scanned code (for an `INCOMING_PENDING` or
+  `ACCEPTED` row only if the code's keys equal the stored ones). (2) The
+  approver: `NoSlopRepository.acceptConnectionRequest(peer, replyVia,
+  confirmedByUser = true)` when the request carried the signed
+  `intro = "qr_camera"` (stored by `HandshakePacketHandler` as
+  `request_intro_<pub>`, removed on accept) and the fingerprint still equals
+  the one shown. Pictures, pasted IDs, network requests, creator auto-accept and
+  crossing requests never verify anyone. The pending-request probes re-send the
+  same intro (`outgoing_intro_<pub>`).
+- **Key changes (D10b).** A changed encryption key from an `ACCEPTED` contact,
+  in a `CONNECTION_REQUEST` or a `USER_HANDSHAKE` refresh, is signed by their
+  Ed25519 key and is applied at once. `verifiedFingerprint` is cleared,
+  `pendingEncKey` is set to null, and `NoSlopRepository.recordKeyChange` stores
+  `key_changed_at_<pub>`. `ChatThreadScreen` shows a one-line, dismissible
+  `KeyChangeNotice`. Encodings are compared with `sameX25519PublicKey`, so a raw
+  copy of the same key is not a change. Keys still held in `pendingEncKey` from
+  D10 are applied once by `migrateIdentityTagsV2` (`PeerDao.applyEncKeyChange`).
+- **Matching.** Removing a contact (`MeshSocialRepository.deletePeer`,
+  `NoSlopViewModel.removePeer`), the orphan clean-up
+  (`purgeOrphanedPeerContent`) and the contact card's post list match posts by
+  author key only, never by handle.
+- **Unverified media (D08).** `NoSlopRepository.isMeshPostMediaVerified(post)`
+  re-verifies the stored post signature in the v2 form
+  (`encodeForSigning(id, author, content, timestamp, avatar, privacy, mediaId,
+  clearnetUrl, sha256)`) for each digest recorded for the media; the feed labels
+  other authors' mesh media "Unverified media" when none verifies.
+
 ### 3.5 Direct Message Encryption
 
 `encryptDM(plaintext, theirEncPubB64, myEncPrivB64) -> Pair<ciphertextB64, nonceB64>`:
@@ -227,11 +284,78 @@ ciphertext    = ChaCha20-Poly1305(chacha_key, nonce, plaintext_utf8)
 
 `decryptDM` mirrors this; returns `null` on any failure (never throws).
 
+This is the legacy v1 form. Current senders use `encryptDMV2` (directional
+HKDF key, AAD binding sender, recipient, message id, group id and timestamp;
+see WIRE_PROTOCOL_REFERENCE §3 MESSAGE). Since 2026-10-10 (review D05) a
+receiver reads v1 only from a key never seen speaking v2
+(`app_settings["dm_v2_seen_<key>"]`, set by `DmPacketHandler.markDmV2Seen`).
+`DM_ACK` uses AAD label `CryptoService.DM_AAD_ACK` (`noslop-dm-ack-v3`),
+distinct from `DM_AAD_MESSAGE` (`noslop-dm-v2`), and must open to `"ACK"`.
+
 If a DM carries media, the plaintext is actually a JSON object
 `{"content": "<text>", "media": <MediaMetadata>}` before encryption — see
 `sendDirectMessage` and `MeshPacketHandler.handleDirectMessage`, which
 attempts to parse decrypted plaintext as JSON and falls back to treating it
 as raw text if parsing fails.
+
+### 3.5.1 Group Message Fan-Out
+
+There is no group-wide symmetric key. `NoSlopRepository.sendGroupMessage`
+encrypts the message body once per member using **that member's** X25519
+public key and the sender's own X25519 private key
+(`IdentityKeys.encPrivateKeyB64` — note this is a different key from the
+Ed25519 `privateKeyB64` used for signing), then sends N separate `MESSAGE`
+packets. Each leg carries the same `EncryptedPayload.groupId` and the same
+message `id`.
+
+```
+for member in group.members - self:
+    ciphertext, nonce = encryptDM(bodyJson, member.encPub, my.encPriv)
+    send MESSAGE { id, ciphertext, nonce, groupId, timestamp } -> member
+```
+
+The trade-off is the same one gChat makes: O(N) encryption work per message,
+in exchange for never having to rotate a shared key when membership changes.
+
+Encryption failure is not silent. `encryptDM` returns `Pair("", "")` rather
+than throwing on any failure, so `sendGroupMessage` checks for a blank
+ciphertext or nonce and skips that recipient with an error log instead of
+transmitting an empty payload.
+
+**Known limitation.** DM encryption is static-static X25519: the shared
+secret between any two identities is the same for every message they ever
+exchange. There is no forward secrecy and no ratchet, so compromise of one
+long-term private key retroactively decrypts that pair's entire history.
+Group messages inherit this, once per member.
+
+### 3.5.2 Group Message Deletion
+
+`DELETE_MESSAGE` packets carry an optional `group_id` field. When present,
+the handler runs group-specific authorization:
+
+```
+if groupId present:
+    verify signature against deletePay.authorId
+    existing = getGroupChatById(groupId) or reject
+    if authorId == message.senderPub:  # author deleting own message
+        delete message
+    elif authorId == existing.adminPublicKeyB64:  # admin deleting any message
+        delete message
+    else:
+        reject
+else:
+    # DM path: only the original sender can delete
+    if authorId != packet.senderId: reject
+    deleteMessageByIdAndSender(messageId, authorId)
+```
+
+The sender broadcasts the `DELETE_MESSAGE` packet to every group member
+individually (same fan-out pattern as `sendGroupMessage`), not via gossip
+broadcast — ensuring only group members receive deletion instructions.
+
+`clearGroupChat()` is a local-only operation: it deletes all messages in a
+group thread from the device's database without sending any packets. This
+is the "Clear Chat" action in the group menu.
 
 ### 3.6 Tor Hidden Service Key Expansion
 
@@ -249,6 +373,8 @@ command expects:
      expanded[31] |= 0b01000000   (or 64)
 5. Base64-encode the 64 bytes -> "ED25519-V3:<base64>"
 ```
+
+> **Critical Implementation Note:** Tor explicitly expects the 64-byte *expanded secret scalar + PRF secret*. It does **not** accept the 64-byte `libsodium` format (`seed || pubkey`). Passing the `libsodium` format to `ADD_ONION` will cause Tor to re-expand the key incorrectly, resulting in a completely mismatched public key and `.onion` address that breaks all peer routing.
 This produces a **persistent** onion address tied to the same key used for
 post signatures — i.e., a node's mesh identity and its network address are
 cryptographically the same key.
@@ -265,13 +391,68 @@ cryptographically the same key.
 `isEncryptionActive()` checks `prefs.javaClass.name.contains("EncryptedSharedPreferences")`
 to determine which backend is actually active at runtime.
 
+**Stored Word Cloud (`mnemonic`), R6.** Written when the account is created (`saveIdentity`, from
+`NoSlopViewModel.completeOnboarding` only) and never changed afterwards. Rules in `WordCloudGuard`:
+- A restore keeps the archive's phrase as it is; the words typed to open the backup are stored only
+  when the archive carries none and they derive the restored Ed25519 key. Otherwise no phrase is stored.
+- An export puts the stored phrase (never the typed words) in `identity_backup.json`, or none if it
+  can't be read.
+- The legacy cross-device rebuild stores the typed words only when the archive's database names the
+  key they derive.
+- Version 1 accounts (before 2026-09-11) have random keys, so no phrase derives them.
+`WordCloudWritePathsTest` fails on any other write site.
+
+### 3.7.1 Creator Identity Separation (`IdentityRouter`, review D04, 2026-10-09)
+
+The creator (burnable) identity has its own keys and onion address and is never sent with the personal ones. By default it shows the personal profile; the Studio page can give it a different one.
+
+- **Profile (D10d, user decision 2026-10-13).** Every identity uses the personal username, picture and bio by default. In creator mode, a field set on the Studio page replaces the personal one for the creator identity only; a blank field falls back to the personal one. On a node that is not a creator, the secondary identity (used to follow discovered creators) always uses the personal profile. The Studio fields are stored in `app_settings` under `creator_profile` (`CREATOR_PROFILE_KEY`, `UserProfile` JSON) and edited on the Studio page (*Creator Profile* card → *Edit*); the card says which fields come from the personal profile. The rule is `resolveSecondaryProfile` (`UserProfile.kt`), used by `IdentityRepository` (`getBurnableIdentity().displayName`, `generateBurnableIdentity`), `IdentityRouter.creator()`, `NoSlopRepository.secondaryIdentityProfile()` and the discoverable announcement. Anyone who sees both identities can match the fields left blank; keys are never shared. This replaces D04's separate creator profile with the default name `Creator` (followers saw "Creator" until a name was set) and D10c's personal-handle-only rule. *Burn ID* clears the Studio fields.
+- **Name updates (D10c).** `announceCreatorPresence` sends the secondary identity's current name (`IDENTITY_UPDATE`, signed by that identity) to the contacts that know it, whenever the name differs from the last one sent (`creator_identity_name_sent`) and one of those contacts is online.
+- **A post's identity follows its privacy (D10c).** In creator mode, public posts are signed by the creator identity and friends-only posts by the personal identity (`composeAndBroadcastPost`). A signed post's author cannot change, so an edit that crosses that line moves the post (`MeshSocialRepository.identityMoveFor`, `moveMeshPostToOtherIdentity`): it is published again by the other identity, with a new id and the same time, attachment and clearnet link, and the old copy is deleted. Likes and comments stay with the old copy. The edit sheet explains this; a personal post made public offers *Move to creator* (default) or *Keep personal*. New posts default to Public in creator mode.
+- **Attachments name the sending identity (D10c).** `MediaMetadata.originNode` and `ownerId` are set to the identity that sends the post, comment, DM or group message. The UI fills in the personal ones, which put the personal onion and key into creator posts. These fields are not signed.
+- **Burning or replacing (D10e).** After the old identity's `USER_EXIT`, the contacts bound to it are forgotten (`NoSlopRepository.dropCreatorContacts`), so the new identity never talks to them and links the two. On a replace by import, contacts in the file are kept.
+- **`IdentityRouter`** (`data/IdentityRouter.kt`, `NoSlopRepository.identityRouter`) is the one place that decides which identity and profile a packet for a given peer is built from:
+  - `knowsUsAsCreator(peer)`: `contact_identity_<peer>` = burnable; otherwise, before the user decides, `requested_identity_<peer>` = burnable. A peer with neither setting counts as a creator contact only when it is a temporary row we never accepted (a discoverable node, a stranger). An accepted contact without a binding knows the personal identity.
+  - `forPeer(peer)`: the creator identity for creator contacts, the personal identity otherwise. **Null** when a creator contact remains but the creator identity is gone (creator mode off). Callers then send nothing. They used to fall back to the personal identity.
+  - `forKey(pub)`: one of our identities with its own profile. `forPostAuthor(author)`: the creator identity on our own creator posts and on posts by creator contacts.
+- **Users** (all sends towards a specific peer): handshakes (request, probe, accept: creator handle, bio, avatar), DMs, DM sync answers (now look up the messages we sent *as that identity*, and resend as it), chat reactions, typing, follow, peer removal, inventory sync requests, sync answers, media requester/responder identity, creator posts and edits (creator handle and avatar), comments (`forPostAuthor`), comment edits, and the group member handle for our own keys (`NoSlopRepository.ownHandleFor`).
+- **Sync to a creator contact** (`SyncPacketHandler`, `requestInventorySync`) leaves out everything the personal identity wrote: its posts, comments on them, and its own comments and reactions. The answer's envelope is the routed identity. In creator mode it used to be the creator key for everyone, so friends also dropped the friends-only posts in the answer.
+- **Presence.** The personal `ANNOUNCE_PEER` goes only to contacts of the personal identity. The creator identity sends its own `ANNOUNCE_PEER` (creator contacts never had one before) and, when discoverable, the `ANNOUNCE_DISCOVERABLE` with the creator profile. Both go out from `announceCreatorPresence`, a random 5–50 s after the personal announce, so the two never arrive together.
+- **Reactions and votes (E4, 2026-10-13).** Reactions and votes on posts and comments are made by the identity that comments on that post (`forPostAuthor`): the creator identity on our own creator posts and on posts by creator contacts, the personal identity otherwise. Taking one back goes out from the identity that made it (`MeshSocialRepository.ownIdentityWith`), so reactions made by the personal identity before E4 are still removed correctly. Before E4 they were always made by the personal identity, and third-party relays could carry them to creator contacts.
+- **"Share Permanent Identity" (E4).** In a temporary chat (a contact bound to the secondary identity), the request comes from the personal identity (`sendConnectionRequest(..., shareMainIdentity = true)`); its nonce is kept in `main_share_nonce_<key>`. The contact stays bound to the secondary identity until the `USER_HANDSHAKE` answering that nonce arrives; `completeMainIdentityShare` then removes the binding and clears `isTemporary`. A pending request is probed from the personal identity too.
+- **Not changed:** group traffic keeps its own identity rules (`groupMemberIdentity`). With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying (still open from D04).
+- Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`, `CreatorPostIdentityD10cTest`, `CreatorIdentityArchiveD10dTest`).
+
+### 3.7.2 Creator Identity File (`CreatorIdentityArchive`, D10d/D10e, 2026-10-13)
+
+The creator identity can be backed up, and restored or moved to another node, on its own.
+
+- **Where.**
+  - *Back up:* the Studio page, *Back Up Creator Identity*. The passphrase is typed twice and needs at least 10 characters; spaces at either end are ignored.
+  - *Import:* the Studio page, *Import Creator Identity*, on a creator node. A warning comes first (with *Back Up First*), and the file's identity then replaces this node's creator identity.
+  - *Restore:* Settings, Creator Node, *Restore Creator Identity*, on a node that is not a creator yet. A different secondary identity already on the node is replaced only after the user confirms.
+- **Contents.** The creator keys, the Studio profile and donation link, the contacts bound to the creator identity, the creator's posts and their media files, and each file's recorded SHA-256. Rows are written as explicit JSON fields, so R8 renaming cannot break the file.
+- **Format "NSC1"** (integers big-endian):
+  - `header` = `"NSC1"` | version (1 byte, 1) | Argon2id iterations (1 byte, 3) | Argon2id memory in KiB (4 bytes, 65536) | salt (16) | nonce prefix (7).
+  - `key` = Argon2id(passphrase, salt, iterations, memory, parallelism 1), 32 bytes.
+  - `body` = chunks, each: last flag (1 byte) | length (4) | AES-256-GCM of at most 1 MiB of plaintext. The nonce is the nonce prefix, the chunk number (4) and the last flag; the associated data is the header.
+  - The last chunk is always written (it may be empty) and nothing may follow it, so a truncated, reordered, modified or extended file is refused. The plaintext is a zip: `manifest.json`, `contacts.json`, `posts.json`, `media/<media id>`.
+  - Each chunk is authenticated on its own, so a large video never has to fit in memory. Since round E3 the full backup uses the same chunk records (NSG2, §17.8).
+- **Restore rules.**
+  - Everything is staged and authenticated before anything on the node changes. The burnable-key checks are the full backup's (`IdentityRepository.burnableIdentityProblem`).
+  - The restore installs the keys, Studio profile and donation link, and turns creator mode on. It then adds contacts (bound to the creator identity), posts (if not present) and media (marked as our own), and registers the creator onion with Tor.
+  - A contact the node already knows by its personal identity is left alone and counted.
+  - Restoring the same file again changes nothing.
+  - The result dialog reminds the user to turn creator mode off on the old device: two devices with one creator identity compete for one onion address.
+
 ### 3.8 BIP39 Mnemonic
 
-`MnemonicGenerator.kt` (259 LOC) generates a 12-word mnemonic using the full
-2048-word official BIP39 English wordlist (milestone 85 — earlier versions
-used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
-`docs/ANALYSiS.md`). The mnemonic seeds the AES-256-CBC key used by
-`BackupManager` for encrypted export/import.
+`MnemonicGenerator.kt` generates a 12-word mnemonic using a 2053-word
+BIP-39-shaped wordlist providing ~132 bits of entropy (see `NOSLOP_WORDLIST_TRUTH_V1`
+and [PROJECT_STATUS.md](PROJECT_STATUS.md)). While shaped like BIP-39, it is not
+strictly BIP-39 compatible (25 custom words, 20 canonical words omitted, and no
+checksum word). The mnemonic seeds the PBKDF2-HMAC-SHA512 key used by
+`BackupManager` for encrypted export/import using Android's Storage Access Framework.
 
 ---
 
@@ -286,28 +467,70 @@ used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
   "hidden-service-only" architecture (milestone 13).
 - **Wire format**: newline-delimited JSON. Each line is one `NetworkPacket`
   serialized via Gson (`packet.toJson()` / `NetworkPacket.fromJson(line)`).
-- **Outbound sends** (`sendPacket(onionAddress, port, packet)`):
+  Framing lives in `mesh/MeshFraming.kt` (`FrameReader`: strips `\r`, skips
+  blank lines, drops an unterminated trailing frame, throws
+  `FrameTooLargeException` past `MAX_PACKET_CHARS` = 4 M chars). At most 16
+  inbound connections are served at once; read timeout 45 s.
+- **Envelope signature (review C09, round E2, 2026-10-13; hard protocol
+  break).** Every packet on the wire carries `env_v`, `env_ts` and `env_sig`
+  (`mesh/EnvelopeAuth.kt`; format in WIRE_PROTOCOL_REFERENCE.md §1.1).
+  Outbound, `prepareForWire` signs with whichever of our identities is the
+  `senderId`; a relay that keeps someone else's sender
+  (`GossipService.preservesOriginalSender`) travels with that sender's own
+  envelope, which stays valid because `hops` is not covered; anything else is
+  not sent. Inbound, the listener and the handshake reply path call
+  `acceptEnvelope` before `handleIncomingPacket`: a packet that is unsigned,
+  of another version, more than `MAX_SKEW_MS` (1 h) from our clock, badly
+  signed, or a replay is dropped. A packet is recorded as processed (replay
+  guard, 20,000 entries, kept for twice the clock window) only after a
+  handler accepted it, so one dropped earlier (firewall, not yet trusted) is
+  judged afresh next time. Packets built inside the app (Hub pulls, Hub web-UI
+  DMs) never cross the socket and are not checked (known gap).
+- **Reply channel (2026-10-07, Round A2)**: every inbound connection gets a
+  write-serialised `ReplyChannel = suspend (NetworkPacket) -> Boolean`, passed
+  through `NoSlopRepository.handleIncomingPacket(packet, reply)` →
+  `MeshPacketHandler` → handlers. Only `HandshakePacketHandler.handleConnectionRequest`
+  uses it (after authentication, once per request timestamp). The requester
+  side is `exchangeOverSocket`, which keeps a `CONNECTION_REQUEST` socket open
+  for `HANDSHAKE_REPLY_WINDOW_MS` (6 s), and `probeConnectionRequest` (own
+  2-slot pool, 30 s connect timeout) used by
+  `MeshSocialRepository.startOutgoingRequestPoll` (every 15 s for 10 min while
+  a request is pending). Protocol detail: WIRE_PROTOCOL_REFERENCE.md §3.1.
+- **Current send policy (2026-10-07, regression restore R1)** — the numbered
+  steps below are the original design; the code today does:
+  - **Tor gate**: sends only when `TorService` is `READY`; handshakes and
+    DM-priority packets wait up to 60 s (`awaitReady`, which returns `false`
+    at once when Android refused to start Tor in the background); everything
+    else is not sent during bootstrap.
+  - **Cooldown gate**: only `ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE` and
+    `USER_EXIT` are skipped for a peer in failure cooldown
+    (`respectsPeerCooldown`). User content and sync are always attempted.
+  - **Pools**: `dmSemaphore(4)` (blocking acquire) for `MESSAGE`,
+    `DELETE_MESSAGE`, `DM_SYNC_REQUEST`, `DM_ACK`, `CHAT_REACTION`, `GROUP_*`
+    **and** `CONNECTION_REQUEST` / `USER_HANDSHAKE` (`usesPrioritySlot`);
+    `mediaSemaphore(3)` (blocking) for `MEDIA_*`; `bulkSemaphore(4)` for the
+    rest — background presence and typing/read receipts are dropped if no
+    permit is free, other bulk packets wait up to 4 s.
+  - **Attempts / connect timeouts**: handshakes 2 × 35 s, DM-priority 2 × 25 s,
+    media 2 × 28 s, typing/read receipts 1 × 10 s, everything else 1 × 15 s.
+  - **Failure accounting**: a failed send counts toward the peer's cooldown
+    unless it is `TYPING`, `READ_RECEIPT` or `DM_ACK` (`countsAsPeerFailure`).
+- **Outbound sends** (`sendPacket(onionAddress, port, packet)`, original design):
   1. `TorService.waitForProxy(timeoutSeconds = 5)` — abort if SOCKS5 not
      reachable.
-  2. Up to **5 attempts**. Each attempt opens a fresh
-     `Socket(Proxy(SOCKS, 127.0.0.1:9050))`, calls
+    2. Up to **3 attempts** (for critical packets; 2 for background). Each attempt opens a fresh
+     `Socket(Proxy(SOCKS, 127.0.0.1:TOR_SOCKS_PORT))`, calls
      `socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000)`
-     (30s connect timeout — onion circuit builds can be slow), writes one
+     (30s connect timeout — forces a fast-fail so we can fallback to Gossip Relay if the HSDir hasn't propagated yet), writes one
      line via `PrintWriter(autoFlush=true)`, then closes the socket.
-  3. Backoff between attempts: `delay(attempt * 3000L)` ms (3s, 6s, 9s, 12s).
-  4. Returns `true` on first successful write, `false` if all 5 attempts
-     fail.
-
-  Note: `docs/PROJECT_STATUS.md` milestone 14 describes "3 retries with 2s/4s
-  backoff" — the current code (`MeshTransport.kt`, read directly) implements
-  **5 attempts with `attempt*3000ms` backoff** (3s/6s/9s/12s for attempts
-  2–5). The status doc appears to predate a later tuning pass.
+  3. Backoff between attempts: `delay(attempt * 4000L)` ms for critical packets, or `2000L` otherwise.
+  4. Returns `true` on first successful write, `false` if all attempts fail.
 
 ### 4.2 Gossip Protocol (`GossipService.kt`)
 
 `GossipService` is a Kotlin `object` (process-wide singleton), initialized via
-`initialize(peerDao, transport, localPublicKeyB64)` from
-`NoSlopRepository.saveLocalIdentity`.
+`initialize(peerDao, transport, localPublicKeyB64, getMeshFilterSettings, checkEntityExists)` from
+`NoSlopRepository.saveLocalIdentity` and `NoSlopApp.onCreate`.
 
 **`processIncoming(packet)` pipeline** (returns `true` if the packet should be
 processed locally by `MeshPacketHandler`):
@@ -323,17 +546,19 @@ processed locally by `MeshPacketHandler`):
    (`now - it > 10000` entries are pruned), max **20** packets per window. If
    exceeded, drop with a `FIREWALL`-tagged warning log.
 4. **Firewall**: For any packet that is **not**
-   `CONNECTION_REQUEST`/`USER_HANDSHAKE` (connection packets) and **not**
-   `MEDIA_RELAY_REQUEST`/`MEDIA_RECOVERY_FOUND` (media relay packets), the
+   `CONNECTION_REQUEST`/`USER_HANDSHAKE` (connection packets) and **not** a
+   `MEDIA_*` packet (plus the other exemptions in the code), the
    sender must exist in `peerDao` **and** have `isTrusted == true`, or the
-   packet is dropped with a `FIREWALL BLOCKED` warning.
+   packet is dropped with a `FIREWALL BLOCKED` warning. `MEDIA_*` packets from
+   an untrusted sender are capped at 2 MB per 60 s, except a `MEDIA_CHUNK` for
+   a download this node has in progress (Round B).
 5. **Routing decision**:
+   - `MEDIA_*` packets (`isPointToPointMediaType`, Round B) are never
+     forwarded: addressed to another node → dropped (`false`);
+     `MEDIA_RELAY_REQUEST` → `MediaManager.handleRecoveryRequest(...)`, return
+     `false`; anything else → return `true` (process locally only).
    - If `packet.targetUserId != null` and `!= localPublicKeyB64` → call
      `forwardPacket(packet)` and return `false` (not for us, just relay).
-   - Else if `type == "MEDIA_RELAY_REQUEST"` → `handleRelayRequest(...)`,
-     also `forwardPacket(packet)`, return `false`.
-   - Else if `type == "MEDIA_RECOVERY_FOUND"` → `handleRecoveryFound(...)`,
-     **does not forward** (follows the reply chain back), return `true`.
    - Else (public broadcast addressed to us or untargeted) → `forwardPacket(packet)`
      **and** return `true` (process locally *and* relay).
 
@@ -342,6 +567,8 @@ processed locally by `MeshPacketHandler`):
 - Builds a **new** `NetworkPacket` with:
   - same `id`, `type`, `payload`, `signature`, `targetUserId`
   - `hops = currentHops - 1`
+  - the original envelope fields when the sender is kept (see §4.1, Envelope
+    signature); otherwise MeshTransport signs the new envelope
   - **`senderId` re-stamped to the local node's public key** — this is the
     "sender re-stamping" privacy mechanism: a peer receiving a forwarded
     packet sees *you* as the sender, not the original (possibly
@@ -353,46 +580,54 @@ processed locally by `MeshPacketHandler`):
   `scope.launch { tx.sendPacket(...) }` — fire-and-forget, no error
   aggregation.
 
-**`broadcast(packet)`** (used for locally-originated content): sends the
-**unmodified** packet to every `isTrusted && publicKeyB64 != localPublicKeyB64`
-peer, each in its own coroutine.
+**`broadcast(packet)`** (used for locally-originated content): sends to every
+`isTrusted && publicKeyB64 != localPublicKeyB64` peer (friends only for
+friends-only packets), each in its own coroutine. Since 2026-10-09 (D04) each
+copy goes through `outboundFor(packet, peerKnowsCreator, mainPub, creatorPub)`:
+- written by the personal identity, for a creator contact → **not sent**;
+- written by the creator identity, for a contact of the personal identity →
+  sent the way a relay of someone else's packet looks (hops one lower; envelope
+  = the relaying node, or the original sender for the types a relay keeps it
+  for: `MESSAGE`, `ANNOUNCE_DISCOVERABLE`, `CHAT_REACTION`, `DELETE_MESSAGE`,
+  `GROUP_*`). `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT`, `FOLLOW`,
+  `UNFOLLOW` and `PEER_REMOVED` are never sent across identities;
+- anything else → the envelope names the identity the peer knows.
+Group and friends-only packets keep their existing envelope rule, except
+`GROUP_QUERY` (E4, 2026-10-13): it names its requester in the payload, and the
+answering node requires requester = sender (G1, round E2), so it takes the
+`outboundFor` route above instead of being re-stamped per peer. Before, every
+copy was re-stamped per peer, so creator contacts received our personal posts,
+comments, reactions, presence (with the personal onion) and profile from the
+creator node, and friends received creator posts stamped with the personal key.
 
-### 4.3 Media Relay State Machine (`GossipService.RelayState`)
+`forwardPacket` likewise stamps relays to creator contacts with the creator key
+(it used the personal key for everyone).
 
-```kotlin
-data class RelayState(
-    val mediaId: String,
-    val listeners: MutableSet<String> = ConcurrentHashMap.newKeySet(),
-    var sourceNode: String? = null,
-    val metadata: MediaMetadata? = null,
-    val establishedAt: Long = System.currentTimeMillis(),
-    var lastActivity: Long = System.currentTimeMillis()
-)
-```
-Stored in `relayStates: ConcurrentHashMap<String, RelayState>`. **Has TTL
-cleanup**: a periodic 60-second sweeper evicts any entry whose
-`lastActivity` is more than 5 minutes stale, and `MediaPacketHandler` (the
-extracted media-domain handler, see §4.4) refreshes `lastActivity` on every
-`MEDIA_CHUNK`. This closes the unbounded-memory-growth gap noted in
-[GAP_ANALYSIS.md §6](GAP_ANALYSIS.md#6-trusted-media-relay--conceptually-present-streaming-semantics-differ).
+### 4.3 Media Recovery (relay state machine removed, Round B)
 
-- **`handleRelayRequest(senderId, packet)`**: checks
-  `File(transport.repository.context.filesDir, "media")` for a file named
-  `mediaId`. If present, immediately sends `MEDIA_RECOVERY_FOUND` (hops=1)
-  directly back to `senderId`. If absent, registers `senderId` as a listener
-  in `relayStates[mediaId]` (creating the entry with `payload.metadata` if
-  new).
-- **`handleRecoveryFound(senderId, packet)`**: sets `relayStates[mediaId].sourceNode
-  = senderId`, then for each listener (excluding self), sends a
-  `MEDIA_RECOVERY_FOUND` packet (hops=1) to that listener's onion address
-  (looked up via `peerDao.getPeerByPublicKey`).
-- **Zero-copy chunk forwarding**: once a relay route is established, incoming
-  `MEDIA_CHUNK` packets for that `mediaId` are live-forwarded to every
-  registered listener via `GossipService.forwardRelayChunk`, in addition to
-  the relay node downloading its own copy — see
-  [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented)
-  for the exact mechanism. This was previously an open gap; it is now
-  implemented.
+`GossipService.RelayState`, `relayStates`, `handleRelayRequest`,
+`handleRecoveryFound`, `forwardRelayChunk`, `delegateUnknownMediaRequest`,
+`removePeerFromRelays` and the stale-route sweeper were removed (review
+finding D03). Any node could register as a listener for any media id and be
+sent copies of its chunks, and recovery requests carried the media id 6 hops
+across the mesh.
+
+Recovery is now one hop:
+- **`MediaManager.attemptMeshRecovery`** (when a download has no reachable
+  source) sends `MEDIA_RELAY_REQUEST {media_id}` (hops=1, `targetUserId` set)
+  to each direct peer that has an onion, is not BLOCKED, and is trusted or a
+  member of the group owning the media. Each request goes out as the identity
+  that peer knows (`requesterIdentity` for group members, `responderIdentity`
+  otherwise).
+- **`MediaManager.handleRecoveryRequest(senderId, payload)`** answers
+  `MEDIA_RECOVERY_FOUND {media_id, onion_address}` (hops=1, as
+  `responderIdentity`) only if the file is held locally, the asker's onion is
+  stored, and `isMediaAuthorizedForSender` allows the asker. Otherwise it is
+  silent.
+- **`MediaManager.handleRecoveryFound`** switches the download to the
+  answering peer's **stored** onion; the onion in the payload is not trusted.
+
+See [WIRE_PROTOCOL_REFERENCE.md §6.1](WIRE_PROTOCOL_REFERENCE.md#61-recovery-direct-peers-only--round-b).
 
 ### 4.4 Incoming Packet Dispatch (`MeshPacketHandler.kt`)
 
@@ -431,6 +666,49 @@ algorithm, the extended `SyncResponsePayload` with `comments`/`reactions`,
 and verification rules — is in
 [WIRE_PROTOCOL_REFERENCE.md §4](WIRE_PROTOCOL_REFERENCE.md#4-inventory-based-sync-inventory_sync_request).
 
+### 4.6 Mesh Broadcast Filters
+
+User-configurable content-type filters that gate which packets are pushed to
+and pulled from the mesh network. Filters operate **exclusively at the network
+sync layer** — all local database writes (reactions, comments, votes, posts)
+always succeed regardless of filter state.
+
+**Data model** (`MeshFilterSettings.kt`): 12 boolean flags (6 content types ×
+2 directions). Persisted as JSON in `app_settings["mesh_filter_settings"]` via
+`SettingsRepository`, exposed reactively as a `StateFlow<MeshFilterSettings>`.
+
+| Filter | Default | Outgoing gate | Incoming gate |
+|---|---|---|---|
+| Reactions | **off** | Unrestricted (broadcasts freely to preserve organic network score) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingReactions` (exempt if anchor tracked locally) |
+| Comments | on | Unrestricted (broadcasts freely to preserve conversational continuity) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingComments` (exempt if anchor tracked locally) |
+| Text Posts | on | Unrestricted (native mesh broadcasts always sent) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingTextPosts` |
+| Clearnet Shares | on | `MeshSocialRepository.composeAndBroadcastPost`: gated by `allowOutgoingClearnetShares` | `GossipService.processIncoming`: step 4.5, checks `allowIncomingClearnetShares` |
+| Image Posts | on | Unrestricted (native mesh broadcasts always sent) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingImagePosts` |
+| Video Posts | on | Unrestricted (native mesh broadcasts always sent) | `GossipService.processIncoming`: step 4.5, checks `allowIncomingVideoPosts` |
+
+**"Already shared" exemption** (incoming): When a reaction, vote, or comment
+packet targets a post or comment that **already exists** in the local database
+(verified via `NoSlopRepository.checkEntityExistsLocally(type, id)` → queries
+`postDao.hasPost` / `commentDao.hasComment` / `messageDao.hasMessage`), the
+packet is exempt from the incoming filter and is always accepted. This ensures
+engagement on tracked content is never silently dropped.
+
+**Clearnet bridging guard** (outgoing): `reactToMeshPost` accepts an
+`isBridging: Boolean` parameter. When `reactToFeedItemWithType` calls it for a
+newly-created clearnet anchor post (`existingCount == 0`), `isBridging = true`
+causes the reaction broadcast to respect `allowOutgoingReactions`. For
+reactions on posts already in the database, `isBridging = false` and the
+broadcast always fires.
+
+**DM chat exemption**: `CHAT_REACTION` packets are completely excluded from
+both the incoming firewall filter check in `GossipService.processIncoming` and
+the outgoing gate in `MeshSocialRepository.reactToChat`. Direct messages and
+their reactions are never affected by mesh filter settings.
+
+**UI**: `MeshFiltersScreen.kt` (Material 3) — accessible from Settings →
+Content tab → Filtering & Content Mix → Mesh Filters button. 6 content-type cards, each with
+Incoming/Outgoing toggle columns.
+
 ---
 
 ## 5. Wire Protocol — `NetworkPacket` and Payloads
@@ -455,37 +733,122 @@ just to the wire protocol:
 ### 6.1 Chunking Constants (`MediaManager.kt`)
 
 ```kotlin
-private const val CHUNK_SIZE = 256 * 1024       // 256 KB
-private const val MAX_CONCURRENCY = 4
-private const val DOWNLOAD_TIMEOUT_MS = 60000L  // 60s
+const val MIN_CHUNK_SIZE = 128 * 1024        // 128 KB (Tor-optimized minimum)
+const val MAX_CHUNK_BYTES = 256 * 1024       // C03: largest request a sender serves
+const val MAX_CHUNK_SIZE = MAX_CHUNK_BYTES   // downloader window cap (was 1 MB)
+const val DOWNLOAD_TIMEOUT_MS = 90000L       // per-chunk inflight timeout
+private const val MAX_CONCURRENCY = 2        // Max 2 concurrent chunk requests
+private const val MAX_OUTBOUND_BYTES_PER_WINDOW = 16L * 1024 * 1024 // per requester per 60 s
 ```
-256 KB matches gChat's documented chunk size exactly (`docs/ARCHITECTURE.md`
-§2: "Files are split into 256KB chunks").
+The window starts at 256 KB, grows by 32 KB per received chunk
+(`grownChunkSize`, capped at `MAX_CHUNK_SIZE`) and halves on a timeout (not
+below `MIN_CHUNK_SIZE`). **The cap must never exceed `MAX_CHUNK_BYTES`**: until
+2026-10-07 it was 1 MB, so from the third request on every request was
+rejected by the sender and re-queued unchanged — recorded videos stopped at
+about 9 % (2 of 21 chunks). Pending ranges above 256 KB are split with
+`splitToServable`; the sender-side bounds check is `chunkRequestRejection`.
+`MediaChunkWindowTest` ties the two sides together. The outbound limit was
+raised from 5 MB to 16 MB per 60 s per requester (≈ 270 KB/s), since 5 MB was
+below normal Tor throughput and tripped mid-transfer; requests over it are
+dropped and retried after the 90 s chunk timeout.
 
-**Concurrency is no longer a flat cap.** `MAX_CONCURRENCY = 4` remains in the
-file, but only as the *initial* AIMD (Additive-Increase/Multiplicative-
-Decrease) window value — it no longer hard-caps in-flight chunk requests at
-steady state. Each download tracks a per-download AIMD state machine:
+**AIMD Congestion Control.** Each download tracks a per-download AIMD state
+machine tuned for Tor's characteristics:
 
-- `windowSize` starts at `4.0`, `ssthresh` starts at `128.0`.
-- **Slow start**: while `windowSize < ssthresh`, each received chunk does
-  `windowSize += 1`.
-- **Congestion avoidance**: once `windowSize >= ssthresh`, each received
-  chunk does `windowSize += 1 / windowSize` (sub-linear growth).
-- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(2.0,
-  windowSize * 0.5)` and `windowSize` resets to `1.0` (classic Reno-style
-  AIMD).
-- `windowSize` is capped at `128.0`.
+- `currentChunkSize` starts at `128 KB`, `currentConcurrency` starts at `1.0`,
+  `ssthresh` starts at `2.0`.
+- **Slow start**: while `currentConcurrency < ssthresh`, each received chunk does
+  `currentConcurrency += 1`.
+- **Congestion avoidance**: once `currentConcurrency >= ssthresh`, each received
+  chunk does `currentConcurrency += 1 / currentConcurrency` (sub-linear growth).
+- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(1.0,
+  currentConcurrency * 0.5)` and `currentConcurrency` resets to `1.0`.
+- `currentConcurrency` is capped at `2.0` (the `MAX_CONCURRENCY` constant).
+- `currentChunkSize` dynamically grows on success (up to `MAX_CHUNK_SIZE`) and
+  shrinks on timeout (down to `MIN_CHUNK_SIZE`).
 - New `MEDIA_REQUEST`s for additional chunks are only issued while
-  `inflight.size < windowSize.toInt()` — i.e. `windowSize` (rounded down) is
-  the live concurrency cap.
+  `inflight.size < currentConcurrency.toInt()`.
 
 This mirrors the algorithm documented for `hainet-social/src/congestion.rs`
 and directly resolves the gap flagged in
-[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop)
-(that section's prose is now historical — see its own checklist in §12,
-which already marks this item done). For full detail see
+[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop).
+For full detail see
 [WIRE_PROTOCOL_REFERENCE.md §5](WIRE_PROTOCOL_REFERENCE.md#5-media-packet-family-6-types).
+
+### 6.1.1 Media Access Control (`MediaManager.isMediaAuthorizedForSender`)
+
+Evaluated for every `MEDIA_REQUEST` and every recovery request. **Deny by
+default (Round B, D02).** Own identities (main and burnable) are always
+allowed. Everyone else is decided only by the `media_owner` index
+(`isAuthorizedByOwnerIndex`); a BLOCKED peer is refused outright. For each
+owner row of the media id:
+- `POST`/`COMMENT` with privacy `public` → anyone;
+- `private` → the author only;
+- anything else (friends) → the author and direct friends (`isFriend`:
+  accepted and not temporary, and the contact is not bound to our burnable
+  identity);
+- `DM` → `ownerId == sender`;
+- `GROUP` → members and admin of that group, minus `getBannedMembers()`.
+
+Any match allows. Media with no owner row is refused. The legacy post, DM and
+group table scans, the `.mine` sentinel check and the "any trusted peer"
+fallback were removed; the index already covers every attachment the DAOs
+store. Comment media had no allow path from `5f9a127` until the index.
+
+**`accessKey` decision.** D02 also suggested issuing and requiring a per-media
+`accessKey`. This is deliberately not done. Every request is now decided by
+who the requester is, and a bearer key would not narrow that: anyone allowed
+to see the post or message already receives the key with it, and anyone not
+allowed is refused by identity regardless. Adding it would mean a new field in
+signed post/comment/DM payloads, back-fill for existing media, and refusing
+older clients' requests, for no extra protection. `MediaRequestPayload.access_key`
+is accepted and ignored; `MediaOwnerDao.attachSecrets` still stores a key if
+one ever arrives.
+
+**Who the reply goes to (`replyOnionFor`, R6b/C03).** A requester stored as a
+peer gets the reply at its stored onion. A requester that is not a contact
+(e.g. a reader of a public post re-shared by someone else) is served only if
+its `MEDIA_REQUEST` is signed (`mediaRequestSigningString`, domain
+`noslop-media-req-v1`, see WIRE §6), the `timestamp` is within ±5 min, the
+request has not been seen before (LRU of 4096), and the signature verifies
+against `senderId`. The reply then goes to `deriveOnionAddress(senderId)`,
+which only the key holder can host. Every refusal is logged at WARN (R6c).
+
+**Which identity answers (`responderIdentity`).** Metadata, chunks and
+`MEDIA_RECOVERY_FOUND` are sent as the local identity the request was
+addressed to (`targetUserId`), else the identity the peer knows
+(`IdentityRouter.knowsUsAsCreator`, §3.7.1), else main. The responder rate limit (16 MB per requester
+per 60 s) now waits for the window to reset, up to 3 attempts, instead of
+dropping the request.
+
+**Requesting side.** `MediaManager.requesterIdentity` picks the identity a `MEDIA_REQUEST`, its `origin_onion` and the final `MEDIA_TRANSFER_ACK` are sent as:
+- group media → our member key in that group (`groupMemberIdentity`);
+- DM media → the identity bound to the contact (`contact_identity_*`);
+- holder is not a peer at all → the burnable key (main if none);
+- anything else → the burnable key towards a creator contact (`IdentityRouter.knowsUsAsCreator`, §3.7.1), else the main key.
+
+Requests are addressed (`targetUserId` = the source peer, or the media's
+`ownerId`) with hops=1 and are never gossiped. `startDownload` no longer sends
+`ANNOUNCE_DISCOVERABLE` for any media; when no source onion is known it goes
+straight to recovery. The download address for message media is the
+authenticated sender's peer onion, falling back to `originNode`. Group
+attachments are stamped with the sender's member identity
+(`groupSenderIdentity`).
+
+**Still open.** `handleMediaChunk` accepts any offset of a download in
+progress from the source; the C17 whole-file SHA-256 check is what rejects a
+corrupted result.
+
+The `media_owner` table is maintained by the DAOs (`PostDao.insertPost`,
+`CommentDao.insertComment`, `MessageDao.insertMessage`, edit/orphan/delete
+paths), so every attachment is registered without callers having to remember.
+Comment media inherits the parent post's privacy; unknown privacy is stored as
+`friends`. `MediaOwnerDao.attachSecrets` adds an `accessKey`/`sha256` without
+ever overwriting one. `NoSlopRepository.recordMediaDigest` stores a verified
+C17 digest on all owner rows; `mediaDigestFor` returns it (or hashes the local
+file and caches it) for re-serving v2-signed posts/comments through sync and
+for `reissueLocalPostsWithCanonicalSignatures`, which keeps a valid v2
+signature and upgrades a legacy one to v2 when the digest is known.
 
 ### 6.2 Storage Layout
 
@@ -495,16 +858,32 @@ based on a `type` prefix match (`"image"`, `"video"`, `"audio"`, else
 Downloads). Falls back to `context.filesDir` if external storage is
 unavailable.
 
+**Temporary Processing Cache.** Media compression and stream copy buffers created
+prior to post creation use `context.externalCacheDir ?: context.cacheDir`. Writing
+large temporary files (> 20 MB) directly to internal `context.cacheDir` causes
+Android's `installd` daemon to purge them during active operations when internal storage
+quotas are reached. `externalCacheDir` is exempt from `installd` internal quota purging,
+ensuring compressed media persists long enough to be moved to permanent `NoSlop` media directories.
+
 ### 6.3 Auto-Download Policy (`MediaManager.checkAndAutoDownload`)
 
 Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
-- `settings.enabled` — global kill switch.
-- Context `"friends"`: requires `settings.autoDownloadFriends` **and** the
-  author must be a `peerDao`-known, `isTrusted == true` peer.
-- Context `"private"` (DMs): requires `settings.autoDownloadPrivate`.
+- `settings.enabled` — global kill switch (UI label: "Automatic Media Download").
+- `metadata.type == "file"` — **file attachments are never auto-downloaded**.
+  They must be manually tapped by the user to initiate sync. This guard runs
+  before any trust or size checks.
+- **Trust-based hierarchy** (replaces the earlier context-string approach):
+  1. Look up `repo.peerDao.getPeerByPublicKey(authorId)` to determine trust.
+  2. If `peer?.isTrusted == true` (a contact): requires
+     `settings.autoDownloadFriends` to be enabled.
+  3. If the peer is unknown or untrusted (a public broadcast): requires
+     `settings.autoDownloadPublic` to be enabled. Toggling this ON in the
+     Settings UI triggers a confirmation dialog warning the user that they
+     will download 3rd-party media.
 - `settings.maxFileSizeMB` — if `metadata.size > maxBytes && size > 0`, skip
   (a `size == 0` placeholder, as used by `MediaProxyService`'s synthetic
-  metadata, bypasses this check).
+  metadata, bypasses this check). The Settings UI slider allows values from
+  1MB to 1000MB (1GB), defaulting to 250MB.
 
 ### 6.4 Local Streaming Proxy (`MediaProxyService.kt`)
 
@@ -544,6 +923,55 @@ Mesh posts with media generate a small, high-compression Base64 thumbnail
 peers can render a preview immediately without waiting for the full chunked
 transfer.
 
+The `BlurredImageBackground` composable (in `MediaComponents.kt`) renders
+this thumbnail as both a blurred background fill and a centered foreground
+image. The `error` and `fallback` painters are explicitly set to the Base64
+thumbnail bitmap, ensuring the preview persists permanently if the high-res
+clearnet URL is empty or fails to load (common for mesh-native posts).
+
+### 6.6 Download Resume (`MediaManager.startDownload`)
+
+Downloads survive app restarts. When `startDownload()` is called for a media
+item that already has an existing `.part` file on disk:
+
+1. If `0 < partFile.length() < totalBytes` — the download resumes from the
+   existing byte offset. `contiguousBytes` and `nextRequestOffset` are set to
+   `partFile.length()`, and the progress bar immediately shows the correct
+   percentage.
+2. If `partFile.length() >= totalBytes` — the part file is already complete
+   and is finalized immediately without re-downloading.
+3. If the part file is zero bytes — it is deleted and the download starts
+   fresh.
+
+This replaced the previous behavior where `startDownload()` unconditionally
+called `dl.partFile.delete()`, forcing every download to restart from 0%
+after an app kill/restart.
+
+### 6.7 Media Compression Pipeline
+
+Media attachments are automatically compressed before being stored in the
+mesh media directory and broadcast to peers. This runs in both the feed post
+composer (`UnifiedFeedTab.kt`) and the DM composer (`ChatThreadScreen.kt`):
+
+**Video transcoding** (threshold: > 20MB):
+- Uses `VideoCompressor.compressVideo()` (Media3 Transformer) to transcode
+  the video into a smaller format.
+- A "Compressing... X%" progress indicator is shown during transcoding.
+- The compressed file replaces the original attachment before
+  `copyFileToMediaDirectory` is called.
+
+**Image compression** (threshold: > 500KB):
+- The image is decoded into a bitmap and proportionally scaled down to fit
+  within a 1280×1280 pixel bounding box.
+- Re-compressed as JPEG at 75% quality.
+- The compressed file is only used if it is actually smaller than the
+  original (failsafe for already-optimized images).
+
+In the DM composer, `buildMediaMetadata()` is a `suspend` function that runs
+on `Dispatchers.IO`, with a coroutine launched from `rememberCoroutineScope()`
+on the send button click. This prevents the UI from freezing during
+compression of large files.
+
 ---
 
 ## 7. Clearnet Aggregator
@@ -551,12 +979,11 @@ transfer.
 ### 7.1 HTTP Client Separation (`net/HttpClientProvider.kt`)
 
 Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
-- `clearnetClient: OkHttpClient` — no proxy, used by `FeedParser` and all
-  `feeds/api/*Client` classes. Configured with `okhttp-dnsoverhttps`
-  (Cloudflare `1.1.1.1`) per milestone 51 to avoid DNS resolution failures
-  without forcing all traffic through Tor.
-- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:9050`, used exclusively
-  by `MeshTransport` and `MediaProxyService`'s mesh-fetch path.
+- `rawClearnetClient: OkHttpClient` — no proxy, used for direct network fetches avoiding Tor (such as background update checks). Configured with a cascading DNS (System -> Cloudflare DoH -> Google DoH) to avoid DNS resolution failures.
+- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used by `MeshTransport` and mesh data paths.
+- `activeClearnetClient: OkHttpClient` — dynamic proxy client. Returns `torClient` if the user has enabled "Use Tor for Clearnet" (default: true), otherwise returns `rawClearnetClient`. Used by `FeedParser` and `feeds/api/*Client` classes.
+
+*Note on Cloudflare Worker API Proxy:* Because API providers (YouTube, Reddit, Jamendo) actively block Tor exit nodes, requests from `YouTubeInternalClient`, `RedditApiClient`, and `JamendoApiClient` are routed through a Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) when utilizing `activeClearnetClient`. This bypasses IP blocks over Tor. For details on proxy secret usage, direct fallback behavior, and media stream byte separation, see §15.
 
 ### 7.2 Source Library (`SourceLibrary.kt`)
 
@@ -571,24 +998,35 @@ identifier like `"youtube:trending"`, `"reddit:multi"`, `"nasa:apod"` —
 
 ### 7.3 API Client Roster (`feeds/api/`)
 
+`PublicApiService.fetchItemsForCategory` is a big `when(category)` dispatcher
+using a `supervisorScope` with `async/awaitAll` — each category launches
+concurrent `fetchAsync(sourceId) { ... }` calls, where `fetchAsync` is a
+no-op if `sourceId` is not in `activeApiSourceIds` and catches/logs
+exceptions so one client failure doesn't block the others. Results are
+`distinctBy { it.id }` deduplicated.
+
+**Search recency filtering**: All user-initiated search categories
+(`Search Videos`, `Search Audio`, `Search Images`, `Search Articles`, and
+the `else` fallback) pass `recentOnly = true` to their respective API
+clients, applying native date filters (YouTube: this year via protobuf
+`params`; Reddit: `t=year`; NewsAPI/Guardian: last 3 months via date
+params). Category-based feeds (Technology, Science, etc.) are unaffected
+and continue using natural trending/hot sorting.
+
 | Client | Auth | Notes |
 |---|---|---|
-| `InvidiousApiClient` | none | YouTube via Invidious instance pool, replaces official YouTube Data API per architecture proposal §2 |
-| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query)` |
-| `InternetArchiveClient` | none | `getPopularVideos()`, `searchAudio(query)` |
+| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Marked `requiresUserKey = false` in `ApiKeyRepository.SERVICES` (InnerTube proxy & direct fallbacks). Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
+| `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool. Routed through the Tor SOCKS proxy whenever `HttpClientProvider.useTorForClearnet` is set (`probeClientTor`), falling back to a direct client only when the user has turned Tor routing off. Instances are **raced**, not walked: batches of `RACE_WIDTH` (4) are queried in parallel and the first usable answer wins. Losing racers are cancelled through OkHttp `enqueue`/`Call.cancel` so their Tor circuits are released immediately rather than pinned until the read timeout, and a cancelled racer is not marked failed — otherwise every race would blacklist three healthy instances. |
+| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)` — decodes `&amp;` preview URLs and preserves article classification for link/text posts |
+| `InternetArchiveClient` | none | `getPopularVideos()`, `getPopularAudio()`, `searchAudio(query)` — supports keyless MP3/FLAC music and podcast browsing |
+| `OpenverseApiClient` | none | `searchAudio(query)`, `searchImages(query)` — CC-licensed audio and photography, 5 min rate-limit cooldown |
 | `NasaApiClient` | optional (DEMO_KEY works) | `fetchAPOD()`, `searchImageLibrary(query)` |
 | `JamendoApiClient` | none (public client ID) | `searchTracks(query)` — CC-licensed music |
 | `PexelsApiClient` | user key required | photos/videos, skipped silently if no key |
-| `NewsApiClient` | user key required | headlines + search, supports `language` param |
-| `GuardianApiClient` | user key required | `searchArticles`, `searchSection` |
+| `NewsApiClient` | user key required | headlines + search, supports `language` and `recentOnly` params |
+| `GuardianApiClient` | user key required | `searchArticles(recentOnly)`, `searchSection` |
 | `VimeoApiClient` | user key required | `fetchFeatured` |
 | `PodcastIndexClient` | user key required | `searchEpisodes`, supports `language` param |
-
-`PublicApiService.fetchItemsForCategory` is a big `when(category)` dispatcher
-— each category calls `safeCall(sourceId, activeApiSourceIds) { ... }` for
-each relevant client, where `safeCall` is a no-op if `sourceId` is not in
-`activeApiSourceIds` and catches/logs exceptions so one client failure
-doesn't block the others. Results are `distinctBy { it.id }` deduplicated.
 
 ### 7.4 Feed Sync Pipeline (`NoSlopRepository.refreshFeeds`)
 
@@ -675,7 +1113,7 @@ gossiped multiple times by different originating peers.
 
 ### 8.3 UI-Level Wiring
 
-- `MainScreen.kt`'s `FullScreenFeedCard` renders Like/Share/Comment overlays
+- `UnifiedFeedTab.kt`'s `FullScreenMeshCardV2` renders Like/Share/Comment overlays
   for both `UnifiedItem.Mesh` and `UnifiedItem.Feed` (clearnet) variants.
 - For clearnet items, `onShare = onShareToMesh` opens the "Share to Mesh"
   confirmation dialog (`showShareDialog` state), which calls
@@ -686,6 +1124,7 @@ gossiped multiple times by different originating peers.
 - Per milestone 90, clearnet feed items themselves have Like/Comment buttons
   **removed** from the unified feed — engagement is funneled through the
   mesh anchor post instead ("Interaction Isolation").
+- Mesh broadcasts in the composer default to `friends` privacy. Explicitly selecting `public` triggers a warning dialog to educate the user that public posts will be gossiped over daisy-chained peers beyond direct friends.
 
 ---
 
@@ -719,6 +1158,14 @@ launch).
    SOCKS5 proxy, looks for the string "Congratulations. This browser is
    configured to use Tor.") → `READY` + `triggerRegistration()`. This loop
    exists as a fallback for missed `STATUS_ON` broadcasts.
+6. **Connectivity blip resilience**: transient network interruptions (e.g.,
+   Wi-Fi ↔ mobile data switches) no longer force the Tor state to `FAILED`.
+   Previously, the `STATUS_OFF` broadcast handler would set `FAILED` and
+   trigger a full daemon restart, which caused `SIGABRT` crashes in
+   `libtor.so` (the native Tor library does not tolerate being forcefully
+   killed mid-circuit). The handler now allows the daemon to recover
+   gracefully on its own, only surfacing `FAILED` if it cannot re-establish
+   circuits after the bootstrap loop's timeout.
 
 ### 9.2 Hidden Service Registration
 
@@ -739,6 +1186,25 @@ launch).
    onion address locally via `deriveOnionAddress` and still fires
    `onAddressReady` — so the UI updates even though `ADD_ONION` itself
    didn't return a fresh `ServiceID`.
+8. **Re-registration after a daemon restart (2026-10-07)**: services added
+   with `ADD_ONION` live only inside one Tor process, so
+   `forgetRegisteredHiddenServices(reason)` clears `activeMainServiceId` /
+   `activeBurnableServiceId` on `STATUS_OFF`, in `stopTor` and when a daemon
+   starts. Previously the "already active" bookkeeping survived the restart,
+   `ADD_ONION` was skipped and the node's onion stayed unreachable until the
+   app was killed. `registeredServiceIds()` exposes the bookkeeping for
+   diagnostics.
+
+**Other lifecycle fixes (2026-10-07).** When Android refuses to start the Tor
+service from the background, `startBlockedInBackground` is set (state stays
+`IDLE`) and `awaitReady` returns `false` immediately instead of waiting out its
+timeout; the flag clears on the next successful start. The connectivity
+callback now also handles `PROXY_READY`: a Tor started while offline parks
+there, and when a network becomes available (and no bootstrap job is running)
+`confirmBootstrapThenPromote()` re-checks and promotes it to `READY`. Tor still
+stops in the background when `NoSlopForegroundService` is not running (it runs
+only with the background-mesh setting on); this is a known limitation, not a
+regression.
 
 ### 9.3 Onboarding-to-Identity Transition
 
@@ -751,16 +1217,17 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 23)
+## 10. Data Model (Room, version 19)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
-| `feed_sources` | `id` | `url` (unique), `title`, `feedType`, `category`, `lastFetchedAt`, `unreadCount`, `isActive`, `addedDuringOnboarding` | unique on `url` |
-| `feed_items` | `id` | `sourceId`, `title`, `url`, `excerpt`, `thumbnailUrl`, `publishedAt`, `isRead`, `isSaved`, `fullContent`, `mediaUrl`, `mediaType`, `apiSource` | on `sourceId` |
-| `peers` | `publicKeyB64` | `handle`, `tripcode`, `onionAddress`, `encPublicKeyB64`, `isTrusted`, `lastSeenAt` | — |
-| `mesh_posts` | `id` | `authorPublicKeyB64`, `authorHandle`, `authorTripcode`, `content`, `timestamp`, `signature`, `mediaUrl`, `mediaType`, `gossipCount`, `privacy`, `thumbnailB64`, `clearnetUrl`, `clearnetTitle`, `clearnetThumbnailUrl` | — |
+| `feed_sources` | `id` | `url` (unique), `title`, `feedType`, `category`, `lastFetchedAt`, `unreadCount`, `isActive`, `addedDuringOnboarding`, `channelCreatedAt` | unique on `url` |
+| `feed_items` | `id` | `sourceId`, `title`, `url`, `excerpt`, `thumbnailUrl`, `publishedAt`, `isRead`, `isSaved`, `fullContent`, `mediaUrl`, `mediaType`, `apiSource`, `channelCreatedAt` | on `sourceId` |
+| `peers` | `publicKeyB64` | `handle`, `tripcode`, `onionAddress`, `encPublicKeyB64`, `isTrusted`, `lastSeenAt`, `customFolder`, `isTemporary`, `isDiscoverable`, `isCreator`, `fundMeLink`, `bio`, `relationship` (`PeerRelationship`: `NONE`/`OUTGOING_PENDING`/`INCOMING_PENDING`/`ACCEPTED`/`BLOCKED`), `pendingNonce`, `pendingEncKey`, `verifiedFingerprint` | — |
+| `media_owner` | (`mediaId`, `ownerType`, `ownerId`) | `ownerType` `POST`/`COMMENT`/`DM`/`GROUP`; `ownerId` post id / comment id / counterparty key / group id; `privacy` (`public`/`friends`/`private`/`group`); `authorPub`; `accessKey`?; `sha256`?; `createdAt` | on `mediaId` |
+| `mesh_posts` | `id` | `authorPublicKeyB64`, `authorHandle`, `authorTripcode`, `content`, `timestamp`, `signature`, `mediaUrl`, `mediaType`, `gossipCount`, `privacy`, `thumbnailB64`, `clearnetUrl`, `clearnetTitle`, `clearnetThumbnailUrl`, `clearnetMediaType`, `mediaSize`, `deletionBroadcasts` | — |
 | `chat_messages` | `id` | `chatWithPeerPub`, `senderPub`, `ciphertext`, `nonce`, `timestamp`, `isRead`, `mediaId`, `mediaType` | on `chatWithPeerPub`, on `timestamp` |
-| `mesh_comments` | `id` | `postId`, `authorPublicKeyB64`, `authorHandle`, `content`, `timestamp`, `signature`, `parentCommentId` | on `postId` |
+| `mesh_comments` | `id` | `postId`, `authorPublicKeyB64`, `authorHandle`, `content`, `timestamp`, `signature`, `parentCommentId`, `mediaId`, `mediaType` | on `postId` |
 | `mesh_reactions` | `id` (format `"${postId}_${authorPubKey}_${reactionType}"`) | `postId`, `authorPublicKeyB64`, `reactionType`, `timestamp`, `signature` | — |
 | `mesh_votes` | `id` (format `"${postId}_${authorPubKey}_${voteType}"`) | `postId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Separates upvotes/downvotes from emoji reactions |
 | `comment_votes` | `id` (format `"${commentId}_${authorPubKey}_${voteType}"`) | `commentId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Votes scoped to comments |
@@ -769,16 +1236,28 @@ the ephemeral onion with the identity-derived one.
 | `app_settings` | `key` | `value` (string, often JSON) | — |
 
 `app_settings` is the catch-all KV store for: identity public data
-(`local_*`), onboarding/session flags, `media_settings` (JSON), per-category
+(`local_*`), onboarding/session flags, `media_settings` (JSON),
+`mesh_filter_settings` (JSON — see §4.6), per-category
 keyword lists (`keywords_<Category>`), `selected_categories`,
 `selected_music_genres`, `selected_video_genres`, `negative_keywords`,
-`language_preference`, `enable_aggregator`, `user_profile` (JSON).
+`pending_dm_outbox` / `pending_dm_outbox_meta` (§19.2),
+`group_admin_sync_ts_<groupId>` (last applied admin `GROUP_SYNC`, replay guard),
+`language_preference`, `creator_keywords`, `banned_channels` (comma-separated blacklist),
+`channel_cutoff_enabled`, `channel_cutoff_year`, `channel_cutoff_month`,
+`enable_aggregator`, `user_profile` (JSON), `dm_all_tab_hidden` (`"true"`/`"false"`).
 
-Database is opened with `JournalMode.WRITE_AHEAD_LOGGING` and
-`fallbackToDestructiveMigration()` — any schema version bump destroys and
-recreates all tables (acceptable for prototyping; **all local mesh history,
-peers, and feed cache are lost on a version bump** since there is no
-migration path defined).
+**Peer trust invariant (review D01, 2026-10-07).** `relationship` is the only
+source of truth. `PeerDao.insertPeer` is the only write path and stores
+`Peer.withNormalizedTrust()`, so `isTrusted == (relationship == ACCEPTED)` on
+every row (`insertPeerRow` is the raw REPLACE). `Peer.isFriend` (`ACCEPTED &&
+!isTemporary`) is the friends-only rule used by sync and the gossip filters.
+Presence changes go through `updatePresence` / `markOffline` /
+`setDiscoverableFlag`, never a whole-row re-insert. Related `app_settings`
+keys: `requested_identity_<pub>` (identity a pending requester addressed),
+`contact_identity_<pub>` (bound only on accept), `declined_request_<pub>`
+(nonce of a request the user declined).
+
+Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve data across schema updates. `MIGRATION_15_16` added `group_chats.revision`; `MIGRATION_16_17` added `peers.relationship`, `pendingNonce`, `pendingEncKey`; `MIGRATION_17_18` added `chat_messages.isLegacy` and `deliveryStatus`; `MIGRATION_18_19` added `peers.verifiedFingerprint` and the `media_owner` table (back-filled from all existing attachments), forced burnable-identity contacts to `isTemporary = 1` and re-derived `isTrusted` from `relationship` (`Migration18To19Test`). `MIGRATION_12_13` introduced `pending_group_messages` and Keystore message encryption, `MIGRATION_13_14` re-encrypted legacy group messages with mandatory AAD binding (`$groupId|$msgId`), and `MIGRATION_14_15` added `bannedMembersJson` to `group_chats` for decentralized group moderation.
 
 ---
 
@@ -801,31 +1280,42 @@ migration path defined).
 
 | Setting | Value |
 |---|---|
-| `applicationId` | `com.noslop.app` |
-| `compileSdk` / `targetSdk` | 35 |
+| `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
+| `compileSdk` / `targetSdk` | 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 1 / `0.1.0` |
+| `versionCode` / `versionName` | 70 / `0.7.0-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
-| ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
+| ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true` (R8 full mode). Rules in `app/proguard-rules.pro`: `tor-android`; Bouncy Castle **provider packages only** (`org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**`, `org.bouncycastle.pqc.jcajce.provider.**`, plus `-dontwarn org.bouncycastle.**`; round E5 — the app calls the lightweight API directly, so R8 keeps what it uses, and nothing asks the provider for an algorithm by name); Gson's `TypeToken` rules (E2b; app code uses no `TypeToken`); Room, mesh packets and settings models. Unit tests run the unshrunk debug build, so check a release build with [RELEASE_SMOKE_TEST.md](RELEASE_SMOKE_TEST.md) after any rule or dependency change. `ReleaseBuildRulesE5Test` fails if the Bouncy Castle keep-all rule returns. |
+| `GITHUB_PAT` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_PAT`. When non-blank, enables in-app GitHub issue submission via REST API (`POST /repos/gaborkukucska/NoSlop/issues`). When blank, the Submit button in `ReportIssueScreen` is disabled. |
+| `GITHUB_ASSIGNEE` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_ASSIGNEE`. When non-blank, auto-assigns the specified GitHub user to all submitted issues. |
 
 ### Key Dependencies
 
-- **Tor**: `info.guardianproject:tor-android:0.4.8.16`,
-  `info.guardianproject:jtorctl:0.4.5.7`,
-  `info.guardianproject.netcipher:netcipher:2.1.0`
-- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`
+- **Tor**: `info.guardianproject:tor-android:0.4.8.16` (jtorctl and netcipher
+  were removed, C24; control goes through `TorControlChannel`, §17.1)
+- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1` (Lazysodium and JNA were removed, C13)
 - **Networking**: `okhttp:4.10.0` (`gradle/libs.versions.toml`),
   `okhttp-dnsoverhttps:4.12.0` (hardcoded in `app/build.gradle.kts`) — this is
   a genuine, currently-real minor version mismatch between the two OkHttp
   artifacts (confirmed by reading both files directly), `gson:2.10.1`
-- **Media**: `androidx.media3` 1.3.1 (`exoplayer`, `exoplayer-hls`,
-  `exoplayer-dash`, `ui`, `datasource-okhttp`)
+- **Media**: `androidx.media3` **1.11.1** (`exoplayer`, `transformer`,
+  `effect`, `exoplayer-hls`, `exoplayer-dash`, `ui`, `datasource-okhttp`; all
+  seven on one version, round E5). Since 1.4 the player calls the
+  `LoadControl` methods that take a `PlayerId` / `Parameters`, and the old
+  ones throw by default, so `AdaptiveTorLoadControl` (`ui/PreloadManager.kt`)
+  implements the ten methods `DefaultLoadControl` does (`onPrepared`,
+  `onTracksSelected`, `onStopped`, `onReleased`, `getAllocator`,
+  `getBackBufferDurationUs`, `retainBackBufferFromKeyframe`,
+  `shouldContinueLoading`, `shouldStartPlayback`, `shouldContinuePreloading`):
+  lifecycle calls go to both inner controls (preload and on-screen),
+  decisions to the active one; preload keeps no back buffer, on screen 60 s.
+  Media3 1.9+ needs API 23; minSdk is 24. Tested (unit: `AdaptiveTorLoadControlE5Test`, `ReleaseBuildRulesE5Test`).
 - **Security**: `androidx.security.crypto` (alpha, per `libs.versions.toml`)
 - **Persistence**: Room (`runtime`, `ktx`, `ksp` compiler)
-- **QR**: `mlkit barcode-scanning`, `zxing:core`
+- **QR**: `zxing:core` 3.5.3 (ML Kit removed, C12)
 - **Camera**: `androidx.camera.*` (`core`, `camera2`, `lifecycle`, `view`)
 - **Background**: `androidx.work.runtime.ktx`
 - **Testing**: JUnit, MockK, `kotlinx-coroutines-test`, Robolectric
@@ -849,7 +1339,10 @@ whitelisted cleartext exceptions (milestone 8).
 
 While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes).
 
-In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md); none of its phases are implemented in the current codebase as of this writing.
+In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md); Phases 1 and 2 (Headless Deployment, Authentication, and Active-Passive Tor Routing) are fully implemented:
+- **Active-Passive Identity**: NoSlop dynamically disables its local Tor hidden service when a Hub is linked, falling back to treating its embedded Tor daemon purely as an outbound SOCKS5 proxy to reach the Hub's persistent `.onion` API endpoint (`invokeHubApi`).
+- **Intelligent Edge Relay**: The Hub is *not* a dumb buffer. NoSlop periodically pushes its Contacts list to the Hub (`sync_push_peers`). The Hub listens on Port 9999, runs incoming traffic through its native `GossipEngine` and `TrustFirewall` (dropping spam and expired TTLs at the edge), and holds only valid packets in memory for the mobile app to securely poll (`sync_pull_packets`).
+- **Phase 3 (Active)**: SQLite persistence is now active on the Hub (`social.db`). NoSlop performs bi-directional sync, pushing live mesh packets and pulling historical DMs, Posts, and Contacts down to the mobile client on connect. The mobile app automatically injects an `Admin AI` peer contact mapped to the Hub's node ID, allowing seamless E2EE interaction with the Hub's persona agent.
 
 ---
 
@@ -873,12 +1366,15 @@ is traceable rather than silently disappearing:
    milestone log is a historical record of what shipped *at the time* and
    isn't being retroactively edited; §4.1 above is the authoritative current
    description.
-4. `docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
+4. ~~`docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
    `TorService.writeTorrc` writes `CookieAuthentication 1`, while
    `registerHiddenService` authenticates with a bare `AUTHENTICATE\r\n` (no
-   cookie) — this combination should still be verified against the running
-   `tor-android` behavior. **Still open** (ANALYSiS.md is archived/historical
-   and not being edited; flagging here is the live tracking mechanism).
+   cookie).~~ **Resolved 2026-09-02** — the torrc did write
+   `CookieAuthentication 0`, and the bare `AUTHENTICATE` matched it, which is
+   why control worked and why any app on the device could also use it. All
+   control access now goes through `TorControlChannel`; see §17.1. Empty
+   authentication is retained deliberately, with socket file permissions as the
+   access control.
 5. ~~`docs/BUILD.md` states `minSdk = 26`; `app/build.gradle.kts` sets
    `minSdk = 24`.~~ **Fixed** — BUILD.md now states 24.
 6. ~~`docs/PACKET_SCHEMA.md`'s `POST` field table omits
@@ -887,13 +1383,16 @@ is traceable rather than silently disappearing:
 7. README's "Implemented" callout under Clearnet-to-Mesh Broadcasts now
    correctly states that the `REACTION`/anchor-ID pipeline is live — this
    item, previously flagged as the README being out of date, **is fixed**.
-8. The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version mismatch
-   noted in §12 is **still real** — not a doc error, an actual dependency
-   skew worth aligning at some point.
+8. ~~The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version
+   mismatch noted in §12.~~ **Fixed 2026-09-02** — the catalog is aligned on
+   4.12.0 and `okhttp-dnsoverhttps` is declared there rather than hardcoded.
+9. The `mvp/` tree is not in `settings.gradle.kts` and does not build. README
+   previously called it the canonical codebase; that claim is corrected, but
+   the directory is still 2.8MB of dead weight in the repo. **Open.**
 9. ~~This document's §2 package-layout table and architecture diagram listed
    `NoSlopDatabase.kt` as Room "version 16" / "version 20" in two places,
-   while §10 and the header correctly said v23.~~ **Fixed** — both now read
-   v23, matching `@Database(version = 23, ...)`.
+   while §10 and the header correctly said v5.~~ **Fixed** — both now read
+   v5, matching `@Database(version = 5, ...)`.
 10. ~~§4.4's dispatch table and §5.2's payload-type table described an
     earlier ~11-handler, single-file version of `MeshPacketHandler` and were
     marked "Superseded" pointing elsewhere for current info, while
@@ -912,12 +1411,1401 @@ is traceable rather than silently disappearing:
     timeout sweep, contrary to a prior claim that Room was never written back
     to on timeout.
 11. ~~GAP_ANALYSIS.md §6 stated relay nodes have no zero-copy chunk
-    forwarding and would "download the whole file rather than acting as a
-    pass-through."~~ **Fixed** — `MediaPacketHandler.handleMediaChunk` calls
-    `GossipService.forwardRelayChunk`, which live-forwards each chunk to all
-    registered relay listeners. See
-    [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented).
+    forwarding.~~ Chunk forwarding was later implemented and then **removed
+    in Round B** (D03): media is now point-to-point only. See
+    [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-chunk-forwarding--removed-round-b).
+12. ~~`GossipService.broadcast` discards the return value of `pushPacketToHub`
+    and has no direct-Tor fallback.~~ **Fixed** — `GossipService.broadcast`
+    checks `pushed` from `pushPacketToHub` and explicitly logs a warning and
+    falls through to the direct Tor peer broadcast loop if the Hub is offline
+    or unreachable.
 
+---
+
+## 15. Privacy & Security Architecture & Implemented Hardening Measures
+
+An architectural audit of the legacy Android app codebase (`app/`) evaluated the privacy and security guarantees of key components, resulting in comprehensive security hardening implementations across the framework:
+
+### 15.1 Cloudflare Worker API Proxy (`yt-proxy.megadreamland.workers.dev`)
+- **Purpose**: API clients (`YouTubeInternalClient`, `RedditApiClient`, `JamendoApiClient`) send search/metadata requests to `https://yt-proxy.megadreamland.workers.dev` to prevent API providers from blocking Tor exit node IP ranges.
+- **Dynamic HMAC Request Signing**: Standard requests generate dynamic HTTP headers `X-Proxy-Timestamp` and `X-Proxy-Signature` (`HMAC-SHA256(timestamp:payload, PROXY_SECRET)`), eliminating reliance on raw static secrets.
+- **Tor Circuit Cycling & Fallbacks**: If proxy requests return HTTP 403 or 429 rate limit responses over Tor, `YouTubeInternalClient` triggers `TorService.requestNewCircuit()` (`SIGNAL NEWNYM`). When `useTorForClearnet = true`, all direct fallbacks strictly execute through `activeClearnetClient` (routed over Tor SOCKS5).
+- **API Metadata vs. Media Stream Bytes**: Cloudflare Worker only proxies API JSON queries. Actual video/audio stream playback bytes (`googlevideo.com`, `jamendo.com`, `v.redd.it`) bypass `yt-proxy` and are fetched directly via `activeMediaClient` (`activeClearnetClient`).
+
+### 15.2 OTA Update Check & Release Integrity Validation
+- **Integrity Checks**: `UpdateManager.kt` computes the full SHA-256 digest of the downloaded APK before calling `launchInstaller()`, verifying file checksums before triggering `ACTION_VIEW` package installation.
+- **Network Path & Tor Routing**: `UpdateChecker.kt` and `UpdateManager.kt` use `HttpClientProvider.activeClearnetClient` (routed over Tor SOCKS5 when "Route Clearnet via Tor" is enabled, after waiting for Tor bootstrap).
+- **User Toggle**: An "Automatic Update Checks" switch in Settings allows users to completely disable automatic update checking.
+
+### 15.3 Identity Key Isolation & Fallback Storage Hardening
+- **Primary Storage**: Private Ed25519 signing keys, X25519 encryption keys, and BIP39 mnemonics are stored in `EncryptedSharedPreferences` (AES-256-GCM encrypted, MasterKey in Android Keystore).
+- **Hardened Fallback Storage**: On devices where Android Keystore fails (e.g. custom ROMs or broken OEM Keystore implementations), `IdentityRepository.kt` encrypts private key strings and mnemonics in memory with `AES-256-GCM` (`secureFallbackWrite` / `secureFallbackRead` using hardware-derived secret key) before writing to `noslop_identity_fallback` `SharedPreferences`.
+- **Authenticated Backup Encryption**: since round E3 (2026-10-13) backups are written as `"NSG2"`: chunked AES-256-GCM under a per-archive HKDF-SHA256 key, encrypted as written and decrypted as read, so no plaintext copy reaches disk (§17.8). `"NSG1"` (whole-file GCM) and legacy `AES-256-CBC` archives still restore, CBC only after the user confirms.
+
+### 15.4 Mesh Transport & Peer Failure Cooldown
+- **Exponential Cooldown Backoff**: `GossipService.kt` puts a peer's onion in cooldown after 3 send failures, each within `PEER_FAILURE_WINDOW_MS` (5 min) of the previous one: 30 s, then 60 s, then 120 s maximum (`cooldownFor`, `PEER_MAX_COOLDOWN_MS`). Failures further apart never accumulate. A successful send, or any authenticated inbound packet from that peer (`processIncoming` → `recordSendSuccess` on the sender's stored onion), clears the cooldown. Only background presence is skipped during cooldown (§4.1). History: commits `679a5a1`/`fd958b9` had stretched the failure memory to 2 h and `4579860` removed the inbound clear, leaving peers cooled down for hours; restored 2026-10-07 (`PeerCooldownRestoreTest`). Tests inject time through `GossipService.clock`.
+- **Non-Blocking Background Traffic**: `MeshTransport.kt` queues `ANNOUNCE_DISCOVERABLE` alongside `ANNOUNCE_PEER` as non-blocking background traffic, dropping queued background announcements when Tor circuit permits are full.
+
+### 15.5 Strict Tor Isolation & Zero Clearnet Fallback Policy
+- **Tor Guard Interceptor**: When `useTorForClearnet = true`, `HttpClientProvider.torClient` and `InvidiousApiClient.probeClientTor` enforce a `torGuardInterceptor`. If `TorService.torState.value != TorState.READY` (Tor is disconnected/starting/failed), all outbound HTTP/HTTPS requests throw an immediate `IOException`, preventing any packet transmission or unproxied socket initialization when Tor is offline.
+- **WebView Embed Prohibition**: When `useTorForClearnet = true`, `VideoPlayer.kt` strictly blocks `VideoSource.Embed` (WebView players for YouTube/Vimeo/Archive.org). Android system `WebView` bypasses OkHttp/SOCKS proxies, so embeds are converted to `VideoSource.Unavailable` to prevent direct IP leaks to content platforms.
+- **Coil Image Loader Isolation**: All Coil `ImageLoader` instances (app-wide and custom GIF loaders in `ChatThreadScreen.kt` and `GroupChatThreadScreen.kt`) configure `.okHttpClient { HttpClientProvider.activeClearnetClient }`, ensuring thumbnail and image traffic follows Tor routing and strict Tor guard interceptors.
+- **Verified Private LAN Guard**: In `NoSlopRepository.kt`, unproxied `rawClearnetClient` is strictly restricted to verified RFC1918 private IPv4 LAN addresses (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`, `127.0.0.1`). Any attempt to connect to non-private WAN IP addresses via `rawClearnetClient` is rejected.
+
+---
+
+## 16. Video Playback Failure Modes
+
+Video playback spans four layers — stream resolution, preloading, ExoPlayer,
+and the poster overlay — and a fault in any of them surfaced identically to
+the user: the slide sat on its thumbnail and never played. The notes below
+record why, so the same symptom is not re-diagnosed from scratch.
+
+### 16.1 Poster overlay occluded the error UI (`NOSLOP_FAILURE_VISIBILITY_V1`)
+
+`VideoPlayer` composes its children into a single `Box`:
+
+| Layer | zIndex | Drawn by |
+|---|---|---|
+| Player / error card | 0 (3 when failed) | `when (source)` branch |
+| Poster thumbnail | 1 | `showThumbnail` block |
+| "Finding stream" / "Buffering" spinner | 2 | `VideoLoadingOverlay` |
+
+`showThumbnail` previously included `source is VideoSource.Unavailable`, and
+`isVideoReady` is never set when playback fails. So on **every** failure path
+the app composed a correct "Video unavailable" card with a working Retry
+button at zIndex 0 and then painted the thumbnail over the top of it. The
+card was reachable by touch but completely invisible.
+
+Additionally, `ExoVideoPlayer` renders its own "Video unavailable / Retry
+Playback" card one level deeper in the tree, where `zIndex` cannot outrank a
+sibling of its parent.
+
+Fixed by:
+- hoisting hard playback failure into the parent via a new `onFailed` callback
+  on `ExoVideoPlayer` (raised from a single `LaunchedEffect(hasError)`),
+- lifting the `ExoVideoPlayer` subtree to `zIndex(3f)` once it has failed, and
+  putting the `Unavailable` card at `zIndex(3f)` directly,
+- keeping the poster as a dimmed backdrop (60% `PrimaryBlack` scrim) rather
+  than an opaque cover, and
+- suppressing the loading spinner once `hasFailed` is true, so it no longer
+  spins for the full 45s `loadingTimedOut` window over a slide that is
+  already known to be dead.
+
+**Any future overlay added to this `Box` must declare a zIndex** or it will
+land underneath the poster.
+
+### 16.2 Un-decipherable signature ciphers (`NOSLOP_CIPHER_SANITY_V1`)
+
+`YouTubeInternalClient.extractFormatStreamUrl()` parses `signatureCipher`
+entries from the InnerTube player response. Those carry either:
+
+- `sig` / `signature` — already plaintext, appendable as-is; or
+- `s` — the **encrypted** signature, which must be transformed by the
+  algorithm embedded in YouTube's player JavaScript before use.
+
+The parser treated `s` as interchangeable with `sig`. The resulting URL is
+syntactically perfect and returns **403 on the first byte-range request**.
+Critically, this counted as a *successful* resolve: the slide received a
+`VideoSource.Direct`, ExoPlayer failed, both `MAX_AUTO_RESOLVE_RETRIES` were
+spent re-resolving the identical dead URL, and the slide gave up — never
+reaching the next InnerTube client or the Invidious/Piped failover, both of
+which return pre-signed URLs.
+
+Formats that only offer `s` are now skipped with a `YT_INTERNAL_API` warning,
+so resolution falls through as designed. NoSlop does not, and should not,
+execute YouTube's player JS to decipher these.
+
+### 16.3 YouTube IFrame embed never started (`NOSLOP_EMBED_AUTOPLAY_V1`)
+
+The embed's `onReady` handler was gated on `window.NoSlop_isVisible`, a
+variable **nothing in the codebase ever assigns**. It was permanently
+`undefined`, so:
+
+1. `playVideo()` never ran (`playerVars.autoplay` is `0`),
+2. `onStateChange` never reached `PLAYING`,
+3. `NoSlopJS.onPlaying()` never fired,
+4. `isVideoReady` stayed `false`, and the poster covered the player forever.
+
+The autoplay decision is now injected as a Kotlin-interpolated JS literal
+(`$shouldAutoplayEmbed`, from `currentIsVisible`), and `onPlaying()` fires as
+soon as the player is *constructed* rather than only once it is playing — so
+if autoplay is refused, the poster still lifts and the user can see and press
+the embedded play button.
+
+Note this path is unreachable while **Route Clearnet via Tor** is on: §15.5
+converts every `VideoSource.Embed` to `Unavailable` to prevent the WebView
+leaking the device IP. With Tor routing enabled, a YouTube video that cannot
+be resolved to a direct stream is correctly surfaced as unavailable (and, per
+§16.1, now visibly so).
+
+### 16.4 The resolver must not sabotage the player
+
+`SIGNAL NEWNYM` is process-wide. It discards **every** circuit, including
+the one ExoPlayer is currently streaming through. A capture on 2026-08-31
+showed eighteen rotations in sixty-three seconds, and every stalled video in
+that window sat at a flat buffer for the whole of it.
+
+The cause was unbounded concurrency meeting unbounded rotation:
+
+- `PreloadManager` warms upcoming slides while `VideoPlayer` resolves the
+  visible one, so `resolveStreamUrl` ran ~10 times at once,
+- each call did up to `maxAttempts` (4) x `configs` (2) = 8 InnerTube player
+  requests, and rotated the Tor circuit between attempts,
+- ~80 near-simultaneous requests from a single API-proxy egress IP pushed
+  YouTube from `OK` into blanket `LOGIN_REQUIRED`, which triggered *more*
+  rotations.
+
+Three constraints now hold, and **new callers must respect them**:
+
+| Constraint | Where | Value |
+|---|---|---|
+| One rotation at a time, process-wide | `TorService.requestNewCircuit` | mutex, non-blocking `tryLock` |
+| Minimum gap between rotations | `TorService.NEWNYM_MIN_INTERVAL_MS` | 60s |
+| Concurrent InnerTube player resolves | `YouTubeInternalClient.playerResolveGate` | 2 |
+
+`requestNewCircuit()` returning `false` is a normal outcome, not an error: it
+means "this route is what you have, try something else". Do not loop on it.
+
+### 16.5 Geo-locked and IP-locked stream URLs (`NOSLOP_GEO_LOCK_V1`)
+
+A resolved `googlevideo.com` URL carries the identity of whoever requested
+it:
+
+- `ip=<addr>` — the address the URL was signed for,
+- `gcr=<cc>` — a country restriction, present when the requesting IP was in
+  a region-restricted context.
+
+NoSlop resolves through the API proxy (so YouTube does not see a Tor exit)
+but fetches the media bytes directly over Tor. Those are different machines
+in different countries, so a signed URL can be refused on fetch. In the
+2026-08-31 capture the only hard 403 was also the only URL carrying `gcr`;
+no URL without `gcr` was refused.
+
+`resolveStreamUrl` now sets a `gcr`-bearing URL aside, tries the remaining
+InnerTube clients and the Invidious/Piped failover first, and only returns
+the geo-locked URL if nothing else resolved. `describeStreamUrl` reports
+`signedFor=` and `geoLock=` so a geo-lock 403 is distinguishable from an
+expired URL in the log.
+
+This is a structural consequence of the privacy design (§15.5) and cannot be
+fixed by routing the media through the proxy — that would hand a third party
+the user's full viewing history. Occasional geo-locked failures are the
+correct trade.
+
+### 16.6 Resume positions must reflect real playback (`NOSLOP_RESUME_POISON_V1`)
+
+`ExoPlayer.currentPosition` returns the **pending seek target** while
+buffering, and `duration` is `C.TIME_UNSET` until the media prepares. The
+old `PlaybackPositionStore.save()` accepted both, so a slide that never
+loaded repeatedly saved its own resume offset — and because the
+near-the-end cleanup is guarded on `durationMs > 0`, an offset near the end
+of a video could never be cleared either. `205swuI0JlY` was pinned at
+891343ms of a 946-second video across every visit.
+
+Two rules now:
+
+- `save()` rejects anything with `durationMs <= 0` — no duration means the
+  player never prepared, so there is no real progress to record.
+- `ExoVideoPlayer` clears the stored position on hard failure when the media
+  never prepared, so a retry starts from zero instead of seeking back into
+  the byte range that was already failing.
+
+### 16.7 Telling "no network" apart from "broken feature"
+
+Before investigating any media failure, check whether *anything* is reaching
+the network. The signature of a dead path is uniform failure across
+destinations that share nothing but Tor:
+
+- `.onion` mesh peers timing out (these use no exit node),
+- `check.torproject.org` failing **both** the primary and fallback probes,
+- unrelated clearnet hosts — RSS feeds, GitHub, archive.org — all timing out
+  at the same interval.
+
+When that pattern is present, no amount of stream-resolution work will help.
+A 2026-08-31 capture showed exactly this while Tor reported `ON` and
+"Circuits built": the SOCKS port accepted connections, but nothing those
+circuits carried arrived.
+
+Two changes make this state cheap and visible rather than a silent four-minute
+hang:
+
+| Change | Where | Effect |
+|---|---|---|
+| Connect timeout 60s → 20s | `HttpClientProvider.torClient` | failures surface in seconds, not minutes |
+| Failed routing probe sets the status message | `TorService` | user is told, instead of watching "Preparing your feed…" |
+
+`readTimeout` deliberately stays at 60s: media streaming over a slow circuit
+needs it, and read time was never what was hanging. And note that the old
+"60s for better mesh reliability" rationale was simply wrong —
+`MeshTransport` opens raw SOCKS sockets and never touches `torClient`.
+
+### 16.8 Resolve concurrency must be bounded at BOTH ends (`NOSLOP_RESOLVE_BUDGET_V1`)
+
+`playerResolveGate` exists to stop the LOGIN_REQUIRED storm described in
+§16.4, and it is correct while the network works. Unbounded, it is actively
+harmful when the network does not: with a 60s connect timeout, one resolve
+held a permit for `maxAttempts` x `configs` x 60s ≈ four minutes, and every
+later slide queued behind it showing nothing at all. Slides that would
+previously have failed in parallel instead sat waiting.
+
+Any future throttle on a user-visible path needs all three of these:
+
+| Bound | Constant | Value |
+|---|---|---|
+| How long a caller waits for a slot | `RESOLVE_QUEUE_WAIT_MS` | 20s, then returns null |
+| How long the work may hold the slot | `RESOLVE_BUDGET_MS` | 45s |
+| How long one HTTP call may take | `playerClient` `callTimeout` | 20s |
+
+`callTimeout` matters specifically: it is the only OkHttp timeout that bounds
+a whole call, and unlike `withTimeout` it actually interrupts the blocking
+socket rather than merely abandoning the coroutine while the thread stays
+stuck.
+
+A bounded refusal is a *better* outcome than a queue. Returning null makes
+the slide show its error card and Retry button (§16.1); queueing makes it
+show nothing.
+
+### 16.9 Tor readiness must be proven, never assumed (`NOSLOP_BOOTSTRAP_TRUTH_V1`)
+
+`org.torproject.jni.TorService` broadcasts `STATUS_ON` when the daemon
+**process** is running. It carries no information about circuits.
+`torStatusReceiver` used to treat it as proof, set `TorState.READY`, and log
+"Tor is ON — Circuits built" — a claim the code had not earned. On
+2026-08-31 that happened eleven seconds after launch, `torGuardInterceptor`
+opened, feed sync dispatched ~40 concurrent requests into a Tor that was
+still bootstrapping, and every one of them blocked on a SOCKS CONNECT until
+the connect timeout. Onion peers failed alongside clearnet, which is correct
+— they need working circuits too — and that uniformity is what made it look
+like a dead device network.
+
+The correct check already existed and had never run. `waitForBootstrap()`
+began with:
+
+    if (_torState.value == TorState.READY) return@withContext true
+
+so once the broadcast flipped READY, the next poll short-circuited and
+returned true without asking Tor anything. `"Tor bootstrap reached 100%"`
+appears in none of the captures from that period for exactly that reason.
+
+The rule now:
+
+| Signal | Means | Promotes to |
+|---|---|---|
+| SOCKS port accepts TCP | a process is listening on localhost | `PROXY_READY` |
+| `STATUS_ON` broadcast | daemon process is alive | `PROXY_READY` |
+| `PROGRESS=100` from the control port | circuits are actually built | `READY` |
+| `checkTorConnection()` succeeds | routing works end to end | `READY` |
+
+Only the bottom two are proof. Nothing else may set `READY`, because `READY`
+is what `torGuardInterceptor` and `isNetworkReady` gate every outbound
+request on.
+
+`waitForBootstrap` now logs each change in `PROGRESS=`, so a stalled
+bootstrap is one obvious line rather than an absence of lines, and the last
+phase seen is reported on timeout.
+
+### 16.10 Two installed variants means two Tor daemons
+
+The 2026-08-31 capture had both `com.noslop.app` (SOCKS 9050) and
+`com.noslop.app.debug` (SOCKS 9052) running Tor daemons on the same handset,
+competing for the same guards and network. The debug APK was also stale — it
+logged `Promoting state to READY` on SOCKS-port-open alone (a string no
+longer in the source) and threw
+`java.net.Socket cannot be cast to javax.net.ssl.SSLSocket`, the
+`PassthroughSSLSocket` fault removed in 38931d9.
+
+When collecting logs, uninstall the variant not under test. Two daemons make
+timing measurements meaningless and a stale one will contradict the source
+you are reading.
+
+### 16.11 InnerTube client roster (`NOSLOP_INNERTUBE_CLIENTS_V1`)
+
+`resolveStreamUrl` walks a list of InnerTube client identities until one
+returns a playable response. Which identities are on that list is the single
+biggest determinant of whether video works at all: a 2026-08-31 capture
+resolved **zero** streams because both entries were being refused —
+`LOGIN_REQUIRED` from ANDROID 4/4, `ERROR` from
+TVHTML5_SIMPLY_EMBEDDED_PLAYER 4/4.
+
+Ordered by attestation exposure, least-gated first:
+
+| Client | PO token | Notes |
+|---|---|---|
+| `TVHTML5` | not required | Upstream's standard answer to "PO Token required". No `thirdParty` node — it is not the embedded variant. |
+| `ANDROID_VR` | **format 18 only** | Fine because we only ask for itag 18/22. Requires a token for everything else. |
+| `IOS` | not required | `osName` must be `iPhone`, not `iOS`. |
+| `ANDROID` | **required** | Behind the gate now; succeeded repeatedly hours earlier. Demoted, not removed. |
+| `TVHTML5_SIMPLY_EMBEDDED_PLAYER` | not required | Previous fallback, kept last. |
+
+Three things that are easy to get wrong here:
+
+- **`LOGIN_REQUIRED` does not mean the Tor exit is blocked**, despite what the
+  log line says. It is the attestation gate. A genuinely blocked exit shows up
+  as HTTP errors or timeouts, not as a well-formed playability status.
+- **`signatureTimestamp` is not a unix time.** It is a small counter near
+  20,000 published inside YouTube's player JavaScript. The old code sent
+  `(currentTimeMillis() / 1000) - 86400` — about 1.79 billion — which is very
+  likely why TVHTML5 never once succeeded. NoSlop cannot compute the real
+  value without executing player JS, so the field is omitted.
+- **The `ANDROID_VR` exemption is tied to format 18.** Widening
+  `extractUrlFromPlayerResponse`'s format preference silently invalidates it.
+
+**These versions go stale, and that is expected.** yt-dlp's youtube extractor
+is the ground truth: it has a community hitting it daily and patched an
+August 2026 `android_vr` break within a day of it landing. When video fails
+wholesale and §16.7 shows the network is fine, compare this roster against
+theirs before investigating anything else. The fix is always to add a client
+that is not yet gated, never to try harder against one that is.
+
+A durable escape from the roster treadmill would be generating PO tokens
+on-device (BotGuard in `androidx.javascriptengine`, which has no network
+access of its own, so every HTTP call stays on OkHttp over Tor — unlike a
+WebView, which would bypass it and leak the device IP, cf. §15.5). That
+carries its own privacy cost: a PO token is bound to a session identifier, so
+reusing one across Tor circuits links them together. Not implemented, and not
+to be implemented without deciding that trade deliberately.
+
+### 16.12 Only muxed sources are playable (`NOSLOP_MUXED_ONLY_V1`)
+
+A YouTube player response offers streams in three places, and only two of
+them are usable:
+
+| Source | Contains | Usable |
+|---|---|---|
+| `formats` | video **and** audio in one stream (progressive) | yes |
+| `hlsManifestUrl` | muxed, adaptive bitrate | yes — `media3-exoplayer-hls` is on the classpath |
+| `adaptiveFormats` | video-only **or** audio-only, by definition | **no** |
+
+`extractUrlFromPlayerResponse` used to end with an `adaptiveFormats` branch
+returning `valid.first().first`. That is the highest-bitrate video-only track
+with no audio at all. The branch was unreachable while ANDROID still returned
+progressive formats; the round-5 roster change made it reachable, and it
+immediately produced `itag=299` at **1806MB** with no sound. Every affected
+slide sat at `bufPos=0` indefinitely.
+
+Muxing two streams requires a demuxer NoSlop does not have. A client that
+offers neither progressive formats nor HLS has not given us anything
+playable, and the correct response is to report an unresolved stream so the
+caller falls through to the next client and then to the Invidious/Piped
+failover, which return muxed URLs.
+
+**`itag=18` is the format to expect.** Every working capture in this
+project's history used it: 360p, muxed, small. If a `PLAYBACK_DIAG resolved
+DIRECT` line shows itag 137, 248, 299, 303 or similar, something has
+regressed here — those are DASH video tracks.
+
+### 16.13 Stream size ceiling over Tor (`NOSLOP_TOR_SIZE_CEILING_V1`)
+
+Progressive candidates over 250MB are rejected outright while
+`useTorForClearnet` is on. Three relays deep, a 1.8GB file is not a slow
+download but an impossible one, and accepting it burns the entire resolve
+budget (§16.8) discovering that. The ceiling is checked against
+`contentLength` from the player response, before the URL is ever handed to
+ExoPlayer.
+
+This is a safety net, not the primary defence — §16.12 is. It exists because
+the primary defence had a gap for months without anyone noticing, and a size
+sanity check would have caught it on its own.
+
+### 16.14 The API proxy can be the thing being refused (`NOSLOP_PROXY_ATTESTATION_V1`)
+
+The proxy exists so YouTube does not see a Tor exit IP. As of 2026-08-31 that
+premise has inverted: one Cloudflare egress address serving every NoSlop user
+is a **more** flagged IP than a fresh Tor exit, and YouTube answers it with
+`LOGIN_REQUIRED`.
+
+The 19:11 capture is unambiguous:
+
+| | |
+|---|---|
+| Successful resolves before `Proxy returned 403 — bypassing it for 5m` | **0** |
+| Successful resolves after it | **4** |
+
+and every one of those four was `signedFor` a published Tor exit
+(109.70.100.9, 176.65.148.3, 185.220.101.180, 45.66.35.27) — meaning the
+request had gone direct. The app only found the working path by accident,
+because an unrelated HTTP 403 happened to trip the bypass.
+
+`notePlayerProxyBlocked` only fired on HTTP 403/429/400. `LOGIN_REQUIRED`
+arrives as a successful **HTTP 200** carrying a `playabilityStatus`, so the
+proxy could serve refusals forever without ever being marked bad. A proxied
+`LOGIN_REQUIRED` now re-asks the same client directly over Tor within the
+same iteration and marks the proxy degraded for subsequent videos.
+
+Two consequences worth carrying forward:
+
+- **This also relieves the worker's request ceiling.** Player calls that go
+  direct do not consume the Cloudflare free tier at all.
+- **The `gcr` geo-lock problem in §16.5 largely dissolves on the direct
+  path**, because the IP that requested the URL and the IP fetching the bytes
+  are then the same circuit rather than two different countries.
+
+### 16.15 Rank clients by playable output, not by `OK`
+
+Round 6 ranked the roster by how often each client returned
+`playabilityStatus: OK`, and put IOS first on that basis. It was the wrong
+metric. IOS answers `OK` and then offers *only* `adaptiveFormats`, which
+§16.12 correctly refuses — so an IOS "success" produces nothing playable and
+costs a round trip. Measured by playable muxed URLs, the same capture read:
+
+| Client | Playable URLs |
+|---|---|
+| `ANDROID` | 3 |
+| `TVHTML5` | 1 |
+| `IOS` | 0 (OK, but adaptiveFormats only) |
+
+**When re-ranking from a fresh capture, count `Resolved direct video stream
+using X`.** Never count playability statuses — a client can pass that check
+and still be useless.
+
+### 16.16 The Tor exit lottery (`NOSLOP_EXIT_LOTTERY_V1`)
+
+Resolve durations are bimodal, and that shape is the diagnosis. From the
+2026-08-31 19:28 capture:
+
+| Outcome | Durations |
+|---|---|
+| `DIRECT` | 520ms, 950ms, 1326ms, 3546ms, 3924ms, 3953ms, 4757ms, 5153ms, 5622ms, 8026ms |
+| `UNAVAILABLE` | 30557ms, 34061ms, 40488ms, 41894ms, 49562ms, 55061ms, 56477ms, 60003ms, 64054ms |
+
+Two clusters and nothing in between. There is no case of a later client
+rescuing an earlier refusal: either the **first** client answers within
+seconds, or all five are refused and the full budget is spent proving it.
+
+That is a per-circuit condition, not a per-client or per-video one. All five
+clients ask from the same Tor exit, so when YouTube has gated that exit they
+all get `LOGIN_REQUIRED` together. Every successful resolve in that capture
+was signed for one of a small set of exits.
+
+**Practical rule:** if a capture shows a wide spread of resolve durations
+with nothing in the middle, stop looking at client identities (§16.15) and
+look at the exit. The client roster only explains failures that vary *by
+client*.
+
+`resolveStreamUrl` now stops after `EXIT_BLOCKED_THRESHOLD` (2) refusals in
+one attempt and tries to rotate instead.
+
+### 16.17 Rotation is gated on live media, not on the clock (`NOSLOP_ADAPTIVE_ROTATION_V1`)
+
+§16.4 rate-limited `requestNewCircuit()` to once per 60s after a rotation
+storm destroyed the circuit a visible video was streaming on. That was right
+about the danger and wrong to apply it unconditionally: a fresh exit is the
+*only* remedy for §16.16, and the flat gate was blocking it.
+
+The discriminator is whether bytes are moving, not how much time has passed:
+
+| Condition | Minimum interval |
+|---|---|
+| Buffer advanced within the last 10s | 60s — protect the stream |
+| Nothing streaming | 15s |
+
+`VideoPlayer`'s sampler calls `TorService.noteMediaProgress()` whenever the
+buffer advances. That call is deliberately just a timestamp write, since it
+runs on every sample of every visible video.
+
+**Anything else that streams over Tor for a sustained period should call
+`noteMediaProgress()` too**, or a resolve elsewhere in the app may rotate the
+circuit out from under it.
+
+### 16.18 Rotation is shared, so its result is shared (`NOSLOP_COOPERATIVE_ROTATION_V1`)
+
+`SIGNAL NEWNYM` is process-wide: a rotation by any caller moves **every**
+subsequent connection onto new circuits. The rate limit in §16.4 and §16.17
+therefore has a subtlety that cost a whole round to find.
+
+Three concurrent resolves (the §16.8 gate allows 3) share one exit. When that
+exit is gated they are all refused together and all request a rotation at the
+same instant. One wins; the others are refused by the interval check. Round 8
+had callers read that refusal as "the route did not change" and give up —
+but their sibling had just moved them onto a brand new exit a fraction of a
+second earlier. They were discarding exactly the retry that would have
+worked, which is why round-8 successes took 15-26s where round-7 successes
+took under a second.
+
+**`requestNewCircuit()` answers "are you on a fresh circuit?", not "did you
+perform the rotation?"** Within `CIRCUIT_CONSIDERED_FRESH_MS` (30s) of any
+rotation, and with nothing streaming, it returns `true` without issuing a
+second NEWNYM. Callers should keep treating `true` as "conditions changed,
+retrying is worthwhile".
+
+This does not weaken §16.17: while media is streaming the answer is still a
+flat `false`, because the caller genuinely must not get a new circuit then.
+
+### 16.19 Resolve failures auto-retry once (`NOSLOP_AUTO_RETRY_UNAVAILABLE_V1`)
+
+`retryTrigger` historically advanced only on ExoPlayer *playback* errors, so
+a slide that failed to **resolve** parked on the Retry button and waited for
+a tap. Field reports were that tapping it usually works — which is the app
+asking the user to do by hand what it should do itself, and is explained
+entirely by §16.16: the first resolve lost the exit lottery, and by the time
+a human reacts the circuit has moved on.
+
+`VideoPlayer` now performs one automatic re-resolve ~2.5s after an
+`Unavailable`. The delay is deliberate: long enough for a sibling resolve's
+rotation to land, short enough that the slide is usually still on screen.
+Exactly one attempt — if it fails again the exit is not the problem and the
+button is the honest answer.
+
+### 16.20 Retrying only helps if something changed
+
+`requestNewCircuit()` is rate limited (§16.4) and returns `false` when it
+refuses. Retrying a YouTube resolve after a refused rotation re-asks the
+**same exit** and gets the identical answer — roughly 20s of guaranteed
+failure per video, spent holding a resolve permit that other slides are
+queued behind. `resolveStreamUrl` now checks the return value and goes
+straight to the Invidious/Piped failover when the route did not change.
+
+The general rule for this codebase: **before spending a retry, establish that
+some input to the operation is different from last time.** Same URL, same
+exit, same client identity means the same result.
+
+### 16.21 Long-Stream Playback Stabilization & Continuous Mid-Stream Stall Recovery (`NOSLOP_LONG_STREAM_STALL_V1`)
+
+Longer videos (exceeding 3–5 minutes) experienced stream breakdown over Tor, entering an endless cycle where the video would buffer for 40–50s, play for 2s, and buffer again, eventually failing with `code=2004 (Source error)`:
+
+1. **Rebuffer Threshold Undersizing**: `DefaultLoadControl` configured `bufferForPlaybackAfterRebufferMs = 2000` (2s). Once buffer ran dry, ExoPlayer resumed playback as soon as only 2s of media was buffered. Over high-latency Tor circuits, playing 2s consumed the buffer faster than the incoming connection could supply it, re-triggering `STATE_BUFFERING` immediately. Raised to `8000` (8s) in both `VideoPlayer.kt` and `PreloadManager.kt`.
+2. **Diagnostic Monitor Early Exit**: The buffer progress sampler in `VideoPlayer.kt` included `if (p.playbackState == STATE_READY && p.isPlaying) return@LaunchedEffect`. As a result, the monitor terminated as soon as playback commenced at minute 0 and never ran during mid-playback stalls, leaving the player hung until OkHttp's 60s read timeout timed out. Removing the early return keeps the monitor active for the full duration of playback.
+3. **Recovery Authorization (`canRetry`)**: `canRetry` was limited strictly to `retryTrigger < 2`. For a long video, any third reconnect was refused, showing "Video unavailable". `canRetry` now permits recovery if the video was already playing (`isVideoReady || resumePosition >= 8000L`), and resets `retryTrigger` to 0 after 15s of stable playback.
+4. **Socket Keep-Alive**: `HttpClientProvider.getOrCreateIsolatedMediaClient` reduced `ConnectionPool` keepalive from 300s to 60s and `readTimeout` from 60s to 35s, preventing ExoPlayer from hanging on stale Tor sockets.
+
+### 16.23 Audio Sourcing Repair, Internet Archive Resilience, Tor Buffer Stabilization & Wikimedia Search Parity (v0.6.1-alpha)
+
+1. **Jamendo Search Parameter Fix**: Replaced invalid `namesearch` on `/v3.0/tracks/` with `search=` (or curated tag fallback `tags=pop+rock+electronic`), restoring live music tracks to the feed.
+2. **Internet Archive Headless Verification**: Replaced flagged User-Agent with a standard browser User-Agent, capped query results to 10, and dropped redundant HTTP `HEAD` checks that exhausted Tor connection pools.
+3. **Wikimedia Category Search Routing**: Swapped `fetchFeaturedPictures()` for `searchImages(query)` in `PublicApiService.kt` so user preferences and keywords determine image results instead of the bird-heavy Commons featured pictures category.
+4. **Preload Eviction Unblocking & Rebuffer Cushion Tuning**:
+   - `preWarm` explicitly clears `cancelledTasks.remove(rawUrl)`, preventing stale evictions from killing preloads for subsequent slides.
+   - `TVHTML5` promoted to second config in `YouTubeInternalClient` and `EXIT_BLOCKED_THRESHOLD` raised to 3, resolving streams in 1–2s without excessive circuit hops.
+   - Tuned `DefaultLoadControl` to `bufferForPlaybackMs = 2500` (2.5s) and `bufferForPlaybackAfterRebufferMs = 8000` (8s), completely stopping the 4s stutter rebuffer cycle over Tor.
+
+### 16.24 Player Mount Lifecycle Decoupling & Tor Circuit Stall Escalation (`NOSLOP_PLAYER_MOUNT_KEY_V1`)
+
+During long video streaming, a subtle recomposition bug caused playing videos to be torn down mid-stream:
+1. **Player Mount Teardown on Stable Reset**: `onStablePlayback` resets `retryTrigger` to 0 after 16 seconds of continuous stable playback. Previously, `ExoVideoPlayer`'s `DisposableEffect(url, retryKey)` was keyed on `retryKey = retryTrigger`. When `retryTrigger` reset from 1 to 0, `DisposableEffect` invoked `onDispose()`, tearing down the actively playing `ExoPlayer` instance (`attempt 1`) and creating a brand new one. The new player sought to the active offset, attempted an unbuffered range request over Tor, and stalled. Solved by introducing `playerMountKey` which only increments on genuine `onRetry()` invocations, ensuring that resetting `retryTrigger` to 0 does not kill the player.
+2. **Tor Circuit Escalation on Stalls**: When the 30s buffering stall detector triggers, calling `onRetry()` without modifying the SOCKS username reconnected to the exact same congested or throttled Tor circuit. `YouTubeInternalClient.advanceStreamNonce(videoId)` is now invoked on mid-stream stalls, guaranteeing the re-resolved URL and subsequent ExoPlayer media connection bind to a fresh Tor circuit and exit node.
+3. **Continuous Buffer Window Tuning**: Tuned `DefaultLoadControl` to `minBufferMs = 45000` (45s), `maxBufferMs = 90000` (90s), and `bufferForPlaybackAfterRebufferMs = 4000` (4s) in both `VideoPlayer.kt` and `PreloadManager.kt`. This maintains an active download stream without creating large idle gaps that allow Tor SOCKS sockets to time out.
+
+### 16.25 Preloader Bandwidth De-Contention, Snappy Startup Buffering & Dead Peer Tor De-Congestion (v0.6.1-alpha)
+
+Videos previously struggled to preload and took a long time to buffer over Tor due to socket contention and oversized preload windows:
+1. **Preloader Bandwidth Monopolization (`PreloadManager.kt`)**: `PreloadManager` previously used `minBufferMs = 45000` (45s) and `maxBufferMs = 90000` (90s). With `MAX_PRELOAD = 3`, up to three background ExoPlayer instances were downloading 45–90 seconds (20–40 MB each) simultaneously over Tor, choking the connection and starving the active on-screen video down to ~25% bandwidth. Sized down to `minBufferMs = 8000` (8s), `maxBufferMs = 15000` (15s), and `bufferForPlaybackMs = 1000` (1.0s). Background players now buffer only an 8–15s head cushion and immediately go idle, yielding 100% of Tor bandwidth to the active playing video.
+2. **Startup Playback Cushion Halving (`VideoPlayer.kt`)**: Reduced active player `bufferForPlaybackMs` from 2500ms (2.5s) to 1200ms (1.2s), halving initial buffering delay, while maintaining `minBufferMs = 35000` and `maxBufferMs = 70000` to prevent memory pressure.
+3. **Dead Peer Tor Socket Congestion Relief (`GossipService.kt`)**: Outbound connection attempts to dead hidden services (e.g. 238 consecutive failures to an offline peer) previously capped at a 2-minute backoff. Every 120s, multiple 12-second hanging sockets saturated Tor's SOCKS daemon (`Tor proxy not responding on 9050`). Extended exponential backoff cap to 30 minutes (`exponent.coerceAtMost(6)`, `1800_000L`), while preserving instant auto-unblock the second any packet arrives from that peer.
+4. **Fast Circuit Escape on Blocked Exits (`YouTubeInternalClient.kt`)**: Lowered `EXIT_BLOCKED_THRESHOLD` from 3 to 2, escaping flagged exits after 2 client refusals (`ANDROID`, `TVHTML5`) rather than waiting through 3.
+
+### 16.27 Clearnet Media Playback over Tor Stabilization, Transfer Listener Watchdog & Size Ceiling (v0.6.5-alpha)
+
+Clearnet media playback over Tor was enhanced to eliminate stalling, false-alarm circuit resets, and socket congestion:
+1. **Network Byte Arrival Watchdog (`VideoPlayer.kt`)**: Previously, the stall detector tracked `bufferedPosition`, which represents the decoded timeline position in milliseconds. During MP4 playback over Tor, ExoPlayer downloads container headers (`moov` atom) and initial chunks while `bufferedPosition` remains at `0L`. At 22s (`stalledSamples >= 11`), the watchdog falsely assumed the connection was dead, aborted the healthy stream, bumped the stream nonce, and restarted. Attached an `OkHttpDataSource` `TransferListener` that tracks actual byte delivery (`lastNetworkByteTimeMs`). While network bytes are transferring over Tor, `isAdvancing` remains true and `stalledSamples = 0`, completely stopping false stall aborts. Raised the continuous buffering threshold to 50s.
+2. **250MB Tor Size Ceiling (`YouTubeInternalClient.kt`)**: Enforced `NOSLOP_TOR_SIZE_CEILING_V1` in `extractUrlFromPlayerResponse()`. Progressive formats with `contentLength > 250MB` (e.g. 1.4GB 12-hour video streams) are skipped over Tor, preventing impossible buffer downloads.
+3. **Background Feed Sync Throttling (`FeedRepository.kt`)**: Paused Phase 2 and 3 background sync using an active while-loop while video playback or preloading is active (`while (PreloadManager.isVideoActive || PreloadManager.currentlyPlayingUrl != null) delay(2000L)`), stopping dozens of parallel API queries from choking Tor video buffers.
+4. **Preloader Eviction Headroom & Main Thread Safety (`PreloadManager.kt`)**: Raised `MAX_PRELOAD` from 3 to 4, preventing the immediate next slide from being evicted when subsequent slides queue. Synchronized player release and map modifications on `Dispatchers.Main`.
+5. **Tor Port 9050 Dummy Connect Fast-Path (`TorService.kt`)**: Fast-paths `waitForProxy()` when `TorState.READY` or `PROXY_READY`, eliminating thousands of dummy socket connects.
+6. **Handshake Timeout & Outbox Cooldown Exemption (`MeshTransport.kt`, `MeshSocialRepository.kt`)**: Sized handshake connect timeout to 45s with 3 attempts for Tor v3 descriptor and rendezvous circuit establishment, and exempted handshakes from peer cooldown traps in the persistent outbox.
+7. **Comment/Reaction Sync & Full UUID Notification Routing (`CommentPacketHandler.kt`, `ReactionPacketHandler.kt`, `UnifiedFeedTab.kt`, `MeshTransport.kt`)**: Added dual-mode verification for comments and reactions. Fixed UUID truncation and own-post exclusion in `UnifiedFeedTab.kt`, ensuring notification taps load the exact broadcast post and open its comments. Elevated sync packets to high priority and auto-synced comments upon opening the comments modal.
+8. **Emulator ANR Elimination (`VideoPlayer.kt`, `PreloadManager.kt`)**: Removed `forceEnableMediaCodecAsynchronousQueueing()` to prevent software decoder deadlocks on Android emulators.
+
+### 16.26 Startup Video Instant Handoff, CachedSource Staleness Fix & Tor Sync De-Contention (v0.6.2-alpha)
+
+On app cold start, the first video frequently experienced a visible delay where the splash screen dismissed into an unbuffered video card showing "Finding stream" followed by "Buffering", stalling for 12 seconds, failing, and restarting:
+1. **CachedSource Stream Nonce Invalidation Bug (`VideoPlayer.kt`)**: `stalenessReason()` previously invoked `extractYouTubeId(source.url)` on the resolved `googlevideo.com` CDN stream URL. Because CDN stream URLs carry parameters containing `v=` (such as `vprv=1` or `mv=m`), it extracted query noise, causing `YouTubeInternalClient.getStreamNonce()` to return 0. When evaluated against `streamNonce = 1`, it returned `"circuit stream nonce advanced (1 -> 0)"`, invalidating every fresh YouTube cache entry. When `VideoPlayer` mounted, it discarded `sourceCache`, displayed "Finding stream", re-resolved the video under a newly bumped nonce, and called `PreloadManager.claim()`. Because the URL had changed during the redundant re-resolve, `PreloadManager` discarded the preloaded player (`"URL changed since warm-up"`), forcing ExoPlayer to reconstruct from scratch and display "Buffering". Storing the authentic `videoId` on `CachedSource` and testing `streamNonce < currentNonce` resolved this cascade.
+2. **Splash Screen Bootstrap & Buffer Synchronization (`MainActivity.kt`)**: `awaitNetworkReady` previously timed out after 4 seconds, whereas Tor requires ~5.5s for cold circuit bootstrap. This caused `awaitPlayerReady(3000L)` to start before Tor was ready, timing out prematurely at 7s (`result: false`) and revealing an unbuffered card. Sized `awaitNetworkReady` to 12s and `awaitPlayerReady` to 16s so initial preloading and first-frame buffer complete seamlessly behind the splash screen curtain.
+3. **Cold-Start Feed Synchronization De-Contention (`NoSlopViewModel.kt`, `FeedRepository.kt`)**: On cold launch, `NoSlopViewModel.init` previously called `refreshFeeds()` the millisecond Tor reached `READY`, firing Phase 1 Ramp-Up (4 creator queries, trending requests, and RSS feeds). These parallel requests saturated Tor's local SOCKS daemon while Slide 1's ExoPlayer was attempting its HTTP Range request. Gated Phase 1 Ramp-Up to empty databases only (`!hasExistingItems`), and deferred cold-start feed synchronization in `init` by 12 seconds so 100% of Tor bandwidth is dedicated to Slide 1 playback.
+4. **Tor Cold-Start Stall Watchdog Tuning (`VideoPlayer.kt`)**: The stall watchdog previously used `if (bufPos <= 0L) 4` (8 seconds) and `stalledSamples >= 6` (12 seconds) on Tor. Because SOCKS5 circuit allocation, TLS handshakes, and Range requests deep into video files (e.g. 627s resume position) take 12–15s on Tor networks, the watchdog aborted valid connections at 8s or 12.1s right as bytes were arriving. Raised the Tor stall threshold to 22s (11 samples) and continuous buffering threshold to 30s (15 samples), and reset `stalledSamples` whenever `delta > 0L`.
+
+### 16.23 Diagnosing from logs
+
+Capture unfiltered — `adb logcat -c && adb logcat -v time > noslop.log` — and
+uninstall whichever build variant is not under test (§16.10). Filtering by
+tag hides the Tor daemon's own bootstrap output, which §16.9 needs.
+
+Then work down this list. **The order matters**: each step rules out a class
+of cause, and skipping ahead is how three rounds of this session were spent
+fixing the wrong layer.
+
+| Step | Question | Where to look |
+|---|---|---|
+| 1 | Is anything reaching the network at all? | §16.7 — `.onion` peers *and* clearnet both timing out means no path; stop here |
+| 2 | Did Tor actually finish bootstrapping? | `Tor bootstrap NN%` (§16.9). "Tor is ON" is not proof |
+| 3 | Are resolves succeeding? | count `Resolved direct video stream using X` — **never** playability status (§16.15) |
+| 4 | If not, is it the client or the exit? | wide spread of durations with nothing in the middle = exit lottery (§16.16). Failures that vary *by client* = roster (§16.11) |
+| 5 | Is the proxy the thing being refused? | `signedFor=` on a resolved URL: a Cloudflare address that gets `LOGIN_REQUIRED` is §16.14 |
+| 6 | Did we resolve something unplayable? | itag on `resolved DIRECT`. **18 is what you want.** 137/248/299/303 are DASH video-only (§16.12) |
+| 7 | Resolved but not playing? | `PLAYBACK_DIAG sample` — `delta=0` with a flat `bufPos` means no bytes; rising `bufPos` with no `FIRST FRAME` means container or codec |
+
+Signals worth knowing by sight:
+
+| Line | Means |
+|---|---|
+| `N clients refused on the same circuit` | exit lottery lost; a rotation was attempted (§16.16) |
+| `Not rotating — another caller rotated Ns ago` | cooperative rotation working (§16.18) |
+| `Skipping NEWNYM ... because a video is streaming` | §16.17 protecting a live stream — correct, not a problem |
+| `Auto-retrying unavailable resolve` | §16.19 doing what a user would otherwise have to tap |
+| `Gave up waiting 20s for a resolve slot` | the §16.8 gate is too tight for current conditions |
+| `offered only adaptiveFormats` | §16.12 correctly refusing a video-only stream |
+| `Player response ... geoLock=` | §16.5 |
+
+**Timing figures throughout §16 were captured on a ~0.1 Mbps uplink.** The
+diagnoses do not depend on that — a gated exit refuses you identically on
+fibre — but treat the durations as an upper bound, and be sceptical of any
+conclusion that rests on absolute latency rather than on a ratio or a
+pattern.
+
+## 17. Audit and Hardening Pass (2026-09-02)
+
+Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
+detail; the status doc is the summary.
+
+### 17.1 Tor control interface — `NOSLOP_CONTROL_SOCKET_V1` / `_V2`
+
+`writeTorrc` used to emit `ControlPort 9051` with `CookieAuthentication 0`, and
+every control operation connected to `127.0.0.1:9051` with a bare
+`AUTHENTICATE`. On Android, loopback is shared between all installed apps. Any
+app holding `INTERNET` could therefore drive our Tor daemon.
+
+Cookie authentication was considered and rejected. It is a global tor setting,
+and `org.torproject.jni.TorService` maintains its own control connection that
+authenticates with empty credentials; enabling it would very likely break the
+library's connection and with it the `STATUS_ON` broadcast, so Tor would never
+report READY. Trading a local attack surface for a non-booting app is a bad
+trade.
+
+`TorControlChannel` instead centralises every control operation and offers
+three modes:
+
+| Mode | torrc | Behaviour |
+|---|---|---|
+| `UNIX_ONLY` | `ControlSocket` only | Destination. File permissions on the app's private `filesDir` are the access control; no TCP port exists to attack. |
+| `AUTO` | both | **Current.** Prefers the socket, falls back to TCP, logs which won plus a directory dump on failure. Leaves 9051 open — diagnostic, not a destination. |
+| `TCP_ONLY` | `ControlPort` only | Exact pre-change behaviour, for isolating a startup failure. |
+
+The first cut shipped `UNIX_ONLY` and the socket never appeared. tor-android
+writes nothing to logcat, so the failure was invisible: no bootstrap-phase
+lines, no hidden service, nine `NEWNYM: control channel unavailable` warnings,
+and circuit rotation entirely inert. `AUTO` exists to answer, on the next run,
+whether tor refuses the directory, places the socket elsewhere, or ignores our
+torrc at all — the last being plausible given `ControlPort 9051` may have been
+tor-android's default rather than ours.
+
+Note `start()` returns early on `Tor already in state READY`, so `writeTorrc`
+is skipped on a warm start. A torrc change needs a genuine tor restart to take
+effect.
+
+### 17.2 TLS trust — `NOSLOP_TLS_TRUST_V1`
+
+`base-config` permitted cleartext for every domain and trusted user
+certificates. System anchors only now, cleartext scoped to `.onion` and
+loopback. Android's network security config matches hostnames and has no CIDR
+syntax, so "any RFC1918 address" is inexpressible — the LAN Hub fast path is
+consequently blocked and `invokeHubApi` falls back to the Hub's `.onion`. A
+commented block pins one known LAN address if the fast path is wanted back.
+Debug TLS interception belongs in a `app/src/debug/res/xml/` overlay, not here.
+
+### 17.3 Release verification — `NOSLOP_RELEASE_CHECKSUM_V1`
+
+The digest is computed while streaming, so the file is never read twice and
+there is no window between hashing and installing. Compared in constant time
+against the published checksum; the file is deleted on mismatch, on truncation
+against `Content-Length`, and on a `text/html` response. With no published
+checksum the install is refused unless `allowUnverified = true` is passed from
+a UI path that has warned the user.
+
+`UpdateChecker` resolves the expected digest from, in order: `hero.apkSha256`
+in `content.json`, a `.sha256` release asset, a bare 64-hex in the release
+notes, then a sibling `<apk-url>.sha256`.
+
+This is integrity against whatever the update channel said, not authenticity.
+See "Still open" item 2.
+
+### 17.4 Media proxy — `NOSLOP_PROXY_TOKEN_V1`
+
+Per-process token on `/stream`, compared in constant time; an untokenised
+request gets 404 rather than 401 so a probing app cannot confirm what the port
+is. The `onion=` parameter must match a well-formed v3 address. The token
+rotates per process, so in-progress mesh streams do not survive an app restart
+in Coil's cache; fully downloaded media is served from `file://` and is
+unaffected.
+
+### 17.5 Mesh framing — `NOSLOP_FRAME_CAP_V1`
+
+Manual newline framing with a 4MB ceiling, generous enough for the largest
+`MEDIA_CHUNK` and small enough that a peer cannot buffer the heap away.
+Connections exceeding it are dropped. The parse-failure branch logs the frame
+length rather than the frame.
+
+### 17.6 Proxy credentials — `NOSLOP_PROXY_SECRET_V1`
+
+`PROXY_URL`, `PROXY_SECRET` and `PROXY_SEND_LEGACY_SECRET` are BuildConfig
+fields sourced from Gradle properties, with `PROXY_SEND_LEGACY_SECRET` defaulting
+to `false`. The shipped secret is no longer in the public repo and the raw secret
+never crosses the wire. Authentication is 100% dynamic HMAC-SHA256 verified by the
+Cloudflare Worker (`ACCEPT_LEGACY_SECRET = false`), reporting `X-Proxy-Auth: hmac`.
+
+### 17.7 Identity fallback — `NOSLOP_UNLOCK_FALLBACK_V1`
+
+`unlock()` now reads through `secureFallbackRead` and normalises whitespace and
+case before comparing. Burnable private keys go through `secureFallbackWrite`.
+`clearAll()` removes the Room mirror as its docstring always claimed.
+
+### 17.8 Backup — `NOSLOP_BACKUP_STREAMING_V1`
+
+**NSG2 (review C07/C06, round E3, 2026-10-13).** The container is
+`data/BackupArchiveFormat.kt` (integers big-endian):
+
+- `header` = `"NSG2"` | version (1 byte, 1) | salt (16) | nonce prefix (7), 28 bytes.
+- `key` = HKDF-SHA256(`MnemonicGenerator.deriveSeed`(canonical Word Cloud), salt,
+  info `"noslop-backup-v2"`), 32 bytes. Each archive has its own salt, so no two
+  archives share a key, and the key is never the raw seed (NSG1 used
+  `seed[0:32]`, the seed the identity keys come from).
+- `body` = the chunk records of the creator identity file (§3.7.2): last flag
+  (1) | length (4) | AES-256-GCM of at most 1 MiB of the zip; nonce = nonce
+  prefix | chunk number (4) | last flag; associated data = the header. The last
+  chunk is always written and nothing may follow it.
+
+`BackupManager` writes the zip straight into `BackupArchiveFormat`'s stream
+and reads it straight out of the decrypting stream: no plaintext zip, and no
+plaintext group-message file, is written on export or restore. Nothing taken
+from the stream is used until it has been read to its end (`drain`), which is
+where a truncated NSG2 file (and the NSG1 tag, or CBC padding) is checked, so a
+truncated, reordered, modified or extended archive, or an export that failed
+part way, changes nothing. `openForReading` returns `Opened.Readable`,
+`ConfirmLegacy` (CBC, unauthenticated, until the user confirms), `NewerVersion`,
+`WrongWordCloud`, `Damaged` or `TooSmall`. Still read: `"NSG1"` (header `"NSG1"` | IV (12), whole-file
+GCM, key `seed[0:32]`) and pre-NSG1 CBC (header = IV (16), same key), each
+decrypted as it is read with the tag or padding checked at the end. Tests:
+`BackupArchiveFormatE3Test` (the container), `BackupNsg2E3Test` (export and
+restore end to end); test helpers that open exports: `BackupArchiveTestSupport`.
+Before E3, the archive was decrypted to a plaintext temp file, unzipped only
+after `doFinal()`, and deleted in a `finally`.
+
+Zip entry names are validated as plain file names and every destination is
+confirmed inside its intended parent by canonical path.
+
+`preferences.xml` in the archive is sealed by a non-exportable Keystore key.
+`canOpenRestoredIdentity()` probes it after a restore. Since 2026-10-10
+(review D09) `importBackup` returns an `ImportResult` (`Success`,
+`SuccessIdentityRecoveryRequired`, `Failed(rolledBack, reason)`,
+`ConfirmLegacy`); `importData` is the Boolean wrapper for older callers. For a
+legacy archive (sealed prefs, no `identity_backup.json`) the Word Cloud rebuild
+is planned while staging (`planLegacyRederivation`: handle and
+`local_pub_ed25519` read from the staged database, read-only). If this device
+can't open the restored prefs and the rebuild doesn't match (or can't be
+sealed), `identity_quarantined` is set and the result is
+`SuccessIdentityRecoveryRequired`: the app restarts into onboarding with the
+"Identity Recovery Required" banner. `loadIdentity` / `getBurnableIdentity`
+also re-derive the X25519 public key from its private key and repair a
+diverged cache.
+
+Since round R5 (2026-10-10) the archive key is derived from
+`MnemonicGenerator.normalize(wordCloud)` (trimmed, lower case, single spaces).
+Earlier builds used the phrase exactly as typed, so a restore tries
+`MnemonicGenerator.restoreCandidates` (canonical first, then as-typed forms:
+untrimmed, capitalised first word, trailing space or newline) and picks the one
+whose key turns the first cipher block into `PK\x03\x04` (`firstBlockIsZip`;
+GCM block 0 is CTR with counter `IV || 00000002`, CBC block 0 is
+`AES⁻¹(C0) XOR IV`). The full authenticated decryption still decides.
+`ImportResult.Failed.reason` is shown to the user. Onboarding handles
+`ConfirmLegacy`. Before restarting after a restore the app stops Tor cleanly.
+
+**Onion descriptor refresh (R5).** `GossipService.recordSendFailure` asks
+`TorService.refreshOnionDescriptor` (control command `HSFETCH <id>`) for a
+fresh descriptor on the second failed send to an onion in a row;
+`recordSendSuccess` does the same when the peer reaches us after two or more
+failed sends. At most once per `DESCRIPTOR_REFRESH_INTERVAL_MS` (60 s) per
+onion; only while Tor is READY.
+
+### 17.9 Player IP lock — `NOSLOP_PLAYER_IP_LOCK_V1`
+
+`playerEndpoint()` is unconditionally direct. Confirm with `PLAYBACK_DIAG
+resolved DIRECT` lines: `signedFor=` should always be a Tor exit, never
+`104.23.x` or `172.71.x`. The Worker's player-response cache is now cold; if
+player calls are ever routed back through it, remove that cache first, because
+it stores URLs locked to Cloudflare's egress.
+
+### 17.10 Bootstrap bail-out — `NOSLOP_BOOTSTRAP_BAILOUT_V1`
+
+If no control connection has succeeded within 20 polls, `waitForBootstrap`
+returns false immediately so the caller's end-to-end routing check runs. Worth
+keeping independently of §17.1: an unreachable control interface is knowable in
+seconds, and the fallback needs to run while the current bootstrap attempt is
+still alive.
+
+### 17.11 Category picker — `NOSLOP_MUSIC_SELECTABLE_V1`
+
+`hiddenFromPicker` (plumbing categories) is now separate from
+`alwaysIncludedCategories` (always fetched). `Music` is both always fetched and
+a real user choice; filtering the picker by the latter removed it from the UI
+and made `Step6Genres`' `interests.contains("Music")` permanently false.
+
+### 17.12 Content Mix layout — `NOSLOP_CONTENT_MIX_SCROLL_V1`
+
+`FeedMixSettingsSection` is a bare composable emitting siblings with no
+container, and requires a scrolling column from its caller.
+`ContentPreferencesScreen` supplies one; `Step8FeedMix` supplied a `Box`, which
+stacked the header over the card and, being height-constrained without a
+scroll, collapsed the lower sliders to zero height.
+
+### 17.13 EXIF orientation — `NOSLOP_EXIF_ORIENTATION_V1`
+
+`ui/ExifUtils.kt` decodes with the orientation applied and exposes
+`needsRotation()` so small photos that carry a rotation are re-encoded too.
+Rotation is baked into pixels rather than preserved as a tag, because the
+receive path mixes Coil and raw `BitmapFactory` and peers may run a different
+build. Applied at `ChatThreadScreen`, `GroupChatThreadScreen`, `AvatarCropper`
+and `GroupSettingsModal`.
+
+CameraX still has no `setTargetRotation()`; the decode-side fix covers both
+camera and gallery sources, so it was left alone deliberately.
+
+### 17.14 Comment media — `NOSLOP_COMMENT_MEDIA_RERESOLVE_V1`
+
+`isDownloaded` is now a `remember` key on the resolved URL, so it re-resolves
+from proxy URL to `file://` at the moment the file becomes usable. The
+`AsyncImage` also gets a GIF-capable `ImageLoader`, matching the one
+`ChatThreadScreen` already builds for DM GIFs.
+
+### 17.15 Logging — `NOSLOP_LOG_HYGIENE_V1`
+
+Rotates at 4MB keeping one generation, so worst-case disk use is bounded at
+~8MB. Release drops DEBUG. Writes are serialised on a single daemon thread —
+the previous implementation launched a coroutine per line onto the
+multi-threaded IO dispatcher and called `File.appendText()`, opening and
+closing the file per line with no ordering guarantee. Scrubbing covers long
+Base64 blobs and 64-hex digests in addition to onion addresses.
+
+Note the log export surfaces only the active file, not the rotated `.log.1`.
+
+**User-chosen values (review C19/D11, rounds E1–E5s2, 2026-10-13).** Search
+terms and video ids are logged through `Logger.redact(value)`: in release
+builds an 8-hex tag and the length (`#1a2b3c4d(len 9)`), the same for the same
+value within one run; builds that show sensitive logs keep the value
+(`LoggerRedactTest`). HTTP request labels never carry them, Reddit logs no
+URLs (they contain the query), YouTube logs no response bodies, and Jamendo
+and Invidious log no terms. `CodeHygieneArchitectureTest` fails on a log or
+request label that interpolates a search term or video id, on a coroutine
+scope without `SupervisorJob` and a logging handler, on a silent `catch` not
+on its per-file allow list, and on app code using Gson `TypeToken`.
+
+### 17.16 R8-Safe Zero-Reflection Dynamic Localization (`NOSLOP_I18N_R8_SAFE_V1`)
+
+In release builds (`assembleRelease`), R8 minification strips generic signatures from anonymous subclasses. `LanguageManager.loadLanguage()` constructed an anonymous `TypeToken<Map<String, String>>() {}`, causing a fatal `RuntimeException: Missing type parameter` on every non-English language load. The exception handler silently caught the error and fell back to reloading English, completely disabling language switching in production builds:
+1. **Zero-Reflection Parsing**: Replaced `TypeToken` with direct `JsonParser.parseString(jsonString).asJsonObject` iteration into a `HashMap<String, String>`.
+2. **State-Triggered Recomposition**: Added a `_languageUpdateTrigger: StateFlow<Long>` in `LanguageManager` observed by `String.tr`. Every language reload increments this counter, guaranteeing that all composables using `.tr` immediately re-evaluate and recompose.
+3. **Synchronous Initialization & Discovery Fallback**: In `NoSlopApp.onCreate()`, `LanguageManager.init(this, "en")` is called synchronously on the main thread, ensuring `appContext` is ready before any UI composes. If `AssetManager.list("languages")` returns empty due to Android asset directory packaging quirks, `LanguageManager` automatically falls back to `WELL_KNOWN_LANGUAGES` so all 22 bundled languages are always present in the selector.
+
+### 17.23 Review Round 2 Remediation & Git-History Regression Restoration (2026-10-07/08)
+
+Changelog and test list: PROJECT_STATUS.md (2026-10-07 – 2026-10-08 entry).
+Mechanism detail lives in the sections it changed:
+
+- **Trust model (D01/D06)** — §10 "Peer trust invariant".
+- **v2-only handshakes (D07) and the handshake reply path (A2)** — §4.1 and
+  WIRE_PROTOCOL_REFERENCE.md §3 / §3.1.
+- **Send policy, pools and cooldown (R1)** — §4.1, §15.4, §19.
+- **Tor hidden-service re-registration, background start, offline
+  `PROXY_READY` (R1)** — §9.2.
+- **Chunk window cap and outbound limit** — §6.1.
+- **Media ACL, `media_owner`, digests and sync of v2-signed media (R2)** —
+  §6.1.1 and WIRE_PROTOCOL_REFERENCE.md §4.3.
+
+Two UI fixes have no other home:
+
+- **QR scanning (`QRScanScreen.kt`)**: CameraX hands over the Y plane with row
+  padding (`rowStride > width`) and sometimes `pixelStride > 1`;
+  `packLuminancePlane` repacks it into a tight `width × height` buffer before
+  ZXing, and the camera use cases are bound once instead of on every
+  recomposition. `QrFrameDecodeTest`.
+- **Chat / comment input (`ui/components/AndroidGifTextField.kt`)**: the field
+  is `internal class GifEditText : EditText` (platform class on purpose —
+  annotated `@SuppressLint("AppCompatCustomView")`). Commit `6f6dffe` had made
+  it an `AppCompatEditText`, which under the app's platform theme
+  (`android:Theme.DeviceDefault.NoActionBar`) loses the EditText style and is
+  not focusable in touch mode, so the keyboard never opened in DMs or
+  comments. The view sets `focusable` / `focusableInTouchMode` / `clickable`
+  explicitly, advertises `image/gif`, `image/png`, `image/jpeg`, `video/mp4`
+  for keyboard content, refreshes its callbacks in the `AndroidView` `update`
+  block (no stale lambdas after recomposition), and `applySendOnEnter`
+  switches between IME *Send* and multi-line input. `GifEditTextTest`.
+  **Do not change the base class back to `AppCompatEditText`** without also
+  moving the theme to an AppCompat parent.
+
+### 17.24 Round R3 — Groups & DM Outbox (2026-10-08)
+
+Changelog: PROJECT_STATUS.md (2026-10-08 R3 entry). Mechanism:
+
+- **Leaving a group** is signed with `NoSlopRepository.groupLeavePayload`, the
+  same 13-field `canonicalGroupUpdatePayload` that
+  `HandshakePacketHandler.resolveUpdateSigner` verifies. The previous 11-field
+  form was rejected by every receiver (register R7a).
+- **Member identity**: `NoSlopRepository.groupMemberIdentity(members,
+  allowMemberInvites, main, burnable)` picks the key that is listed in the
+  group. It is used by `leaveGroupChat`, non-admin `updateGroupChat` (signing,
+  `senderId`, the invites it sends), `sendGroupMessage` ("friends only" still
+  uses the main key when it is a member) and `reactToGroupChat`.
+  `requestGroupCatchup` parses the member list instead of a substring match,
+  and no longer sends a query to our own burnable identity.
+- **Group catch-up** (register R7b): the admin's `GROUP_SYNC` answer is stamped
+  with its signing time (`groupSyncTimestamp`). Receivers record the last
+  applied admin sync in `group_admin_sync_ts_<groupId>` and set the stored
+  revision to the state's revision. Detail: WIRE_PROTOCOL_REFERENCE.md §3
+  GROUP_SYNC.
+- **Group members vs the stranger-DM limit** (register R7c):
+  `GossipService.isFromMemberOfStoredGroup` exempts a directed group `MESSAGE`
+  whose sender is a member or the admin of that stored group.
+- **DM outbox limits, forced flushes, group legs, queued group sender**: §19.2.
+- Not changed, by decision: the `GROUP_UPDATE` freshness gate stays before the
+  signer check (R7f). Accepting member updates older than the stored revision
+  would let a replayed old leave remove a member who was re-added.
+
+### 17.25 Review Round 2 Follow-up — Rounds E1–E5, E5s, E5s2 (2026-10-13)
+
+Changelog, decisions and known gaps: PROJECT_STATUS.md (2026-10-13 entries).
+Mechanism detail lives in the sections it changed:
+
+- **Envelope signature (C09, E2)** — §4.1 and WIRE_PROTOCOL_REFERENCE.md §1.1.
+- **`ANNOUNCE_PEER` v2 (S2) and `GROUP_QUERY` rules (G1), E2/E4** —
+  WIRE_PROTOCOL_REFERENCE.md §3 and §5.1; the `GROUP_QUERY` sender rule in §4.2.
+- **Reactions, votes and "Share Permanent Identity" (D04 leftovers, E4)** — §3.7.1.
+- **NSG2 backups (C07/C06, E3)** — §17.8.
+- **Release-build JSON reads (E2b).** In R8 full mode an anonymous
+  `TypeToken` subclass loses its type argument. `PreferencesRepository` (saved
+  categories, genres, keywords, banned nodes) and `GroupChat`
+  (`parseGroupMemberHandles`, `parseGroupBannedMembers`) parse through array
+  classes or `JsonObject`; unreadable values fall back to the defaults.
+  `PreferencesRepositoryE2bTest`, `GroupChatParsingE2bTest`.
+- **Logging, scopes, silent catches (C19/C25/D11, E1)** — §17.15.
+- **Tor Browser detection (D11, E1).** `AndroidManifest.xml` `<queries>` lists
+  `org.torproject.torbrowser` and `org.torproject.torbrowser_alpha`
+  (package visibility, API 30+); the article dialog's button (`ui/MediaComponents.kt`) opens whichever is
+  installed and never falls back to an unrestricted intent.
+- **DM without an X25519 key (D11, E1).** `MeshSocialRepository.sendDirectMessage`
+  returns false and stores nothing when the contact's `encPublicKeyB64` is
+  blank; it used to seal to the Ed25519 key. `MeshSocialRepositoryTest`.
+- **Media3 1.11.1 and the Bouncy Castle keep rule (C24, E5)** — §12. Release
+  check: [RELEASE_SMOKE_TEST.md](RELEASE_SMOKE_TEST.md).
+- **Search paging (E5s, E5s2).** A search from the search modal goes through
+  `FeedRepository.searchCustomFeedPage(query, filterMode, cursor, firstPage)`,
+  which calls `PublicApiService.fetchItemsForCategory` with the search's
+  `SearchCursor` (`nextPagesOnly` after the first page). What it finds depends
+  on the query and the modal's filter only, never on the user's categories,
+  genres or keywords. `NoSlopViewModel.fetchNextSearchPage` asks for the next
+  page of the same terms while the user is still swiping (a prefetch), or
+  when the list has run out, instead of searching again with a random extra
+  word. One page at a time per search.
+  - `PublicApiService.SearchCursor` holds one search's place in each source
+    (YouTube continuation token, Invidious page, Reddit `after`, and per-source
+    pages from `feeds/api/SourcePage.kt`). A source is done when it reports the
+    end, has no key, or failed 3 times in a row; a failed request keeps its
+    place. A source page that has not arrived when the fetch's time is up is
+    cancelled, and the same page is asked for next time.
+  - Newest first where the source can sort by date (`SEARCH_NEWEST_FIRST`):
+    YouTube (upload date), Invidious (`sort_by=upload_date`, every date),
+    Reddit (`sort=new`), Hacker News, NewsAPI, the Guardian, the Internet
+    Archive. By relevance: Openverse, Wikimedia, Pexels, NASA, Wikipedia.
+    Podcast Index fills the first page only. NewsAPI stops after 5 pages (its
+    free plan serves 100 results).
+  - Searches made outside the search window (background interest feeds) send
+    the same requests as before; "All" searches have their own category
+    (`userSearchCategory`).
+  - `ui/SearchPaging.kt`: display order (page, then newest first, undated last
+    in a page); paging stops after 3 pages in a row with nothing new
+    (`MAX_EMPTY_PAGES`), after 50 pages (`MAX_PAGES`), or when every source is
+    done; local-only filters (History, Liked, Saved, My Content, Mesh) don't page.
+  - Hidden from search and the content tabs: blocked creators, banned channels,
+    banned nodes' posts, and anything voted down since E5s (keys in the app
+    setting `downvoted_items`, newest 3,000). Voted-down items still show in
+    History, Liked, Saved and My Content. Already-seen items may appear in
+    search. Downvotes made before E5s were stored only as swipes.
+  - Tested (unit: `SearchPagingE5sTest`, `SearchPagingE5s2Test`).
+
+### 17.22 Protocol Canonicalization, Atomic Post Persistence & Safe Staging (2026-10-04)
+
+A comprehensive hardening pass addressed the fifth round of external audit findings (R01–R18):
+1. **Post & Edit Wire Signature Canonicalization (`MeshSocialRepository.kt`, `Packets.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`, `MeshPacketVerifier.kt`)**:
+   Unified post and edit signing to 8 canonical fields (`id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl`), resolving R01 signature verification failures across historical inventory sync. Stored `authorAvatarB64` in `PostDao.updatePostDetails` and bound legacy signature fallbacks strictly to public posts without attachments (`mediaId == null && mediaMetadata == null && clearnetUrl == null`), closing R05 downgrade and unauthenticated attachment injection loopholes.
+2. **Atomic Room Post Mutations (`Daos.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`)**:
+   Introduced `@Transaction` methods in `PostDao` (`insertPostSafely`, `editPostSafely`, `deletePostSafely`), eliminating non-atomic check-then-insert race conditions between concurrent sync responses, deletions, and live broadcasts (R07).
+3. **Canonical Group Updates, Invitations & Authority Enforcement (`NoSlopRepository.kt`, `HandshakePacketHandler.kt`, `MeshPacketVerifier.kt`)**:
+   Aligned wire payload fields with canonical signing representations for group updates and leaves, eliminating R02 rejection caused by omitted permission strings. Signed new-member invitations independently with `canonicalGroupInvitePayload`, resolving R03 where group update signatures were reused for group invites. Restricted legacy 4-field group signatures strictly to non-mutating updates, preventing unauthorized member or permission changes with captured admin signatures (R04). Enforced that only verified admin signatures can alter metadata and permissions, and disallow member addition when invites are disabled, while requiring invite consent for unknown groups (R06).
+4. **Synchronized Feed Task Lifecycle & WorkManager Outcomes (`FeedRepository.kt`, `FeedSyncWorker.kt`, `NoSlopRepository.kt`)**:
+   Coalesced setup, ramp-up, and background passes into a unified `activeSyncDeferred: Deferred<FeedSyncResult>` guarded by `syncMutex`, preventing workers from returning early before sync completes and propagating typed `FeedSyncResult` to `FeedSyncWorker` for proper retry outcomes (R08).
+5. **Safe Backup Validation, Staging Commit, Destination Secret Cleansing & Identity Recovery (`BackupManager.kt`, `IdentityRepository.kt`)**:
+   Fixed group message restore SQL column omission (`isRead`) and wrapped portable message restore in transactional DB replacements with rollback (S01, S06). Validated complete identity schema, keypair consistency, and empty API key manifests (S10), while preserving quarantine recovery state (S11).
+6. **Active Player Teardown on Route Change, MediaProxy Range Support & Deployer Path Hygiene (`VideoPlayer.kt`, `MediaProxyService.kt`, `GossipService.kt`, `SshDeployer.kt`)**:
+   Tore down active players on Tor route transitions rather than early-returning, eliminating direct clearnet streaming leaks when enabling Tor (R14). Stripped `Range:` prefixes before evaluating `bytes=`, added support for prefix, suffix, and standard byte ranges with HTTP 416 responses for unsatisfiable ranges (R15). Enforced atomic connection admission (`incrementAndGet() > MAX_ACTIVE_CONNECTIONS`) and 5-second total header deadlines with strict CRLF-CRLF termination in `MediaProxyService` (R16). Removed unauthenticated liveness resets in `GossipService.processIncoming` (R17). Used absolute directory paths in SSH deployment cleanup traps and set `chmod 600` on secret files before writing (R18).
+7. **Android Lint Gate Compliance & Opt-in API Safety (`TorService.kt`, `ChatThreadScreen.kt`, `AndroidGifTextField.kt`, `PreloadManager.kt`, `QRScanScreen.kt`, `VideoCompressor.kt`, `lint.xml`)**:
+   Enforced Android 14+ broadcast safety in `TorService.kt` via `ContextCompat.registerReceiver(..., RECEIVER_EXPORTED)`. Corrected `SuspiciousIndentation` in `ChatThreadScreen.kt`, migrated custom text view to `AppCompatEditText` in `AndroidGifTextField.kt`, and provided Media3 `UnstableApi` and CameraX `ExperimentalGetImage` opt-in annotations along with `app/lint.xml`, clearing all lint errors for `:app:lintGithubDebug`.
+8. **Audit Hardening Test Suite & Keystore Fallback (`MediaProxyServiceTest.kt`, `WireProtocolTest.kt`, `GroupMessageSecurityTest.kt`, `BackupManagerTest.kt`, `MediaManager.kt`, `GossipService.kt`)**:
+   Implemented `MediaProxyServiceTest.kt` covering S13 range edge cases, expanded `WireProtocolTest.kt` with canonical group payload round-trips (S02/S07), added tamper tests in `GroupMessageSecurityTest.kt`, and verified `isRead` column and API key manifest restore in `BackupManagerTest.kt` (S01/S06/S10) with hardware Keystore fallback in `BackupManager.importData()`.
+9. **Injective Group Codecs, Author-Scoped Tombstones, DH Keypair Probes & Strict Ingress (V01–V09)**:
+   Addressed the eighth round of external audit findings (V01–V09):
+   - **X25519 DH Consistency Probes (V01)**: Replaced self-shared secret derivation probes with independent ephemeral key agreements in `CryptoService.verifyX25519Keypair` (`X25519(ephPriv, pub) == X25519(priv, ephPub)`). Validated tripcodes and onion addresses against derived Ed25519 public keys.
+   - **Whole-State Rollback & Snapshot Quiescence (V02)**: Closed Room DB before snapshotting DB/WAL/SHM; tracked pre-existing target DB state to delete created databases on rollback; snapshotted existing media files to backup directories and tracked created files; ensured preferences and API keys use verified synchronous `commit()`; and preserved recovery snapshots if rollback fails. Staged identity JSON is fully validated before any live store is mutated.
+   - **Injective Directory Encodings (V03)**: Encoded directory maps with length-prefixed `encodeForSigning` to eliminate delimiter collisions with `:` and `;`. Bound member directory maps to `canonicalGroupUpdatePayload` and `canonicalGroupSyncPayload`, and added `memberHandles.isNullOrEmpty()` to the 7-field legacy invite restriction.
+   - **Strict Canonical Ingress for EDIT_POST (V04)**: Eliminated legacy pipe signature fallback from `PostPacketHandler.handleEditPost` and `MeshPacketVerifier`, enforcing canonical 8-field signatures on all edits.
+   - **Authoritative Admin Group Revision & Unbanning (V05)**: Restricted state `revision` advancement strictly to admin-signed packets; prevented ordinary member snapshots from unioning bans or overriding admin state; and stamped authoritative state revisions on `GROUP_QUERY` responses.
+   - **Author-Scoped Tombstone Isolation (V06)**: Stored out-of-order delete-before-create tombstones in `app_settings` scoped by `(authorId, postId)`. Enforced that foreign authors can never overwrite a known post, active or orphaned, preventing post ID acquisition.
+   - **Feed Failure Counting & Synchronous Cancellation (V07)**: Fetch helpers rethrow `CancellationException` and return `Boolean`, failure counters accurately reflect results, and `cancelSync()` is a suspending, synchronized function that cancels and joins `activeSyncDeferred`.
+   - **Atomic Post Signature Re-issuance (V08)**: Updated `reissueLocalPostsWithCanonicalSignatures()` to perform transactional compare-and-update (`updateSignatureIfUnchanged`) on exact read snapshots, skipping orphaned posts, and allowed signature-only upgrades in `insertPostSafely` on matching timestamps and content.
+   - **Quarantine Recovery Flow & Verified Marker Archival (V09)**: Exposed an explicit **Identity Recovery Required** banner on Step 1 of `OnboardingScreen`, providing "Restore from Word Cloud", "Restore from Backup Archive", and "Start Fresh" options. Gated quarantine marker archival on verified preference commits and reload probes.
+10. **Authoritative Identity Restore, Whole-State Multi-Store Rollback & Protocol Hardening (U01–U12)**:
+   Restored sovereign credentials authoritatively via `IdentityRepository.restoreAuthoritativeIdentity(...)` with Ed25519 signing and X25519 encryption keypair consistency probes (U01). Added multi-store snapshotting (`mesh.db`, `-wal`, `-shm`, `noslop_identity_secure.xml`, `noslop_identity_fallback.xml`, and API keys prefs) with atomic rollback across all stores on any commit failure (U02). Bound member directory and handles in `canonicalGroupInvitePayload` and restricted 7-field legacy invites to admin signers with blank unsigned fields (U03). Enforced canonical 8-field post and edit ingress signatures eliminating friends-to-public downgrade attacks (U04). Fixed unreachable admin group removal, added dedicated state `revision: Long` to `GroupChat` (Room schema v16, `MIGRATION_15_16`), and applied authoritative admin ban and clear operations (U05). Emitted complete attachment metadata on text edits and retained existing descriptors on receipt (U06). Scoped tombstones to matching authors so foreign signers cannot reserve post IDs (U07). Replaced racy deferred captures with immutable generation tokens and structured `NonCancellable` cleanup in `FeedRepository` (U08). Gated onboarding on `needsIdentityRecovery()` and archived `.corrupt_` markers to `.resolved_` (U09). Shut down prior Coil loaders and cancelled running clearnet requests on Tor route change (U10). Enforced remaining-budget socket timeouts and strict range syntax validation in `MediaProxyService` (U11). Aligned `FakePostDao` with Room SQL and implemented automated regression suites in `BackupManagerTest`, `GroupMessageSecurityTest`, `PostPacketHandlerTest`, and `MediaProxyServiceTest` (U12).
+
+### 17.21 Contact Identity Authenticity, Tor Cooldown Balancing & Audit Hardening (2026-10-03)
+
+A security, performance, and correctness pass addressed the second and third rounds of external audit findings:
+1. **Dedicated Untrusted DM Rate Limiting (`GossipService.kt`)**: Decoupled unauthenticated directed DMs into `dmRateLimits` (10 per 60s per sender) and introduced a global rate limit (30 unauthenticated DMs per 60s window across all senders), protecting the node from rotating spoofed sender IDs and separating DM traffic from lifecycle announcements.
+2. **Shared Privacy Predicate & Post Caching (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**: Reused `SyncPacketHandler.canSharePost()` across `handleSyncRequest`, `handleInventorySyncRequest`, and `MeshSocialRepository.requestInventorySync()`. Fixed `postCache` to use `containsKey` so missing posts cached as null do not trigger repeated SQLite queries.
+3. **PostContext Pass-Through & Dead Code Pruning (`GossipService.kt`)**: Passed `PostContext` directly through `processIncoming` into `forwardPacket`, eliminating redundant context re-resolutions per packet. Pruned uncalled `getTargetPostAuthor()`.
+4. **Pre-Picker Backup Mnemonic Validation (`SettingsTab.kt`)**: Gated the system SAF `CreateDocument` file picker on validating typed recovery words against active mnemonic in both primary and advisory export dialogs, alerting immediately on typos.
+5. **Media Cooldown Bypass & Client Uniformity (`MeshTransport.kt`, `YouTubeInternalClient.kt`, `scripts/test_yt.sh`)**: Allowed `isMediaPacket` to bypass cooldown in `MeshTransport.sendPacket()`, preventing single-seeder chunk downloads from stalling for 3 minutes on temporary network dips. Standardized `YouTubeInternalClient` to use `ProxyAuth.isConfigured` and scrubbed legacy proxy secret from `scripts/test_yt.sh`.
+6. **Tor Video Streaming Stabilization & 800MB Ceiling (`YouTubeInternalClient.kt`, `VideoPlayer.kt`, `ClearnetTorMediaTest.kt`)**: Raised progressive format 18 (360p) size ceiling from 250MB to 800MB, allowing normal full-length videos (e.g. 314MB) to stream via byte-range requests without rejection. Raised `EXIT_BLOCKED_THRESHOLD` to 4 configs so token-free fallback clients (`ANDROID_VR`, embedded player) run on the active circuit before hopping nonces. Halved continuous buffering stall timeout from 50s to 24s on Tor with trickling-circuit protection.
+1. **Authenticated Contact Identity Association (`DmPacketHandler.kt`, `GossipService.kt`)**: Previously, `DmPacketHandler.handleDirectMessage()` associated incoming senders with the burnable identity before decrypting payloads. An unauthenticated attacker could spoof a friend's public key as `senderId` to re-label legitimate contacts as "burnable". The database write is now strictly gated on successful ChaCha20-Poly1305 AEAD decryption. Incoming directed DMs from untrusted senders are rate-limited to 10 per 60s in `GossipService.processIncoming()`, and missing-key auto connection requests are throttled to 1 per 60s per sender.
+2. **Balanced Peer Failure Tracking & Cooldown (`MeshTransport.kt`, `GossipService.kt`)**: Re-enabled failure tracking on all send attempts (excluding interactive typing/read receipts). DMs and handshakes bypass cooldown so direct user communications are never blocked, while broadcasts, forwards, sync requests, and background presence respect cooldown (30s to 3m backoff) to prevent Tor socket storms to offline hidden services.
+3. **Unified Post Context Resolution (`GossipService.kt`)**: Replaced duplicate DB lookups across `isFriendsOnlyPacket` and `getTargetPostAuthor` with a single unified `resolvePostContext(packet): PostContext`. Removed the unsafe `hops == 1` heuristic that misclassified transit engagement packets.
+4. **Sync N+1 Query Elimination (`SyncPacketHandler.kt`)**: Replaced repeated `postDao.getPostById()` calls inside comment and reaction `filter {}` loops with a cached `postCache` map and `canSharePost()` helper.
+5. **Media ID & Traversal Hardening (`MediaManager.kt`, `GossipService.kt`)**: Pre-compiled `MEDIA_ID_REGEX = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")` rejecting leading dots and lone `.` / `..`. Sanitized public download filenames. Switched `handleRelayRequest()` to locate media via `MediaManager.getLocalFile(mediaId)`.
+6. **Proxy Fallback Gating (`ProxyAuth.kt`, `RedditApiClient.kt`, `JamendoApiClient.kt`)**: Added `ProxyAuth.isConfigured` check so Reddit and Jamendo skip proxy round-trips when `PROXY_SECRET` is blank.
+7. **Tor Service Lifecycle Safety (`TorService.kt`)**: Captured `applicationContext` instead of activity context for `ConnectivityManager.NetworkCallback`, unregistered the callback on `stopTor()`, and guarded `onAvailable()` against racing startup jobs.
+8. **Mnemonic Validation on Backup (`SettingsTab.kt`)**: Validated typed recovery words against active mnemonic before triggering SAF export.
+
+### 17.20 Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (2026-10-01)
+
+A security and privacy hardening pass restricted Friends Only broadcasts and sync to authentic direct personal contacts:
+1. **Friends-Only Broadcast Isolation (`GossipService.kt`, `MeshSocialRepository.kt`)**: Previously, `GossipService.broadcast()` sent packets to all peers in `peerDao.getAllPeersList()` matching `isTrusted == true`. Because temporary contacts (follower pairing) and creator nodes could hold `isTrusted == true`, they were receiving Friends Only broadcasts. `GossipService.broadcast()` now evaluates `isFriendsOnlyPacket(packet)`. If true, `targetPeers` is strictly restricted to trusted direct personal connections (`peer.isTrusted && !peer.isTemporary && !peer.isCreator && contactSetting != "burnable"`).
+2. **Primary Identity Authorship for Friends Content (`MeshSocialRepository.kt`)**: `composeAndBroadcastPost()` previously selected the burnable identity when `is_creator_enabled == true`. For Friends Only posts (`privacy == "friends"`), it now strictly authors and signs with the primary personal identity (`getLocalIdentity()`), ensuring friends verify the personal key and burnable follower identities are never stamped on private content.
+3. **Historical & Inventory Sync Privacy Isolation (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**: In `handleSyncRequest` and `handleInventorySyncRequest`, posts with `privacy == "friends"` and their comments/reactions are withheld from temporary contacts, creator nodes, and burnable connections. In `requestInventorySync`, outgoing inventory hashes omit friends-only posts when querying non-direct peers. In `handleSyncResponse`, incoming friends-only posts from non-direct peers are dropped.
+4. **Firewall Inbound & Forwarding Isolation (`GossipService.kt`)**: Inbound Friends Only packets from non-direct peers are blocked at the gossip firewall. `forwardPacket` unconditionally drops friends-only packets.
+
+### 17.20 Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (2026-10-01)
+
+A security and privacy hardening pass restricted Friends Only broadcasts and sync to authentic direct personal contacts:
+1. **Friends-Only Broadcast Isolation (`GossipService.kt`, `MeshSocialRepository.kt`)**: Previously, `GossipService.broadcast()` sent packets to all peers in `peerDao.getAllPeersList()` matching `isTrusted == true`. Because temporary contacts (follower pairing) could hold `isTrusted == true`, they were receiving Friends Only broadcasts. `GossipService.broadcast()` now evaluates `isFriendsOnlyPacket(packet)`. If true, `targetPeers` is strictly restricted to trusted direct personal connections (`peer.isTrusted && !peer.isTemporary && contactSetting != "burnable"`), while guaranteeing that the post author (`targetPostAuthor`) always receives engagement on their post.
+2. **Primary Identity Authorship for Friends Content (`MeshSocialRepository.kt`)**: `composeAndBroadcastPost()` previously selected the burnable identity when `is_creator_enabled == true`. For Friends Only posts (`privacy == "friends"`), it now strictly authors and signs with the primary personal identity (`getLocalIdentity()`), ensuring friends verify the personal key and burnable follower identities are never stamped on private content.
+3. **Historical & Inventory Sync Privacy Isolation (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**: In `handleSyncRequest` and `handleInventorySyncRequest`, posts with `privacy == "friends"` and their comments/reactions are withheld from temporary contacts and severable burnable connections. For trusted direct peers, comments and reactions on friends-only posts synchronize bi-directionally between the author and peer (`post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == packet.senderId`). In `requestInventorySync`, outgoing inventory hashes omit friends-only posts when querying non-direct peers. In `handleSyncResponse`, incoming friends-only posts from non-direct peers are dropped unless authored by the sender.
+4. **Firewall Inbound & Forwarding Isolation (`GossipService.kt`)**: Inbound Friends Only packets from non-direct peers are blocked at the gossip firewall unless originating from the post author. `forwardPacket` unconditionally drops friends-only packets.
+
+### 17.19 Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (2026-09-30)
+
+A targeted remediation resolved mesh sync lockouts, Tor bootstrap freezes, and network reconnection failures:
+1. **Tor Circuit Ready SOCKS Gating (`MeshTransport.kt`)**: Previously, `MeshTransport.sendPacket()` called `TorService.waitForProxy()`, which returned `true` as soon as the SOCKS5 port opened (`TorState.PROXY_READY`, bootstrap 0%). Outbound `.onion` connections attempted during bootstrap overwhelmed Tor's internal socket queue, causing directory authority certificate downloads to time out and freezing bootstrap at 40% (`Loading authority key certs`). `MeshTransport` now evaluates `TorService.torState == READY`. High-priority user packets (`isHandshake`, `isDmHighPriority`) wait up to 60s for circuits to complete bootstrap (`awaitReady(60_000L)`), while non-essential background packets (`ANNOUNCE_PEER`, sync) are safely dropped/deferred instead of bombarding Tor's SOCKS daemon during bootstrap.
+2. **Network Connectivity Auto-Recovery (`TorService.kt`)**: Registered a `ConnectivityManager.NetworkCallback` on `startTor()` detecting `onAvailable()`. When the device reconnects to Wi-Fi or cellular data after a drop, it automatically restarts Tor if in `FAILED` or `IDLE` state, eliminating permanent Tor disconnections after transient network blips.
+3. **Duplicate Bootstrap Polling Elimination (`TorService.kt`)**: Removed concurrent control port polling between `startTor()` and `confirmBootstrapThenPromote()`, preventing simultaneous `waitForBootstrap(120)` loops from contending for the unix control socket.
+4. **Mesh Firewall Directed Message & Presence Whitelisting (`GossipService.kt`, `DmPacketHandler.kt`)**:
+   - Directed `MESSAGE` packets addressed to our node (`targetUserId == localPublicKeyB64 || targetUserId == burnablePublicKeyB64`) now bypass the untrusted sender firewall check in `GossipService.processIncoming()`. This allows `DmPacketHandler.handleDirectMessage()` to decrypt the packet using ChaCha20-Poly1305 AEAD and automatically initiate mutual connection requests for un-cached senders.
+   - Added `ANNOUNCE_PEER` to `isConnectionPacket` so Ed25519-signed presence heartbeats reach `HandshakePacketHandler` and update peer online/lastSeen states without being dropped as untrusted.
+   - Added `DM_SYNC_REQUEST` to `isSyncPacket` so incoming DM sync requests bypass the untrusted sender gate.
+5. **Cooldown De-Escalation & Scope Narrowing (`GossipService.kt`, `MeshTransport.kt`)**:
+   - Lowered the maximum exponential cooldown backoff cap from 30 minutes (`1800_000L`) to 3 minutes (`180_000L`).
+   - Cooldown throttling in `MeshTransport.kt` is restricted strictly to unsolicited background presence announcements (`ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE`). DMs, sync requests, posts, comments, and media transfers are never blocked by cooldown.
+   - In `GossipService.broadcast()`, only presence announcements skip peers in cooldown; active user content (posts, comments, votes, reactions) always broadcast.
+   - Removed duplicate `recordSendFailure()` calls in `GossipService.forwardPacket`, `GossipService.broadcast`, and `MeshSocialRepository.flushOutboxForPeer()`.
+6. **Typing Signal Debouncing & Semaphore Isolation (`ChatThreadScreen.kt`, `MeshTransport.kt`)**: Debounced `onTyping(true)` in `ChatThreadScreen.kt` to transmit at most once every 6 seconds while typing, and `onTyping(false)` upon send or idle, reducing socket overhead by over 95%. Routed `isInteractive` packets in `MeshTransport.kt` to `bulkSemaphore`, keeping `dmSemaphore(4)` 100% open for real DMs.
+7. **Thread-Safe DM Sync Deduplication (`MeshSocialRepository.kt`)**: Replaced non-atomic map checks with `lastDmSyncRequests.compute(peerPub)` for atomic 10-second deduplication in `requestDmSync`.
+
+### 17.18 Codebase Audit, Dead Code Elimination, Firewall Whitelist & Concurrency Hardening (2026-09-29)
+
+A comprehensive audit of the legacy Android application codebase (`app/`) addressed dead routines, wire protocol discrepancies, and race conditions:
+1. **Wire Protocol Dual-Mode Verification (`MeshPacketVerifier.kt`, `CommentPacketHandler.kt`, `HandshakePacketHandler.kt`)**: Fixed critical signature verification traps where `DELETE_COMMENT`, `FOLLOW`/`UNFOLLOW`, `CONNECTION_REJECTED`, and `EDIT_COMMENT` packets were rejected due to mismatching length-prefixed `encodeForSigning` and legacy pipe string formats. Both `MeshPacketVerifier` and `CommentPacketHandler` now support dual-mode verification.
+2. **Mesh Firewall Whitelisting (`GossipService.kt`)**: Added `CONNECTION_REJECTED`, `FOLLOW`/`UNFOLLOW`, and `ANNOUNCE_INVIDIOUS_INSTANCE` to the untrusted-sender firewall whitelist (with dedicated 5/60s rate-limiting), ensuring connection declines, creator follows, and public Invidious instances are not dropped as untrusted. Fixed `cleanupFailureTracking` to retain failed peer records for 2 hours rather than prematurely evicting them after 5.5 minutes.
+3. **Structured Concurrency in Feed Sync (`FeedRepository.kt`)**: Detached Phase 2 and 3 background feed sync onto an independent supervisor scope rather than launching as child `async` coroutines of `withContext(Dispatchers.IO)`. This prevents `refreshFeeds()` from blocking indefinitely when video playback is active.
+4. **Consolidated Hub Polling & Ghost Peer Cleanup (`NoSlopRepository.kt`, `NoSlopViewModel.kt`, `HandshakePacketHandler.kt`)**: Pruned the redundant 3-second repository `hubSyncJob` to eliminate dual-polling race conditions with `NoSlopViewModel`'s 5-second Smart Hub loop. Extracted `cleanupOrphanedGroupPeers` in `NoSlopRepository` to unify 4 duplicated ghost peer cleanup blocks.
+5. **Creator Auto-Accept & Channel Cut-Off Fixes (`HandshakePacketHandler.kt`, `ChannelMetadataResolver.kt`)**: Keyed creator auto-accept rate limits per sender ID rather than using a single global bucket. Fixed `ChannelMetadataResolver` so video publication timestamps are only used as an upper bound when older than the cutoff date, preventing pre-2022 channels with recent uploads from being falsely marked as post-2022 AI channels.
+6. **Dead Code & Magic Number Pruning (`MediaCaptureManager.kt`, `MediaManager.kt`, `YouTubeInternalClient.kt`, `NoSlopViewModel.kt`)**: Pruned dead `mediaRecorder` and `audioFile` fields, aligned chunk backoff to `MIN_CHUNK_SIZE`, pruned dead `usingProxy` player branches in `YouTubeInternalClient.kt`, and removed uncalled `takeDiverse` function.
+
+### 17.17 R8-Safe Outbox Deserialization & Media Image Policy Routing (v0.6.1-alpha)
+
+1. **R8-Safe Outbox Deserialization (`MeshSocialRepository.kt`)**: In release builds, `loadPersistedOutbox()` threw `RuntimeException: TypeToken must be created with a type argument: new TypeToken<...>() {}` due to R8 minification stripping anonymous generic type tokens. Replaced `TypeToken` with direct `JsonParser.parseString(json).asJsonObject` iteration into `NetworkPacket` instances, eliminating outbox restore crashes on startup.
+2. **Image URL Clean Formatting (`MediaComponents.kt`)**: `sanitizeImageUrl()` previously called `Html.fromHtml(cleanUrl, ...).toString()`, which automatically appends `\n\n`. The trailing newlines were never stripped, causing OkHttp and Coil to reject all sanitized image URLs with `IllegalArgumentException`. Added `.trim()` and safe entity decoding.
+3. **Wikimedia & Art Institute Image Headers (`MediaComponents.kt`, `NoSlopApp.kt`)**: Wikimedia Commons blocks generic browser User-Agents from Tor exit nodes with HTTP 403 Forbidden under its robot policy. Injected `NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)` for `wikimedia.org` / `wikipedia.org`, and `AIC-User-Agent` for `artic.edu` across `BlurredImageBackground`, `ZoomableImageDialog`, and the app-wide Coil interceptor.
+4. **Undated Feed Interleaving (`NoSlopViewModel.kt`)**: Filter modes for `Audio` and `Images` previously sorted feeds strictly by `publishedAt DESC`. Because Openverse, Wikimedia, and Art Institute use the undated sentinel `publishedAt = 0L`, they were pushed to the bottom beneath thousands of dated items. Sorted using `effectiveDate` (`now - 20 days` assumed age) so undated media items interleave with dated items.
+5. **Jamendo Client ID Candidate Pool (`JamendoApiClient.kt`)**: Replaced suspended client ID `709fa152` with a rotating pool of candidate client IDs. On error code 11 or 4, the client advances `candidateIndex` and retries with the next candidate.
+
+## 18. SOCKS5 Stream Isolation & Egress IP Affinity (2026-09-06)
+
+### 18.1 The Exit Invalidation & Rotation Conundrum
+YouTube's `googlevideo.com` CDN issues direct stream URLs bound strictly to the IP address that resolved the player response (`&ip=<address>`). When routing clearnet traffic through Tor on Android:
+- Earlier attempts to pass `X-Tor-Stream-Id` HTTP headers failed because Google's CDN returns HTTP 403 Forbidden on unrecognized request headers, and Tor SOCKS5 does not inspect TLS-encrypted HTTP payloads.
+- Process-wide `SIGNAL NEWNYM` rotations rotated all circuits simultaneously, terminating active ExoPlayer playback streams and invalidating all pre-warmed URLs.
+- Disabling circuit rotation entirely caused the app to become trapped on exit nodes flagged by YouTube with `LOGIN_REQUIRED`.
+
+### 18.2 SOCKS5 Stream Isolation (`TorSocksSocket` & `TorSocksSocketFactory`)
+Implemented standard SOCKS5 Username/Password authentication (RFC 1928 / RFC 1929) via custom `Socket` and `SocketFactory` classes in `HttpClientProvider.kt`:
+1. `TorSocksSocket` opens a loopback connection to `127.0.0.1:TOR_SOCKS_PORT` and presents auth method `0x02` (Username/Password).
+2. It sends subnegotiation version 1 with `username = streamId` (e.g. `yt_${videoId}_${streamNonce}`) and empty password.
+3. Tor's native `IsolateSOCKSAuth` flag on `SocksPort` automatically isolates connections by SOCKS credentials, assigning each unique `streamId` its own dedicated 3-hop circuit and exit node.
+4. `TorDns` prevents local DNS resolution by handing dummy `InetAddress` records to OkHttp, ensuring all hostname lookups occur remotely at the Tor exit node via SOCKS5 `ATYP 0x03` (DOMAINNAME).
+
+### 18.3 Nonce-Bumping Circuit Hopping
+When YouTube returns `LOGIN_REQUIRED` across 2 client configs (`ANDROID` and `TVHTML5`), `YouTubeInternalClient` increments `streamNonce` in `videoStreamNonces[videoId]`. The subsequent attempt automatically opens a SOCKS connection under `yt_${videoId}_1`, causing Tor to assign a brand new exit node without invoking `SIGNAL NEWNYM`. Active streams and other preloaded players are completely unaffected.
+
+### 18.4 Egress Region Parameter Retention
+Removed obsolete code that discarded stream URLs carrying `gcr=` country tags over Tor. With SOCKS5 stream isolation, both the resolution request and the media chunk requests originate from the same exit node IP, making regional parameters (`gcr=ir`, `gcr=ro`, `gcr=us`) valid and preventing false `Unavailable` failures.
+
+### 18.5 Micro-Seek Elimination
+ExoPlayer range requests over Tor incur 10-15s latency round trips when seeking away from byte 0. `PlaybackPositionStore` now ignores offsets under 8,000ms, preserving preloaded initial frame buffers and allowing claimed preloaded players to render in 200-300ms on swipe.
+
+## 19. Direct Message Fast-Lane & Missed Message Catch-up (2026-09-07)
+
+### 19.1 Concurrency Pool Isolation (`dmSemaphore` vs `bulkSemaphore`)
+Previously, `MeshTransport` funneled all outbound Tor sockets through a single `torSemaphore(4)`. When background inventory sync ran or peers exchanged broadcasts, bursts of `SYNC_RESPONSE` and media chunks exhausted all permits. Real-time DMs and typing signals were forced into an unconstrained FIFO queue behind 15-second Tor handshakes.
+- `dmSemaphore` (4 permits): Strictly reserved for `MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `DM_ACK`, `CHAT_REACTION` and `GROUP_*` packets. (Commit `439c83b` had moved the handshakes to the bulk pool, where they were dropped after 4 s; restored 2026-10-07.)
+- `bulkSemaphore` (4 permits): Confines bulk inventory sync, media chunk transfers, and general gossip.
+- Guarantees that feed and media activity can never monopolize circuits or delay direct messaging.
+
+### 19.2 Persistent DM Outbox (`MeshSocialRepository`)
+In-memory coroutine retry loops failed to survive app kills or system reboots. Undelivered DMs are now serialized to `app_settings["pending_dm_outbox"]`.
+- When a direct send fails, the packet is placed into the persistent queue.
+- Reconnect triggers (Tor reaching `READY`, peer `ANNOUNCE_PEER` receipts, or opening a chat thread) flush pending outbox DMs immediately to the target onion address.
+- The outbox worker no longer pauses while a video player is mounted (the `PreloadManager.isVideoActive` / `currentlyPlayingUrl` gate from `679a5a1` was removed 2026-10-07; those flags were often never cleared, stalling DMs indefinitely). `VideoPlayer` now also clears `isVideoActive` for non-direct sources and off-screen slides.
+- Receivers send `DM_ACK` fire-and-forget on `AppScopes.io`, never inline on the inbound handler.
+- **Limits (2026-10-08, register R8 / review D05).** Each entry's queue time and its number of deliveries without a `DM_ACK` are kept in `outboxMeta`, persisted as `app_settings["pending_dm_outbox_meta"]` (`{packetId: [enqueuedAt, unackedDeliveries]}`, plain JSON so R8 cannot break it). `expireOutbox()` runs on every worker pass (every 10 s, even while Tor is down). It gives up on an entry older than `OUTBOX_MAX_AGE_MS` (7 days), or on a 1:1 DM delivered `OUTBOX_MAX_UNACKED_DELIVERIES` (50) times with no ACK. A DM it gives up on is marked `deliveryStatus = "FAILED"` unless an ACK already marked it `DELIVERED`. The chat shows a red error icon that calls `retryFailedDirectMessage`, which re-queues the identical packet (same id, nonce, ciphertext) with a fresh age. Failed connection attempts don't count toward the 50; an offline peer is covered by the age limit.
+- **Only 1:1 DMs wait for an ACK** (`awaitsDmAck`): a group fan-out leg (`MESSAGE` with `group_id`) is removed after a successful send. Since `3c766cb` every `MESSAGE` had stayed queued until an ACK that never comes for groups, and was re-sent forever.
+- **Event-triggered flushes** (`flushOutboxForPeer(..., force = true)`: an `ANNOUNCE_PEER` from the peer, opening the chat, Tor becoming ready) skip the exponential backoff but keep a 15 s spacing (`OUTBOX_EVENT_MIN_INTERVAL_MS`). The 10 s worker keeps the backoff (10 s doubling to 5 min).
+- Saves take the snapshot under a mutex (`persistOutboxNow`), so two quick saves can't land out of order.
+- **Queued group messages** (`pending_group_messages`) are flushed under the identity of the local echo's `senderPub` and as `v = 2` (`pendingGroupPacket`). Before, they always went out as the main identity, so the AAD check failed at the recipient for every burnable-identity sender.
+
+### 19.3 Bi-directional Message Synchronization (`DM_SYNC_REQUEST`)
+Upon establishing peer presence or application start, nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and dispatch a `DM_SYNC_REQUEST(since: Long)`.
+The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any missing `MESSAGE` packets directly over the fast-lane. The existing idempotency of `messageDao.insertMessage` (`OnConflictStrategy.REPLACE`) ensures zero duplicate message creation.
+
+### 19.4 Peer Cooldown Dynamic Reset & Verification Alignment
+- Peer failure cooldown is capped at 120s max (preventing 1-hour lockout traps). (Lost in later commits and restored 2026-10-07 — see §15.4.)
+- Incoming authenticated packets from a peer immediately clear any failure cooldown on the peer's onion address. (Removed in `4579860`, restored 2026-10-07.)
+- `ANNOUNCE_PEER` signature verification accepts both `CryptoService.encodeForSigning` and legacy pipe payloads, ensuring peers are accurately marked `isOnline = true`.
+- Typing indicators feature a 6-second auto-expiration guard, immediate dismissal upon message delivery, and a 4-second client-side idle debounce.
+
+## 20. Feed Engagement Tracking, Slide Position Persistence & Playback Hardening (2026-09-09)
+
+### 20.1 Immediate Swipe-Away History & Multi-Key Exclusion
+Previously, swiping away a slide only invoked `markItemViewed` if a 4-second dwell timer elapsed. If a user swiped away while the card was loading or within 3 seconds, the item remained unread (`isRead = false`), was never registered in `swipe_tracker`, and was omitted from `cachedExcludedIds`.
+- `UnifiedFeedTab.kt` tracks page transitions: whenever the pager settles on a different item, the slides moved past are immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
+- **By item, not by page (2026-10-09).** The settled item is tracked by id (`lastSettledItemId`), together with the ids of the list at that moment (`lastSettledListIds`). `itemsSwipedPast` works out what was passed:
+  - over an unchanged list, every item between the previous and the current one (a fling passes several);
+  - if the list changed in between, only a previous item directly next to the current one;
+  - nothing after a jump to the top, a mode switch, or when the previous item has left the list.
+- The old page-index range broke whenever the list changed under the pager. A mesh post arriving at the top moved the current post down a page, and the new post was marked viewed and swiped without being seen. A replaced list followed by a jump to the top marked every item between the top and the old page (seen in device logs as five posts "swiped away" within 10 ms). Text posts were lost from the Mesh view for good that way.
+- The 4 s dwell effect is keyed on the settled item id as well. It no longer marks an item that was replaced at the same page, and a list shift that keeps the same item on screen isn't a new slide for `onSlideViewed`.
+- Tested (unit: `FeedSwipeMarkingTest`).
+- `EngagementRepository.recordSwipe()` writes the raw `itemId`, normalized ID (`normId`), and canonical key (`canonicalKey`) into `swipe_tracker`.
+- `NoSlopViewModel.loadMoreFeedItems()` filters candidates against `cachedExcludedIds` across raw, normalized, and canonical keys, ensuring swiped items are permanently excluded from the Live Feed.
+
+### 20.2 Cold-Start Slide Position Persistence & Race Condition Elimination
+`UnifiedFeedTab.kt` previously initialized `hasRestoredInitialPosition = true` on the first frame if `savedTargetId` was null. Because `NoSlopViewModel` loads `saved_feed_active_id` asynchronously from Room on `Dispatchers.IO`, `savedTargetId` was momentarily null during early composition. Additionally, Room's initial empty emission on cold start caused `NoSlopViewModel` to fall into `else { loadMoreFeedItems() }`, discarding `saved_feed_list`.
+- `isSavedPositionLoaded` StateFlow in `NoSlopViewModel` indicates when Room DB retrieval is complete.
+- `NoSlopViewModel` ignores Room's initial empty emission (`feeds.isEmpty() && meshes.isEmpty()`), waiting for disk contents to emit before building `restoredFeed`.
+- `UnifiedFeedTab.kt` gates position restoration on `isSavedPositionLoaded == true`, scrolling to the saved target via `pagerState.scrollToPage(index)` before permitting any position saves.
+- `saveFeedPosition` centers `itemsToSave` around the active `itemId` rather than naive `takeLast(100)`, ensuring early slides are never dropped from `saved_feed_list`.
+- The settled item (`lastSettledItemId`) is set to the restored item on cold start to avoid false swipe triggers on the initial scroll.
+
+### 20.3 Fair Round-Robin Creator Variety for 40+ Channels
+In `takeRoundRobin()`, sorting priority creator queues strictly by `effectiveDate` descending caused ~10 frequent daily uploaders to permanently occupy the top positions of `rawVideos`. Because each batch requested only 5 videos, the other 30+ creators were never reached until all 15 videos from the first 10 creators were consumed (~150 slides).
+- `NoSlopViewModel.takeRoundRobin()` partitions and shuffles priority creator queues so every batch draws from 5 different creators across the user's entire list of 40+.
+- `FeedRepository.kt` randomizes `rampUpCreators` and expands the background creator sample to 8 channels per sync.
+
+### 20.4 Tor Stream Resolution, Age-Gate Fast-Fail & Circuit Hopping
+- **Age-Gate Fast-Fail**: `YouTubeInternalClient.kt` inspects `playabilityStatus.reason` for *"age"*, *"inappropriate"*, or *"private"*, bailing out in 0.1s instead of wasting 40s hopping 6 circuits for videos that require Google account authentication.
+- **Fast-fail Dead Circuits**: On `SocketTimeoutException` (`Read timed out`), `YouTubeInternalClient` immediately increments `streamNonce` to jump to a fresh Tor circuit.
+- **Circuit Construction Timeouts**: Set 20s connect/read timeouts and 25s call timeout in `playerClient()`, providing Tor sufficient time (14–18s) to build fresh 3-hop circuits on mobile networks.
+- **Dead Invidious Fallback Elimination**: Bypassed dead public Invidious and Piped instances over Tor, eliminating 50s socket exhaustion.
+- **Bandwidth Contention Prevention**: When `VideoPlayer` mounts a fresh player, it immediately cancels any duplicate background `doWarmUp` download in `PreloadManager` for that URL.
+- **Dedicated Visible Player Resolution**: Restricted `VideoPlayer` network resolution to `isVisible == true` so off-screen next slides do not steal bandwidth or lock resolve mutexes.
+- **False-Alarm Banner Elimination**: Removed false-alarm `setTorStatusMessage` triggers from background offline-peer checks in `TorService.kt`, and auto-cleared `torBlockedMessage` on media progress (`noteMediaProgress()`) and playback readiness.
+
+### 20.5 Background Feed Sync Throttling & Banner Auto-Dismissal
+- `PreloadManager.kt` maintains `isVideoActive` while videos are resolving, buffering, or playing.
+- `FeedRepository.kt` pauses Phase 2 and 3 background RSS, category, and creator sync while `isVideoActive || currentlyPlayingUrl != null`, giving foreground playback 100% of Tor's bandwidth.
+- Phase 2 & 3 background sync executes asynchronously so `refreshFeeds()` returns immediately after Phase 1 Ramp-Up.
+- Added a 5-second auto-dismiss timeout to `isResettingFeed` in `UnifiedFeedTab.kt` so the "Fetching fresh content..." banner never gets stuck on screen.
+
+### 20.6 Search Relevance & Concurrency Unblocking
+- `NoSlopViewModel.searchAndCreateCustomFeed()` runs even when background feed sync is active (`isRefreshingFeeds`).
+- `syncFilterMode()` preserves `activeSearchQuery` during active searches.
+- ~~Search feed sorting prioritizes videos at the top and preserves exact relevance order from the search API (`lastSearchResultIds`).~~ **Replaced in the search round (2026-10-13):** results are ordered page by page, newest first within a page, and paged as the user swipes (§17.25).
+- Search results replace the active feed instead of appending to the live feed.
+
+### 20.8 History Filter Chronological Ordering, 30-Slide Batches & Instant Return
+Previously, using the History filter presented several severe defects:
+1. `specificNeeded` evaluated to 3 on `isInitialLoad` when switching to History. Because `UnifiedFeedTab.kt` requires `unifiedItems.size >= 5` to trigger infinite scroll, History was permanently trapped at 3 slides.
+2. `viewedHistoryDao.insertViewedItem` used `OnConflictStrategy.IGNORE`. Re-viewed content never had its `viewedAt` timestamp refreshed.
+3. `sortedHistory` sorted items by `viewedIdsList.indexOf(it.id)`. When an item's ID did not exactly match the stored key representation, `indexOf` returned `-1`, sorting unviewed items to the front ahead of real history.
+4. Dismissing the History filter called `syncFilterMode("Live Feed", forceRefresh = true)`. Passing `forceRefresh = true` bypassed `cachedDefaultFeed`, clobbered `savedFeedItemId`, and fired `refreshFeeds()` over Tor, causing a 20-second delay and returning a brand new feed.
+
+**Implementations Applied:**
+- `ViewedHistoryDao.insertViewedItem` uses `OnConflictStrategy.REPLACE` so every dwell or swipe updates `viewedAt = System.currentTimeMillis()`.
+- `NoSlopViewModel.loadMoreFeedItems()` handles `"History"` with an instant in-memory O(1) map resolution against `viewedHistoryRecords.value` (sorted by `viewedAt DESC`), bypassing all heavy feed filtering, regexes, and network sync.
+- History, Liked, and Saved batches default to 30 items, allowing smooth infinite scrolling past slide 27.
+- Dismissing filter chips and clearing modal filters calls `syncFilterMode("Live Feed", forceRefresh = false)`, immediately restoring `cachedDefaultFeed` and scrolling to `savedFeedItemId` with zero delay.
+- `LaunchedEffect(filterMode) { lastSettledItemId = null }` in `UnifiedFeedTab.kt` prevents filter switches from registering false swipe-away events against vacated slides.
+- The "See Old Posts" button on the Mesh "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts` is true.
+
+### 20.7 Mesh Tab Instant Empty State & Position Restoration on Return
+Previously, toggling to the Mesh tab checked `if (isRefreshing)` before checking for Mesh empty state. Because background clearnet feed sync was running over Tor, `isRefreshing` remained true for up to a minute, displaying "Curating your feed..." over the Mesh tab despite no clearnet feeds belonging to Mesh mode. Additionally, `loadMoreFeedItems()` in `NoSlopViewModel` triggered `refreshFeeds()` whenever `unseenFeeds.isEmpty()`, which was always true on the Mesh tab.
+- `NoSlopViewModel.loadMoreFeedItems()` restricts `isUsingFallback` to feed modes (`actualFilter == "Live Feed" || actualFilter == "Random"`), preventing Mesh switches from firing clearnet sync.
+- `UnifiedFeedTab.kt` prioritizes `filterMode == "Mesh"` in the empty state container, instantly rendering the "Nothing New Here" card by default with zero delay.
+- The "See Old Posts" button on the "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts == true`.
+- The tab-switching restore mechanism uses a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)` independent of the one-time cold-start flag, restoring the exact slide position when returning to "All".
+- On tab clicks ("All" / "Mesh"), `lastSettledItemId` is cleared so tab switches do not trigger false swipe-away events against the vacated slide.
+- **Mode switch from a pager load (2026-10-09).** `loadMoreFeedItems(mode)` for a mode other than the current one now switches the mode the way `syncFilterMode` does: it caches the Live Feed, empties the list, clears `sessionLoadedIds`, resets "See Old Posts" for Mesh and updates `currentFilterModeFlow`. The feed screen's `syncFilterMode(mode)` is a no-op once the mode matches, so when the pager's load ran first the All feed's session ids stayed behind. Mesh posts that had been loaded into the All feed but never reached were then hidden from Mesh.
+- **Infinite scroll appends (2026-10-09).** In the specific-filter path (Mesh, My Content, Videos, Images, Audio, Articles, search) only the first batch of a mode fills the list and scrolls to the top. Later batches are appended. They used to replace the list and jump to the top, so with more than one batch of mesh posts the user lost the first batch, and the jump marked posts in between as seen.
+
+### 20.8 History Filter Chronological Ordering, In-Memory Fast Path & Search Integration
+Previously, using the History filter presented several severe defects:
+1. `specificNeeded` evaluated to 3 on `isInitialLoad` when switching to History. Because `UnifiedFeedTab.kt` requires `unifiedItems.size >= 5` to trigger infinite scroll, History was permanently trapped at 3 slides.
+2. `viewedHistoryDao.insertViewedItem` used `OnConflictStrategy.IGNORE`. Re-viewed content never had its `viewedAt` timestamp refreshed.
+3. `sortedHistory` sorted items by `viewedIdsList.indexOf(it.id)`. When an item's ID did not exactly match the stored key representation, `indexOf` returned `-1`, sorting unviewed items to the front ahead of real history.
+4. Dismissing the History filter called `syncFilterMode("Live Feed", forceRefresh = true)`. Passing `forceRefresh = true` bypassed `cachedDefaultFeed`, clobbered `savedFeedItemId`, and fired `refreshFeeds()` over Tor, causing a 20-second delay and returning a brand new feed.
+5. In `UnifiedFeedTab.kt`, swiping past an item in History triggered `recordItemSwiped` and `markItemViewed`, re-inserting the slide at the current timestamp and displacing the active list.
+
+**Implementations Applied:**
+- `ViewedHistoryDao.insertViewedItem` uses `OnConflictStrategy.REPLACE` so every dwell or swipe updates `viewedAt = System.currentTimeMillis()`.
+- `NoSlopViewModel.loadMoreFeedItems()` handles `"History"` with an instant in-memory O(1) map resolution against `viewedHistoryRecords.value` (sorted by `viewedAt DESC`), bypassing all heavy feed filtering, regexes, and network sync.
+- `viewedHistoryRecords` uses `SharingStarted.Eagerly` in `NoSlopViewModel.kt`, guaranteeing that history records are immediately active and fresh in memory even without UI subscribers.
+- Real-time search query filtering is integrated into `loadHistoryBatch`, allowing users to search their viewed history by keyword across titles, authors, excerpts, and content.
+- `unconsumed` checks `com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys` and performs a clean return when empty, preventing duplicate re-appending or loopback to slide 0 when scrolling past slide 30.
+- Viewed items (`isRead = 1`) in `feed_items` are protected from deletion in `deleteYouTubeItems`, `deleteExpiredItems`, and `clearUnsavedItems`.
+- `loadHistoryBatch` automatically reconstructs historical YouTube items on the fly from their `yt_VIDEO_ID` stored in `viewed_history` if their rows were purged in earlier versions, enabling continuous infinite scrolling through all historical content.
+- In `UnifiedFeedTab.kt`, `recordItemSwiped` and dwell-time `markItemViewed` are guarded with `if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked")`. Merely browsing historical items does not mutate timestamps or displace active pager items.
+- Dismissing filter chips and clearing modal filters calls `syncFilterMode("Live Feed", forceRefresh = false)`, immediately restoring `cachedDefaultFeed` and scrolling to `savedFeedItemId` with zero delay.
+
+### 20.9 Content Mix Variety, Media Classification & Non-Blocking Background Sync
+Previously, users experienced Live Feeds that quickly degraded into 100% video, with audio showing zero items and images/articles repeating stale content:
+1. `FeedRepository.kt` wrapped background RSS and category sync in `while (currentlyPlayingUrl != null || isVideoActive) { delay(4000L) }`. Because the user is browsing the feed playing videos, this loop spun indefinitely, completely blocking background fetching of RSS articles, NASA images, and Music audio.
+2. In `NoSlopViewModel.kt`, `specificFeeds` for Audio strictly checked `it.mediaType?.contains("audio") == true`. Audio items from the Internet Archive, Openverse, and podcast RSS feeds without explicit `mediaType` fields were rejected and misclassified as articles.
+3. Swiping past audio, image, and article items in the Live Feed placed their IDs into `cachedExcludedIds`. In `NoSlopViewModel.kt`, content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) were subjected to the aggressive `cachedViewedIds + cachedExcludedIds` purge, clearing out all available items and leaving tabs at 0 items or frozen at 3 items.
+
+**Implementations Applied:**
+- Replaced blocking while-loops in `FeedRepository.kt` with non-blocking Tor staggers (`delay(1000ms)`), allowing RSS articles, NASA images, and Music audio to fetch continuously in the background while videos play.
+- Unified media detection helpers (`isAudioFeedItem`, `isVideoFeedItem`, `isImageFeedItem`, `isArticleFeedItem`) in `NoSlopViewModel.kt`, ensuring audio tracks (MP3/FLAC/AAC) and images are recognized consistently across the entire pipeline.
+- Raised batch size for all specific filters (`Videos`, `Audio`, `Images`, `Articles`, `Mesh`, `History`, `Liked`, `Saved`) from 3 to 30, unblocking infinite scrolling past slide 27.
+- Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
+- Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
+
+### 20.10 Tor Resolve Priority & Bandwidth De-Contention
+- **Resolve Permit Priority**: In `YouTubeInternalClient.kt`, background preloads (`isPreload = true`) now use a 2-second timeout on `playerResolveGate` and yield immediately if permits are busy, preventing speculative preloads from locking out the active on-screen video.
+- **Bandwidth Concentration**: Reduced `MAX_PRELOAD` from 4 to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe.
+
+## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)
+
+(See previous section for group chat, tri-channel transport isolation, and video buffering details.)
+
+## 22. Peer Mesh Content Lists, Severable Creator Architecture & Tor Daemon Teardown (2026-09-10)
+
+(See previous section for content modal lists, author feed fast-path, and creator mode architecture.)
+
+## 23. Security & Cryptographic Audit Remediation (2026-09-11)
+
+
+### 23.14 Follow System Rollback & DMs Node Info Modal Swipe-Down Parity (v0.6.0-alpha)
+* **Sovereign Burnable ID Alignment & Follow Rollback**: The secondary burnable ID system (temporary contact pairing over Tor) already provides sovereign, privacy-preserving connections to discoverable creator nodes without exposing the user's primary identity. Removed redundant "Follow Creator" / "Unfollow Creator" UI toggles across `PeerItem.kt`, `FeedCard.kt`, and `ChannelPreferenceModal.kt`, removed the `Following` badge from `FeedCard.kt`, and reverted feed interleaver prioritization back to pure chronological sorting.
+* **DMs Node Info Modal Bottom Sheet Architecture (`ContactCardDialog`, `DMsTab.kt`)**: Converted `ContactCardDialog` from a rigid centered `Dialog` to a Material 3 `ModalBottomSheet` with `skipPartiallyExpanded = true` and `BottomSheetDefaults.DragHandle`. Unified `selectedDiscoverableNode` in `DMsTab.kt` to share `ContactCardDialog`. Wrapped contents in `verticalScroll(rememberScrollState())` with `32.dp` bottom padding, ensuring all action buttons ("Connect", "Remove", "Ban Node 🚫", "Close") remain fully accessible and visible regardless of screen height, and enabling standard swipe-down-to-close gesture handling.
+
+### 23.13 Decentralized Group Directory Sync, Node Blacklisting & ProGuard Hardening (v0.5.8-alpha)
+* **Decentralized Group Member Directory Synchronization**: `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupSyncPayload` carry `memberDetails: Map<String, GroupMemberInfo>` containing members' handles, onion addresses, and X25519 public keys (`encPublicKey`). Nodes store these as un-trusted group peers (`isTrusted = false`), enabling pairwise X25519 DM encryption for group messages without exposing peers as 1:1 DM contacts.
+* **Group Catchup & Multi-Candidate Verification**: Nodes issue `GROUP_QUERY` packets to resolve missing keys. Responding nodes generate `GROUP_SYNC` packets signed by the admin or sender. `HandshakePacketHandler` verifies signatures against all current group members and admin candidates.
+* **Mesh Node Firewall Blacklisting**: `PreferencesRepository.BannedNode` stores blacklisted node keys. `GossipService.processIncoming` evaluates `repo.isNodeBanned(senderId)` and discards all incoming packets before deduplication or routing.
+* **ProGuard Reflection Safety**: Added `@Keep` across all `Packets.kt` payload models and configured `proguard-rules.pro` with `-keepattributes Signature,InnerClasses,EnclosingMethod` to safeguard Gson `TypeToken` generic types under R8 full minification.
+
+### 23.12 Tiered Sovereign Backups, Media Exclusion & Identity Lifecycle Advisory Prompts (v0.5.7-alpha)
+* **Tiered Backup Architecture**: `BackupManager.exportData` accepts `BackupMediaOption`:
+  * `BackupMediaOption.NONE`: Restricts archive contents to `database.db`, `identity_backup.json`, `api_keys_backup.json`, and preference XMLs, generating a ~100 KB payload that transfers instantly.
+  * `BackupMediaOption.OWNED_ONLY`: Queries `mesh_posts` and `chat_messages` for media IDs authored by local public keys (`myPubKeys`) and bundles only those files (plus `.mine` attachments) from `Pictures/NoSlop`, `Movies/NoSlop`, `Music/NoSlop`, and `Downloads/NoSlop`.
+* **Identity Lifecycle Advisory Prompts**: `NoSlopViewModel.backupPromptReason` triggers a Material 3 advisory modal explaining serverless recovery and prompting for an immediate export when identity or creator keypairs change (`ONBOARDING_COMPLETED`, `DISCOVERABILITY_CHANGED`, `CREATOR_MODE_CHANGED`, `CREATOR_IDENTITY_BURNED`).
+
+### 23.11 Mesh Video Transfer Stabilization & Loopback Proxy Isolation (v0.5.6-alpha)
+* **Local Proxy Loopback Isolation**: `HttpClientProvider.loopbackClient` enforces `Proxy.NO_PROXY` for requests targeting `127.0.0.1` and `localhost`. Eliminates `Connection reset` and `Broken pipe` exceptions previously caused by `torClient` routing local ExoPlayer proxy connections through the Tor SOCKS daemon when "Route Clearnet via Tor" was enabled.
+* **Unthrottled Background Chunk Pipeline**: Removed blocking `isVideoActive` checks in `MediaManager.requestNextChunks`. Downloads continue without interruption across background navigation and tab changes. Switched `MeshTransport` to suspending `mediaSemaphore.acquire()` (3 permits), preventing packet loss on high-latency Tor hidden service circuits.
+* **Seen State Playback Gating**: `NoSlopViewModel.markItemViewed` and `recordItemSwiped` strictly verify that attached mesh media exists on disk and has commenced playback (`playedMeshPostIds`) before applying seen timestamps or swipe exclusions.
+  * **2026-10-09:** the check is `isMeshMediaUnseen(post)`. It applies only to posts with a mesh media id in `mediaUrl`, and not to file attachments (the card is the whole post; downloading is optional). Posts without mesh media (text, clearnet shares) are never held back. A post with a media type but no media id used to be held back for good.
+  * `markMeshMediaPlaybackStarted` is now called for every kind of mesh media: by `VideoPlayer` on playback, by `AudioPlayer` (new `onPlaybackStarted` parameter) when audio starts playing, and by `FullScreenMeshCardV2` when a downloaded image or GIF is on screen. Only video used to report, so image, GIF and audio posts were never marked seen and kept returning in Mesh as new.
+  * Mesh posts without a clearnet or media URL are keyed by their id in `getCanonicalItemKey`. They used to be keyed by their first 80 characters (`mesh_title_…`), so two text posts that began alike hid each other in the feed, and viewing one marked the other as seen. Clearnet shares are still keyed by their URL, so one link shared by several peers shows once. Tested (unit: `MeshCanonicalKeyTest`).
+
+### 23.10 Broadcast Slide Stability, Mesh Post Editing & Swipe-Down Bottom Sheets (v0.5.6-alpha)
+* **Broadcast Recomposition Stability**: `NoSlopViewModel.kt` promotes `localKeys` and `burnableKeys` to `SharingStarted.Eagerly`. Eliminates transient `null` evaluation cycles in `UnifiedFeedTab.kt` that caused index-0 pager key oscillation and slide flickering. `allMeshes` filter accommodates both primary and burnable identities.
+* **Mesh Post Editing Wire Protocol**: `EditPostPayload` transmits updated content, `media_id`, `media_metadata`, and `privacy`. `MeshSocialRepository.editMeshPost` signs with the corresponding identity and broadcasts with `hops = 6` (or 1 for friends-only). `PostPacketHandler.handleEditPost` validates Ed25519 signatures and applies SQLite updates via `postDao.updatePostDetails`.
+* **Broadcast Editing UI**: `OverlayInteractions` renders an `Edit` action button for post authors. `UnifiedFeedTab` opens the broadcast modal in edit mode pre-filled with post content and media.
+* **Bottom Sheet Gesture Navigation**: `ChannelPreferenceModal` and the feed User Profile modal migrate from `AlertDialog` to Material 3 `ModalBottomSheet` with nested scroll coordination for content lists.
+
+### 23.9 Media Startup Masking, 60-Day Creator Depletion & Mindful Break Reminders (v0.5.6-alpha)
+* **Splash Screen Media Readiness**: `MainActivity.kt` gates dismissal on `viewModel.isSavedPositionLoaded` and calls `PreloadManager.awaitPlayerReady()`, masking video buffering behind the splash curtain until ExoPlayer is in `STATE_READY`.
+* **Wikipedia Thumbnail Extraction**: `WikipediaApiClient` queries `piprop=thumbnail|original&pilicense=any&pithumbsize=800` with Wikipedia REST summary API fallback; `ArticleMetadataResolver` handles inverted `og:image` meta tags.
+* **Seen & Reacted Content Exclusion**: Room `mesh_reactions` and `mesh_votes` anchor IDs are cached (`cachedReactedAnchorIds`) and excluded alongside `cachedExcludedIds` and `cachedViewedIds` in `NoSlopViewModel`. Stale item resurrection in `unseenFeeds` and `saved_feed_list` is eliminated.
+* **60-Day Freshness & All Creator Sourcing**: `FRESHNESS_MAX_AGE_MS` set to 60 days; `FeedRepository.kt` syncs all configured creators without sampling truncation.
+* **Creator Depletion Milestone Card**: Injects `UnifiedItem.CreatorDepletion` when creator content is depleted, prompting discovery search before delivering fresh random content.
+* **Mindful Break Reminders**: Enabled by default (time-based, 30-minute interval, with slide-counter mode). Scheduled directly into the Live Feed and rendered with 1-tap exit and continue options.
+* **Instagram & TikTok Definitions**: Registered in `SourceLibrary` and `ApiKeyRepository.SERVICES` for key-configured social clearnet ingestion.
+
+### 23.8 Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping & Video Timeline (v0.5.5-alpha)
+* **Tor v3 Handshake Pairing Latency**: Handshake connect timeout tuned to 28s with 2 attempts; removed spurious duplicate USER_HANDSHAKE broadcasts on directed delivery failure and decoupled inventory sync from initial handshake dispatch.
+* **Direct Notification Deletion**: Connection request notifications are purged directly from `notifications` table by sender public key and notification ID upon popup resolution.
+* **Broadcast Alerts & Rubbish Dump Cycle**: `PostPacketHandler` dispatches system notifications for verified non-self broadcasts; `purgeOrphanedPeerContent()` sweeps orphaned posts, comments, and media files from removed peers every 30m without affecting burnable identities.
+* **Interactive Playhead & Back-Buffer**: ExoPlayer retains 60s back-buffer in RAM to prevent network rebuffering on backward seek; playhead scrubber features `MM:SS` duration timestamps, keyframe sync, and 3.5s auto-hide fade animations.
+* **Clearnet Creator Modal Content List**: `ChannelPreferenceModal` renders a scrollable list of cached creator items with 52dp thumbnails, excerpts, and date metadata.
+
+### 23.7 Bi-Directional Peer Disconnect, Media Purging & Sync Hardening (v0.5.4-alpha)
+* **Bi-Directional Disconnect (`PEER_REMOVED`)**: When a contact is deleted, the node dispatches a signed `PEER_REMOVED` packet directly to the remote peer's onion address using the matching identity keypair (`getIdentityForPeer`). Receipt of `PEER_REMOVED` or a targeted `USER_EXIT` triggers local deletion of the peer without remote re-notification, guaranteeing symmetric removal across both accounts.
+* **On-Disk Media Purging**: Peer deletion queries all posts, DMs, and comments by that author, collects all media identifiers, and calls `MediaManager.deleteMediaFiles()`, removing `.mp4`, `.jpg`, `.part`, and `.mine` files across external and internal media folders. Database deletions wipe by author public key and handle (`authorHandle = ?`), and `NoSlopViewModel` evicts deleted mesh items immediately from the active feed.
+* **Total Factory Reset**: `NoSlopRepository.factoryReset()` purges all media files, drops all SQLite tables, deletes encrypted and fallback SharedPreferences, unregisters Tor hidden services, and cleanly restarts the application process via `android.os.Process.killProcess`.
+* **Sync Response Firewall Bypass & Legacy Signatures**: `GossipService.processIncoming` permits `isSyncPacket` (`SYNC_RESPONSE`, `INVENTORY_SYNC_REQUEST`, `SYNC_REQUEST`) and `DELETE_POST` through the trust firewall. `MeshPacketVerifier`, `PostPacketHandler`, and `SyncPacketHandler` support both length-prefixed `encodeForSigning` and legacy pipe-delimited signatures. Connecting peers receive cached `ANNOUNCE_DISCOVERABLE` packets for all known discoverable creator nodes.
+* **Export IO Streaming & Latency Tuning**: Backup export and import execute on `Dispatchers.IO`, write temp archives to `externalCacheDir`, and present a confirmation popup dialog upon completion. Handshake packets fail fast at 15s to the persistent outbox during Tor v3 directory publication, eliminating multi-minute pairing stalls.
+
+### 23.6 Migration 13 → 14, Group Message Gate & Word Cloud Recovery (v0.5.3-alpha)
+* **Migration 13 → 14**: Scans `chat_messages` for legacy `ENC:GCM:` group rows, decrypts via legacy unauthenticated GCM, re-encrypts under `ENC:GCM2:` with Additional Authenticated Data (`"$groupId|$msgId"`), and updates both ciphertext and IV.
+* **GroupMessageGate Architecture**: `DmPacketHandler.handleGroupMessage` delegates acceptance decisions to a pure, stateless evaluation gate (`GroupMessageGate`), enabling comprehensive JVM test coverage over group membership, author verification, and signature validity without Robolectric or instrumentation overhead.
+* **Word Cloud Restore**: Allows fresh devices to deterministically derive Ed25519 signing keys and X25519 encryption keys directly from the 12-word mnemonic phrase via HKDF-SHA512. Detects legacy pre-v0.5.1 identities (`identity_version < 2`) and protects them against loss.
+
+### 23.5 Dual-Identity Deletion & Download UX Resilience (v0.5.2-alpha)
+* **Dual-Identity Post Deletion**: Mesh post deletion resolves the active signing key from either the user's primary identity or burnable creator identity (`burnableKeys`). The `DELETE_POST` packet is stamped and signed with the matching author key, ensuring peer firewalls and tombstone checks validate the request.
+* **Responsive Media Download Feedback**: The media download state machine distinguishes between un-started downloads and in-flight chunk requests. While awaiting the initial Tor circuit handshake (0 bytes received), the UI renders an animated indeterminate progress bar rather than a static zero-percent indicator.
+
+### 23.1 Group Messaging E2EE Fan-out & At-Rest Encryption
+* **Pairwise Fan-out**: Group message bodies are encrypted per-member using that member's X25519 key agreement and ChaCha20-Poly1305 AEAD. Cleartext gossip relaying has been completely eliminated.
+* **Store-and-Forward Outbox**: Undelivered group messages for offline members are stored in `pending_group_messages` table and flushed on peer connect with automatic 7-day expiration.
+* **At-Rest Encryption with AAD**: Group chat message bodies stored in Room are encrypted under Android Keystore AES-256-GCM via `GroupMessageCrypto.encrypt`/`decrypt` (Room version 13, `MIGRATION_12_13`). Encryption fails closed (never falls back to plaintext or ephemeral keys on Keystore failure in production), caches `SecretKey` in memory, uses prefix `ENC:GCM2:`, and cryptographically binds message ID and group ID via Additional Authenticated Data (AAD).
+
+### 23.2 Hardened Tor Control & Address Derivation
+* **UNIX_ONLY Sockets**: `TorControlChannel` uses `Mode.UNIX_ONLY` bound to app-private `filesDir/tor/ControlSocket`. The loopback TCP control port 9051 is closed, with post-bootstrap verification.
+* **Collision Derivation**: On hidden service collision, `TorService` derives the `.onion` address using `CryptoService.getPublicKeyFromPrivateKey()`.
+
+### 23.3 Deterministic HKDF Identity Derivation & Severable Teardown
+* **HKDF Seed Derivation**: `CryptoService.deriveIdentityFromSeed()` derives Ed25519 and X25519 keypairs via domain-separated HKDF-SHA512 (`noslop-identity-ed25519-v1` and `noslop-identity-x25519-v1`).
+* **Severable ID Burn**: `setCreatorEnabled(false)` unregisters secondary hidden services, broadcasts `USER_EXIT`, and removes keys from disk.
+
+### 23.4 Schema Export & Consolidation
+* **Room Schema Safety**: Schema export enabled (`exportSchema = true`), schema exported to `app/schemas/com.noslop.app.data.NoSlopDatabase/13.json`, and `room-testing` added.
+* **Code Consolidation**: Extracted `ProxyAuth.kt` for proxy signing, `compressImageFile` in `MediaUtils.kt`, `JsonUtils.kt` for JSON/HTML processing, and unified deployment runners in `HubSetupScreen.kt`.
+
+### 22.1 Peer Mesh Content List & Direct Filtered Feed Navigation
+Previously, User Info modals in `FullScreenMeshCardV2` only displayed a minimal text list for temporary contacts, while `ContactCardDialog` in `PeerItem.kt` and the Discoverable Node modal in `DMsTab.kt` lacked mesh post listings entirely.
+* **`PeerMeshContentList` Composable**: Renders a scrollable list of an author's mesh broadcasts with 52dp rounded media thumbnails (Base64 bitmaps, Coil web/clearnet URLs, or media icons), timestamps, and two-line body excerpts parsed with `MarkdownUtils.parseMarkdown(...)`.
+* **Author Feed Fast-Path Loader**: In `NoSlopViewModel.kt`, added a dedicated `Author:$authorPub` fast-path at the top of `loadMoreFeedItems()` (matching `History` and `Saved`), populating all broadcasts by that author from `allMeshes` chronologically without being pruned by discovery deduplication or `cachedViewedIds`.
+* **Scroll Positioning & Guarding**: Tapping any post in `PeerMeshContentList` switches `selectedTab = 0`, sets `filterMode = "Author:$authorPub"`, and immediately scrolls to the tapped post index via `_restoreScrollPositionEvent`. In `UnifiedFeedTab.kt`, `forceScrollToTop` is guarded against `filterMode.startsWith("Author:")` to prevent scroll collisions.
+
+### 22.2 Creator Mode Severable Identity Architecture
+To maintain sovereign identity separation between personal direct messages and public mesh broadcasts:
+* **Creator ID Sharing in Studio (`CreatorStudioTab.kt`)**: Added a **Creator ID 🪪** action to Creator Studio. Tapping it opens `QRShareSheet` with the node's `burnableIdentity` (the severable secondary Tor `.onion` address) and `isCreator = true` in the QR JSON payload, ensuring followers connect to the secondary identity.
+* **Decoupled Creator Controls & Disconnect Warning (`SettingsTab.kt`)**: Un-nested the Creator Node switch from Discoverability so it remains accessible at all times. Toggling Creator Mode OFF triggers an `AlertDialog` warning that all connections established via the Creator ID will be lost.
+* **Discoverability Deactivation Guard**: `setDiscoverableEnabled(false)` in `NoSlopViewModel.kt` only sends `USER_EXIT` if Creator Mode is also disabled, keeping the Creator Identity active on Tor.
+* **Dual-Identity Targeted Broadcast Routing (`MeshSocialRepository.kt`, `GossipService.kt`)**: When `is_creator_enabled == true`, `composeAndBroadcastPost` authors posts using `getBurnableIdentity()`. During `GossipService.broadcast()`, packets are dynamically stamped with `senderId = burnable.publicKeyB64` for followers (`contact_identity_$peerPub == "burnable"`) and `main.publicKeyB64` for personal friends, allowing both peer types to pass firewall validation. *(Superseded 2026-10-09: §4.2 `outboundFor` and §3.7.1.)*
+
+### 22.3 Official NoSlop Creator Node Seeding & In-App Browser Reader
+* In `NoSlopRepository.ensureDefaultDiscoverableNode()`, seeded the official NoSlop creator node into `PeerDao` using `OFFICIAL_CREATOR_PUBKEY` and `OFFICIAL_CREATOR_ONION` (`fnozdo...`), with dynamic tripcode derivation.
+* Excluded the creator's own device from rendering itself in "DISCOVERABLE NODES".
+* Cleared hardcoded Stripe links (`fundMeLink = null`) so donation links are populated dynamically from live `ANNOUNCE_DISCOVERABLE` broadcasts.
+* Added a clickable `$` coin badge and donation link across User Info modals opening `ArticleWebViewDialog`.
+
+### 22.4 Tor Daemon Teardown & 40% (`loading_keys`) Hang Fix (`TorService.kt`)
+* **Process Teardown (`stopTor`)**: Sends `SIGNAL HALT` to the Tor control channel, issues `ACTION_STOP` intent (`"org.torproject.android.intent.action.STOP"`) to the Android service, and polls port 9050 until closed before executing restarts.
+* **Cache Purge on Force Restart**: Once the Tor process is terminated, safely purges `app_TorService/data/` (clearing corrupted `cached-consensus` and authority certs) so Tor performs a clean bootstrap.
+* **IPv4 Directory Authority Preference**: Added `ClientPreferIPv6ORPort 0` to `torrc` to prevent authority certificate drops over IPv6.
+
+### 22.5 Handshake Signature Verification Alignment & Creator Auto-Accept
+* Updated `handleConnectionRequest` and `handleUserHandshake` in `HandshakePacketHandler.kt` with dual-mode signature verification, accepting length-prefixed `CryptoService.encodeForSigning` alongside legacy pipe payloads.
+* Aligned creator setting lookup to `"is_creator_enabled"` so incoming connection requests are automatically accepted on creator nodes.
+* Fixed `handleAnnounceDiscoverable` to preserve `isTemporary = peer.isTemporary`, preventing temporary contacts from flipping to permanent upon presence heartbeats.
+
+---
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
@@ -927,3 +2815,4 @@ JSON shapes, signed-string formats) that supersedes §4/§5 here ·
 [PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
 log · [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for §13's planned
 HUB-client transition in full detail.
+

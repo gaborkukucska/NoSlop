@@ -1,5 +1,8 @@
 package com.noslop.app.ui.tabs
 
+import com.noslop.app.util.tr
+
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,6 +31,9 @@ import java.util.*
 @Composable
 fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) -> Unit) {
     val notifications by viewModel.allNotifications.collectAsState()
+    val groupChats by viewModel.groupChats.collectAsState()
+    val peers by viewModel.peers.collectAsState()
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
         // Header
@@ -38,17 +45,43 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Notifications",
+                text = "Notifications".tr,
                 style = MaterialTheme.typography.titleLarge,
                 color = AccentGreen,
                 fontWeight = FontWeight.Bold
             )
             
             if (notifications.isNotEmpty()) {
-                TextButton(onClick = { viewModel.clearAllNotifications() }) {
-                    Text("Clear All", color = TextMuted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = { viewModel.markAllNotificationsAsRead() }) {
+                        Icon(Icons.Default.DoneAll, contentDescription = "Mark all read".tr, tint = AccentGreen)
+                    }
+                    IconButton(onClick = { showClearConfirm = true }) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear all".tr, tint = DestructiveRed)
+                    }
                 }
             }
+        }
+
+        if (showClearConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearConfirm = false },
+                title = { Text("Clear All Notifications?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("Are you sure you want to permanently clear all notifications?".tr, color = TextMuted) },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            viewModel.clearAllNotifications()
+                            showClearConfirm = false 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                    ) { Text("Clear All".tr, color = Color.White, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearConfirm = false }) { Text("Cancel".tr, color = AccentGreen) }
+                },
+                containerColor = SurfaceDark
+            )
         }
 
         if (notifications.isEmpty()) {
@@ -56,7 +89,7 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(64.dp), tint = TextMuted)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("No new notifications", color = TextMuted, style = MaterialTheme.typography.bodyLarge)
+                    Text("No new notifications".tr, color = TextMuted, style = MaterialTheme.typography.bodyLarge)
                 }
             }
         } else {
@@ -66,16 +99,46 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(notifications, key = { it.id }) { notif ->
+                    val gid = notif.targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
+                    val isGroupJoined = !gid.isNullOrBlank() && groupChats.any { it.groupId == gid }
+                    val isAlreadyContact = !notif.senderPub.isNullOrBlank() && peers.any { it.publicKeyB64 == notif.senderPub && it.isTrusted }
+                    val requester = notif.senderPub?.let { pub -> peers.find { it.publicKeyB64 == pub } }
+
                     NotificationCard(
                         notif = notif,
+                        isGroupJoined = isGroupJoined,
+                        isAlreadyContact = isAlreadyContact,
+                        requester = requester,
+                        viewModel = viewModel,
                         onClick = {
                             viewModel.markNotificationAsRead(notif.id)
-                            if (notif.targetRoute != null) {
+                            if (notif.type == "GROUP_INVITE") {
+                                if (!gid.isNullOrBlank()) {
+                                    if (!isGroupJoined) {
+                                        viewModel.acceptGroupInviteFromNotification(notif.id, gid)
+                                    }
+                                    onNavigateToRoute("group_chat/$gid")
+                                }
+                            } else if (notif.targetRoute != null) {
                                 onNavigateToRoute(notif.targetRoute)
                             }
                         },
                         onAccept = { notifId, senderPub -> viewModel.acceptConnectionFromNotification(notifId, senderPub) },
-                        onDecline = { notifId, senderPub -> viewModel.rejectConnectionFromNotification(notifId, senderPub) }
+                        onDecline = { notifId, senderPub -> viewModel.rejectConnectionFromNotification(notifId, senderPub) },
+                        onAcceptGroup = { notifId, targetRoute -> 
+                            if (!gid.isNullOrBlank()) {
+                                viewModel.acceptGroupInviteFromNotification(notifId, gid)
+                                onNavigateToRoute("group_chat/$gid")
+                            }
+                        },
+                        onDeclineGroup = { notifId, targetRoute -> 
+                            viewModel.declineGroupInviteFromNotification(notifId, targetRoute)
+                        },
+                        onOpenGroup = {
+                            if (!gid.isNullOrBlank()) {
+                                onNavigateToRoute("group_chat/$gid")
+                            }
+                        }
                     )
                 }
             }
@@ -88,13 +151,22 @@ fun NotificationCard(
     notif: com.noslop.app.data.NotificationItem, 
     onClick: () -> Unit,
     onAccept: (String, String) -> Unit,
-    onDecline: (String, String) -> Unit
+    onDecline: (String, String) -> Unit,
+    onAcceptGroup: (String, String?) -> Unit = { _, _ -> },
+    onDeclineGroup: (String, String?) -> Unit = { _, _ -> },
+    isGroupJoined: Boolean = false,
+    isAlreadyContact: Boolean = false,
+    onOpenGroup: () -> Unit = {},
+    requester: com.noslop.app.data.Peer? = null,
+    viewModel: NoSlopViewModel? = null
 ) {
     val icon = when (notif.iconType) {
         "dm" -> Icons.Default.Email
         "comment" -> Icons.Default.ChatBubble
         "reaction" -> Icons.Default.Favorite
         "handshake" -> Icons.Default.Person
+        "group" -> Icons.Default.People
+        "broadcast" -> Icons.Default.Campaign
         else -> Icons.Default.Notifications
     }
 
@@ -147,13 +219,20 @@ fun NotificationCard(
                 )
             }
             
-            if (!notif.isRead && notif.type != "CONNECTION_REQUEST") {
+            if (!notif.isRead && notif.type != "CONNECTION_REQUEST" && notif.type != "GROUP_INVITE") {
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(AccentGreen))
             }
         }
 
         if (notif.type == "CONNECTION_REQUEST") {
+            // D10b: who is asking (name.tag) and the check code to compare before accepting.
+            if (requester != null && viewModel != null && requester.relationship == com.noslop.app.data.PeerRelationship.INCOMING_PENDING) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(modifier = Modifier.fillMaxWidth().padding(start = 64.dp)) {
+                    com.noslop.app.ui.components.ConnectionRequestIdentity(peer = requester, viewModel = viewModel)
+                }
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier
@@ -166,14 +245,56 @@ fun NotificationCard(
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Accept", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                    Text("Accept".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
                 }
                 OutlinedButton(
                     onClick = { notif.senderPub?.let { onDecline(notif.id, it) } },
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Decline")
+                    Text("Decline".tr)
+                }
+            }
+        } else if (notif.type == "GROUP_INVITE") {
+            Spacer(modifier = Modifier.height(12.dp))
+            if (isGroupJoined) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 64.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onOpenGroup,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                        border = BorderStroke(1.dp, AccentGreen),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Joined • Open Chat".tr, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 64.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = { onAcceptGroup(notif.id, notif.targetRoute) },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Accept".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = { onDeclineGroup(notif.id, notif.targetRoute) },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Decline".tr)
+                    }
                 }
             }
         }

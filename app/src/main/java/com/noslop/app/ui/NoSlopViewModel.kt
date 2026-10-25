@@ -1,6 +1,8 @@
 // FILE: app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
@@ -19,6 +21,33 @@ import com.noslop.app.tor.TorState
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.withContext
+
+fun isAudioFeedItem(item: FeedItem): Boolean {
+    val type = item.mediaType?.lowercase() ?: ""
+    val url = (item.mediaUrl ?: item.url ?: "").lowercase()
+    return type.contains("audio") || url.endsWith(".mp3") || url.endsWith(".m4a") ||
+        url.endsWith(".ogg") || url.endsWith(".wav") || url.endsWith(".aac") ||
+        url.endsWith(".flac") || url.contains("/audio/") || url.contains("podbean")
+}
+
+fun isVideoFeedItem(item: FeedItem): Boolean {
+    val type = item.mediaType?.lowercase() ?: ""
+    val url = (item.mediaUrl ?: item.url ?: "").lowercase()
+    return type.contains("video") || url.contains("youtube") || url.contains("youtu.be") ||
+        url.contains("vimeo") || url.endsWith(".mp4") || url.endsWith(".webm") ||
+        url.endsWith(".m3u8") || url.endsWith(".mpd")
+}
+
+fun isImageFeedItem(item: FeedItem): Boolean {
+    val type = item.mediaType?.lowercase() ?: ""
+    val mediaUrl = (item.mediaUrl ?: "").lowercase()
+    return type.contains("image") || (mediaUrl.isNotBlank() && (mediaUrl.endsWith(".jpg") || mediaUrl.endsWith(".jpeg") || mediaUrl.endsWith(".png") || mediaUrl.endsWith(".webp") || mediaUrl.endsWith(".gif")) && item.url.isNullOrBlank())
+}
+
+fun isArticleFeedItem(item: FeedItem): Boolean {
+    return !isVideoFeedItem(item) && !isAudioFeedItem(item) && !isImageFeedItem(item)
+}
 
 sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
     abstract val id: String
@@ -27,6 +56,15 @@ sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
     }
     data class Mesh(val post: MeshPost) : UnifiedItem(post.timestamp, true) {
         override val id: String get() = post.id
+    }
+    data class Tutorial(val step: Int) : UnifiedItem(Long.MAX_VALUE - step, false) {
+        override val id: String = "tutorial_$step"
+    }
+    data class CreatorDepletion(val idOverride: String = "creator_depletion") : UnifiedItem(0L, false) {
+        override val id: String = idOverride
+    }
+    data class BreakReminder(val triggerType: String, val value: Int, val idOverride: String = "break_reminder_${System.currentTimeMillis()}") : UnifiedItem(0L, false) {
+        override val id: String = idOverride
     }
 }
 
@@ -38,6 +76,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     init {
         Logger.initialize(application)
         logFilePath = Logger.getLogFilePath()
+        // D10b: one-time tag migration and held-key apply (a no-op once done; retried if it fails).
+        viewModelScope.launch {
+            try {
+                repository.migrateIdentityTagsV2()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.warn("REPOSITORY", "Identity tag migration failed, will retry next start: ${e.message}")
+            }
+        }
     }
 
     fun checkForUpdateNow() {
@@ -51,7 +99,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 emit(repository.getLocalIdentity())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val burnableKeys: StateFlow<CryptoService.IdentityKeys?> = repository.identityUpdateFlow
+        .flatMapLatest {
+            kotlinx.coroutines.flow.flow {
+                emit(repository.getBurnableIdentity())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val localHandle: StateFlow<String> = localKeys
         .flatMapLatest {
@@ -60,6 +116,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Anonymous")
+
+    private val _navigationTabEvent = kotlinx.coroutines.flow.MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
+    val navigationTabEvent = _navigationTabEvent.asSharedFlow()
+
+    fun selectTab(tabIndex: Int) {
+        _navigationTabEvent.tryEmit(tabIndex)
+    }
+
+    private val _currentFilterModeFlow = MutableStateFlow("Live Feed")
+    val currentFilterModeFlow: StateFlow<String> = _currentFilterModeFlow.asStateFlow()
+
+    private val _feedTutorialStep = MutableStateFlow<Int>(-1)
+    val feedTutorialStep: StateFlow<Int> = _feedTutorialStep.asStateFlow()
+
+    private val _dmTutorialStep = MutableStateFlow<Int>(-1)
+    val dmTutorialStep: StateFlow<Int> = _dmTutorialStep.asStateFlow()
 
     private val _isOnboardingComplete = MutableStateFlow(false)
     val isOnboardingComplete: StateFlow<Boolean> = _isOnboardingComplete.asStateFlow()
@@ -88,45 +160,196 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isContentTransparencyEnabled = MutableStateFlow(false)
     val isContentTransparencyEnabled: StateFlow<Boolean> = _isContentTransparencyEnabled.asStateFlow()
 
+    private val _openCommentsState = MutableStateFlow<Pair<String, String?>?>(null)
+    val openCommentsState: StateFlow<Pair<String, String?>?> = _openCommentsState.asStateFlow()
+
+    fun openCommentsForPost(postId: String, commentId: String? = null) {
+        _openCommentsState.value = Pair(postId, commentId)
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.requestAllPeersInventorySync()
+        }
+    }
+
+    fun consumeCommentsEvent() {
+        _openCommentsState.value = null
+    }
+
     private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
     val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
+
+    private val _isContactsCollapsed = MutableStateFlow(false)
+    val isContactsCollapsed: StateFlow<Boolean> = _isContactsCollapsed.asStateFlow()
+
+    private val _isTemporaryContactsCollapsed = MutableStateFlow(false)
+    val isTemporaryContactsCollapsed: StateFlow<Boolean> = _isTemporaryContactsCollapsed.asStateFlow()
+
+    fun setContactsCollapsed(collapsed: Boolean) {
+        _isContactsCollapsed.value = collapsed
+        viewModelScope.launch {
+            repository.putAppSetting("dms_contacts_collapsed", collapsed.toString())
+        }
+    }
+
+    fun setTemporaryContactsCollapsed(collapsed: Boolean) {
+        _isTemporaryContactsCollapsed.value = collapsed
+        viewModelScope.launch {
+            repository.putAppSetting("temporary_contacts_collapsed", collapsed.toString())
+        }
+    }
 
     private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
 
-    // --- Viewed History & Swipe Exclusion Caches ---
+    // --- Viewed History, Swipe, & Reacted Exclusion Caches ---
     private var cachedViewedIds: Set<String> = emptySet()
     private var cachedExcludedIds: Set<String> = emptySet()
+    private var cachedReactedAnchorIds: Set<String> = emptySet()
     
     private var cachedDefaultFeed = listOf<UnifiedItem>()
     private var isSearchModeActive = false
     private var savedFeedItemId: String? = null
+    val currentSavedFeedItemId: String? get() = savedFeedItemId
+    private val _savedActiveItemId = MutableStateFlow<String?>(null)
+    val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
+    private val _isSavedPositionLoaded = MutableStateFlow(false)
+    val isSavedPositionLoaded: StateFlow<Boolean> = _isSavedPositionLoaded.asStateFlow()
     private val sessionLoadedIds = mutableSetOf<String>()
+    private val savedTimestampsMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private var lastSearchResultIds = emptySet<String>()
+    private val allSearchResultItemIds = mutableSetOf<String>()
+    private var searchExhaustedCount = 0
+    private var isLoadingMoreFeedItems = false
+    // E5s: paging of the active search (fetchNextSearchPage). The cursor belongs to one search, the
+    // query and the search-modal filter in searchCursorKey. searchResultPage records the page each
+    // result arrived on: the list shows earlier pages first, each newest first. searchExhaustedCount
+    // now counts pages in a row that added nothing new (SearchPaging.MAX_EMPTY_PAGES ends the paging).
+    private var searchCursor: com.noslop.app.feeds.PublicApiService.SearchCursor? = null
+    private var searchCursorKey: String? = null
+    private var searchFetchInFlight: com.noslop.app.feeds.PublicApiService.SearchCursor? = null
+    private var searchListWaiting = false
+    private var searchPagesFetched = 0
+    private val searchResultPage = HashMap<String, Int>()
+    // E5s: hidden from every list but the user's own records (loadMoreFeedItems).
+    private var cachedDownvotedKeys: Set<String> = emptySet()
+    private var cachedBannedNodeKeys: Set<String> = emptySet()
+    private val downvoteMutex = kotlinx.coroutines.sync.Mutex()
+    private var hasShownCreatorDepletionInSession = false
+
+    // Session stats for Break / Exit Reminders
+    private var sessionSlideCount = 0
+    private var sessionStartTimeMs = System.currentTimeMillis()
+    private var lastBreakReminderSlide = 0
+    private var lastBreakReminderTimeMs = System.currentTimeMillis()
+
+    val breakReminderEnabled: StateFlow<Boolean> = repository.breakReminderEnabled
+    val breakReminderMode: StateFlow<String> = repository.breakReminderMode
+    val breakReminderIntervalSlides: StateFlow<Int> = repository.breakReminderIntervalSlides
+    val breakReminderIntervalMinutes: StateFlow<Int> = repository.breakReminderIntervalMinutes
+
+    fun setBreakReminderEnabled(enabled: Boolean) = viewModelScope.launch { 
+        repository.setBreakReminderEnabled(enabled)
+        if (enabled) {
+            scheduleBreakReminderNow()
+        } else {
+            dismissBreakReminder()
+        }
+    }
+    fun setBreakReminderMode(mode: String) = viewModelScope.launch { 
+        repository.setBreakReminderMode(mode)
+        scheduleBreakReminderNow()
+    }
+    fun setBreakReminderIntervalSlides(interval: Int) = viewModelScope.launch { 
+        repository.setBreakReminderIntervalSlides(interval)
+        scheduleBreakReminderNow()
+    }
+    fun setBreakReminderIntervalMinutes(interval: Int) = viewModelScope.launch { 
+        repository.setBreakReminderIntervalMinutes(interval)
+        scheduleBreakReminderNow()
+    }
+
+    private fun scheduleBreakReminderNow() {
+        val currentList = _unifiedFeed.value.toMutableList()
+        currentList.removeAll { it is UnifiedItem.BreakReminder }
+        val mode = breakReminderMode.value
+        val interval = if (mode == "slides") breakReminderIntervalSlides.value else breakReminderIntervalMinutes.value
+        val targetIdx = interval.coerceIn(1, (currentList.size).coerceAtLeast(1))
+        currentList.add(targetIdx, UnifiedItem.BreakReminder(mode, interval))
+        _unifiedFeed.value = currentList
+        Logger.info("VM", "Proactively scheduled BreakReminder slide at index $targetIdx (mode=$mode, interval=$interval)")
+    }
+
+    fun onSlideViewed(currentIndex: Int) {
+        if (!breakReminderEnabled.value) return
+        val mode = breakReminderMode.value
+        val now = System.currentTimeMillis()
+        sessionSlideCount++
+
+        var shouldTrigger = false
+        var triggerValue = 0
+
+        if (mode == "slides") {
+            val interval = breakReminderIntervalSlides.value
+            if (sessionSlideCount - lastBreakReminderSlide >= interval) {
+                lastBreakReminderSlide = sessionSlideCount
+                shouldTrigger = true
+                triggerValue = interval
+            }
+        } else {
+            val intervalMinutes = breakReminderIntervalMinutes.value
+            val elapsedMinutes = ((now - lastBreakReminderTimeMs) / 60000L).toInt()
+            if (elapsedMinutes >= intervalMinutes) {
+                lastBreakReminderTimeMs = now
+                shouldTrigger = true
+                triggerValue = elapsedMinutes
+            }
+        }
+
+        if (shouldTrigger) {
+            val currentList = _unifiedFeed.value.toMutableList()
+            if (currentList.none { it is UnifiedItem.BreakReminder }) {
+                val insertAt = (currentIndex + 1).coerceAtMost(currentList.size)
+                currentList.add(insertAt, UnifiedItem.BreakReminder(mode, triggerValue))
+                _unifiedFeed.value = currentList
+                Logger.info("VM", "Injected BreakReminder slide at index $insertAt (mode=$mode, value=$triggerValue)")
+            }
+        }
+    }
+
+    fun dismissBreakReminder() {
+        lastBreakReminderSlide = sessionSlideCount
+        lastBreakReminderTimeMs = System.currentTimeMillis()
+        val currentList = _unifiedFeed.value.toMutableList()
+        currentList.removeAll { it is UnifiedItem.BreakReminder }
+        _unifiedFeed.value = currentList
+    }
 
     fun saveFeedPosition(itemId: String) {
-        if (_isRefreshingFeeds.value) return
         if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
             savedFeedItemId = itemId
-            
-            val currentIndex = _unifiedFeed.value.indexOfFirst { it.id == itemId }
-            if (currentIndex >= 0) {
-                val startIndex = maxOf(0, currentIndex - 3)
-                cachedDefaultFeed = _unifiedFeed.value.subList(startIndex, currentIndex + 1)
-            } else {
-                cachedDefaultFeed = _unifiedFeed.value.toList()
-            }
+            cachedDefaultFeed = _unifiedFeed.value.toList()
             
             viewModelScope.launch {
-                val itemsToSave = cachedDefaultFeed.takeLast(100)
+                val currentIdx = cachedDefaultFeed.indexOfFirst { it.id == itemId }
+                val itemsToSave = if (cachedDefaultFeed.size > 100 && currentIdx >= 0) {
+                    val start = maxOf(0, currentIdx - 30)
+                    cachedDefaultFeed.subList(start, minOf(cachedDefaultFeed.size, start + 100))
+                } else {
+                    cachedDefaultFeed.take(100)
+                }
                 val ids = itemsToSave.map { it.id }.joinToString(",")
+                val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
                 repository.putAppSetting("saved_feed_list", ids)
                 repository.putAppSetting("saved_feed_active_id", itemId)
+                repository.putAppSetting("saved_feed_date", todayStr)
             }
         }
     }
 
     private val _restoreScrollPositionEvent = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val restoreScrollPositionEvent: kotlinx.coroutines.flow.SharedFlow<String> = _restoreScrollPositionEvent.asSharedFlow()
+
+    val viewedHistoryRecords: StateFlow<List<ViewedHistoryItem>> = repository.allViewedHistory
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val viewedHistoryIds: StateFlow<Set<String>> = repository.allViewedHistory
         .map { items -> items.map { it.itemId }.toSet() }
@@ -151,8 +374,50 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val peers: StateFlow<List<Peer>> = repository.allPeers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val discoverablePeers: StateFlow<List<Peer>> = repository.discoverablePeers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val temporaryPeers: StateFlow<List<Peer>> = repository.temporaryPeers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val followedPeers: StateFlow<List<Peer>> = repository.followedPeers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val groupChats: StateFlow<List<GroupChat>> = repository.groupChats
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val peerTypingStates: StateFlow<Map<String, Boolean>> = repository.peerTypingStates
+
+    fun toggleFollowPeer(peerPub: String, follow: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.toggleFollowPeer(peerPub, follow)
+        }
+    }
+
+    fun createGroupChat(
+        title: String,
+        memberPubs: List<String>,
+        avatarB64: String? = null,
+        description: String? = null,
+        allowInvites: Boolean = true,
+        allowSelfRemove: Boolean = true
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.createGroupChat(title, memberPubs, avatarB64, description, allowInvites, allowSelfRemove)
+        }
+    }
+
+    fun sendTypingSignal(peerPub: String, isTyping: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.sendTypingSignal(peerPub, isTyping)
+        }
+    }
+
     val meshPosts: StateFlow<List<MeshPost>> = repository.allMeshPosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val feedBuildStatus: StateFlow<String> = repository.feedBuildStatus
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     val allNotifications: StateFlow<List<com.noslop.app.data.NotificationItem>> = repository.allNotifications
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -166,6 +431,31 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
 
+    val meshFilterSettingsFlow: StateFlow<com.noslop.app.data.MeshFilterSettings> = repository.meshFilterSettingsFlow
+
+    val feedMixSettingsFlow: StateFlow<com.noslop.app.data.FeedMixSettings> = repository.feedMixSettingsFlow
+
+    val meshFilterSettings: StateFlow<MeshFilterSettings> = repository.meshFilterSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MeshFilterSettings())
+
+    private val _showOldMeshPosts = MutableStateFlow(false)
+    val showOldMeshPosts: StateFlow<Boolean> = _showOldMeshPosts.asStateFlow()
+
+    fun setShowOldMeshPosts(show: Boolean) {
+        _showOldMeshPosts.value = show
+        if (currentFilterMode == "Mesh") {
+            _unifiedFeed.value = emptyList()
+            sessionLoadedIds.clear()
+            loadMoreFeedItems("Mesh")
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(50)
+                _scrollToTopEvent.emit(Unit)
+            }
+        }
+    }
+
+    val hasMeshPosts: Boolean get() = allMeshes.any { it.authorPublicKeyB64 != localKeys.value?.publicKeyB64 }
+
     val updateInfo: StateFlow<com.noslop.app.util.UpdateInfo?> = NoSlopApp.updateChecker.updateInfo
 
     val notificationSettings: StateFlow<com.noslop.app.data.NotificationSettings> = repository.notificationSettingsFlow
@@ -173,6 +463,24 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     val isForegroundServiceEnabled: StateFlow<Boolean> = repository.isForegroundServiceEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    
+    val useTorForClearnet: StateFlow<Boolean> = repository.useTorForClearnet
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setUseTorForClearnet(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setUseTorForClearnet(enabled)
+            com.noslop.app.ui.components.invalidateAllOnRouteTransition()
+        }
+    }
+
+    val isAutoUpdateEnabled: StateFlow<Boolean> = repository.isAutoUpdateEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setAutoUpdateEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setAutoUpdateEnabled(enabled) }
+    }
 
     val isSendOnEnterEnabled: StateFlow<Boolean> = repository.isSendOnEnterEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -195,6 +503,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _userProfile = MutableStateFlow(com.noslop.app.data.UserProfile())
     val userProfile: StateFlow<com.noslop.app.data.UserProfile> = _userProfile.asStateFlow()
 
+    /** D04: the creator identity's own profile (handle, bio, avatar), edited in Creator Studio. */
+    private val _creatorProfile = MutableStateFlow(com.noslop.app.data.UserProfile())
+    val creatorProfile: StateFlow<com.noslop.app.data.UserProfile> = _creatorProfile.asStateFlow()
+
+    /** D04: saves the creator profile, tells creator contacts and refreshes the discoverable announcement. */
+    fun updateCreatorProfile(profile: com.noslop.app.data.UserProfile) {
+        viewModelScope.launch {
+            val clean = profile.copy(displayName = profile.displayName.trim(), bio = profile.bio.trim())
+            repository.saveCreatorProfile(clean)
+            _creatorProfile.value = clean
+            if (_isDiscoverableEnabled.value) {
+                broadcastDiscoverable()
+            }
+        }
+    }
+
     private val _selectedInterests = MutableStateFlow<List<String>>(emptyList())
     val selectedInterests: StateFlow<List<String>> = _selectedInterests.asStateFlow()
 
@@ -213,18 +537,57 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _creatorKeywords = MutableStateFlow("")
     val creatorKeywords: StateFlow<String> = _creatorKeywords.asStateFlow()
 
+    private val _bannedChannels = MutableStateFlow<List<String>>(emptyList())
+    val bannedChannels: StateFlow<List<String>> = _bannedChannels.asStateFlow()
+
+    private val _bannedNodes = MutableStateFlow<List<com.noslop.app.data.PreferencesRepository.BannedNode>>(emptyList())
+    val bannedNodes: StateFlow<List<com.noslop.app.data.PreferencesRepository.BannedNode>> = _bannedNodes.asStateFlow()
+
+    private val _channelCutoffSettings = MutableStateFlow<Triple<Boolean, Int, Int>>(Triple(true, 2022, 1))
+    val channelCutoffSettings: StateFlow<Triple<Boolean, Int, Int>> = _channelCutoffSettings.asStateFlow()
+
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
     val isUsingInsecureStorage = repository.isUsingInsecureStorage
+
+    private val _needsIdentityRecovery = MutableStateFlow(false)
+    val needsIdentityRecovery: StateFlow<Boolean> = _needsIdentityRecovery.asStateFlow()
+
+    fun checkIdentityRecoveryState() {
+        viewModelScope.launch {
+            _needsIdentityRecovery.value = repository.needsIdentityRecovery()
+        }
+    }
+
+    private val _appLanguage = MutableStateFlow("en")
+    val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
+
+    private val _isDiscoverableEnabled = MutableStateFlow(false)
+    val isDiscoverableEnabled: StateFlow<Boolean> = _isDiscoverableEnabled.asStateFlow()
+
+    private val _isCreatorEnabled = MutableStateFlow(false)
+    val isCreatorEnabled: StateFlow<Boolean> = _isCreatorEnabled.asStateFlow()
+
+    private val _creatorFundMeLink = MutableStateFlow("")
+    val creatorFundMeLink: StateFlow<String> = _creatorFundMeLink.asStateFlow()
+
+    private val _hubDeploymentStatus = MutableStateFlow<String?>(null)
+    val hubDeploymentStatus: StateFlow<String?> = _hubDeploymentStatus.asStateFlow()
 
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
-    val chatMessages: StateFlow<List<ChatMessage>> = _selectedPeerPub
-        .flatMapLatest { pub ->
-            if (pub == null) flowOf(emptyList())
-            else repository.getMessagesWithPeer(pub)
+    private val _selectedGroupChatId = MutableStateFlow<String?>(null)
+    val selectedGroupChatId: StateFlow<String?> = _selectedGroupChatId.asStateFlow()
+
+    val chatMessages: StateFlow<List<ChatMessage>> = combine(_selectedPeerPub, _selectedGroupChatId) { peerPub, groupId ->
+        peerPub to groupId
+    }.flatMapLatest { (peerPub, groupId) ->
+        when {
+            peerPub != null -> repository.getMessagesWithPeer(peerPub)
+            groupId != null -> repository.getMessagesWithPeer(groupId)
+            else -> flowOf(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -232,94 +595,270 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            val isComplete = repository.isOnboardingComplete()
+            
+            var fStep = repository.getAppSetting("feed_tutorial_step")?.toIntOrNull()
+            if (fStep == null) {
+                fStep = if (isComplete) 5 else 0
+                repository.putAppSetting("feed_tutorial_step", fStep.toString())
+            }
+            _feedTutorialStep.value = fStep
+
+            var dStep = repository.getAppSetting("dms_tutorial_step")?.toIntOrNull()
+            if (dStep == null) {
+                dStep = if (isComplete) 4 else 0
+                repository.putAppSetting("dms_tutorial_step", dStep.toString())
+            }
+            _dmTutorialStep.value = dStep
+        }
+        viewModelScope.launch {
+            _needsIdentityRecovery.value = repository.needsIdentityRecovery()
             _isOnboardingComplete.value = repository.isOnboardingComplete()
+            repository.ensureDefaultApiSourcesExist()
+            repository.ensureDefaultDiscoverableNode()
             val recovered = repository.recoverSourcesAfterMigration()
             if (recovered) {
                 _selectedInterests.value = repository.getUserSelectedCategories()
                 _isAggregatorEnabled.value = repository.isAggregatorEnabled()
                 refreshFeeds()
+            } else if (_isOnboardingComplete.value && _isAggregatorEnabled.value) {
+                // Defer startup background feed refresh so Tor circuits and bandwidth
+                // are 100% dedicated to Slide 1 preloading and buffering
+                viewModelScope.launch(Dispatchers.IO) {
+                    kotlinx.coroutines.delay(12_000L)
+                    refreshFeeds()
+                }
+            }
+            
+            // One-time migration: purge YouTube items with stale dates
+            val ytDateMigrated = repository.getAppSetting("yt_date_migrated")
+            if (ytDateMigrated == null) {
+                repository.deleteYouTubeItems()
+                repository.putAppSetting("yt_date_migrated", "1")
+                Logger.info("VM", "One-time YouTube date migration: purged stale items")
+            }
+            
+            // Smart Hub Sync Loop: starts whenever an onboarding or linked hub state is detected
+            viewModelScope.launch(Dispatchers.IO) {
+                var lastPeerSync = 0L
+                while (true) {
+                    if (repository.isOnboardingComplete() && !repository.getAppSetting("hub_deployment_status").isNullOrBlank()) {
+                        if (System.currentTimeMillis() - lastPeerSync > 60_000) {
+                            repository.syncPeersWithHub()
+                            repository.syncPostsWithHub()
+                            lastPeerSync = System.currentTimeMillis()
+                        }
+                        repository.syncDmsWithHub()
+                        repository.pullMeshPacketsFromHub()
+                    }
+                    kotlinx.coroutines.delay(5000)
+                }
             }
         }
 
         viewModelScope.launch {
             repository.getMediaSettings()
+            repository.getMeshFilterSettings()
             repository.getNotificationSettings()
+            repository.getFeedMixSettings()
             repository.initForegroundServiceSetting()
             repository.initSendOnEnterSetting()
+            repository.initTorForClearnetSetting()
+            repository.initAutoUpdateSetting()
+            repository.initBreakReminderSettings()
         }
 
         viewModelScope.launch {
+            val savedId = repository.getAppSetting("saved_feed_active_id")
+            savedFeedItemId = savedId
+            _savedActiveItemId.value = savedId
+            _isSavedPositionLoaded.value = true
+        }
+
+        viewModelScope.launch {
+            val appLang = repository.getAppLanguage()
+            _appLanguage.value = appLang
+            com.noslop.app.util.LanguageManager.loadLanguage(appLang)
             _userProfile.value = repository.getUserProfile()
+            _creatorProfile.value = repository.getCreatorProfile()
             _selectedInterests.value = repository.getUserSelectedCategories()
             _selectedMusicGenres.value = repository.getSelectedMusicGenres()
             _selectedVideoGenres.value = repository.getSelectedVideoGenres()
             _negativeKeywords.value = repository.getUserNegativeKeywords().joinToString(", ")
             _languagePreference.value = repository.getLanguagePreference()
             _creatorKeywords.value = repository.getCreatorKeywords().joinToString(", ")
+            _bannedChannels.value = repository.getBannedChannels()
+            _bannedNodes.value = repository.getBannedNodes()
+            _channelCutoffSettings.value = repository.getChannelCutoffSettings()
         }
 
         viewModelScope.launch {
+            var retryCount = 0
+            var hasRequestedCatchup = false
             TorService.torState.collect { state ->
-                if (state == TorState.READY || state == TorState.PROXY_READY) refreshTorStatus()
+                if (state == TorState.READY || state == TorState.PROXY_READY) {
+                    retryCount = 0
+                    if (!_torReadyState.value.first) {
+                        _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                    }
+                    if (state == TorState.READY && !hasRequestedCatchup) {
+                        hasRequestedCatchup = true
+                        repository.onTorReady()
+                        repository.requestAllGroupsCatchup()
+                    }
+                    refreshTorStatus()
+                } else if (state == TorState.FAILED) {
+                    _torReadyState.value = Pair(false, "Tor disconnected")
+                    val hasNet = com.noslop.app.tor.TorService.isNetworkAvailable(getApplication())
+                    if (hasNet && retryCount < 2) {
+                        retryCount++
+                        com.noslop.app.debug.Logger.warn("VM", "Tor FAILED while online. Retrying startTor (attempt $retryCount/2)...")
+                        kotlinx.coroutines.delay(5000L * retryCount)
+                        startTor(forceRestart = false)
+                    } else {
+                        com.noslop.app.debug.Logger.info("VM", "Tor retry skipped (hasNet=$hasNet, retries=$retryCount).")
+                    }
+                }
             }
         }
 
         viewModelScope.launch { _isAggregatorEnabled.value = repository.isAggregatorEnabled() }
         viewModelScope.launch { _isContentTransparencyEnabled.value = repository.isContentTransparencyEnabled() }
         viewModelScope.launch { _isEncryptionActive.value = repository.isEncryptionActive() }
-        viewModelScope.launch { refreshExclusionCaches() }
+        viewModelScope.launch { 
+            _isDiscoverableEnabled.value = repository.getAppSetting("is_discoverable_enabled") == "true"
+            _isCreatorEnabled.value = repository.getAppSetting("is_creator_enabled") == "true"
+            _creatorFundMeLink.value = repository.getAppSetting("creator_fundme_link") ?: ""
+            
+            val hubStatus = repository.getAppSetting("hub_deployment_status")
+            _hubDeploymentStatus.value = hubStatus
+            com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
 
+            if (!hubStatus.isNullOrBlank()) {
+                com.noslop.app.tor.TorService.unregisterHiddenServices()
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    val oldPeer = repository.peerDao.getPeerByPublicKey(identity.publicKeyB64)
+                    if (oldPeer != null && oldPeer.handle == "Admin AI") {
+                        repository.peerDao.deletePeer(oldPeer)
+                    }
+                    // D01 (explicit decision): the Hub's Admin AI is the user's own node -> ACCEPTED.
+                    val adminPeer = com.noslop.app.data.Peer(
+                        publicKeyB64 = "admin_${identity.publicKeyB64}",
+                        handle = "Admin AI",
+                        tripcode = identity.tripcode,
+                        onionAddress = identity.onionAddress,
+                        encPublicKeyB64 = identity.encPublicKeyB64,
+                        relationship = com.noslop.app.data.PeerRelationship.ACCEPTED,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                    repository.peerDao.insertPeer(adminPeer)
+                }
+            }
+
+            _isContactsCollapsed.value = repository.getAppSetting("dms_contacts_collapsed") == "true"
+            _isTemporaryContactsCollapsed.value = repository.getAppSetting("temporary_contacts_collapsed") == "true"
+        }
         // Cleaned up DB Flow: NO MORE PREPENDING! This strictly updates existing items for live reaction counts.
         viewModelScope.launch {
-            combine(feedItems, meshPosts, localKeys) { feeds, meshes, keys ->
-                Triple(feeds, meshes, keys)
-            }.collect { (feeds, meshes, keys) ->
+            refreshExclusionCaches()
+            combine(
+                combine(feedItems, meshPosts) { f, m -> f to m },
+                localKeys,
+                meshFilterSettingsFlow
+            ) { (feeds, meshes), keys, filters ->
+                Triple(feeds, meshes, keys) to filters
+            }.collect { (tuple, filters) ->
+                val (feeds, meshes, keys) = tuple
                 if (_isOnboardingComplete.value && keys == null) return@collect
 
                 allFeeds = feeds
-                allMeshes = meshes.filter { !it.isOrphaned }
+                val burnablePub = burnableKeys.value?.publicKeyB64
+                allMeshes = meshes.filter { mesh ->
+                    if (mesh.isOrphaned) return@filter false
+                    if (mesh.authorPublicKeyB64 == keys?.publicKeyB64 || (burnablePub != null && mesh.authorPublicKeyB64 == burnablePub)) return@filter true
+                    if (mesh.clearnetUrl != null && !filters.allowIncomingClearnetShares) return@filter false
+                    if (mesh.mediaType == "image" && !filters.allowIncomingImagePosts) return@filter false
+                    if (mesh.mediaType == "video" && !filters.allowIncomingVideoPosts) return@filter false
+                    if (mesh.mediaType.isNullOrEmpty() && mesh.clearnetUrl == null && !filters.allowIncomingTextPosts) return@filter false
+                    true
+                }
                 
                 if (_unifiedFeed.value.isEmpty()) {
-                    val savedIdsStr = repository.getAppSetting("saved_feed_list")
-                    val savedActiveId = repository.getAppSetting("saved_feed_active_id")
-                    
-                    if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
-                        val idList = savedIdsStr.split(",")
-                        val restoredFeed = idList.mapNotNull { id ->
-                            val feed = feeds.find { it.id == id }
-                            if (feed != null) UnifiedItem.Feed(feed)
-                            else {
-                                val mesh = meshes.find { it.id == id }
-                                if (mesh != null) UnifiedItem.Mesh(mesh) else null
-                            }
-                        }
-                        if (restoredFeed.isNotEmpty()) {
-                            cachedDefaultFeed = restoredFeed
-                            _unifiedFeed.value = restoredFeed
-                            savedFeedItemId = savedActiveId
-                            sessionLoadedIds.addAll(restoredFeed.map { it.id })
-                            
-                            viewModelScope.launch {
-                                kotlinx.coroutines.delay(150)
-                                if (savedActiveId != null) {
-                                    _restoreScrollPositionEvent.emit(savedActiveId)
+                    if (currentFilterMode == "Mesh") {
+                        loadMoreFeedItems("Mesh")
+                    } else {
+                        val savedIdsStr = repository.getAppSetting("saved_feed_list")
+                        val savedActiveId = repository.getAppSetting("saved_feed_active_id")
+                        if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                            val idList = savedIdsStr.split(",")
+                            // Keep full restored feed so user can scroll both up and down
+                            val candidateIds = idList
+                            val restoredFeed = candidateIds.mapNotNull { id ->
+                                val feed = feeds.find { it.id == id }
+                                if (feed != null) {
+                                    val anchor = getReactionAnchorIdForUrl(feed.url ?: "")
+                                    val isExcluded = id in cachedExcludedIds || id in cachedViewedIds || 
+                                                     feed.isRead || feed.isSaved || anchor in cachedReactedAnchorIds
+                                    if (isExcluded && id != savedActiveId) return@mapNotNull null
+                                    UnifiedItem.Feed(feed)
+                                } else {
+                                    val mesh = meshes.find { it.id == id }
+                                    if (mesh != null) {
+                                        val isExcluded = id in cachedExcludedIds || id in cachedViewedIds || id in cachedReactedAnchorIds
+                                        if (isExcluded && id != savedActiveId) return@mapNotNull null
+                                        UnifiedItem.Mesh(mesh)
+                                    } else null
                                 }
                             }
-                        } else {
+                            if (restoredFeed.isNotEmpty()) {
+                                cachedDefaultFeed = restoredFeed
+                                _unifiedFeed.value = restoredFeed
+                                savedFeedItemId = savedActiveId
+                                _savedActiveItemId.value = savedActiveId
+                                _isSavedPositionLoaded.value = true
+                                sessionLoadedIds.addAll(restoredFeed.map { it.id })
+
+                                viewModelScope.launch {
+                                    if (savedActiveId != null) {
+                                        _restoreScrollPositionEvent.emit(savedActiveId)
+                                    }
+                                }
+                                if (restoredFeed.size < 5) {
+                                    loadMoreFeedItems("Live Feed")
+                                }
+                            } else if (feeds.isEmpty() && meshes.isEmpty()) {
+                                // Room DB emission on cold start is still initial empty emission; wait for DB data
+                                return@collect
+                            } else {
+                                loadMoreFeedItems()
+                            }
+                        } else if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
                             loadMoreFeedItems()
                         }
-                    } else if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
-                        loadMoreFeedItems()
                     }
                 } else {
+                    val existingIds = _unifiedFeed.value.map { it.id }.toSet()
+                    val newIncomingMeshes = if (currentFilterMode == "Mesh") {
+                        allMeshes.filter { it.id !in existingIds && (showOldMeshPosts.value || (it.id !in cachedViewedIds && it.id !in cachedExcludedIds)) }
+                            .map { UnifiedItem.Mesh(it) }
+                    } else emptyList()
+
                     val updatedFeed = _unifiedFeed.value.mapNotNull { currentItem ->
                         when (currentItem) {
                             is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
-                            is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id }?.let { UnifiedItem.Mesh(it) } ?: currentItem
+                            is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id && !it.isOrphaned }?.let { UnifiedItem.Mesh(it) }
+                            is UnifiedItem.Tutorial -> currentItem
+                            is UnifiedItem.CreatorDepletion -> currentItem
+                            is UnifiedItem.BreakReminder -> currentItem
                         }
                     }.toList()
                     
-                    _unifiedFeed.value = updatedFeed
+                    _unifiedFeed.value = (newIncomingMeshes + updatedFeed).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+
+                    if (_unifiedFeed.value.size < 5 && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                        loadMoreFeedItems("Live Feed")
+                    }
                 }
             }
         }
@@ -327,16 +866,54 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun searchAndCreateCustomFeed(query: String, filterMode: String?) {
         if (query.isBlank()) return
-        if (_isRefreshingFeeds.value) return 
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
-                
                 isSearchModeActive = true
+                searchExhaustedCount = 0
                 activeSearchQuery = query
+                // E5s: a new search pages on its own. A page of the previous search still on its way is
+                // dropped when it lands (it belongs to another cursor).
+                val cursor = com.noslop.app.feeds.PublicApiService.SearchCursor()
+                searchCursor = cursor
+                searchCursorKey = searchKey(query, filterMode ?: "Live Feed")
+                searchFetchInFlight = null
+                searchListWaiting = false
+                searchPagesFetched = 0
+                searchResultPage.clear()
+                refreshSearchExclusions()
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
-                repository.searchCustomFeed(query, filterMode)
+                
+                val isLocalOnly = filterMode in listOf("History", "Liked", "Saved", "My Content", "Mesh")
+                if (!isLocalOnly) {
+                    // E5s: the first page of a paged search, newest first and with no date limit.
+                    searchFetchInFlight = cursor
+                    val searchResultList = try {
+                        repository.searchCustomFeedPage(query, filterMode, cursor, firstPage = true)
+                    } finally {
+                        if (searchFetchInFlight === cursor) searchFetchInFlight = null
+                    }
+                    // A newer search started while this one was fetching: the list is its now.
+                    if (searchCursor !== cursor) return@launch
+                    searchPagesFetched = 1
+                    if (searchResultList.isEmpty()) searchExhaustedCount = 1
+                    rememberSearchPage(searchResultList, 1)
+                    lastSearchResultIds = searchResultList.toSet()
+                    allSearchResultItemIds.addAll(searchResultList)
+
+                    var waitCount = 0
+                    while (waitCount < 15) {
+                        if (allFeeds.any { it.id in lastSearchResultIds }) break
+                        kotlinx.coroutines.delay(100)
+                        waitCount++
+                    }
+                } else {
+                    lastSearchResultIds = emptySet()
+                }
+                
+                currentFilterMode = filterMode ?: "Live Feed"
+                loadMoreFeedItems(filterMode)
             } catch (e: Exception) {
                 Logger.error("VM", "Custom search exception: ${e.message}")
             } finally {
@@ -345,110 +922,553 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun syncFilterMode(mode: String) {
-        if (currentFilterMode != mode) {
-            if (mode == "Live Feed") {
-                clearSearchAndRestoreFeed()
-            } else {
+    fun syncFilterMode(mode: String, forceRefresh: Boolean = false) {
+        if (currentFilterMode != mode || forceRefresh) {
+            val previousMode = currentFilterMode
+            currentFilterMode = mode
+            _currentFilterModeFlow.value = mode
 
-                currentFilterMode = mode
+            // Cache Live Feed before leaving it so toggling back is instantaneous
+            if (previousMode == "Live Feed" && _unifiedFeed.value.isNotEmpty() && !isSearchModeActive) {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
+
+            if (mode == "Live Feed") {
+                if (!isSearchModeActive) {
+                    activeSearchQuery = ""
+                }
+                if (cachedDefaultFeed.isNotEmpty() && !forceRefresh) {
+                    _unifiedFeed.value = cachedDefaultFeed.toList()
+                    sessionLoadedIds.clear()
+                    sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(50)
+                        if (savedFeedItemId != null) {
+                            _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                        } else {
+                            _scrollToTopEvent.emit(Unit)
+                        }
+                    }
+                } else {
+                    _unifiedFeed.value = emptyList()
+                    sessionLoadedIds.clear()
+                    loadMoreFeedItems("Live Feed")
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(50)
+                        _scrollToTopEvent.emit(Unit)
+                    }
+                }
+            } else {
+                if (mode == "Mesh") {
+                    _showOldMeshPosts.value = false
+                }
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 loadMoreFeedItems(mode)
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(50)
+                    _scrollToTopEvent.emit(Unit)
+                }
             }
         }
     }
 
-    private fun <T> Iterable<T>.takeDiverse(limit: Int, keySelector: (T) -> String, isPriority: (T) -> Boolean = { false }): List<T> {
-        val result = mutableListOf<T>()
-        val counts = mutableMapOf<String, Int>()
+    /**
+     * NOSLOP_FEED_VARIETY_V1
+     *
+     * Take up to [limit] items, cycling one at a time through each distinct
+     * [keySelector] group instead of draining one group before moving to the
+     * next. Order inside a group is preserved, so each creator contributes
+     * their newest item first, then their second newest on the following pass.
+     *
+     * This replaces the old cap-only approach: capping repeats at 2 stopped a
+     * creator from taking over completely, but did nothing about ordering, so
+     * their items still landed close together.
+     *
+     * [isPriority] items (creator-filter matches) lead the rotation rather than
+     * bypassing it — you still see more of them, just not several in a row.
+     */
+    /**
+     * NOSLOP_FEED_RECENCY_V1 — Live Feed recency bounds.
+     *
+     * MAX_FEED_AGE_MS is deliberately generous (~13 months): the goal is to
+     * stop years-old videos resurfacing, not to make the feed strictly
+     * news-like. Raise it if the feed starts running dry.
+     */
+    private val MAX_FEED_AGE_MS = 60L * 24 * 60 * 60 * 1000L
+    private val UNKNOWN_DATE_ASSUMED_AGE_MS = 20L * 24 * 60 * 60 * 1000L
+
+    /**
+     * NOSLOP_SOURCE_AGE_V1
+     *
+     * Age means different things depending on where an item came from, and the
+     * distinction is by SOURCE, not by media type.
+     *
+     * Archives publish material that is *supposed* to be old — NASA's Apollo
+     * footage, Internet Archive's 1940s documentaries, Commons photographs. An
+     * age ceiling applied to them removes good content for no reason, and worse:
+     * because both NASA and Internet Archive set real dates via
+     * FeedParser.parseDate, the ceiling used to empty the video bucket, which
+     * triggered the empty-pool floor, which returned everything — including the
+     * stale YouTube uploads the ceiling was meant to remove.
+     *
+     * Exempting archival sources keeps the bucket populated, so the floor stops
+     * firing and the ceiling can actually bite on the sources where staleness is
+     * a real defect.
+     */
+    private val ARCHIVAL_SOURCES = setOf(
+        "nasa", "archive", "internet_archive", "wikimedia", "artic", "openverse", "pexels", "vimeo", "podcast_index", "jamendo"
+    )
+
+    /** Age ceiling for sources where a stale upload is genuinely stale (< 60 days). */
+    private val FRESHNESS_MAX_AGE_MS = 60L * 24 * 60 * 60 * 1000L
+
+    private fun <T> Iterable<T>.takeRoundRobin(
+        limit: Int,
+        keySelector: (T) -> String,
+        isPriority: (T) -> Boolean = { false }
+    ): List<T> {
+        if (limit <= 0) return emptyList()
+
+        val groups = LinkedHashMap<String, MutableList<T>>()
         for (item in this) {
-            if (result.size >= limit) break
-            val key = keySelector(item)
-            val count = counts.getOrDefault(key, 0)
-            val maxAllowed = if (isPriority(item)) limit else 2 // Creators bypass diversity limits!
-            if (count < maxAllowed) {
-                result.add(item)
-                counts[key] = count + 1
+            groups.getOrPut(keySelector(item)) { mutableListOf() }.add(item)
+        }
+        if (groups.isEmpty()) return emptyList()
+
+        // Equal creator distribution: shuffle priority creator queues so high-frequency daily
+        // uploaders do not monopolize all slots and starve creators who upload weekly or monthly
+        val priorityGroups = groups.filter { it.value.any(isPriority) }
+            .values
+            .map { it.toMutableList() }
+            .shuffled()
+        val otherGroups = groups.filter { !it.value.any(isPriority) }
+            .values
+            .map { it.toMutableList() }
+        val queues = priorityGroups + otherGroups
+
+        val result = mutableListOf<T>()
+        var round = 0
+        while (result.size < limit) {
+            var addedThisRound = false
+            for (queue in queues) {
+                if (result.size >= limit) break
+                if (round < queue.size) {
+                    result.add(queue[round])
+                    addedThisRound = true
+                }
             }
+            if (!addedThisRound) break
+            round++
         }
         return result
     }
 
+    // takeDiverse pruned: superseded by fair takeRoundRobin
+
     fun clearSearchAndRestoreFeed() {
-        if (_isRefreshingFeeds.value) return
-        _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
                 activeSearchQuery = ""
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
+                // E5s: the search's paging ends with it.
+                searchCursor = null
+                searchCursorKey = null
+                if (searchListWaiting) {
+                    searchListWaiting = false
+                    _isRefreshingFeeds.value = false
+                }
                 
                 _unifiedFeed.value = cachedDefaultFeed.toList()
                 
                 sessionLoadedIds.clear()
                 sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
                 
-                kotlinx.coroutines.delay(50)
-                if (savedFeedItemId != null) {
-                    _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                if (_unifiedFeed.value.isEmpty()) {
+                    loadMoreFeedItems("Live Feed")
                 } else {
-                    _scrollToTopEvent.emit(Unit)
+                    kotlinx.coroutines.delay(50)
+                    if (savedFeedItemId != null) {
+                        _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                    } else {
+                        _scrollToTopEvent.emit(Unit)
+                    }
                 }
             } catch (e: Exception) {
                 Logger.error("VM", "Clear search exception: ${e.message}")
-            } finally {
-                _isRefreshingFeeds.value = false
             }
         }
     }
 
-    fun loadMoreFeedItems(filterMode: String? = null) {
+    private fun loadHistoryBatch(
+        historyRecords: List<ViewedHistoryItem>,
+        isInitialLoad: Boolean,
+        query: String = activeSearchQuery
+    ) {
+        val currentKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+        val feedMap = allFeeds.associateBy { it.id }
+        val meshMap = allMeshes.associateBy { it.id }
+        val feedByNormId = allFeeds.associateBy { normalizeFeedItemId(it.id, it.url ?: "") }
+        val feedByCanonKey = allFeeds.associateBy { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) }
+        val meshByCanonKey = allMeshes.associateBy { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
+
+        val searchTerms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val matchedHistory = mutableListOf<UnifiedItem>()
+        val seenKeys = mutableSetOf<String>()
+
+        for (rec in historyRecords) {
+            var item: UnifiedItem? = feedMap[rec.itemId]?.let { UnifiedItem.Feed(it) }
+                ?: meshMap[rec.itemId]?.let { UnifiedItem.Mesh(it) }
+                ?: feedByNormId[rec.itemId]?.let { UnifiedItem.Feed(it) }
+                ?: feedByCanonKey[rec.itemId]?.let { UnifiedItem.Feed(it) }
+                ?: meshByCanonKey[rec.itemId]?.let { UnifiedItem.Mesh(it) }
+
+            // Synthesize historical YouTube item if purged from feed_items in an earlier session
+            if (item == null && (rec.itemId.startsWith("yt_") || rec.itemId.startsWith("url_yt_"))) {
+                val videoId = rec.itemId.removePrefix("url_yt_").removePrefix("yt_").substringBefore("&").substringBefore("?")
+                if (videoId.isNotBlank()) {
+                    val synth = FeedItem(
+                        id = "yt_$videoId",
+                        sourceId = "api-yt",
+                        title = "YouTube Video",
+                        url = "https://www.youtube.com/watch?v=$videoId",
+                        author = "YouTube",
+                        publishedAt = rec.viewedAt,
+                        thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                        mediaUrl = "https://www.youtube.com/watch?v=$videoId",
+                        mediaType = "video",
+                        apiSource = "youtube",
+                        isRead = true
+                    )
+                    item = UnifiedItem.Feed(synth)
+                }
+            }
+
+            if (item != null) {
+                val cKey = com.noslop.app.data.getCanonicalItemKey(item)
+                if (seenKeys.add(cKey)) {
+                    val matchesSearch = if (searchTerms.isEmpty()) true else {
+                        when (item) {
+                            is UnifiedItem.Feed -> {
+                                val t = item.item.title.lowercase()
+                                val a = item.item.author?.lowercase() ?: ""
+                                val e = item.item.excerpt?.lowercase() ?: ""
+                                searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) }
+                            }
+                            is UnifiedItem.Mesh -> {
+                                val c = item.post.content.lowercase()
+                                val a = item.post.authorHandle.lowercase()
+                                val t = item.post.clearnetTitle?.lowercase() ?: ""
+                                searchTerms.all { term -> c.contains(term) || a.contains(term) || t.contains(term) }
+                            }
+                            else -> false
+                        }
+                    }
+                    if (matchesSearch) {
+                        matchedHistory.add(item)
+                    }
+                }
+            }
+        }
+
+        val unconsumed = matchedHistory.filter { com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys }
+        if (unconsumed.isEmpty()) {
+            return
+        }
+        val batch = unconsumed.take(30)
+        sessionLoadedIds.addAll(batch.map { it.id })
+        _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+            batch
+        } else {
+            (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+        }
+        if (isInitialLoad) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(50)
+                _scrollToTopEvent.emit(Unit)
+            }
+        }
+    }
+
+    private fun loadSavedBatch(
+        isInitialLoad: Boolean,
+        query: String = activeSearchQuery
+    ) {
+        val currentKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+        val inMemorySaved = allFeeds.filter { it.isSaved }
+        
+        if (inMemorySaved.isEmpty() && isInitialLoad) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val dbSaved = repository.getSavedFeedItemsList()
+                withContext(Dispatchers.Main) {
+                    processSavedBatch(dbSaved, currentKeys, isInitialLoad, query)
+                }
+            }
+            return
+        }
+        processSavedBatch(inMemorySaved, currentKeys, isInitialLoad, query)
+    }
+
+    private fun processSavedBatch(
+        savedFeeds: List<FeedItem>,
+        currentKeys: Set<String>,
+        isInitialLoad: Boolean,
+        query: String
+    ) {
+        val searchTerms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val matchedSaved = savedFeeds.filter { item ->
+            if (searchTerms.isEmpty()) true else {
+                val t = item.title.lowercase()
+                val a = item.author?.lowercase() ?: ""
+                val e = item.excerpt?.lowercase() ?: ""
+                val c = item.fullContent?.lowercase() ?: ""
+                searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) || c.contains(term) }
+            }
+        }.sortedByDescending { item ->
+            savedTimestampsMap[item.id] ?: item.publishedAt
+        }
+
+        val unconsumed = matchedSaved.filter { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) !in currentKeys }
+        if (unconsumed.isEmpty()) return
+
+        val batch = unconsumed.take(30).map { UnifiedItem.Feed(it) }
+        sessionLoadedIds.addAll(batch.map { it.id })
+        _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+            batch
+        } else {
+            (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+        }
+        if (isInitialLoad) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(50)
+                _scrollToTopEvent.emit(Unit)
+            }
+        }
+    }
+
+    fun loadMoreFeedItems(filterMode: String? = null, isInjection: Boolean = false) {
         if (_isOnboardingComplete.value && localKeys.value == null) return
-        val actualFilter = filterMode ?: currentFilterMode
+        if (isLoadingMoreFeedItems) return
+        isLoadingMoreFeedItems = true
+        try {
+            val actualFilter = filterMode ?: currentFilterMode
         if (currentFilterMode != actualFilter) {
+            // A load for another mode switches the mode, so it does what syncFilterMode does. The feed
+            // screen calls syncFilterMode(mode) right after the user picks a mode, but that call is a
+            // no-op once the mode already matches. When the pager's load got in first, the previous
+            // mode's session ids stayed behind (hiding mesh posts that had been loaded into the All feed
+            // but never seen), together with a stale "See Old Posts" state and mode flow.
+            if (currentFilterMode == "Live Feed" && _unifiedFeed.value.isNotEmpty() && !isSearchModeActive) {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
             _unifiedFeed.value = emptyList()
+            sessionLoadedIds.clear()
+            if (actualFilter == "Mesh") _showOldMeshPosts.value = false
             currentFilterMode = actualFilter
+            _currentFilterModeFlow.value = actualFilter
+        }
+
+        if (actualFilter == "History") {
+            val isInitialLoad = _unifiedFeed.value.isEmpty()
+            val historyRecords = viewedHistoryRecords.value
+            if (historyRecords.isEmpty()) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val dbRecords = repository.getAllViewedHistoryList()
+                    withContext(Dispatchers.Main) {
+                        loadHistoryBatch(dbRecords, isInitialLoad, activeSearchQuery)
+                    }
+                }
+                return
+            }
+            loadHistoryBatch(historyRecords, isInitialLoad, activeSearchQuery)
+            return
+        }
+
+        if (actualFilter == "Liked" || actualFilter == "Saved") {
+            val isInitialLoad = _unifiedFeed.value.isEmpty()
+            loadSavedBatch(isInitialLoad, activeSearchQuery)
+            return
+        }
+
+        if (actualFilter.startsWith("Author:")) {
+            val authorPub = actualFilter.substringAfter("Author:")
+            val authorMeshes = allMeshes.filter { it.authorPublicKeyB64 == authorPub && !it.isOrphaned }
+                .sortedByDescending { it.timestamp }
+            val batch = authorMeshes.map { UnifiedItem.Mesh(it) }
+            sessionLoadedIds.addAll(batch.map { it.id })
+            _unifiedFeed.value = batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+            return
         }
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
+        val burnablePubKey = burnableKeys.value?.publicKeyB64
+        val isOwnAuthor = { pub: String -> pub == localPubKey || (burnablePubKey != null && pub == burnablePubKey) }
         val isSearchActive = activeSearchQuery.isNotBlank()
         
-        val anchorTime = _unifiedFeed.value.firstOrNull()?.timestamp
+        val isPersistentList = isSearchActive || actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
+                               actualFilter == "My Content" || actualFilter == "Videos" || actualFilter == "Audio" ||
+                               actualFilter == "Images" || actualFilter == "Articles" || (actualFilter == "Mesh" && _showOldMeshPosts.value)
         
         val exclusionIds = currentIds + sessionLoadedIds
-        var unseenFeeds = allFeeds.filter { it.id !in exclusionIds && (isSearchActive || anchorTime == null || it.publishedAt <= anchorTime) }
-        var unseenMeshes = allMeshes.filter { it.id !in exclusionIds && (isSearchActive || anchorTime == null || it.timestamp <= anchorTime) }
+        val readOrHiddenIds = cachedViewedIds + cachedExcludedIds + exclusionIds
+        
+        // DEDUPLICATION: Prevent articles/videos with the exact same title or canonical key from reappearing
+        val readOrHiddenFeeds = allFeeds.filter { it.isRead || it.id in readOrHiddenIds }
+        val readTitles = readOrHiddenFeeds
+            .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
+            .toSet()
+        val excludedFeedKeys = (readOrHiddenFeeds.map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) } + cachedViewedIds + cachedExcludedIds)
+            .toSet()
+            
+        val excludedMeshKeys = allMeshes.filter { it.id in readOrHiddenIds }
+            .map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
+            .toSet()
+        
+        var unseenFeeds = allFeeds.filter { 
+            if (isPersistentList) {
+                it.id !in currentIds
+            } else {
+                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
+                val normId = normalizeFeedItemId(it.id, it.url ?: "")
+                val anchor = getReactionAnchorIdForUrl(it.url ?: "")
+                !it.isRead && !it.isSaved &&
+                it.id !in exclusionIds &&
+                it.id !in cachedViewedIds &&
+                it.id !in cachedExcludedIds &&
+                normId !in cachedViewedIds &&
+                normId !in cachedExcludedIds &&
+                cKey !in cachedExcludedIds &&
+                cKey !in cachedViewedIds &&
+                anchor !in cachedReactedAnchorIds &&
+                it.id !in cachedReactedAnchorIds &&
+                it.title.lowercase().trim() !in readTitles && 
+                cKey !in excludedFeedKeys
+            }
+        }
+        // Strict non-resurrection: never bring back items the user already saw, swiped, or reacted to.
+        val isFeedMode = actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random"
+        if (isFeedMode && unseenFeeds.isEmpty() && !_isRefreshingFeeds.value && !isSearchActive) {
+            refreshFeeds()
+        }
+        var unseenMeshes = allMeshes.filter { 
+            if (isPersistentList) {
+                it.id !in currentIds
+            } else {
+                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it))
+                it.id !in exclusionIds && 
+                it.id !in cachedViewedIds &&
+                cKey !in cachedExcludedIds &&
+                cKey !in excludedMeshKeys
+            }
+        }
 
         if (isSearchActive) {
-            val q = activeSearchQuery.lowercase()
-            unseenFeeds = unseenFeeds.filter {
-                it.title.lowercase().contains(q) || it.excerpt?.lowercase()?.contains(q) == true || it.author?.lowercase()?.contains(q) == true
+            val terms = activeSearchQuery.lowercase().split("\\s+".toRegex()).filter { it.isNotEmpty() }
+            unseenFeeds = unseenFeeds.filter { item ->
+                item.id in lastSearchResultIds || terms.all { term ->
+                    item.title.lowercase().contains(term) || 
+                    item.excerpt?.lowercase()?.contains(term) == true || 
+                    item.author?.lowercase()?.contains(term) == true
+                }
             }
-            unseenMeshes = unseenMeshes.filter {
-                it.content.lowercase().contains(q) || it.clearnetTitle?.lowercase()?.contains(q) == true || it.authorHandle.lowercase().contains(q)
+            unseenMeshes = unseenMeshes.filter { item ->
+                terms.all { term ->
+                    item.content.lowercase().contains(term) || 
+                    item.clearnetTitle?.lowercase()?.contains(term) == true || 
+                    item.authorHandle.lowercase().contains(term)
+                }
             }
         }
 
-        if (actualFilter == "My Content" && localPubKey != null) {
-            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == localPubKey }
+        if (actualFilter == "My Content") {
+            unseenMeshes = unseenMeshes.filter { isOwnAuthor(it.authorPublicKeyB64) }
             unseenFeeds = emptyList()
-        } else if (localPubKey != null) {
-            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
+        } else if (actualFilter == "P2P Mesh" || actualFilter == "Mesh") {
+            unseenFeeds = emptyList()
+            unseenMeshes = unseenMeshes.filter { !isOwnAuthor(it.authorPublicKeyB64) }
+        } else if (actualFilter?.startsWith("Author:") == true) {
+            val authorPub = actualFilter.substringAfter("Author:")
+            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == authorPub }
+            unseenFeeds = emptyList()
+        } else {
+            unseenMeshes = unseenMeshes.filter { !isOwnAuthor(it.authorPublicKeyB64) }
         }
 
-        if (!isSearchActive) {
-            if (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || 
-                actualFilter == "Videos" || actualFilter == "Audio" || 
-                actualFilter == "Images" || actualFilter == "Articles") {
-                val hiddenIds = cachedViewedIds + cachedExcludedIds
-                if (hiddenIds.isNotEmpty()) {
-                    unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
-                    unseenMeshes = unseenMeshes.filter { it.id !in hiddenIds }
+        // Swiped items are hidden from discovery feeds (user dismissed them). NOT applied in Saved, Liked, History, or search lists.
+        if (!isPersistentList && cachedExcludedIds.isNotEmpty()) {
+            unseenFeeds = unseenFeeds.filter { it.id !in cachedExcludedIds }
+        }
+
+        // Banned channels filtering
+        val bannedList = _bannedChannels.value
+        if (bannedList.isNotEmpty()) {
+            unseenFeeds = unseenFeeds.filter { item ->
+                val aClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                if (aClean.isBlank()) true
+                else bannedList.none { b ->
+                    val bClean = b.trim().lowercase().removePrefix("@")
+                    aClean == bClean || aClean.contains(bClean) || bClean.contains(aClean)
                 }
-                if (actualFilter == "Live Feed" || actualFilter == "Random") {
-                    unseenFeeds = unseenFeeds.filter { !it.isRead }
+            }
+        }
+
+        // E5s: posts from banned nodes stay hidden in every list, search included. Banning removed them
+        // from the list on screen only, and they came back with a later batch.
+        if (cachedBannedNodeKeys.isNotEmpty()) {
+            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 !in cachedBannedNodeKeys }
+        }
+        // E5s: what the user voted down (downvote, slop, vomit, clown, NoSlop) stays hidden in every list
+        // except their own records: History, Liked, Saved, My Content. Search lists show seen and swiped
+        // items, and a downvote only recorded a swipe, so downvoted items came back in search.
+        if (cachedDownvotedKeys.isNotEmpty() && actualFilter !in SearchPaging.KEEPS_DOWNVOTED) {
+            unseenFeeds = unseenFeeds.filter { item ->
+                item.id !in cachedDownvotedKeys &&
+                    normalizeFeedItemId(item.id, item.url ?: "") !in cachedDownvotedKeys &&
+                    com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item)) !in cachedDownvotedKeys
+            }
+            unseenMeshes = unseenMeshes.filter { post ->
+                post.id !in cachedDownvotedKeys &&
+                    com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(post)) !in cachedDownvotedKeys
+            }
+        }
+
+        // Channel creation date cut-off filtering (exempt during explicit creator/channel search)
+        val cutoff = _channelCutoffSettings.value
+        if (cutoff.first && !isSearchActive) {
+            val cal = java.util.Calendar.getInstance()
+            cal.set(cutoff.second, cutoff.third - 1, 1, 0, 0, 0)
+            val cutoffMs = cal.timeInMillis
+            unseenFeeds = unseenFeeds.filter { item ->
+                val created = item.channelCreatedAt
+                    ?: item.author?.let { com.noslop.app.feeds.api.ChannelMetadataResolver.getCreationDate(it) }
+                    ?: (if (item.publishedAt > 0L && item.publishedAt <= cutoffMs) item.publishedAt else null)
+                // If channel creation timestamp is unknown (null or 0L), keep the item.
+                // If known (> 0), drop only if created after the cut-off date.
+                created == null || created == 0L || created <= cutoffMs
+            }
+
+            // Proactively resolve channel creation dates in background for current candidate items
+            val candidateItems = unseenFeeds.take(25)
+            viewModelScope.launch(Dispatchers.IO) {
+                candidateItems.forEach { item ->
+                    item.author?.let { author ->
+                        com.noslop.app.feeds.api.ChannelMetadataResolver.resolveCreationDate(author, item.publishedAt, cutoffMs)
+                    }
                 }
+            }
+        }
+
+        // In feed-centric modes (Live Feed & Random), also exclude viewed items and swiped mesh posts
+        // so the feed feels fresh. NOT applied in specific filter tabs (Audio, Images, Articles, Videos) so users can browse all content.
+        if (!isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || (actualFilter == "Mesh" && !_showOldMeshPosts.value))) {
+            val hiddenIds = cachedViewedIds + cachedExcludedIds
+            if (hiddenIds.isNotEmpty()) {
+                unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
+                unseenMeshes = unseenMeshes.filter { it.id !in hiddenIds }
+            }
+            if (actualFilter == "Live Feed" || actualFilter == "Random") {
+                unseenFeeds = unseenFeeds.filter { !it.isRead }
             }
         }
         
@@ -456,14 +1476,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val viewedIds = viewedHistoryIds.value
             unseenFeeds = unseenFeeds.filter { it.id in viewedIds }
             unseenMeshes = unseenMeshes.filter { it.id in viewedIds }
-        } else if (actualFilter == "Liked") {
+        } else if (actualFilter == "Liked" || actualFilter == "Saved") {
             unseenFeeds = unseenFeeds.filter { it.isSaved }
             unseenMeshes = emptyList() 
         }
 
-        if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) return
+        if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) {
+            // E5s: a search that has shown everything it found fetches the next page of the same search
+            // (same terms, same filter, newest first). It used to search again with a random extra word
+            // ("review", "vlog", ...), which drifted away from what the user asked for.
+            if (isSearchActive) fetchNextSearchPage(actualFilter, listIsWaiting = true)
+            return
+        }
 
-        val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && actualFilter != "History" && actualFilter != "Liked"
+        val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && !actualFilter.startsWith("Author:")
 
         val creators = _creatorKeywords.value.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
         val isCreatorMatch = { item: FeedItem ->
@@ -471,124 +1497,352 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             else {
                 val title = item.title.lowercase()
                 val author = item.author?.lowercase() ?: ""
-                val excerpt = item.excerpt?.lowercase() ?: ""
-                creators.any { title.contains(it) || author.contains(it) || excerpt.contains(it) }
+                val isWiki = author == "wikipedia" || item.apiSource == "wikipedia"
+                if (isWiki) false
+                else {
+                    creators.any { c -> author.contains(c) || (title.contains(c) && isVideoFeedItem(item)) }
+                }
             }
         }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
-        val specificNeeded = if (isInitialLoad) 3 else 10
+        val specificNeeded = if (isSpecificFilter || isSearchActive) 30 else if (isInitialLoad) 5 else 10
 
         if (isSpecificFilter || isSearchActive) {
             val specificFeeds = unseenFeeds.filter {
                 if (isSearchActive && !isSpecificFilter) true
                 else when (actualFilter) {
-                    "Videos" -> it.mediaType?.contains("video") == true
-                    "Audio" -> it.mediaType?.contains("audio") == true
-                    "Images" -> it.mediaType?.contains("image") == true
-                    "Articles" -> it.mediaType.isNullOrEmpty()
+                    "Videos" -> isVideoFeedItem(it)
+                    "Audio" -> isAudioFeedItem(it)
+                    "Images" -> isImageFeedItem(it)
+                    "Articles" -> isArticleFeedItem(it)
+                    "History" -> true
+                    "Liked", "Saved" -> true
                     else -> false
                 }
             }
             val specificMeshes = unseenMeshes.filter {
                 if (isSearchActive && !isSpecificFilter) true
+                else if (actualFilter.startsWith("Author:")) true
                 else when (actualFilter) {
                     "Mesh" -> true
-                    "My Content" -> it.authorPublicKeyB64 == localPubKey
+                    "My Content" -> isOwnAuthor(it.authorPublicKeyB64)
                     "Videos" -> (it.mediaType == "video" || it.clearnetMediaType == "video")
                     "Audio" -> (it.mediaType == "audio" || it.clearnetMediaType == "audio")
                     "Images" -> (it.mediaType == "image" || it.clearnetMediaType == "image")
                     "Articles" -> (it.mediaType.isNullOrEmpty() && it.clearnetMediaType.isNullOrEmpty())
+                    "History" -> true
+                    "Liked", "Saved" -> true
                     else -> !isSpecificFilter
                 }
             }
             
             val batch = mutableListOf<UnifiedItem>()
             
-            if (isSearchActive) {
-                val allMatches = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
-                batch.addAll(allMatches.sortedByDescending { it.timestamp }.take(specificNeeded))
-            } else {
-                val sortedSpecificFeeds = specificFeeds.partition(isCreatorMatch).let { (c, o) ->
-                    c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
+            if (actualFilter == "Liked" || actualFilter == "Saved") {
+                val savedFeeds = allFeeds.filter { it.isSaved }
+                val currentLoadedKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+                
+                val searchTerms = activeSearchQuery.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+                val matchedSaved = savedFeeds.filter { item ->
+                    if (searchTerms.isEmpty()) true else {
+                        val t = item.title.lowercase()
+                        val a = item.author?.lowercase() ?: ""
+                        val e = item.excerpt?.lowercase() ?: ""
+                        searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) }
+                    }
+                }.sortedByDescending { item ->
+                    savedTimestampsMap[item.id] ?: item.publishedAt
                 }
 
-                batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
-                batch.addAll(specificMeshes.sortedByDescending { it.timestamp }.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
-                
-                if (isInitialLoad && actualFilter != "Mesh" && actualFilter != "My Content" && actualFilter != "History" && actualFilter != "Liked") {
-                    batch.shuffle()
+                val unconsumedSaved = matchedSaved.filter { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) !in currentLoadedKeys }
+                batch.addAll(unconsumedSaved.take(specificNeeded).map { UnifiedItem.Feed(it) })
+            } else if (isSearchActive) {
+                // E5s: in the order the pages arrived, newest first within a page; matches found on the
+                // device count as the first page. Videos no longer go first: a search lists what matches,
+                // in date order, whatever its type.
+                val allMatches = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
+                val sortedSearch = SearchPaging.order(allMatches, { searchResultPage[it.id] }, { it.timestamp.toLong() })
+                batch.addAll(sortedSearch.take(specificNeeded))
+                // Keep the next page coming while the user is still swiping through this one.
+                if (allMatches.size - batch.size < specificNeeded) {
+                    fetchNextSearchPage(actualFilter, listIsWaiting = false)
+                }
+            } else {
+                if (actualFilter == "History") {
+                    val viewedIdsList = viewedHistoryIds.value.toList()
+                    val allHistoryItems = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
+                    val sortedHistory = allHistoryItems.sortedBy { viewedIdsList.indexOf(it.id) }
+                    batch.addAll(sortedHistory.take(specificNeeded))
+                } else if (actualFilter.startsWith("Author:")) {
+                    val sortedAuthorMeshes = specificMeshes.sortedByDescending { it.timestamp }
+                    batch.addAll(sortedAuthorMeshes.map { UnifiedItem.Mesh(it) })
+                } else {
+                    val sortedSpecificFeeds = specificFeeds.sortedByDescending { item ->
+                        if (item.publishedAt <= 0L) System.currentTimeMillis() - UNKNOWN_DATE_ASSUMED_AGE_MS else item.publishedAt
+                    }
+
+                    val sortedMeshes = specificMeshes.sortedByDescending { it.timestamp }
+                    batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
+                    batch.addAll(sortedMeshes.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
                 }
             }
             
             sessionLoadedIds.addAll(batch.map { it.id })
-            _unifiedFeed.value = _unifiedFeed.value + batch
-            if (isInitialLoad) {
+            if (isInjection) {
+                val currentList = _unifiedFeed.value.toMutableList()
+                val upFront = batch.take(3)
+                val dispersed = batch.drop(3)
+                
+                val bufferSize = 3.coerceAtMost(currentList.size)
+                currentList.addAll(bufferSize, upFront)
+                
+                dispersed.forEachIndexed { i, item ->
+                    val insertIndex = (bufferSize + 3 + 2 + (i * 2)).coerceAtMost(currentList.size)
+                    currentList.add(insertIndex, item)
+                }
+                
+                _unifiedFeed.value = currentList.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
                 viewModelScope.launch {
                     kotlinx.coroutines.delay(150)
-                    _scrollToTopEvent.emit(Unit)
+                    if (upFront.isNotEmpty()) {
+                        _restoreScrollPositionEvent.emit(upFront.first().id)
+                    }
+                }
+            } else {
+                // The first batch of a mode or search fills the empty list (every mode switch, search and
+                // "See Old Posts" empties it first) and scrolls to the top. Later batches come from the
+                // pager's infinite scroll and are appended. They used to replace the list and jump to the
+                // top: in Mesh with more than one batch of posts, nearing the end swapped in the next batch
+                // with no way back, and the jump marked the posts in between as seen.
+                _unifiedFeed.value = if (isInitialLoad) {
+                    batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                } else {
+                    (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                }
+                if (isInitialLoad) {
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(150)
+                        _scrollToTopEvent.emit(Unit)
+                    }
                 }
             }
             return
         }
 
         // --- SMART INTERLEAVING ALGORITHM (Live Feed & Random) ---
-        val needed = if (isInitialLoad) 3 else 10
+        val needed = if (isInitialLoad) 5 else 10
+        val mixSettings = feedMixSettingsFlow.value
 
+        val userInterests = _selectedInterests.value
+        val prioritySourceIds = sources.value.filter { 
+            it.category in userInterests || it.id.startsWith("custom_") 
+        }.map { it.id }.toSet()
+        val isPrioritySource = { item: FeedItem -> item.sourceId in prioritySourceIds }
+
+        // --- NOSLOP_FEED_RECENCY_V1 ---
+        // publishedAt == 0L now means "the source gave us no date" rather than
+        // "published this instant" (see YouTubeInternalClient). Two things
+        // follow:
+        //
+        //  - Drop dated items older than MAX_FEED_AGE_MS from the Live Feed.
+        //    Undated items are exempt: we cannot judge them, and discarding
+        //    everything we are unsure about throws away too much.
+        //  - Rank undated items as though they were UNKNOWN_DATE_ASSUMED_AGE_MS
+        //    old. Sorting them by a literal 0 would bury them at the bottom
+        //    where the quota never reaches — the mirror image of the bug we
+        //    just fixed. Mid-pack keeps them visible without letting them
+        //    outrank genuinely fresh content.
+        val nowMs = System.currentTimeMillis()
+        // --- NOSLOP_TOR_MIX_V1 ---
+        // The age filter could only ever remove VIDEO. Videos carry real parsed
+        // dates; the image sources are either undated (0L, exempt) or used to
+        // stamp themselves with the current time. So asking for 80% video meant
+        // the video pool was the only pool being thinned, and the shortfall got
+        // backfilled with images.
+        //
+        // --- NOSLOP_AGE_FLOOR_V1 ---
+        // The previous version exempted every type except video from the age
+        // ceiling, on the theory that images and audio are timeless. The effect
+        // was the opposite of intended: video became the ONLY type the ceiling
+        // could remove, so the video pool could be emptied entirely while 2009
+        // podcasts passed through untouched and backfilled the whole batch.
+        //
+        // Symmetric again. Undated items (publishedAt <= 0) are still exempt
+        // because we genuinely cannot judge them.
+        // --- NOSLOP_SOURCE_AGE_V1 ---
+        val datedRecently = { item: FeedItem ->
+            when {
+                // Undated: we genuinely cannot judge it.
+                item.publishedAt <= 0L -> true
+                // Archives: age is the point. NASA Apollo footage and Internet
+                // Archive documentaries are not "stale".
+                // NB: apiSource is String?, and `x in Set<String>` does not
+                // compile with a nullable left side. Coalesce first.
+                (item.apiSource ?: "") in ARCHIVAL_SOURCES -> true
+                // Everything else — YouTube, Reddit, news — a two-year-old
+                // upload is stale and should not be in a live feed.
+                else -> (nowMs - item.publishedAt) <= FRESHNESS_MAX_AGE_MS
+            }
+        }
+        val effectiveDate = { item: FeedItem ->
+            if (item.publishedAt <= 0L) nowMs - UNKNOWN_DATE_ASSUMED_AGE_MS else item.publishedAt
+        }
+
+        /**
+         * NOSLOP_AGE_FLOOR_V1
+         *
+         * The age ceiling is a preference, not a hard constraint. Applied to a
+         * whole pool it can silently reduce one content type to zero, and the
+         * mix quota then has nothing to draw on — which is how an 80%-video
+         * setting produced a feed with no video in it at all.
+         *
+         * Applied per bucket with a floor: if the ceiling would empty a type,
+         * that type keeps everything it had. A year-old video beats no video.
+         */
+        val withAgeFloor = { items: List<FeedItem> ->
+            val fresh = items.filter(datedRecently)
+            if (fresh.isEmpty()) items else fresh
+        }
+
+        // NB: no longer age-filtered here — that now happens per bucket below.
         val recentFeeds = if (actualFilter == "Random") {
             unseenFeeds.shuffled()
         } else {
-            unseenFeeds.partition(isCreatorMatch).let { (c, o) ->
-                c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
-            }
+            unseenFeeds.sortedByDescending(effectiveDate)
         }
         val recentMeshes = if (actualFilter == "Random") unseenMeshes.shuffled() else unseenMeshes.sortedByDescending { it.timestamp }
 
-        val rawVideos = recentFeeds.filter { it.mediaType?.contains("video") == true }
-        val rawAudios = recentFeeds.filter { it.mediaType?.contains("audio") == true }
-        val rawImages = recentFeeds.filter { it.mediaType?.contains("image") == true }
-        val rawArticles = recentFeeds.filter { it.mediaType.isNullOrEmpty() }
+        // Filter based on toggles
+        // --- NOSLOP_AGE_FLOOR_V1 ---
+        // Age ceiling applied per bucket, with the empty-pool floor.
+        val allVideos = if (mixSettings.videoEnabled) recentFeeds.filter { isVideoFeedItem(it) } else emptyList()
+        val allAudios = if (mixSettings.audioEnabled) recentFeeds.filter { isAudioFeedItem(it) } else emptyList()
+        val allImages = if (mixSettings.imageEnabled) recentFeeds.filter { isImageFeedItem(it) } else emptyList()
+        val allArticles = if (mixSettings.articleEnabled) recentFeeds.filter { isArticleFeedItem(it) } else emptyList()
 
-        // Determine proportional mix based on needed size
-        val targetV = if (needed <= 3) 2 else 5
-        val targetOther = if (needed <= 3) 0 else 1
-        val targetM = if (needed <= 3) 1 else 2
+        val rawVideos = withAgeFloor(allVideos)
+        val rawAudios = withAgeFloor(allAudios)
+        val rawImages = withAgeFloor(allImages)
+        val rawArticles = withAgeFloor(allArticles)
+        val rawMeshes = if (mixSettings.meshEnabled) recentMeshes else emptyList()
 
-        val v = rawVideos.takeDiverse(targetV, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val a = rawAudios.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val i = rawImages.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val t = rawArticles.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val m = recentMeshes.take(targetM).map { UnifiedItem.Mesh(it) }
+        // Balance search-origin candidates in Live Feed so search items don't overwhelm regular feeds
+        if ((actualFilter == "Live Feed" || actualFilter == "Random") && !isSearchActive && allSearchResultItemIds.isNotEmpty()) {
+            val searchFeeds = unseenFeeds.filter { it.id in allSearchResultItemIds }
+            val nonSearchFeeds = unseenFeeds.filter { it.id !in allSearchResultItemIds }
+            val maxSearchCandidates = (needed * 0.25f).toInt().coerceAtLeast(2)
+            val balancedSearchFeeds = searchFeeds.take(maxSearchCandidates)
+            unseenFeeds = (nonSearchFeeds + balancedSearchFeeds).sortedByDescending { it.publishedAt }
+        }
+        val totalActivePercent = (if (mixSettings.videoEnabled) mixSettings.videoPercent else 0) +
+                                 (if (mixSettings.audioEnabled) mixSettings.audioPercent else 0) +
+                                 (if (mixSettings.imageEnabled) mixSettings.imagePercent else 0) +
+                                 (if (mixSettings.articleEnabled) mixSettings.articlePercent else 0) +
+                                 (if (mixSettings.meshEnabled) mixSettings.meshPercent else 0)
+                                 
+        val normalize = if (totalActivePercent > 0) 100.0f / totalActivePercent else 0.0f
+        
+        val targetV = Math.max(if (mixSettings.videoEnabled) 1 else 0, Math.round(needed * ((mixSettings.videoPercent * normalize) / 100f)))
+        val targetA = Math.max(if (mixSettings.audioEnabled) 1 else 0, Math.round(needed * ((mixSettings.audioPercent * normalize) / 100f)))
+        val targetI = Math.max(if (mixSettings.imageEnabled) 1 else 0, Math.round(needed * ((mixSettings.imagePercent * normalize) / 100f)))
+        val targetT = Math.max(if (mixSettings.articleEnabled) 1 else 0, Math.round(needed * ((mixSettings.articlePercent * normalize) / 100f)))
+        val targetM = Math.max(if (mixSettings.meshEnabled) 1 else 0, Math.round(needed * ((mixSettings.meshPercent * normalize) / 100f)))
+
+        // Group by author to prevent clumping. If author is null or blank, fallback to unique item ID
+        val diverseKey = { it: FeedItem -> if (!it.author.isNullOrBlank()) it.author!! else it.id }
+
+        // --- NOSLOP_FEED_VARIETY_V1 ---
+        // One item per creator per pass, so a channel that published four
+        // videos today contributes one here and keeps the rest for later
+        // batches, instead of occupying most of the video quota at once.
+        // --- NOSLOP_TOR_MIX_V1 ---
+        // Log the pool vs the quota. When the mix setting is not being met it
+        // is almost always because the pool is empty, not because the maths is
+        // wrong — this makes that visible instead of guesswork.
+        if (rawVideos.size < targetV) {
+            // --- NOSLOP_AGE_FLOOR_V1 ---
+            // Report the pool before AND after the ceiling. The previous version
+            // of this line could not distinguish "the ceiling removed them all"
+            // from "there were never any videos in the database", which is
+            // exactly the question that mattered.
+            val ceilingRemoved = allVideos.size - allVideos.count(datedRecently)
+            Logger.info(
+                "VM",
+                "Video pool short: have ${rawVideos.size}, want $targetV | " +
+                    "videos in db=${allVideos.size}, removed by age ceiling=$ceilingRemoved, " +
+                    "total candidates=${recentFeeds.size}"
+            )
+        }
+        val v = rawVideos.takeRoundRobin(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val a = rawAudios.takeRoundRobin(targetA, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val i = rawImages.takeRoundRobin(targetI, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val t = rawArticles.takeRoundRobin(targetT, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val m = rawMeshes.takeRoundRobin(targetM, { it.authorPublicKeyB64 }).map { UnifiedItem.Mesh(it) }.toMutableList()
 
         val batch = mutableListOf<UnifiedItem>()
-        batch.addAll(v)
-        batch.addAll(a)
-        batch.addAll(i)
-        batch.addAll(t)
-        batch.addAll(m)
+        val buckets = listOf(v, m, a, i, t) // Order of round-robin attempts
+        
+        // True Round-Robin Interleaving
+        var addedInPass = true
+        while (batch.size < needed && addedInPass) {
+            addedInPass = false
+            for (bucket in buckets) {
+                if (bucket.isNotEmpty() && batch.size < needed) {
+                    batch.add(bucket.removeAt(0))
+                    addedInPass = true
+                }
+            }
+        }
 
         if (batch.size < needed) {
             val usedIds = batch.map { it.id }.toSet()
-            val leftovers = (rawVideos.map { UnifiedItem.Feed(it) } + recentMeshes.map { UnifiedItem.Mesh(it) } + rawArticles.map { UnifiedItem.Feed(it) })
+            val leftovers = (rawVideos.map { UnifiedItem.Feed(it) } + rawAudios.map { UnifiedItem.Feed(it) } + rawImages.map { UnifiedItem.Feed(it) } + rawMeshes.map { UnifiedItem.Mesh(it) } + rawArticles.map { UnifiedItem.Feed(it) })
                 .filter { it.id !in usedIds }
-            batch.addAll(leftovers.take(needed - batch.size))
+            
+            // Round-robin leftovers
+            val leftoverBuckets = listOf(
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType?.contains("video") == true }.toMutableList(),
+                leftovers.filterIsInstance<UnifiedItem.Mesh>().toMutableList(),
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType?.contains("audio") == true }.toMutableList(),
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType?.contains("image") == true }.toMutableList(),
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType.isNullOrEmpty() }.toMutableList()
+            )
+            
+            var addedLeftover = true
+            while (batch.size < needed && addedLeftover) {
+                addedLeftover = false
+                for (bucket in leftoverBuckets) {
+                    if (bucket.isNotEmpty() && batch.size < needed) {
+                        batch.add(bucket.removeAt(0))
+                        addedLeftover = true
+                    }
+                }
+            }
         }
 
-        // Separate creators from others to force them to the absolute front
-        val creatorBatch = batch.filter { 
-            it is UnifiedItem.Feed && isCreatorMatch(it.item) 
-        }.toMutableList()
-        
-        val meshBatch = batch.filterIsInstance<UnifiedItem.Mesh>().toMutableList()
-        val otherBatch = batch.filter { it !in creatorBatch && it !in meshBatch }.toMutableList()
+        val finalBatch = batch.toMutableList()
 
-        // No internal shuffling to guarantee absolute chronological primacy!
-        // The arrays are already sorted descending.
+        // Creator Depletion check: if user has creators and fresh creator content < 60 days is exhausted,
+        // show an encouraging slide to discover/add more creators, then continue with fresh random content.
+        if (creators.isNotEmpty() && actualFilter == "Live Feed" && !hasShownCreatorDepletionInSession) {
+            val hasFreshCreatorVideos = rawVideos.any(isCreatorMatch)
+            if (!hasFreshCreatorVideos && _unifiedFeed.value.none { it is UnifiedItem.CreatorDepletion }) {
+                hasShownCreatorDepletionInSession = true
+                finalBatch.add(0, UnifiedItem.CreatorDepletion())
+            }
+        }
 
-        val finalBatch = mutableListOf<UnifiedItem>()
-        finalBatch.addAll(creatorBatch)
-        finalBatch.addAll(meshBatch)
-        finalBatch.addAll(otherBatch)
+        // Proactively schedule Break Reminder into Live Feed if enabled
+        if (breakReminderEnabled.value && actualFilter == "Live Feed" && !isSearchActive) {
+            val interval = breakReminderIntervalSlides.value
+            val totalSize = _unifiedFeed.value.size + finalBatch.size
+            if (totalSize >= interval && finalBatch.none { it is UnifiedItem.BreakReminder } && _unifiedFeed.value.none { it is UnifiedItem.BreakReminder }) {
+                val insertIdx = (interval - _unifiedFeed.value.size).coerceIn(0, finalBatch.size)
+                finalBatch.add(insertIdx, UnifiedItem.BreakReminder("slides", interval))
+                Logger.info("VM", "Scheduled BreakReminder slide into batch at index $insertIdx")
+            }
+        }
 
         // TikTok Vibe: Guarantee a video is at index 0 on the very first load to trigger instant preload
         if (isInitialLoad && (actualFilter == "Live Feed" || actualFilter == "Random")) {
@@ -603,14 +1857,46 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         
         sessionLoadedIds.addAll(finalBatch.map { it.id })
-        _unifiedFeed.value = _unifiedFeed.value + finalBatch
         
-        // Force the Pager to snap to the top (Index 0) on fresh filter loads
-        if (isInitialLoad) {
+        if (isInjection) {
+            val currentList = _unifiedFeed.value.toMutableList()
+            val upFront = finalBatch.take(3)
+            val dispersed = finalBatch.drop(3)
+            
+            val bufferSize = 3.coerceAtMost(currentList.size)
+            currentList.addAll(bufferSize, upFront)
+            
+            dispersed.forEachIndexed { i, item ->
+                val insertIndex = (bufferSize + 3 + 2 + (i * 2)).coerceAtMost(currentList.size)
+                currentList.add(insertIndex, item)
+            }
+            
+            _unifiedFeed.value = currentList.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             viewModelScope.launch {
                 kotlinx.coroutines.delay(150)
-                _scrollToTopEvent.emit(Unit)
+                if (upFront.isNotEmpty()) {
+                    _restoreScrollPositionEvent.emit(upFront.first().id)
+                }
             }
+        } else {
+            _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+                finalBatch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+            } else {
+                (_unifiedFeed.value + finalBatch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+            }
+            if (cachedDefaultFeed.isEmpty() && actualFilter == "Live Feed" && !isSearchActive) {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
+            // Force the Pager to snap to the top (Index 0) on fresh filter loads
+            if (isInitialLoad) {
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(150)
+                    _scrollToTopEvent.emit(Unit)
+                }
+            }
+        }
+        } finally {
+            isLoadingMoreFeedItems = false
         }
     }
 fun toggleAggregator() {
@@ -637,11 +1923,36 @@ fun toggleAggregator() {
         }
     }
 
+    fun saveCreatorKeywords(keywords: String) {
+        viewModelScope.launch {
+            repository.saveCreatorKeywords(keywords)
+            _creatorKeywords.value = keywords
+        }
+    }
+
     private val _mnemonic = MutableStateFlow<String?>(null)
     val mnemonic: StateFlow<String?> = _mnemonic.asStateFlow()
 
     fun generateMnemonic() {
         _mnemonic.value = com.noslop.app.crypto.MnemonicGenerator.generateMnemonic()
+    }
+
+    fun triggerBackgroundCreatorPreFetch(keywords: String) {
+        viewModelScope.launch {
+            try {
+                repository.saveCreatorKeywords(keywords)
+                _creatorKeywords.value = keywords
+                
+                val creatorList = keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                for (creator in creatorList) {
+                    launch(Dispatchers.IO) {
+                        repository.searchCustomFeed(creator, "Videos")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.error("VM", "Background creator fetch failed: ${e.message}")
+            }
+        }
     }
 
     fun preloadFeedsDuringOnboarding(selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, creatorKeywords: String = "") {
@@ -668,15 +1979,96 @@ fun toggleAggregator() {
         }
     }
 
+    fun updatePeerFolder(pubKey: String, folder: String?) {
+        viewModelScope.launch {
+            val peer = repository.peerDao.getPeerByPublicKey(pubKey)
+            if (peer != null) {
+                repository.peerDao.insertPeer(peer.copy(customFolder = folder))
+            }
+        }
+    }
+
+    enum class BackupPromptReason {
+        ONBOARDING_COMPLETED,
+        DISCOVERABILITY_CHANGED,
+        CREATOR_MODE_CHANGED,
+        CREATOR_IDENTITY_BURNED
+    }
+
+    private val _backupPromptReason = MutableStateFlow<BackupPromptReason?>(null)
+    val backupPromptReason: StateFlow<BackupPromptReason?> = _backupPromptReason.asStateFlow()
+
+    fun triggerBackupPrompt(reason: BackupPromptReason) {
+        _backupPromptReason.value = reason
+    }
+
+    fun dismissBackupPrompt() {
+        _backupPromptReason.value = null
+    }
+
+    /**
+     * R5b: compares the Word Cloud typed for an export with the one stored on this device, in canonical
+     * form (case and spacing ignored). A mismatch is logged as counts only, never the words.
+     */
+    suspend fun checkWordCloud(typed: String): com.noslop.app.data.WordCloudCheck {
+        val stored = getActiveMnemonic()
+        val result = com.noslop.app.data.WordCloudCheck.compare(typed, stored)
+        if (result is com.noslop.app.data.WordCloudCheck.Differs) {
+            // R5c: which phrase (if either) this account's keys were derived from. Version-2 identities
+            // are derived from their Word Cloud; version 1 identities have random keys, so neither phrase
+            // derives them and the stored phrase is only a backup password. Booleans only, never words.
+            val diag = try {
+                val idRepo = com.noslop.app.data.IdentityRepository(
+                    getApplication(),
+                    com.noslop.app.data.NoSlopDatabase.getDatabase(getApplication()).appSettingDao()
+                )
+                val localPub = idRepo.loadIdentity()?.publicKeyB64
+                val handle = idRepo.getHandle()
+                fun derives(phrase: String?): Boolean {
+                    if (phrase.isNullOrBlank() || localPub == null) return false
+                    val seed = com.noslop.app.crypto.MnemonicGenerator.deriveSeed(com.noslop.app.crypto.MnemonicGenerator.normalize(phrase))
+                    return CryptoService.deriveIdentityFromSeed(seed, handle).publicKeyB64 == localPub
+                }
+                "identityVersion=${idRepo.getIdentityVersion()} | typedDerivesIdentity=${derives(typed)} | storedDerivesIdentity=${derives(stored)}"
+            } catch (e: Exception) {
+                "derivation check failed: ${e.message}"
+            }
+            Logger.warn(
+                "VM",
+                "Typed Word Cloud differs from the one stored on this device",
+                "differingWords=${result.differingWords} | typedWords=${result.typedWords} | storedWords=${result.storedWords} | $diag"
+            )
+        }
+        return result
+    }
+
+    suspend fun getActiveMnemonic(): String? {
+        val idRepo = com.noslop.app.data.IdentityRepository(
+            getApplication(),
+            com.noslop.app.data.NoSlopDatabase.getDatabase(getApplication()).appSettingDao()
+        )
+        return idRepo.getMnemonic()
+    }
+
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, mnemonic: String, creatorKeywords: String = "") {
         viewModelScope.launch {
-            val keys = CryptoService.generateIdentity(handle)
+            repository.clearBurnableIdentity()
+            val seed = com.noslop.app.crypto.MnemonicGenerator.deriveSeed(mnemonic)
+            val keys = CryptoService.deriveIdentityFromSeed(seed, handle)
             repository.saveLocalIdentity(handle, keys, mnemonic)
+            repository.ensureDefaultDiscoverableNode()
             preloadFeedsDuringOnboarding(selectedSources, selectedCategories, selectedMusicGenres, selectedVideoGenres, creatorKeywords)
             repository.setOnboardingComplete(true)
             _isOnboardingComplete.value = true
+            _feedTutorialStep.value = 0
+            _dmTutorialStep.value = 0
+            repository.putAppSetting("feed_tutorial_step", "0")
+            repository.putAppSetting("dms_tutorial_step", "0")
+            _backupPromptReason.value = BackupPromptReason.ONBOARDING_COMPLETED
         }
     }
+
+    suspend fun getIdentityVersion(): Int = repository.getIdentityVersion()
 
     fun updateUserProfile(profile: com.noslop.app.data.UserProfile) {
         viewModelScope.launch {
@@ -687,6 +2079,14 @@ fun toggleAggregator() {
                 repository.updateLocalHandle(profile.displayName)
             }
             repository.broadcastIdentityUpdate(profile.displayName)
+        }
+    }
+
+    fun updateAppLanguage(langCode: String) {
+        viewModelScope.launch {
+            repository.setAppLanguage(langCode)
+            _appLanguage.value = langCode
+            com.noslop.app.util.LanguageManager.loadLanguage(langCode)
         }
     }
 
@@ -706,16 +2106,49 @@ fun toggleAggregator() {
             if (languagePreference != null) _languagePreference.value = languagePreference
             if (creatorKeywords != null) _creatorKeywords.value = creatorKeywords
 
-            // DO NOT wipe the unified feed or session history!
-            // Just refresh feeds to pull down new content matching the new preferences in the background.
-            refreshFeeds()
+            // Wipe the unified feed and session history to apply new preferences immediately
+            forceResetFeed()
         }
     }
 
     fun factoryReset() {
         viewModelScope.launch {
             repository.factoryReset()
+            _unifiedFeed.value = emptyList()
+            cachedDefaultFeed = emptyList()
+            sessionLoadedIds.clear()
+            cachedViewedIds = emptySet()
+            cachedExcludedIds = emptySet()
+            savedTimestampsMap.clear()
+            savedFeedItemId = null
+            _savedActiveItemId.value = null
+            _selectedPeerPub.value = null
+            _selectedGroupChatId.value = null
+            _userProfile.value = com.noslop.app.data.UserProfile()
+            _creatorProfile.value = com.noslop.app.data.UserProfile()
+            _selectedInterests.value = emptyList()
+            _selectedMusicGenres.value = emptyList()
+            _selectedVideoGenres.value = emptyList()
+            _negativeKeywords.value = ""
+            _creatorKeywords.value = ""
+            _bannedChannels.value = emptyList()
+            _isDiscoverableEnabled.value = false
+            _isCreatorEnabled.value = false
+            _creatorFundMeLink.value = ""
+            _hubDeploymentStatus.value = null
             _isOnboardingComplete.value = false
+            _feedTutorialStep.value = 0
+            _dmTutorialStep.value = 0
+            clearLogFile()
+            kotlinx.coroutines.delay(500)
+            val context = getApplication<Application>()
+            val pm = context.packageManager
+            val intent = pm.getLaunchIntentForPackage(context.packageName)
+            if (intent != null) {
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                context.startActivity(intent)
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
         }
     }
 
@@ -735,17 +2168,117 @@ fun toggleAggregator() {
     private val _isLocked = MutableStateFlow(false)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
-    fun checkLockStatus() {
-        viewModelScope.launch { _isLocked.value = repository.isLocked() }
+
+
+    private val _isBackupExporting = MutableStateFlow(false)
+    val isBackupExporting: StateFlow<Boolean> = _isBackupExporting.asStateFlow()
+
+    fun exportBackupToUri(
+        context: Context,
+        mnemonic: String,
+        uri: android.net.Uri,
+        mediaOption: com.noslop.app.data.BackupMediaOption = com.noslop.app.data.BackupMediaOption.OWNED_ONLY,
+        onResult: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isBackupExporting.value = true
+            try {
+                val outputStream = context.contentResolver.openOutputStream(uri)
+                if (outputStream != null) {
+                    val success = com.noslop.app.data.BackupManager.exportData(context, mnemonic, outputStream, mediaOption)
+                    withContext(Dispatchers.Main) {
+                        onResult(success, if (success) null else "Export failed during archive creation")
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        onResult(false, "Could not open target file for writing")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.error("VM", "exportBackupToUri failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onResult(false, e.message ?: "Export failed")
+                }
+            } finally {
+                _isBackupExporting.value = false
+            }
+        }
     }
 
-    fun exportBackup(context: Context, mnemonic: String, file: java.io.File) {
-        viewModelScope.launch { com.noslop.app.data.BackupManager.exportData(context, mnemonic, file) }
+    fun importBackupFromUri(
+        context: Context,
+        mnemonic: String,
+        uri: android.net.Uri,
+        allowLegacyUnauthenticated: Boolean = false,
+        onLegacyDetected: (() -> Unit)? = null,
+        /** R5: why a restore failed, in plain words (shown instead of a generic "check your mnemonic"). */
+        onFailed: ((String) -> Unit)? = null,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    // D09: a typed outcome. A restore that needs identity recovery *was* applied: it restarts
+                    // like a success (the onboarding screen then shows the recovery banner) instead of being
+                    // reported as "Import failed" with the device's data already replaced.
+                    val result = inputStream.use {
+                        com.noslop.app.data.BackupManager.importBackup(context, mnemonic, it, allowLegacyUnauthenticated)
+                    }
+                    when (result) {
+                        com.noslop.app.data.ImportResult.Success,
+                        com.noslop.app.data.ImportResult.SuccessIdentityRecoveryRequired -> {
+                            if (result == com.noslop.app.data.ImportResult.Success) {
+                                context.getSharedPreferences("noslop_system", Context.MODE_PRIVATE)
+                                    .edit().putBoolean("prompt_hub_after_restore", true).commit()
+                            } else {
+                                Logger.warn("VM", "Backup restored; identity recovery is required after the restart")
+                            }
+                            // R5: stop Tor cleanly before the process is killed, so its state (guards,
+                            // directory info) is saved; after an abrupt kill the restarted daemon sat at
+                            // "Connecting to a relay" for two minutes.
+                            try {
+                                com.noslop.app.tor.TorService.stopTor(context.applicationContext)
+                            } catch (e: Exception) {
+                                Logger.warn("VM", "Stopping Tor before the restore restart failed: ${e.message}")
+                            }
+                            kotlinx.coroutines.delay(1500)
+                            val pm = context.packageManager
+                            val intent = pm.getLaunchIntentForPackage(context.packageName)
+                            if (intent != null) {
+                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                context.startActivity(intent)
+                                android.os.Process.killProcess(android.os.Process.myPid())
+                            }
+                            withContext(Dispatchers.Main) { onResult(true) }
+                        }
+                        com.noslop.app.data.ImportResult.ConfirmLegacy -> {
+                            withContext(Dispatchers.Main) { onLegacyDetected?.invoke() }
+                        }
+                        is com.noslop.app.data.ImportResult.Failed -> {
+                            if (!result.rolledBack) {
+                                Logger.error("VM", "Import failed and the rollback could not be verified: ${result.reason}")
+                            } else {
+                                Logger.warn("VM", "Import failed; nothing was changed: ${result.reason}")
+                            }
+                            withContext(Dispatchers.Main) {
+                                onResult(false)
+                                // After onResult, so the specific reason replaces any generic failure text.
+                                onFailed?.invoke(result.reason)
+                            }
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) { onResult(false) }
+                }
+            } catch (e: Exception) {
+                Logger.error("VM", "Import failed: ${e.message}")
+                withContext(Dispatchers.Main) { onResult(false) }
+            }
+        }
     }
 
-    fun importBackup(context: Context, mnemonic: String, file: java.io.File) {
-        viewModelScope.launch { com.noslop.app.data.BackupManager.importData(context, mnemonic, file) }
-    }
+
 
     fun refreshFeeds() {
         if (_isRefreshingFeeds.value) return
@@ -762,17 +2295,90 @@ fun toggleAggregator() {
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
-                _unifiedFeed.value = emptyList()
-                allFeeds = emptyList()
-                allMeshes = emptyList()
-                cachedDefaultFeed = emptyList()
-                sessionLoadedIds.clear()
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
-                repository.clearFeedData()
+                
+                savedFeedItemId = null
+                repository.putAppSetting("saved_feed_list", "")
+                repository.putAppSetting("saved_feed_active_id", "")
+                repository.putAppSetting("saved_feed_date", "")
+                refreshExclusionCaches()
+                _unifiedFeed.value = emptyList()
+                cachedDefaultFeed = emptyList()
+                sessionLoadedIds.clear()
+                
+                // Purge stale YouTube items from DB so fresh items are fetched
+                repository.deleteYouTubeItems()
+                com.noslop.app.ui.PreloadManager.evictAll()
+                com.noslop.app.ui.components.PlaybackPositionStore.clearAll()
+
+                // Fetch fresh feeds from the network FIRST so the feed is populated with fresh content
                 repository.refreshFeeds()
+
+                // Refresh exclusion caches and rebuild from freshly fetched items
+                refreshExclusionCaches()
+                loadMoreFeedItems("Live Feed")
+                _scrollToTopEvent.emit(Unit)
+                
             } catch (e: Exception) {
                 Logger.error("VM", "Force reset exception: ${e.message}")
+            } finally {
+                _isRefreshingFeeds.value = false
+            }
+        }
+    }
+
+    /**
+     * Refreshes the Live Feed with a completely fresh mix of content from the
+     * existing database — no network fetch.  Clears the session-seen IDs and
+     * refreshes the exclusion caches (viewed / swiped) so the new mix excludes
+     * anything the user has already consumed, then rebuilds the interleaved
+     * feed from scratch and scrolls to the top.
+     */
+    fun refreshMeshFeed() {
+        if (_isRefreshingFeeds.value) return
+        _isRefreshingFeeds.value = true
+        viewModelScope.launch {
+            try {
+                repository.requestAllPeersInventorySync()
+                _showOldMeshPosts.value = false
+                _unifiedFeed.value = emptyList()
+                sessionLoadedIds.clear()
+                loadMoreFeedItems("Mesh")
+                _scrollToTopEvent.emit(Unit)
+            } finally {
+                _isRefreshingFeeds.value = false
+            }
+        }
+    }
+
+    fun refreshLiveFeed() {
+        if (_isRefreshingFeeds.value) return
+        _isRefreshingFeeds.value = true
+        viewModelScope.launch {
+            try {
+                isSearchModeActive = false
+                savedFeedItemId = null
+                currentFilterMode = "Live Feed"
+
+                // Keep saved position intact so user does not lose their place on refresh
+
+                // Fetch fresh feeds from the network
+                repository.refreshFeeds()
+
+                // Refresh what's been seen / swiped so the new mix excludes them
+                refreshExclusionCaches()
+                _bannedChannels.value = repository.getBannedChannels()
+
+                // Clear session and rebuild from scratch
+                sessionLoadedIds.clear()
+                _unifiedFeed.value = emptyList()
+                cachedDefaultFeed = emptyList()
+                loadMoreFeedItems("Live Feed")
+
+                _scrollToTopEvent.emit(Unit)
+            } catch (e: Exception) {
+                Logger.error("VM", "Refresh live feed exception: ${e.message}")
             } finally {
                 _isRefreshingFeeds.value = false
             }
@@ -785,69 +2391,424 @@ fun toggleAggregator() {
 
     fun markItemViewed(itemId: String, isMesh: Boolean) {
         viewModelScope.launch {
-            repository.markAsViewed(itemId, if (isMesh) "mesh" else "feed")
+            val item = _unifiedFeed.value.find { it.id == itemId }
+                ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
+
+            // Do NOT mark mesh post as viewed if attached media has not finished downloading or hasn't been shown
+            if (item is UnifiedItem.Mesh && isMeshMediaUnseen(item.post)) return@launch
+
+            val (url, cKey) = when (item) {
+                is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
+                is UnifiedItem.Mesh -> Pair(item.post.clearnetUrl, com.noslop.app.data.getCanonicalItemKey(item))
+                else -> Pair(null, null)
+            }
+            repository.markAsViewed(itemId, if (isMesh) "mesh" else "feed", url, cKey)
             cachedViewedIds = repository.getViewedItemIds()
         }
     }
 
     fun recordItemSwiped(itemId: String) {
         viewModelScope.launch {
-            repository.recordSwipe(itemId)
+            val item = _unifiedFeed.value.find { it.id == itemId }
+                ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
+
+            // Do NOT record as swiped away if mesh media is not yet available or hasn't been shown at least once
+            if (item is UnifiedItem.Mesh && isMeshMediaUnseen(item.post)) return@launch
+
+            val (url, cKey) = when (item) {
+                is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
+                is UnifiedItem.Mesh -> Pair(item.post.clearnetUrl, com.noslop.app.data.getCanonicalItemKey(item))
+                else -> Pair(null, null)
+            }
+            repository.recordSwipe(itemId, url, cKey)
             cachedExcludedIds = repository.getSwipeExcludedIds()
         }
     }
 
+
+
     private suspend fun refreshExclusionCaches() {
         cachedViewedIds = repository.getViewedItemIds()
         cachedExcludedIds = repository.getSwipeExcludedIds()
+        try {
+            cachedReactedAnchorIds = repository.getReactedAnchorIds()
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("VIEWMODEL", "Could not refresh reacted items; keeping the previous list: ${e.message}")
+        }
+        refreshSearchExclusions()  // E5s
     }
 
     fun updateActiveSearchQuery(query: String) {
         activeSearchQuery = query
     }
 
+    /** E5s: one search's paging belongs to its query and its search-modal filter. */
+    private fun searchKey(query: String, filter: String) = "$filter\n${query.trim()}"
+
+    /** E5s: records the page [ids] arrived on, for the search order (an id keeps its first page). */
+    private fun rememberSearchPage(ids: List<String>, page: Int) {
+        for (id in ids) {
+            if (id !in searchResultPage) searchResultPage[id] = page
+        }
+    }
+
+    /**
+     * E5s: fetches the next page of the active search in the background and adds what it finds to the
+     * search results. [listIsWaiting]: the list has nothing left to show, so the spinner shows and the
+     * list is refilled when the page lands; otherwise this is a prefetch while the user is still
+     * swiping, and its results join the pool the next batch draws from.
+     *
+     * One page at a time per search. Stops when every source of this filter has reported the end of its
+     * results, after SearchPaging.MAX_EMPTY_PAGES pages in a row that added nothing new, or after
+     * SearchPaging.MAX_PAGES pages.
+     */
+    private fun fetchNextSearchPage(filter: String, listIsWaiting: Boolean) {
+        val query = activeSearchQuery
+        if (query.isBlank() || filter in SearchPaging.LOCAL_ONLY_FILTERS) return
+        val key = searchKey(query, filter)
+        val existing = searchCursor
+        val cursor = if (existing != null && searchCursorKey == key) existing else {
+            // The query or the filter changed without a new search (updateActiveSearchQuery, a mode
+            // switch with the query still set): page that search from its start.
+            com.noslop.app.feeds.PublicApiService.SearchCursor().also {
+                searchCursor = it
+                searchCursorKey = key
+                searchFetchInFlight = null
+                searchPagesFetched = 0
+                searchExhaustedCount = 0
+                searchResultPage.clear()
+            }
+        }
+        if (searchFetchInFlight === cursor) {
+            // A prefetch is already on its way: it refills the list when it lands.
+            if (listIsWaiting) {
+                searchListWaiting = true
+                _isRefreshingFeeds.value = true
+            }
+            return
+        }
+        if (!SearchPaging.shouldFetchMore(searchExhaustedCount, searchPagesFetched)) return
+        val firstPage = searchPagesFetched == 0
+        if (!firstPage && !repository.searchHasMorePages(filter, cursor)) return
+
+        searchFetchInFlight = cursor
+        if (listIsWaiting) {
+            searchListWaiting = true
+            _isRefreshingFeeds.value = true
+        }
+        viewModelScope.launch {
+            try {
+                val ids = repository.searchCustomFeedPage(query, filter, cursor, firstPage)
+                if (searchCursor !== cursor) return@launch  // the user has moved on to another search
+                searchPagesFetched++
+                val fresh = ids.filter { it !in lastSearchResultIds }
+                searchExhaustedCount = if (fresh.isEmpty()) searchExhaustedCount + 1 else 0
+                rememberSearchPage(fresh, searchPagesFetched)
+                lastSearchResultIds = lastSearchResultIds + fresh
+                allSearchResultItemIds.addAll(fresh)
+                Logger.info("VM", "Search page $searchPagesFetched: ${fresh.size} new results")
+                if (searchListWaiting && fresh.isNotEmpty()) {
+                    // As for the first page: give the database a moment to deliver the new items.
+                    val freshSet = fresh.toSet()
+                    var waitCount = 0
+                    while (waitCount < 15 && allFeeds.none { it.id in freshSet }) {
+                        kotlinx.coroutines.delay(100)
+                        waitCount++
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                searchExhaustedCount++
+                Logger.warn("VM", "Search page fetch failed: ${e.message}")
+            } finally {
+                if (searchFetchInFlight === cursor) searchFetchInFlight = null
+            }
+            if (searchCursor !== cursor || !searchListWaiting) return@launch
+            searchListWaiting = false
+            _isRefreshingFeeds.value = false
+            // Refill the list. If the page added nothing it can show, this asks for the following page,
+            // within the limits above.
+            loadMoreFeedItems(filter, isInjection = false)
+        }
+    }
+
+    /** E5s: reloads what the lists hide on top of the swipe and view records (loadMoreFeedItems). */
+    private suspend fun refreshSearchExclusions() {
+        try {
+            cachedDownvotedKeys = SearchPaging.parseDownvotes(repository.getAppSetting(SearchPaging.DOWNVOTED_SETTING))
+            cachedBannedNodeKeys = repository.getBannedNodes().map { it.publicKeyB64 }.toSet()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.warn("VM", "Could not refresh downvoted items and banned nodes: ${e.message}")
+        }
+    }
+
+    /**
+     * E5s: remembers that the user voted down the item with these [keys] (its id, normalized id and
+     * canonical key), so it stays out of every list but their own records. Kept in app settings, one
+     * key per line, the newest SearchPaging.MAX_DOWNVOTED_KEYS of them.
+     */
+    private suspend fun rememberDownvote(keys: Collection<String>) {
+        try {
+            downvoteMutex.lock()
+            try {
+                val merged = SearchPaging.mergeDownvotes(repository.getAppSetting(SearchPaging.DOWNVOTED_SETTING), keys)
+                repository.putAppSetting(SearchPaging.DOWNVOTED_SETTING, merged.joinToString("\n"))
+                cachedDownvotedKeys = merged.toSet()
+            } finally {
+                downvoteMutex.unlock()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.warn("VM", "Could not record a downvote: ${e.message}")
+        }
+    }
+
+    /** E5s: the keys a downvoted clearnet item is remembered by. */
+    private fun downvoteKeys(item: FeedItem): List<String> = listOf(
+        item.id,
+        normalizeFeedItemId(item.id, item.url ?: ""),
+        com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item))
+    )
+
+    /** E5s: the keys a downvoted mesh post is remembered by. */
+    private fun downvoteKeys(postId: String): List<String> = listOfNotNull(
+        postId,
+        allMeshes.find { it.id == postId }?.let { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
+    )
+
     fun ensurePostInFeed(postId: String) {
         viewModelScope.launch {
-            val alreadyInFeed = _unifiedFeed.value.any { it.id == postId }
-            if (alreadyInFeed) return@launch
-            val meshPost = allMeshes.find { it.id == postId }
+            if (isSearchModeActive) {
+                clearSearchAndRestoreFeed()
+                kotlinx.coroutines.delay(100)
+            }
+            
+            val existingIndex = _unifiedFeed.value.indexOfFirst { 
+                it.id == postId || (it is UnifiedItem.Feed && getReactionAnchorIdForUrl(it.item.url ?: "") == postId) 
+            }
+            if (existingIndex >= 0) {
+                _restoreScrollPositionEvent.emit(_unifiedFeed.value[existingIndex].id)
+                return@launch
+            }
+            
+            val meshPost = repository.postDao.getPostById(postId)
             if (meshPost != null) {
                 val currentFeed = _unifiedFeed.value.toMutableList()
                 currentFeed.add(0, UnifiedItem.Mesh(meshPost))
                 _unifiedFeed.value = currentFeed
+                _restoreScrollPositionEvent.emit(postId)
+                return@launch
+            }
+            
+            if (allFeeds.isEmpty()) {
+                kotlinx.coroutines.delay(800)
+            }
+            
+            val feedItem = allFeeds.find { it.id == postId || getReactionAnchorIdForUrl(it.url ?: "") == postId }
+            if (feedItem != null) {
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                currentFeed.add(0, UnifiedItem.Feed(feedItem))
+                _unifiedFeed.value = currentFeed
+                _restoreScrollPositionEvent.emit(feedItem.id)
+            }
+        }
+    }
+
+
+
+
+    fun setFeedTutorialStep(step: Int) {
+        if (step > _feedTutorialStep.value) {
+            _feedTutorialStep.value = step
+            viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", step.toString()) }
+        }
+    }
+
+    fun completeFeedTutorial() {
+        _feedTutorialStep.value = 5
+        viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", "5") }
+    }
+
+    fun advanceDmTutorial() {
+        val next = _dmTutorialStep.value + 1
+        _dmTutorialStep.value = next
+        viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", next.toString()) }
+    }
+
+    fun completeDmTutorial() {
+        _dmTutorialStep.value = 5
+        viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", "5") }
+    }
+
+    /**
+     * D10d: writes the creator identity file (CreatorIdentityArchive) to [uri]. [onResult] gets the
+     * summary, or null and the reason it failed.
+     */
+    fun exportCreatorIdentityToUri(
+        context: Context,
+        passphrase: String,
+        uri: android.net.Uri,
+        onResult: (com.noslop.app.data.CreatorArchiveSummary?, String?) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isBackupExporting.value = true
+            val (summary, error) = try {
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: throw java.io.IOException("Could not open the file for writing")
+                com.noslop.app.data.CreatorIdentityArchive.export(repository, passphrase, output) to null
+            } catch (e: Exception) {
+                Logger.error("VM", "Creator identity export failed: ${e.message}")
+                null to (e.message ?: "Export failed")
+            } finally {
+                _isBackupExporting.value = false
+            }
+            withContext(Dispatchers.Main) { onResult(summary, error) }
+        }
+    }
+
+    /**
+     * D10d: restores a creator identity file from [uri] and makes this device the creator: registers
+     * the creator onion with Tor and announces it when discoverable. [onResult] gets the outcome;
+     * [com.noslop.app.data.CreatorRestoreResult.ConfirmReplace] means nothing changed yet.
+     */
+    fun restoreCreatorIdentityFromUri(
+        context: Context,
+        passphrase: String,
+        uri: android.net.Uri,
+        replaceExisting: Boolean,
+        onResult: (com.noslop.app.data.CreatorRestoreResult) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = try {
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: throw java.io.IOException("Could not open the file")
+                input.use { com.noslop.app.data.CreatorIdentityArchive.restore(repository, passphrase, it, replaceExisting) }
+            } catch (e: Exception) {
+                Logger.error("VM", "Creator identity restore failed: ${e.message}")
+                com.noslop.app.data.CreatorRestoreResult.Failed(e.message ?: "Restore failed")
+            }
+            if (result is com.noslop.app.data.CreatorRestoreResult.Restored) {
+                _isCreatorEnabled.value = true
+                _creatorProfile.value = repository.getCreatorProfile()
+                _creatorFundMeLink.value = repository.getAppSetting("creator_fundme_link") ?: ""
+                val main = repository.getLocalIdentity()
+                val creator = repository.getBurnableIdentity()
+                if (main != null && creator != null) {
+                    com.noslop.app.tor.TorService.updateKeyAndRegister(main.privateKeyB64, creator.privateKeyB64)
+                }
+                if (_isDiscoverableEnabled.value) {
+                    broadcastDiscoverable()
+                }
+                // The full backup should now include the restored creator keys.
+                _backupPromptReason.value = BackupPromptReason.CREATOR_MODE_CHANGED
+            }
+            withContext(Dispatchers.Main) { onResult(result) }
+        }
+    }
+
+    suspend fun ensureBurnableIdentity(): CryptoService.IdentityKeys {
+        var burnable = repository.getBurnableIdentity()
+        if (burnable == null) {
+            burnable = repository.generateBurnableIdentity()
+            val mainIdentity = repository.getLocalIdentity()
+            if (mainIdentity != null) {
+                com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, burnable.privateKeyB64)
+            }
+        }
+        return burnable
+    }
+
+    fun viewAuthorPosts(authorPub: String, targetPostId: String? = null) {
+        viewModelScope.launch {
+            if (currentFilterMode == "Live Feed" && !isSearchModeActive && _unifiedFeed.value.isNotEmpty()) {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
+            val filter = "Author:$authorPub"
+            currentFilterMode = filter
+            _currentFilterModeFlow.value = filter
+            _unifiedFeed.value = emptyList()
+            sessionLoadedIds.clear()
+            loadMoreFeedItems(filter)
+            selectTab(0)
+            if (targetPostId != null) {
+                kotlinx.coroutines.delay(100)
+                _restoreScrollPositionEvent.emit(targetPostId)
+            } else {
+                kotlinx.coroutines.delay(50)
                 _scrollToTopEvent.emit(Unit)
             }
         }
     }
 
-    fun markNotificationAsRead(id: String) { viewModelScope.launch { repository.markNotificationAsRead(id) } }
-    fun clearAllNotifications() { viewModelScope.launch { repository.clearAllNotifications() } }
+    private val playedMeshPostIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    fun toggleItemSavedState(id: String, isSaved: Boolean) {
-        viewModelScope.launch { repository.updateSavedState(id, isSaved) }
-    }
-
-    fun deleteFeedSource(source: FeedSource) {
-        viewModelScope.launch { repository.removeSource(source) }
-    }
-
-    fun addCustomFeedSource(title: String, url: String, category: String, feedType: String) {
-        viewModelScope.launch {
-            val resolvedUrl = try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.noslop.app.feeds.FeedParser.resolveRssUrl(url)
-                }
-            } catch (e: Exception) { url }
-            val sourceId = "custom_${java.util.UUID.randomUUID().hashCode()}"
-            repository.insertSource(FeedSource(id = sourceId, url = resolvedUrl, title = title, feedType = feedType, category = category))
-            refreshFeeds()
+    /**
+     * Called by the mesh card once the post's media has actually reached the user: video and audio
+     * when playback starts, images and GIFs when the downloaded picture is on screen. Until then the
+     * post is not marked viewed or swiped (see [isMeshMediaUnseen]). Only the video player used to
+     * call this, so image, GIF and audio posts were never marked seen and kept coming back in Mesh.
+     */
+    fun markMeshMediaPlaybackStarted(postId: String) {
+        if (playedMeshPostIds.add(postId)) {
+            Logger.info("VM", "Media shown for mesh post: $postId")
         }
     }
 
-    fun isMeshListening(): Boolean = repository.meshTransport.isListening()
+    /**
+     * True while a mesh post's own media (a mesh media id in [MeshPost.mediaUrl]) is not downloaded yet
+     * or hasn't been shown this session, so leaving the slide doesn't count as having seen it.
+     *
+     * File attachments are exempt: the card shows the file name and a download button, which is the
+     * whole post, and downloading is optional. Posts without mesh media (text, clearnet shares) are
+     * exempt too; a post with a media type but no media id used to be held back for good.
+     */
+    private fun isMeshMediaUnseen(post: MeshPost): Boolean {
+        val rawMediaId = post.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() } ?: return false
+        if (post.mediaType == "file") return false
+        val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType)
+        return !isDownloaded || !playedMeshPostIds.contains(post.id)
+    }
 
-    fun updateMediaSettings(settings: MediaSettings) { viewModelScope.launch { repository.updateMediaSettings(settings) } }
+    fun getPeerHandle(pubKey: String): String? {
+        return peers.value.find { it.publicKeyB64 == pubKey }?.handle
+            ?: allMeshes.find { it.authorPublicKeyB64 == pubKey }?.authorHandle
+    }
+    fun markNotificationAsRead(id: String) { viewModelScope.launch { repository.markNotificationAsRead(id) } }
+    fun markAllNotificationsAsRead() { viewModelScope.launch { repository.markAllNotificationsAsRead() } }
+    fun clearAllNotifications() { viewModelScope.launch { repository.clearAllNotifications() } }
+
+    fun toggleItemSavedState(id: String, isSaved: Boolean) {
+        val now = System.currentTimeMillis()
+        if (isSaved) {
+            savedTimestampsMap[id] = now
+        } else {
+            savedTimestampsMap.remove(id)
+        }
+        viewModelScope.launch { 
+            repository.updateSavedState(id, isSaved)
+            if (isSaved) {
+                repository.putAppSetting("saved_at_$id", now.toString())
+            } else {
+                repository.putAppSetting("saved_at_$id", "")
+            }
+        }
+    }
+
+
+
+    fun updateMediaSettings(settings: MediaSettings) { 
+        viewModelScope.launch { 
+            repository.updateMediaSettings(settings)
+            com.noslop.app.ui.PreloadManager.evictAll()
+        } 
+    }
     fun updateNotificationSettings(settings: com.noslop.app.data.NotificationSettings) { viewModelScope.launch { repository.updateNotificationSettings(settings) } }
+    fun updateMeshFilterSettings(settings: MeshFilterSettings) { viewModelScope.launch { repository.updateMeshFilterSettings(settings) } }
+    fun updateFeedMixSettings(settings: com.noslop.app.data.FeedMixSettings) { viewModelScope.launch { repository.updateFeedMixSettings(settings) } }
 
     fun setForegroundServiceEnabled(enabled: Boolean) {
         viewModelScope.launch {
@@ -860,16 +2821,108 @@ fun toggleAggregator() {
 
     fun setSendOnEnterEnabled(enabled: Boolean) { viewModelScope.launch { repository.setSendOnEnterEnabled(enabled) } }
 
-    fun sendTestPost() { viewModelScope.launch { repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}") } }
+
+
+    fun syncDmsWithPeer(peer: Peer) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress, force = true)
+            repository.requestDmSync(peer)
+        }
+    }
+
+    fun requestInventorySync(peer: Peer) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.requestInventorySync(peer)
+        }
+    }
 
     fun selectChatPeer(peerPub: String?) {
+        _selectedGroupChatId.value = null
         _selectedPeerPub.value = peerPub
-        if (peerPub != null) viewModelScope.launch { repository.markMessagesAsRead(peerPub) }
+        if (peerPub != null) {
+            viewModelScope.launch {
+                repository.markMessagesAsRead(peerPub)
+                val peer = peers.value.find { it.publicKeyB64 == peerPub }
+                if (peer != null) syncDmsWithPeer(peer)
+            }
+        }
+    }
+
+    fun selectGroupChat(groupId: String?) {
+        _selectedPeerPub.value = null
+        _selectedGroupChatId.value = groupId
+    }
+
+    fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null, privacy: String = "public") {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.sendGroupMessage(groupId, text, media, replyToMessageId, privacy)
+        }
+    }
+
+    fun updateGroupChat(
+        groupId: String,
+        title: String,
+        description: String?,
+        avatarB64: String?,
+        allowInvites: Boolean,
+        allowSelfRemove: Boolean,
+        membersList: List<String>,
+        bannedMembersList: List<String> = emptyList()
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateGroupChat(groupId, title, description, avatarB64, allowInvites, allowSelfRemove, membersList, bannedMembersList)
+        }
+    }
+
+    fun deleteGroupChat(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteGroupChat(groupId)
+        }
+    }
+
+    fun leaveGroupChat(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.leaveGroupChat(groupId)
+        }
+    }
+
+    fun resendGroupInvites(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.resendGroupInvites(groupId)
+        }
+    }
+
+
+    fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
+        viewModelScope.launch { repository.deleteDirectMessages(messageIds, peerPubB64) }
+    }
+
+    fun clearChat(peerPubB64: String) {
+        viewModelScope.launch { repository.clearChat(peerPubB64) }
+    }
+
+    fun clearGroupChat(groupId: String) {
+        viewModelScope.launch { repository.clearGroupChat(groupId) }
+    }
+
+    fun deleteGroupMessages(messageIds: List<String>, groupId: String) {
+        viewModelScope.launch { repository.deleteGroupMessages(messageIds, groupId) }
     }
 
     fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
-        viewModelScope.launch { repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId) }
+        viewModelScope.launch {
+            val sent = repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId)
+            if (!sent) {
+                // D11 (E1): nothing was stored or sent (no encryption key, or no identity for this contact).
+                android.widget.Toast.makeText(
+                    getApplication<android.app.Application>(),
+                    com.noslop.app.util.LanguageManager.translate("Message not sent: this contact's encryption key is missing. Ask them to reconnect."),
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            repository.syncDmsWithHub()
+        }
     }
 
     fun deleteMeshPost(postId: String) {
@@ -882,6 +2935,62 @@ fun toggleAggregator() {
             }
         }
     }
+
+    fun editMeshPost(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String = "public",
+        /** D10c: the edit moves the post to our other identity (see [identityMoveFor]). */
+        moveIdentity: Boolean = false
+    ) {
+        viewModelScope.launch {
+            if (moveIdentity) {
+                // D10c: the post is published again by the other identity and the old copy deleted, so
+                // the feed swaps the old item for the new post.
+                val moved = repository.moveMeshPostToOtherIdentity(postId, newContent, mediaMetadata, privacy)
+                if (moved != null) {
+                    val currentFeed = _unifiedFeed.value.toMutableList()
+                    val idx = currentFeed.indexOfFirst { it.id == postId }
+                    if (idx >= 0) currentFeed[idx] = UnifiedItem.Mesh(moved) else currentFeed.add(0, UnifiedItem.Mesh(moved))
+                    _unifiedFeed.value = currentFeed
+                }
+                return@launch
+            }
+            val success = repository.editMeshPost(postId, newContent, mediaMetadata, privacy)
+            if (success) {
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                val idx = currentFeed.indexOfFirst { it.id == postId }
+                if (idx >= 0) {
+                    val oldItem = currentFeed[idx]
+                    if (oldItem is UnifiedItem.Mesh) {
+                        val authorOnion = oldItem.post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/")
+                        val updatedPost = oldItem.post.copy(
+                            content = newContent,
+                            timestamp = System.currentTimeMillis(),
+                            mediaUrl = mediaMetadata?.id?.let { "noslop://${authorOnion ?: "local"}/$it" } ?: oldItem.post.mediaUrl,
+                            mediaType = mediaMetadata?.type ?: oldItem.post.mediaType,
+                            thumbnailB64 = mediaMetadata?.thumbnailB64 ?: oldItem.post.thumbnailB64,
+                            privacy = privacy
+                        )
+                        currentFeed[idx] = UnifiedItem.Mesh(updatedPost)
+                        _unifiedFeed.value = currentFeed
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * D10c: whether saving [post] with [privacy] moves it to our other identity (null: it stays where
+     * it is). In creator mode public posts are the creator identity's and friends-only posts the
+     * personal identity's.
+     */
+    fun identityMoveFor(post: com.noslop.app.data.MeshPost, privacy: String): com.noslop.app.data.IdentityMove? =
+        com.noslop.app.data.MeshSocialRepository.identityMoveFor(
+            post.authorPublicKeyB64, privacy, _isCreatorEnabled.value,
+            localKeys.value?.publicKeyB64, burnableKeys.value?.publicKeyB64
+        )
 
     fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null, clearnetThumbnailUrl: String? = null, clearnetMediaType: String? = null) {
         if (content.isBlank() && mediaMetadata == null && clearnetUrl == null) return
@@ -899,47 +3008,418 @@ fun toggleAggregator() {
         }
     }
 
-    fun injectMeshClearnetToFeed(post: MeshPost) {
-        if (post.clearnetUrl == null) return
-        viewModelScope.launch {
-            val feedItem = FeedItem(
-                id = "mesh_${post.id}", sourceId = "mesh_shared", title = post.clearnetTitle ?: "Shared Link", url = post.clearnetUrl, author = post.authorHandle, excerpt = post.content.take(100), publishedAt = System.currentTimeMillis(), isRead = true, isSaved = false
-            )
-            repository.insertFeedItem(feedItem)
-            val currentFeed = _unifiedFeed.value.toMutableList()
-            currentFeed.add(0, UnifiedItem.Feed(feedItem))
-            _unifiedFeed.value = currentFeed
-            _scrollToTopEvent.emit(Unit)
-        }
-    }
+
 
     fun composeAndBroadcastComment(postId: String, content: String, parentCommentId: String? = null, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null) {
         if (content.isBlank() && mediaMetadata == null) return
         viewModelScope.launch { repository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata) }
     }
 
-    fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "") {
-        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64) }
+    fun editComment(commentId: String, newContent: String) {
+        if (newContent.isBlank()) return
+        viewModelScope.launch { repository.editComment(commentId, newContent) }
     }
 
-    fun acceptHandshake(peer: Peer) { viewModelScope.launch { repository.acceptConnectionRequest(peer) } }
+    fun deleteComment(commentId: String) {
+        viewModelScope.launch { repository.deleteComment(commentId) }
+    }
+
+    /** D10b: [intro] says how the identity was obtained (ContactIntro); only a camera scan verifies. */
+    fun requestConnection(
+        handle: String,
+        publicKeyB64: String,
+        onionAddress: String,
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false,
+        intro: String = com.noslop.app.data.ContactIntro.NETWORK,
+        /** E4: "Share Permanent Identity" (see MeshSocialRepository.sendConnectionRequest). */
+        shareMainIdentity: Boolean = false
+    ) {
+        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity) }
+    }
+
+    fun setDiscoverableEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.putAppSetting("is_discoverable_enabled", enabled.toString())
+            _isDiscoverableEnabled.value = enabled
+            if (enabled) {
+                var burnableIdentity = repository.getBurnableIdentity()
+                if (burnableIdentity == null) {
+                    burnableIdentity = repository.generateBurnableIdentity()
+                    // Tell TorService to register the newly generated burnable identity
+                    val mainIdentity = repository.getLocalIdentity()
+                    if (mainIdentity != null) {
+                        com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, burnableIdentity.privateKeyB64)
+                    }
+                }
+                broadcastDiscoverable()
+                _backupPromptReason.value = BackupPromptReason.DISCOVERABILITY_CHANGED
+            } else {
+                val burnable = repository.getBurnableIdentity()
+                if (burnable != null && !_isCreatorEnabled.value) {
+                    val timestamp = System.currentTimeMillis()
+                    val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(burnable.publicKeyB64, timestamp.toString())
+                    val signature = com.noslop.app.crypto.CryptoService.sign(payload, burnable.privateKeyB64)
+                    val exitPay = com.noslop.app.mesh.UserExitPayload(
+                        userId = burnable.publicKeyB64,
+                        timestamp = timestamp,
+                        signature = signature
+                    )
+                    val packet = com.noslop.app.mesh.NetworkPacket(
+                        id = java.util.UUID.randomUUID().toString(),
+                        hops = 6,
+                        senderId = burnable.publicKeyB64,
+                        type = "USER_EXIT",
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(exitPay),
+                        signature = signature
+                    )
+                    com.noslop.app.mesh.GossipService.broadcast(packet)
+                }
+            }
+        }
+    }
+
+    fun setCreatorEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.putAppSetting("is_creator_enabled", enabled.toString())
+            _isCreatorEnabled.value = enabled
+            if (enabled) {
+                ensureBurnableIdentity()
+                if (_isDiscoverableEnabled.value) {
+                    broadcastDiscoverable()
+                }
+                _backupPromptReason.value = BackupPromptReason.CREATOR_MODE_CHANGED
+            } else {
+                repository.clearBurnableIdentity()
+            }
+        }
+    }
+
+    fun burnCreatorIdentity() {
+        viewModelScope.launch {
+            repository.clearBurnableIdentity()
+            // D10e: the burned identity's contacts are forgotten, so the new identity never talks to them.
+            repository.dropCreatorContacts()
+            // D04: the new creator identity must not carry the old one's handle, bio or avatar.
+            repository.clearCreatorProfile()
+            _creatorProfile.value = com.noslop.app.data.UserProfile()
+            ensureBurnableIdentity()
+            if (_isDiscoverableEnabled.value) {
+                broadcastDiscoverable()
+            }
+            _backupPromptReason.value = BackupPromptReason.CREATOR_IDENTITY_BURNED
+        }
+    }
+
+    fun setCreatorFundMeLink(link: String) {
+        viewModelScope.launch {
+            repository.putAppSetting("creator_fundme_link", link)
+            _creatorFundMeLink.value = link
+            if (_isDiscoverableEnabled.value) {
+                broadcastDiscoverable()
+            }
+        }
+    }
+
+    fun setHubDeploymentStatus(status: String) {
+        viewModelScope.launch {
+            repository.putAppSetting("hub_deployment_status", status)
+            _hubDeploymentStatus.value = status
+            
+            val hasHub = status.isNotBlank()
+            com.noslop.app.tor.TorService.skipHiddenServiceRegistration = hasHub
+            
+            if (hasHub) {
+                // Instantly tear down the local Tor hidden service to prevent
+                // "descriptor flapping" with the newly deployed Hub which shares the same key.
+                com.noslop.app.tor.TorService.unregisterHiddenServices()
+                
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    val oldPeer = repository.peerDao.getPeerByPublicKey(identity.publicKeyB64)
+                    if (oldPeer != null && oldPeer.handle == "Admin AI") {
+                        repository.peerDao.deletePeer(oldPeer)
+                    }
+                    // D01 (explicit decision): the Hub's Admin AI is the user's own node -> ACCEPTED.
+                    val adminPeer = com.noslop.app.data.Peer(
+                        publicKeyB64 = "admin_${identity.publicKeyB64}",
+                        handle = "Admin AI",
+                        tripcode = identity.tripcode,
+                        onionAddress = identity.onionAddress,
+                        encPublicKeyB64 = identity.encPublicKeyB64,
+                        relationship = com.noslop.app.data.PeerRelationship.ACCEPTED,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                    repository.peerDao.insertPeer(adminPeer)
+                }
+            }
+
+            if (hasHub && isForegroundServiceEnabled.value) {
+                setForegroundServiceEnabled(false)
+            }
+            
+            if (!hasHub) {
+                // We just unlinked! Force Tor to re-register the hidden service for standalone mode.
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    com.noslop.app.tor.TorService.updateKeyAndRegister(identity.privateKeyB64)
+                }
+            }
+        }
+    }
+
+    fun broadcastDiscoverable() {
+        viewModelScope.launch {
+            // D10d: the secondary identity's profile (Studio fields in creator mode, else the personal ones).
+            val secondaryProfile = repository.secondaryIdentityProfile()
+            val handle = secondaryProfile.handle
+            val isCreator = _isCreatorEnabled.value
+            val link = _creatorFundMeLink.value.takeIf { it.isNotBlank() }
+            
+            // Wait for Tor to finish generating and registering the burnable hidden service
+            var burnableAddress = com.noslop.app.tor.TorService.currentBurnableOnionAddress
+            var attempts = 0
+            while (burnableAddress == null && attempts < 15) {
+                kotlinx.coroutines.delay(1000)
+                burnableAddress = com.noslop.app.tor.TorService.currentBurnableOnionAddress
+                attempts++
+            }
+            
+            if (burnableAddress == null) {
+                Logger.warn("DISCOVERABLE", "Cannot broadcast discoverable: burnable address not ready after 15s")
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to broadcast discoverability: Tor address not ready."), android.widget.Toast.LENGTH_LONG).show()
+                }
+                return@launch
+            }
+            
+            val identity = repository.getBurnableIdentity() ?: return@launch
+            val localKeyB64 = identity.publicKeyB64
+            val encKeyB64 = identity.encPublicKeyB64
+            val timestamp = System.currentTimeMillis()
+            
+            val creatorBio = secondaryProfile.bio
+            // Omit avatar to save bandwidth on the periodic background heartbeat
+            val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}::${creatorBio ?: ""}:${timestamp}"
+            val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, identity.privateKeyB64)
+            
+            val payload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
+                authorId = localKeyB64,
+                handle = handle,
+                onionAddress = burnableAddress,
+                encPublicKey = encKeyB64,
+                isCreator = isCreator,
+                fundMeLink = link,
+                authorAvatarB64 = null,
+                bio = creatorBio,
+                timestamp = timestamp,
+                signature = signature
+            )
+            
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                senderId = localKeyB64,
+                type = "ANNOUNCE_DISCOVERABLE",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(payload),
+                hops = 6 // Spread up to 6 hops
+            )
+            
+            // Use GossipService to broadcast this packet across the mesh
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+            Logger.info("DISCOVERABLE", "Broadcasted ANNOUNCE_DISCOVERABLE (creator=\$isCreator, hops=6)")
+        }
+    }
+
+    fun acceptHandshake(peer: Peer) { 
+        viewModelScope.launch { 
+            // D10b: every caller shows name.tag and the check code (ConnectionRequestIdentity).
+            repository.acceptConnectionRequest(peer, confirmedByUser = true) 
+            repository.deleteNotification("conn_req_${peer.publicKeyB64}")
+            repository.deleteNotificationsBySender(peer.publicKeyB64)
+            // Trigger rubbish dump to clean up any orphaned content
+            repository.purgeOrphanedPeerContent()
+        } 
+    }
+    
+    
+    fun dismissHandshakeDialog() {
+        viewModelScope.launch {
+            repository.clearIncomingRequest()
+        }
+    }
+
     fun rejectHandshake() {
         viewModelScope.launch {
             val peer = incomingRequest.value
-            if (peer != null) repository.rejectConnectionRequest(peer) else repository.clearIncomingRequest()
+            if (peer != null) {
+                repository.rejectConnectionRequest(peer)
+                repository.deleteNotification("conn_req_${peer.publicKeyB64}")
+                repository.deleteNotificationsBySender(peer.publicKeyB64)
+            } else {
+                repository.clearIncomingRequest()
+            }
         }
     }
-    fun togglePeerTrust(peer: Peer) { viewModelScope.launch { repository.togglePeerTrust(peer) } }
-    fun removePeer(peerPub: String) { viewModelScope.launch { repository.deletePeer(peerPub) } }
+    /** D07: re-sends a connection request the peer never answered. */
+    fun resendConnectionRequest(peer: Peer) {
+        viewModelScope.launch {
+            val useBurnable = repository.getAppSetting("contact_identity_${peer.publicKeyB64}") == "burnable"
+            repository.sendConnectionRequest(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnable)
+        }
+    }
+
+    /** D07: withdraws an unanswered outgoing request. */
+    fun cancelOutgoingRequest(peer: Peer) {
+        viewModelScope.launch { repository.cancelOutgoingRequest(peer.publicKeyB64) }
+    }
+
+    /** D07: whether this peer was last seen running the pre-v0.7.0 handshake protocol. */
+    suspend fun isPeerOnLegacyProtocol(peerPub: String): Boolean = repository.isPeerOnLegacyProtocol(peerPub)
+
+    /** D10b: when the contact's encryption key last changed, while the chat notice is not dismissed. */
+    suspend fun keyChangedAt(peerPub: String): Long? = repository.keyChangedAt(peerPub)
+
+    /** D10b: hides the "security key changed" notice in the chat. */
+    fun dismissKeyChangeNotice(peerPub: String) {
+        viewModelScope.launch { repository.dismissKeyChangeNotice(peerPub) }
+    }
+
+    /** D10b: whether a pending request was signed as coming from a camera scan of our QR code. */
+    suspend fun requestCameFromScan(peerPub: String): Boolean = repository.requestCameFromScan(peerPub)
+
+    /** D08/D10: false when a mesh post's media is not covered by its author's signature. */
+    suspend fun isMeshPostMediaVerified(post: MeshPost): Boolean = repository.isMeshPostMediaVerified(post)
+    fun removePeer(peerPub: String) { 
+        viewModelScope.launch { 
+            repository.deletePeer(peerPub) 
+            
+            // Instantly clear all their posts from the active UI and caches. D10b: by key only;
+            // anyone can post under the same handle.
+            val currentFeed = _unifiedFeed.value.toMutableList()
+            currentFeed.removeAll { 
+                it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub
+            }
+            _unifiedFeed.value = currentFeed
+            cachedDefaultFeed = cachedDefaultFeed.filterNot { 
+                it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub
+            }
+            sessionLoadedIds.removeAll { id -> 
+                allMeshes.any { it.id == id && it.authorPublicKeyB64 == peerPub }
+            }
+            if (_selectedPeerPub.value == peerPub) {
+                _selectedPeerPub.value = null
+            }
+        } 
+    }
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch {
+            if (reactionType == "noslop") {
+                recordItemSwiped(item.id)
+                rememberDownvote(downvoteKeys(item))  // E5s
+                _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
+                val author = item.author
+                if (!author.isNullOrBlank()) {
+                    banChannel(author)
+                }
+                return@launch
+            }
+            if (reactionType in setOf("downvote", "slop", "vomit", "clown")) {
+                recordItemSwiped(item.id)
+                rememberDownvote(downvoteKeys(item))  // E5s
+                _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
+                return@launch
+            }
+            // Mark item as viewed, read, and recorded so it never recurs in the unread Live Feed
+            markItemViewed(item.id, isMesh = false)
+            markItemReadState(item.id, true)
+            recordItemSwiped(item.id)
+            val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item))
+            val normId = normalizeFeedItemId(item.id, item.url ?: "")
+            cachedExcludedIds = cachedExcludedIds + setOf(item.id, normId, cKey)
+            cachedViewedIds = cachedViewedIds + setOf(item.id, normId, cKey)
             repository.reactToFeedItemWithType(item, reactionType)
-            if (reactionType == "like") repository.updateSavedState(item.id, true)
+            if (reactionType == "like") {
+                val now = System.currentTimeMillis()
+                savedTimestampsMap[item.id] = now
+                repository.updateSavedState(item.id, true)
+                repository.putAppSetting("saved_at_${item.id}", now.toString())
+            }
+        }
+    }
+
+    fun banChannel(channelName: String) {
+        if (channelName.isBlank()) return
+        viewModelScope.launch {
+            repository.banChannel(channelName)
+            _bannedChannels.value = repository.getBannedChannels()
+            repository.deleteFeedItemsByAuthor(channelName)
+            refreshExclusionCaches()
+            val bannedList = _bannedChannels.value
+            _unifiedFeed.value = _unifiedFeed.value.filter { uItem ->
+                if (uItem is UnifiedItem.Feed) {
+                    val aClean = uItem.item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    if (aClean.isBlank()) true
+                    else bannedList.none { b ->
+                        val bClean = b.trim().lowercase().removePrefix("@")
+                        aClean == bClean || aClean.contains(bClean) || bClean.contains(aClean)
+                    }
+                } else true
+            }
+        }
+    }
+
+    fun unbanChannel(channelName: String) {
+        if (channelName.isBlank()) return
+        viewModelScope.launch {
+            repository.unbanChannel(channelName)
+            _bannedChannels.value = repository.getBannedChannels()
+        }
+    }
+
+    fun banNode(publicKeyB64: String, handle: String) {
+        if (publicKeyB64.isBlank()) return
+        viewModelScope.launch {
+            repository.banNode(publicKeyB64, handle)
+            _bannedNodes.value = repository.getBannedNodes()
+            refreshSearchExclusions()  // E5s
+            val currentFeed = _unifiedFeed.value.toMutableList()
+            currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == publicKeyB64 }
+            _unifiedFeed.value = currentFeed
+        }
+    }
+
+    fun unbanNode(publicKeyB64: String) {
+        if (publicKeyB64.isBlank()) return
+        viewModelScope.launch {
+            repository.unbanNode(publicKeyB64)
+            refreshSearchExclusions()  // E5s
+            _bannedNodes.value = repository.getBannedNodes()
+        }
+    }
+
+    fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) {
+        viewModelScope.launch {
+            repository.saveChannelCutoffSettings(enabled, year, month)
+            _channelCutoffSettings.value = Triple(enabled, year, month)
+            refreshFeeds()
+        }
+    }
+
+    fun bridgeFeedItemToMesh(item: FeedItem) {
+        viewModelScope.launch {
+            repository.reactToFeedItemWithType(item, "bridge_only")
         }
     }
 
     fun reactToMeshPost(postId: String, reactionType: String = "like") {
+        markItemViewed(postId, isMesh = true)
+        if (reactionType == "noslop" || reactionType in setOf("downvote", "slop", "vomit", "clown")) {
+            recordItemSwiped(postId)
+            val keys = downvoteKeys(postId)
+            viewModelScope.launch { rememberDownvote(keys) }  // E5s
+            _unifiedFeed.value = _unifiedFeed.value.filter { it.id != postId }
+        }
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToMeshPost(postId, reactionType) }
         else viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }
     }
@@ -954,6 +3434,14 @@ fun toggleAggregator() {
     }
 
     fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String) { viewModelScope.launch { repository.reactToChat(messageId, reactionType, recipientPubB64) } }
+
+    /** R3b: the identity a group message (and its attachment) is sent as. */
+    suspend fun groupSenderIdentity(groupId: String, privacy: String): CryptoService.IdentityKeys? =
+        repository.groupSenderIdentity(groupId, privacy)
+
+    /** R3: re-sends a DM the outbox gave up on (status FAILED). */
+    fun retryFailedMessage(messageId: String) { viewModelScope.launch(Dispatchers.IO) { repository.retryFailedDirectMessage(messageId) } }
+    fun reactToGroupChat(messageId: String, reactionType: String, groupId: String) { viewModelScope.launch { repository.reactToGroupChat(messageId, reactionType, groupId) } }
     fun reactToComment(commentId: String, reactionType: String) {
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToComment(commentId, reactionType) }
         else viewModelScope.launch { repository.reactToComment(commentId, reactionType) }
@@ -962,7 +3450,8 @@ fun toggleAggregator() {
     fun acceptConnectionFromNotification(notifId: String, senderPub: String) {
         viewModelScope.launch {
             val peer = repository.peerDao.getPeerByPublicKey(senderPub)
-            if (peer != null) repository.acceptConnectionRequest(peer)
+            // D10b: the notification card shows name.tag and the check code (ConnectionRequestIdentity).
+            if (peer != null) repository.acceptConnectionRequest(peer, confirmedByUser = true)
             repository.deleteNotification(notifId)
         }
     }
@@ -976,11 +3465,47 @@ fun toggleAggregator() {
         }
     }
 
-    fun startTor() {
+    fun acceptGroupInviteFromNotification(notifId: String, targetRoute: String?) {
         viewModelScope.launch {
+            val cleanRoute = targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
+            if (!cleanRoute.isNullOrBlank()) {
+                repository.acceptGroupInvite(cleanRoute)
+                repository.deleteGroupInviteNotifications(cleanRoute)
+            }
+            repository.deleteNotification(notifId)
+        }
+    }
+
+    fun declineGroupInviteFromNotification(notifId: String, targetRoute: String?) {
+        viewModelScope.launch {
+            val cleanRoute = targetRoute?.substringAfter("group_invite/")?.replace(Regex("""-\d{10,}$"""), "")?.trim()
+            if (!cleanRoute.isNullOrBlank()) {
+                repository.declineGroupInvite(cleanRoute)
+                repository.deleteGroupInviteNotifications(cleanRoute)
+            }
+            repository.deleteNotification(notifId)
+        }
+    }
+
+    fun startTor(forceRestart: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
             val identity = repository.getLocalIdentity()
-            com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
-            TorService.startTor(getApplication(), identity?.privateKeyB64)
+            val burnableIdentity = repository.getBurnableIdentity()
+            val hubStatus = repository.getAppSetting("hub_deployment_status")
+            com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+            
+            // Re-read settings directly to avoid race condition with init
+            val fgEnabled = repository.getAppSetting("foreground_service_enabled") == "true"
+            if (fgEnabled && hubStatus.isNullOrBlank()) {
+                com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
+            }
+            
+            com.noslop.app.tor.TorService.startTor(
+                getApplication(),
+                identity?.privateKeyB64,
+                burnableIdentity?.privateKeyB64,
+                forceRestart = forceRestart
+            )
         }
     }
 
@@ -988,21 +3513,188 @@ fun toggleAggregator() {
         if (_isTorChecking.value) return
         viewModelScope.launch {
             _isTorChecking.value = true
-            try { _torReadyState.value = TorService.checkTorConnection() } 
-            finally { _isTorChecking.value = false }
+            try {
+                val result = TorService.checkTorConnection()
+                if (result.first || TorService.torState.value != TorState.READY) {
+                    _torReadyState.value = result
+                } else {
+                    _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                }
+            } finally {
+                _isTorChecking.value = false
+            }
         }
     }
 
-    fun copyLogToClipboard(context: Context) {
-        viewModelScope.launch {
-            val logsText = Logger.getLogs().joinToString("\n") { it.toString() }
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            val clip = android.content.ClipData.newPlainText("NoSlop Logs", logsText)
-            clipboard.setPrimaryClip(clip)
+    fun copyLogToClipboard(context: Context, levelFilter: Logger.Level? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val safeText = Logger.getFilteredLogsText(levelFilter)
+            withContext(Dispatchers.Main) {
+                try {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val label = if (levelFilter != null) "NoSlop Logs (${levelFilter.name})" else "NoSlop Logs"
+                    val clip = android.content.ClipData.newPlainText(label, safeText)
+                    clipboard.setPrimaryClip(clip)
+                    val lineCount = safeText.lines().size
+                    android.widget.Toast.makeText(
+                        context,
+                        com.noslop.app.util.LanguageManager.translate("Logs copied to clipboard ({count} lines)").replace("{count}", lineCount.toString()),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } catch (e: Exception) {
+                    Logger.error("VM", "Clipboard copy failed: ${e.message}")
+                }
+            }
+        }
+    }
+fun clearLogFile() { Logger.clearLog() }
+
+    fun handleQrLogin(sessionId: String, ip: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                var targetIp = ip
+                // If scanned from a local browser or the hub binds to 0.0.0.0,
+                // resolve to the known Hub IP from deployment status
+                if (targetIp == "localhost" || targetIp == "127.0.0.1" || targetIp == "0.0.0.0") {
+                    val hubStatus = hubDeploymentStatus.value
+                    if (hubStatus != null && hubStatus.contains("Active at ")) {
+                        targetIp = hubStatus.substringAfter("Active at ").trim()
+                    } else {
+                        targetIp = "10.0.2.2" // Fallback to emulator host if missing
+                    }
+                }
+                
+                Logger.info("QR_LOGIN", "Attempting QR auth → $targetIp (session=${sessionId.take(8)}…)")
+                
+                val identity = repository.getLocalIdentity()
+                if (identity == null) {
+                    Logger.error("QR_LOGIN", "No local identity found, aborting QR login")
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("No local identity found"), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
+
+                val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
+                
+                val isOnion = targetIp.endsWith(".onion")
+                val proxy = if (isOnion) {
+                    java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress(com.noslop.app.tor.TorService.PROXY_HOST, com.noslop.app.tor.TorService.SOCKS_PORT))
+                } else {
+                    java.net.Proxy.NO_PROXY
+                }
+                
+                val url = java.net.URL("http://$targetIp:8080/api/auth/qr/verify")
+                val connection = url.openConnection(proxy) as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.doOutput = true
+
+                val payload = org.json.JSONObject().apply {
+                    put("session_id", sessionId)
+                    put("public_key", identity.publicKeyB64)
+                    put("signature", signature)
+                }.toString()
+
+                connection.outputStream.use { os ->
+                    val input = payload.toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+
+                val responseCode = connection.responseCode
+                Logger.info("QR_LOGIN", "Hub responded with HTTP $responseCode")
+                withContext(Dispatchers.Main) {
+                    if (responseCode == 200) {
+                        Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $targetIp")
+                        android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Successfully authenticated with Hub!"), android.widget.Toast.LENGTH_LONG).show()
+                    } else {
+                        val errorBody = try { connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
+                        Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode, Body: $errorBody")
+                        if (responseCode == 401) {
+                            android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate: Identity mismatch."), android.widget.Toast.LENGTH_LONG).show()
+                        } else {
+                            android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate with Hub (HTTP {code}).").replace("{code}", responseCode.toString()), android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.error("QR_LOGIN", "Exception during QR login: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Error during Hub authentication: {error}").replace("{error}", e.message ?: ""), android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
-    fun clearLogFile() { Logger.clearLog() }
+    fun verifyAndLinkHub(ip: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val identity = repository.getLocalIdentity()
+                if (identity == null) {
+                    withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("No local identity found")) }
+                    return@launch
+                }
+                
+                val isOnion = ip.endsWith(".onion")
+                val proxy = if (isOnion) {
+                    java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress(com.noslop.app.tor.TorService.PROXY_HOST, com.noslop.app.tor.TorService.SOCKS_PORT))
+                } else {
+                    java.net.Proxy.NO_PROXY
+                }
+                
+                val initUrl = java.net.URL("http://$ip:8080/api/auth/qr/init")
+                val initConn = initUrl.openConnection(proxy) as java.net.HttpURLConnection
+                initConn.requestMethod = "POST"
+                initConn.connectTimeout = 5000
+                if (initConn.responseCode != 200) {
+                    withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Hub is unreachable or not running HAI-Net.")) }
+                    return@launch
+                }
+                
+                val initResponse = initConn.inputStream.bufferedReader().use { it.readText() }
+                val sessionId = org.json.JSONObject(initResponse).optString("session_id")
+                if (sessionId.isBlank()) {
+                    withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Invalid Hub response (No session ID)")) }
+                    return@launch
+                }
+                
+                val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
+                val payload = """
+                    {
+                        "session_id": "$sessionId",
+                        "public_key": "${identity.publicKeyB64}",
+                        "signature": "$signature"
+                    }
+                """.trimIndent()
+                
+                val verifyUrl = java.net.URL("http://$ip:8080/api/auth/qr/verify")
+                val verifyConn = verifyUrl.openConnection(proxy) as java.net.HttpURLConnection
+                verifyConn.requestMethod = "POST"
+                verifyConn.setRequestProperty("Content-Type", "application/json")
+                verifyConn.connectTimeout = 5000
+                verifyConn.doOutput = true
+                verifyConn.outputStream.use { os ->
+                    val input = payload.toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+                
+                val code = verifyConn.responseCode
+                withContext(Dispatchers.Main) {
+                    if (code == 200 || code == 404) {
+                        onResult(true, null)
+                    } else if (code == 401) {
+                        onResult(false, com.noslop.app.util.LanguageManager.translate("Identity mismatch. This Hub is owned by another user."))
+                    } else {
+                        onResult(false, com.noslop.app.util.LanguageManager.translate("Verification failed (HTTP {code})").replace("{code}", code.toString()))
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Connection error: {error}").replace("{error}", e.message ?: "")) }
+            }
+        }
+    }
 
     class Factory(private val application: Application) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

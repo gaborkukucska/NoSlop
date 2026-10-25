@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -9,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
@@ -57,8 +60,11 @@ fun AvatarCropper(
     LaunchedEffect(uri) {
         withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(uri)?.use {
-                    val original = BitmapFactory.decodeStream(it)
+                run {
+                    // NOSLOP_EXIF_ORIENTATION_V1 — decodeStream() drops the EXIF
+                    // rotation, which is why profile pictures came out sideways.
+                    val original = com.noslop.app.ui.ExifUtils.decodeOriented(context, uri)
+                        ?: return@withContext
                     val maxDim = 1024
                     if (original.width > maxDim || original.height > maxDim) {
                         val ratio = maxDim.toFloat() / max(original.width, original.height)
@@ -173,7 +179,14 @@ fun AvatarCropper(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             IconButton(onClick = onCancel) {
-                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextLight)
+                Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight)
+            }
+            IconButton(onClick = {
+                val matrix = android.graphics.Matrix()
+                matrix.postRotate(90f)
+                bitmap = android.graphics.Bitmap.createBitmap(bitmap!!, 0, 0, bitmap!!.width, bitmap!!.height, matrix, true)
+            }) {
+                Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = "Rotate".tr, tint = TextLight)
             }
             IconButton(onClick = {
                 coroutineScope.launch(Dispatchers.IO) {
@@ -238,7 +251,7 @@ fun AvatarCropper(
                     }
                 }
             }) {
-                Icon(Icons.Default.Check, contentDescription = "Crop", tint = AccentGreen)
+                Icon(Icons.Default.Check, contentDescription = "Crop".tr, tint = AccentGreen)
             }
         }
     }

@@ -9,10 +9,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import com.noslop.app.ui.MainScreen
+import com.noslop.app.debug.Logger
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.OnboardingScreen
 import com.noslop.app.ui.theme.MyApplicationTheme
+import com.noslop.app.util.tr
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: NoSlopViewModel
@@ -25,7 +31,7 @@ class MainActivity : ComponentActivity() {
         val factory = NoSlopViewModel.Factory(application)
         viewModel = ViewModelProvider(this, factory).get(NoSlopViewModel::class.java)
 
-        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it }
+        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it + "-" + System.currentTimeMillis() }
 
         setContent {
             MyApplicationTheme {
@@ -43,69 +49,162 @@ class MainActivity : ComponentActivity() {
                 if (isOnboarded) {
                     // Remember the splash screen state across configuration changes
                     var showSplash by rememberSaveable { mutableStateOf(!didJustFinishOnboarding) }
+                    var splashStatusMessage by remember { mutableStateOf(com.noslop.app.util.LanguageManager.translate("Initializing NoSlop...")) }
 
                     LaunchedEffect(Unit) {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
-                            var firstPreloadUrl: String? = null
                             
-                            // 1. Wait up to 4 seconds for the feed to populate
+                            // 1. Wait for Tor readiness (up to 12s; returns immediately once Tor reaches READY)
+                            splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
-                                kotlinx.coroutines.withTimeout(4000) {
+                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(12000L)
+                            } catch (e: Exception) {
+                                Logger.debug("MAIN", "Tor awaitNetworkReady in splash: ${e.message}")
+                            }
+
+                            var firstPreloadUrl: String? = null
+                            var secondPreloadUrl: String? = null
+                            
+                            // 2. Wait for saved feed position and initial feed items to be fully ready
+                            splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Loading feed items...")
+                            try {
+                                kotlinx.coroutines.withTimeout(6000L) {
+                                    // Wait until saved position from Room DB is loaded
+                                    while (!viewModel.isSavedPositionLoaded.value) {
+                                        kotlinx.coroutines.delay(50L)
+                                    }
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
-                                            val firstItem = items.first()
-                                            val rawUrl = when(firstItem) {
-                                                is com.noslop.app.ui.UnifiedItem.Feed -> {
-                                                    val type = firstItem.item.mediaType
-                                                    if (type == "video" || type == "audio") firstItem.item.mediaUrl else null
+                                            val nonTutItems = items.filter { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
+                                            if (nonTutItems.isNotEmpty()) {
+                                                val savedActiveId = viewModel.savedActiveItemId.value ?: com.noslop.app.NoSlopApp.repository.getAppSetting("saved_feed_active_id")
+                                                val targetItem = nonTutItems.find { it.id == savedActiveId } ?: nonTutItems.firstOrNull()
+                                                val targetIndex = nonTutItems.indexOf(targetItem)
+                                                val secondItem = nonTutItems.getOrNull(if (targetIndex >= 0) targetIndex + 1 else 1)
+
+                                                fun extractUrl(item: com.noslop.app.ui.UnifiedItem?): String? {
+                                                    val (rawUrl, isPlayable) = when(item) {
+                                                        is com.noslop.app.ui.UnifiedItem.Feed -> {
+                                                            val isMedia = item.item.mediaType == "video" || item.item.mediaType == "audio" || (item.item.mediaUrl?.contains("youtube") == true || item.item.url?.contains("youtube") == true)
+                                                            Pair(item.item.mediaUrl ?: item.item.url, isMedia)
+                                                        }
+                                                        is com.noslop.app.ui.UnifiedItem.Mesh -> {
+                                                            val isMedia = item.post.mediaType == "video" || item.post.mediaType == "audio" || item.post.clearnetMediaType == "video" || item.post.clearnetMediaType == "audio"
+                                                            Pair(item.post.mediaUrl ?: item.post.clearnetUrl, isMedia)
+                                                        }
+                                                        else -> Pair(null, false)
+                                                    }
+                                                    if (!isPlayable || rawUrl.isNullOrBlank()) return null
+                                                    return if (rawUrl.startsWith("noslop://")) {
+                                                        val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
+                                                        val id = rawUrl.substringAfterLast("/")
+                                                        com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, id)
+                                                    } else {
+                                                        rawUrl
+                                                    }
                                                 }
-                                                is com.noslop.app.ui.UnifiedItem.Mesh -> {
-                                                    val type = firstItem.post.mediaType ?: firstItem.post.clearnetMediaType
-                                                    if (type == "video" || type == "audio") firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl else null
-                                                }
+
+                                                firstPreloadUrl = extractUrl(targetItem)
+                                                secondPreloadUrl = extractUrl(secondItem)
+                                                throw java.util.concurrent.CancellationException("Feed Loaded")
                                             }
-                                            
-                                            // Safely resolve local mesh media proxies natively to avoid import issues
-                                            firstPreloadUrl = if (rawUrl?.startsWith("noslop://") == true) {
-                                                val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
-                                                val id = rawUrl.substringAfterLast("/")
-                                                "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
-                                            } else {
-                                                rawUrl
-                                            }
-                                            throw java.util.concurrent.CancellationException("Feed Loaded")
                                         }
                                     }
                                 }
                             } catch (e: Exception) {
-                                // Caught timeout or our deliberate success cancellation
+                                Logger.debug("MAIN", "Initial feed item check during splash ended: ${e.message}")
                             }
                             
-                            // 2. If the first item is media, aggressively pre-warm it before dropping the splash screen! (up to 4s)
-                            if (firstPreloadUrl != null) {
-                                try {
-                                    kotlinx.coroutines.withTimeout(4000) {
-                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
+                            // 3. Pre-warm Slide 1 media and hold splash screen until ExoPlayer is READY
+                            if (!firstPreloadUrl.isNullOrBlank()) {
+                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Buffering initial media...")
+                                val targetUrl = firstPreloadUrl!!
+                                com.noslop.app.util.AppScopes.io.launch {
+                                    try {
+                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, targetUrl)
+                                    } catch (e: Exception) {
+                                        Logger.debug("MAIN", "Slide 1 preWarm failed: ${e.message}")
                                     }
+                                }
+                                try {
+                                    // Wait for Slide 1 to buffer to READY state before dismissing splash
+                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 16000L)
+                                    Logger.info("MAIN", "Slide 1 preload buffer readiness result: $isReady")
                                 } catch (e: Exception) {
-                                    // Timeout on preload
+                                    Logger.debug("MAIN", "Slide 1 awaitPlayerReady ended: ${e.message}")
                                 }
                             }
                             
-                            // 3. Ensure we've shown the splash for at least 1.8s for the aesthetic
+                            splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Starting NoSlop...")
+                            
+                            // 4. Smooth minimum delay (1.5s) so splash feels intentional and seamless
                             val elapsed = System.currentTimeMillis() - startTime
-                            if (elapsed < 1800) {
-                                kotlinx.coroutines.delay(1800 - elapsed)
+                            if (elapsed < 1500L) {
+                                kotlinx.coroutines.delay(1500L - elapsed)
                             }
                             
                             showSplash = false
+
+                            // 5. Pre-warm Slide 2 asynchronously in the background after splash dismissal
+                            secondPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                                com.noslop.app.util.AppScopes.io.launch {
+                                    try {
+                                        kotlinx.coroutines.delay(1000L)
+                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
+                                    } catch (e: Exception) {
+                                        Logger.debug("MAIN", "Slide 2 async preWarm failed: ${e.message}")
+                                    }
+                                }
+                            }
                         }
                     }
 
                     if (showSplash) {
-                        com.noslop.app.ui.SplashScreen()
+                        val buildStatus by viewModel.feedBuildStatus.collectAsState()
+                        val statusMsg = when {
+                            buildStatus.isNotBlank() -> buildStatus
+                            splashStatusMessage.isNotBlank() -> splashStatusMessage
+                            else -> "Initializing NoSlop...".tr
+                        }
+                        com.noslop.app.ui.SplashScreen(statusMessage = statusMsg)
                     } else {
+                        val prefs = applicationContext.getSharedPreferences("noslop_system", android.content.Context.MODE_PRIVATE)
+                        var showRestoreHubPrompt by rememberSaveable { mutableStateOf(prefs.getBoolean("prompt_hub_after_restore", false)) }
+                        val hubStatus by viewModel.hubDeploymentStatus.collectAsState()
+
+                        if (showRestoreHubPrompt && hubStatus.isNullOrBlank()) {
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { 
+                                    prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
+                                    showRestoreHubPrompt = false 
+                                },
+                                containerColor = com.noslop.app.ui.theme.SurfaceDark,
+                                title = { androidx.compose.material3.Text("Connect Home Hub?".tr, color = com.noslop.app.ui.theme.TextLight, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                                text = { androidx.compose.material3.Text("Your profile was restored, but you don't have a Home Hub connected. Would you like to set one up now?".tr, color = com.noslop.app.ui.theme.TextMuted) },
+                                confirmButton = {
+                                    androidx.compose.material3.Button(
+                                        onClick = {
+                                            prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
+                                            showRestoreHubPrompt = false
+                                            _routeFlow.value = "hubs"
+                                        },
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = com.noslop.app.ui.theme.AccentGreen, contentColor = com.noslop.app.ui.theme.PrimaryBlack)
+                                    ) {
+                                        androidx.compose.material3.Text("Setup Hub".tr)
+                                    }
+                                },
+                                dismissButton = {
+                                    androidx.compose.material3.TextButton(onClick = { 
+                                        prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
+                                        showRestoreHubPrompt = false 
+                                    }) {
+                                        androidx.compose.material3.Text("Not Now".tr, color = com.noslop.app.ui.theme.TextMuted)
+                                    }
+                                }
+                            )
+                        }
+
                         MainScreen(viewModel = viewModel, initialRoute = targetRoute)
                     }
                 } else {
@@ -124,6 +223,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (this::viewModel.isInitialized) {
+            val state = com.noslop.app.tor.TorService.torState.value
+            if (state == com.noslop.app.tor.TorState.IDLE || state == com.noslop.app.tor.TorState.FAILED) {
+                viewModel.startTor(forceRestart = false)
+            }
             viewModel.refreshTorStatus()
             viewModel.checkForUpdateNow()
         }
@@ -132,6 +235,6 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("target_route")?.let { _routeFlow.value = it }
+        intent.getStringExtra("target_route")?.let { _routeFlow.value = it + "-" + System.currentTimeMillis() }
     }
 }

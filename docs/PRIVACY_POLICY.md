@@ -22,7 +22,7 @@ NoSlop generates a public/private key pair on your device during onboarding. You
 
 ### Content you create
 
-Posts, direct messages, and any other content you create are stored locally in an encrypted SQLite database on your device. They are shared only with the peers you choose to connect with, over the encrypted mesh network. Nothing is sent to any server operated by NoSlop.
+Posts, direct messages, and any other content you create are stored locally in a SQLite database on your device. Group chat message bodies are encrypted at rest using an AES-256-GCM key bound to the Android Keystore, and 1:1 direct messages store encrypted ciphertext. Content is shared only with the peers you choose to connect with, over the encrypted mesh network. Nothing is sent to any server operated by NoSlop.
 
 ### Mesh network and peer connections
 
@@ -32,9 +32,16 @@ When you connect to peers, your device exchanges messages directly with theirs (
 
 If you use the Tor routing option, your traffic is routed through the Tor network. Tor is a third-party anonymity network; its privacy properties and limitations are described at [torproject.org](https://www.torproject.org/about/privacy-policy/). NoSlop does not control or monitor Tor.
 
-### Content feeds
+### Home Hub Deployment
 
-NoSlop can display content from third-party sources you choose (RSS/Atom feeds, public APIs). When your device fetches content from those sources, the operators of those sources may see your IP address, as is normal for any web request. NoSlop does not intermediary, log, or see those requests.
+When you deploy a HAI-Net Home Hub via SSH from NoSlop, your cryptographic identity (including Ed25519 and X25519 keys) is transmitted to your local server over SSH to allow your node to operate 24/7. First-time SSH connections prompt you to verify and pin the remote server's host key fingerprint.
+
+### Content feeds and API proxies
+
+NoSlop displays content from third-party sources (RSS/Atom feeds, public APIs).
+- **API Proxy**: To bypass IP blocks on Tor exit nodes, search and metadata requests for YouTube, Reddit, and Jamendo pass through an open-source Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`). When "Route clearnet through Tor" is enabled (default), these requests arrive at the proxy over Tor; when disabled, requests reach the proxy via your direct ISP connection.
+- **Media Streaming**: Video and audio media bytes (e.g. `googlevideo.com`, `jamendo.com`) are streamed directly from source content delivery networks (CDNs).
+- **Update Checks**: In-app OTA update checks against `noslop.me` / GitHub Releases API and APK downloads execute through your selected network route (routed over Tor when "Route Clearnet via Tor" is enabled, after Tor bootstraps). Users can also turn off automatic update checks altogether in Settings.
 
 ### Camera (QR scanning)
 

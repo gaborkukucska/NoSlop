@@ -16,7 +16,18 @@ object SourceLibrary {
      * Their sources are auto-enabled and they should never appear in the
      * onboarding/settings category picker.
      */
-    val alwaysIncludedCategories = listOf("Video Platforms", "Social Clearnet")
+    val alwaysIncludedCategories = listOf("Video Platforms", "Social Clearnet", "Music")
+
+    /**
+     * NOSLOP_MUSIC_SELECTABLE_V1
+     * Categories hidden from the onboarding picker because they are pipeline
+     * plumbing rather than a taste. This is deliberately NOT the same list as
+     * [alwaysIncludedCategories]: "Music" is always fetched AND is a real user
+     * choice. Filtering the picker by alwaysIncludedCategories removed Music
+     * from the category page, which in turn made Step6's `interests.contains
+     * ("Music")` permanently false and hid the Music Genres selector entirely.
+     */
+    val hiddenFromPicker = listOf("Video Platforms", "Social Clearnet")
 
     /** Full internal category list — used by the pipeline / recovery logic. */
     val categories = listOf(
@@ -39,7 +50,7 @@ object SourceLibrary {
     )
 
     /** Categories shown to the user for selection (excludes always-included source categories). */
-    val selectableCategories = categories.filter { it !in alwaysIncludedCategories }
+    val selectableCategories = categories.filter { it !in hiddenFromPicker }
 
     val sources = listOf(
         // Technology
@@ -72,7 +83,7 @@ object SourceLibrary {
         // still well covered by Al Jazeera, BBC, Reuters, and the API sources below.
         BuiltInSource("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "rss", "World News"),
         BuiltInSource("bbc-world", "BBC World News", "https://feeds.bbci.co.uk/news/world/rss.xml", "rss", "World News"),
-        BuiltInSource("reuters-world", "Reuters World", "https://www.reutersagency.com/feed/?best-topics=world-news&post_type=best", "rss", "World News"),
+        BuiltInSource("npr-world", "NPR World News", "https://feeds.npr.org/1004/rss.xml", "rss", "World News"),
 
         // Open Source
         BuiltInSource("linux-foundation", "Linux Foundation", "https://www.linuxfoundation.org/blog/rss.xml", "rss", "Open Source"),
@@ -121,11 +132,11 @@ object SourceLibrary {
 
         // Photography
         BuiltInSource("500px-popular", "500px Popular", "https://500px.com/popular.rss", "rss", "Photography"),
-        BuiltInSource("flickr-explore", "Flickr Explore", "https://www.flickr.com/services/feeds/explore/", "rss", "Photography"),
+        BuiltInSource("flickr-explore", "Flickr Explore", "https://www.flickr.com/services/feeds/photos_public.gne?format=rss_200", "rss", "Photography"),
         BuiltInSource("petapixel", "PetaPixel", "https://petapixel.com/feed/", "rss", "Photography"),
 
         // Music
-        BuiltInSource("pitchfork", "Pitchfork", "https://pitchfork.com/rss/all/", "rss", "Music"),
+        BuiltInSource("pitchfork", "Pitchfork", "https://pitchfork.com/feed/feed-news/rss", "rss", "Music"),
         BuiltInSource("rolling-stone", "Rolling Stone", "https://www.rollingstone.com/feed/", "rss", "Music"),
         BuiltInSource("nme", "NME", "https://www.nme.com/feed", "rss", "Music"),
 
@@ -141,18 +152,32 @@ object SourceLibrary {
         BuiltInSource("api-archive-video", "Internet Archive Video", "archive:video", "api", "Video Platforms"),
         BuiltInSource("api-archive-audio", "Internet Archive Audio", "archive:audio", "api", "Music"),
         BuiltInSource("api-jamendo-music", "Jamendo Free Music", "jamendo:music", "api", "Music"),
+        // NOSLOP_OPENVERSE_V1 — keyless, so Music has a working source even with
+        // no API keys configured.
+        BuiltInSource("api-openverse-audio", "Openverse Audio", "openverse:audio", "api", "Music"),
+        // --- NOSLOP_SEARCH_SOURCES_V1 ---
+        // api-openverse-images was called in PublicApiService but never
+        // registered here, and fetchAsync silently skips any id missing from
+        // activeApiSourceIds — so image search never once queried Openverse.
+        BuiltInSource("api-openverse-images", "Openverse Images", "openverse:images", "api", "Photography"),
+        BuiltInSource("api-wikipedia-search", "Wikipedia", "wikipedia:search", "api", "Technology"),
+        BuiltInSource("api-hackernews-search", "Hacker News", "hackernews:search", "api", "Technology"),
+        // api-invidious-search was called from two places in PublicApiService and
+        // was never registered either — the YouTube fallback has never once run.
+        BuiltInSource("api-invidious-search", "Invidious", "invidious:search", "api", "Video Platforms"),
+        BuiltInSource("api-tiktok", "TikTok Trending", "tiktok:trending", "api", "Video Platforms"),
+        BuiltInSource("api-instagram", "Instagram Feed", "instagram:recent", "api", "Social Clearnet"),
         BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
         BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),
         BuiltInSource("api-nasa-apod", "NASA Picture of the Day", "nasa:apod", "api", "Science"),
         BuiltInSource("api-nasa-library", "NASA Image Library", "nasa:library", "api", "Science"),
         BuiltInSource("api-vimeo-featured", "Vimeo Featured", "vimeo:featured", "api", "Video Platforms"),
-        BuiltInSource("api-wikimedia-featured", "Wikimedia Featured", "wikimedia:featured", "api", "Photography")
+        BuiltInSource("api-wikimedia-featured", "Wikimedia Featured", "wikimedia:featured", "api", "Photography"),
+        // NOSLOP_IMAGE_SOURCES_V1 — keyless, so Art/Photography still has something
+        // to show when no Pexels key is configured.
+        BuiltInSource("api-artic-artworks", "Art Institute of Chicago", "artic:artworks", "api", "Art")
     )
-
-    fun getSourcesForCategory(category: String): List<BuiltInSource> {
-        return sources.filter { it.category == category }
-    }
 
     /**
      * Curated list of well-known creators, channels, YouTubers, podcasters, subreddits,

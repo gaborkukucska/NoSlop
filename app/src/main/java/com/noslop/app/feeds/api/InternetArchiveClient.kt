@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import okhttp3.Request
 
 /**
@@ -20,9 +21,41 @@ import okhttp3.Request
 object InternetArchiveClient {
 
     private const val TAG = "ARCHIVE_API"
-    private val gson = Gson()
 
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
+    // Each result needs its own /metadata/<id>/files round trip to find a
+    // playable file. Those run inside async, but OkHttp's Dispatcher allows
+    // only 5 concurrent requests PER HOST, and every one of these targets
+    // archive.org — so twenty results drain in four serialised waves and
+    // consumed the whole 20s category budget in the logs.
+    //
+    // Cap the number we resolve. Items past the cap are DROPPED rather than
+    // emitted with the bare /download/<id> directory URL, which is a file
+    // listing and will not play.
+    private const val MAX_METADATA_RESOLUTIONS = 10
+
+    private val metadataResolutions = java.util.concurrent.atomic.AtomicInteger(0)
+    private val gson = com.noslop.app.util.Json.gson
+
+    // --- NOSLOP_IMAGE_SOURCES_V1 ---
+    // Archive.org carries an enormous volume of machine-uploaded YouTube
+    // mirrors. They dominate download-sorted results and are almost never what
+    // someone browsing a curated audio feed wants.
+    // NB: no `$` anywhere in this pattern — it lives in a Kotlin raw string,
+    // where `$` would be parsed as a template expression. \b does the job.
+    private val YOUTUBE_MIRROR_PATTERN = Regex(
+        """\b(youtube|yt-dlp|youtube-dl)\b|audio\s+translation|dubbed\s+audio""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun isLowValueUpload(identifier: String, title: String, extra: String?): Boolean {
+        if (identifier.startsWith("youtube-", ignoreCase = true)) return true
+        if (identifier.startsWith("yt-", ignoreCase = true)) return true
+        val haystack = listOfNotNull(title, extra).joinToString(" ")
+        return YOUTUBE_MIRROR_PATTERN.containsMatchIn(haystack)
+    }
+
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
      * Search for videos on Internet Archive.
@@ -46,10 +79,63 @@ object InternetArchiveClient {
         sourceId: String = "api-archive-audio",
         rows: Int = 20
     ): List<FeedItem> {
+        val qTerm = query.trim()
+        val queryPart = if (qTerm.isBlank()) "collection:(etree OR netlabels OR 78rpm) AND mediatype:audio" else "($qTerm) AND (collection:etree OR collection:netlabels OR collection:78rpm OR mediatype:audio)"
         val encodedQuery = java.net.URLEncoder.encode(
-            "$query AND mediatype:audio", "UTF-8"
+            "$queryPart AND -subject:youtube",
+            "UTF-8"
         )
         return search(encodedQuery, "audio", sourceId, rows)
+    }
+
+    /**
+     * E5s2: one page of [searchAudio] for a user search (pages numbered from 1). [newestFirst] sorts by
+     * the date the item was published on the Archive instead of by downloads.
+     */
+    suspend fun searchAudioPage(
+        query: String,
+        page: Int,
+        newestFirst: Boolean,
+        sourceId: String = "api-archive-audio",
+        rows: Int = 20
+    ): SourcePage {
+        val qTerm = query.trim()
+        val queryPart = if (qTerm.isBlank()) "collection:(etree OR netlabels OR 78rpm) AND mediatype:audio" else "($qTerm) AND (collection:etree OR collection:netlabels OR collection:78rpm OR mediatype:audio)"
+        val encodedQuery = java.net.URLEncoder.encode(
+            "$queryPart AND -subject:youtube",
+            "UTF-8"
+        )
+        resetMetadataBudget()  // NOSLOP_ARCHIVE_BUDGET_V1
+        val sort = if (newestFirst) "publicdate+desc" else "downloads+desc"
+        val url = "https://archive.org/advancedsearch.php?" +
+                "q=$encodedQuery&" +
+                "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
+                "sort[]=$sort&" +
+                "rows=$rows&page=$page&output=json"
+        return fetchAndParsePage(url, "audio", sourceId)
+    }
+
+    /**
+     * Get popular audio recordings, music collections, podcasts, and vintage radio.
+     */
+    suspend fun getPopularAudio(
+        sourceId: String = "api-archive-audio",
+        rows: Int = 20
+    ): List<FeedItem> {
+        val encodedQuery = java.net.URLEncoder.encode(
+            "collection:(netlabels OR etree OR 78rpm OR audio_music) AND mediatype:audio AND -subject:quran AND -title:quran", "UTF-8"
+        )
+        val url = "https://archive.org/advancedsearch.php?" +
+                "q=$encodedQuery&" +
+                "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
+                "sort[]=week+desc&" +
+                "rows=$rows&output=json"
+        return fetchAndParse(url, "audio", sourceId)
+    }
+
+    /** NOSLOP_ARCHIVE_BUDGET_V1 — reset the per-search resolution budget. */
+    private fun resetMetadataBudget() {
+        metadataResolutions.set(0)
     }
 
     /**
@@ -70,30 +156,13 @@ object InternetArchiveClient {
         return fetchAndParse(url, "video", sourceId)
     }
 
-    /**
-     * Get public domain feature films.
-     */
-    suspend fun getPublicDomainFilms(
-        sourceId: String = "api-archive-video",
-        rows: Int = 20
-    ): List<FeedItem> {
-        val encodedQuery = java.net.URLEncoder.encode(
-            "collection:feature_films AND mediatype:movies", "UTF-8"
-        )
-        val url = "https://archive.org/advancedsearch.php?" +
-                "q=$encodedQuery&" +
-                "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
-                "sort[]=downloads+desc&" +
-                "rows=$rows&output=json"
-        return fetchAndParse(url, "video", sourceId)
-    }
-
     private suspend fun search(
         encodedQuery: String,
         defaultMediaType: String,
         sourceId: String,
         rows: Int
     ): List<FeedItem> {
+        resetMetadataBudget()  // NOSLOP_ARCHIVE_BUDGET_V1
         val url = "https://archive.org/advancedsearch.php?" +
                 "q=$encodedQuery&" +
                 "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
@@ -102,23 +171,27 @@ object InternetArchiveClient {
         return fetchAndParse(url, defaultMediaType, sourceId)
     }
 
-    private suspend fun fetchAndParse(url: String, defaultMediaType: String, sourceId: String): List<FeedItem> {
+    private suspend fun fetchAndParse(url: String, defaultMediaType: String, sourceId: String): List<FeedItem> =
+        fetchAndParsePage(url, defaultMediaType, sourceId).items
+
+    /** E5s2: [fetchAndParse], with whether the search has a further page. */
+    private suspend fun fetchAndParsePage(url: String, defaultMediaType: String, sourceId: String): SourcePage {
         return try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
                 .build()
 
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "Internet Archive API returned ${response.code}")
-                return emptyList()
+                return SourcePage.failed()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
-            val docs = root.getAsJsonObject("response")
-                ?.getAsJsonArray("docs") ?: return emptyList()
+            val responseObj = root.getAsJsonObject("response") ?: return SourcePage.END
+            val docs = responseObj.getAsJsonArray("docs") ?: return SourcePage.END
 
             val items = coroutineScope {
                 docs.mapNotNull { doc ->
@@ -127,6 +200,23 @@ object InternetArchiveClient {
                             val obj = doc.asJsonObject
                             val identifier = obj.get("identifier")?.asString ?: return@async null
                             val title = obj.get("title")?.asString ?: return@async null
+
+                            // --- NOSLOP_IMAGE_SOURCES_V1 ---
+                            // `subject` comes back as either a bare string or an
+                            // array depending on how many tags the item carries.
+                            val subjectText = try {
+                                val s = obj.get("subject")
+                                when {
+                                    s == null || s.isJsonNull -> null
+                                    s.isJsonArray -> s.asJsonArray.joinToString(" ") { it.asString }
+                                    else -> s.asString
+                                }
+                            } catch (_: Exception) { null }
+
+                            if (isLowValueUpload(identifier, title, subjectText)) {
+                                Logger.debug(TAG, "Filtered YouTube-mirror upload: $identifier")
+                                return@async null
+                            }
 
                             val creator = try { obj.get("creator")?.asString } catch (_: Exception) { null }
                             val description = try { obj.get("description")?.asString?.take(300) } catch (_: Exception) { null }
@@ -143,9 +233,15 @@ object InternetArchiveClient {
 
                             // Resolve actual playable file URLs from metadata for both audio and video
                             if (resolvedMediaType == "audio" || resolvedMediaType == "video") {
+                                // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
+                                if (metadataResolutions.incrementAndGet() > MAX_METADATA_RESOLUTIONS) {
+                                    Logger.debug(TAG, "Metadata resolution cap reached; dropping $identifier")
+                                    return@async null
+                                }
                                 try {
                                     val metaUrl = "https://archive.org/metadata/$identifier/files"
                                     Logger.debug(TAG, "Fetching metadata for $identifier from: $metaUrl")
+                                    if (!isActive) return@async null
                                     val metaReq = Request.Builder().url(metaUrl).build()
                                     val metaRes = client.newCall(metaReq).execute()
                                     val metaBody = metaRes.body?.string()
@@ -154,7 +250,9 @@ object InternetArchiveClient {
                                         val files = metaJson.getAsJsonArray("result")
 
                                         if (files != null) {
-                                            Logger.debug(TAG, "Found ${files.size()} files in metadata for $identifier")
+                                            // NOSLOP_ARCHIVE_BUDGET_V1 — was DEBUG per item; 321 of 515 log
+                                            // lines came from this client alone.
+                                            // Logger.debug(TAG, "Found ${files.size()} files in metadata for $identifier")
                                             if (resolvedMediaType == "audio") {
                                                 var bestAudio: String? = null
                                                 for (f in files) {
@@ -216,37 +314,8 @@ object InternetArchiveClient {
                                 }
                             }
                             
-                            // Validate the resolved URL
-                            var finalMediaUrl: String? = archiveMediaUrl
+                            var finalMediaUrl: String? = archiveMediaUrl.takeIf { it.isNotBlank() }
                             var finalMediaType = resolvedMediaType
-                            
-                            if (archiveMediaUrl.isEmpty()) {
-                                finalMediaUrl = null // Drop
-                            } else {
-                                try {
-                                    val headReq = Request.Builder().url(archiveMediaUrl).head().build()
-                                    val headRes = client.newCall(headReq).execute()
-                                    val code = headRes.code
-                                    val contentType = headRes.header("Content-Type") ?: ""
-                                    headRes.close()
-                                    
-                                    if (code == 401 || code == 403 || contentType.contains("text/html")) {
-                                        if (finalMediaType == "audio") {
-                                            Logger.warn(TAG, "Audio URL is HTML or restricted ($identifier), dropping item")
-                                            finalMediaUrl = null
-                                        } else {
-                                            Logger.warn(TAG, "Download URL is HTML/restricted ($identifier), using embed fallback")
-                                            finalMediaUrl = "https://archive.org/embed/$identifier"
-                                            finalMediaType = "video" // Embeds are handled via WebView
-                                        }
-                                    } else if (code == 404) {
-                                        Logger.warn(TAG, "Download URL not found ($identifier), skipping")
-                                        finalMediaUrl = null
-                                    }
-                                } catch (e: Exception) {
-                                    Logger.warn(TAG, "Failed to validate URL for $identifier: ${e.message}")
-                                }
-                            }
 
                             if (finalMediaUrl == null) {
                                 return@async null // Skip this item as it has no valid playable URL
@@ -276,10 +345,13 @@ object InternetArchiveClient {
             }
 
             Logger.info(TAG, "Internet Archive: fetched ${items.size} items")
-            items
+            // numFound counts every match; start is where this page began.
+            val numFound = responseObj.intField("numFound") ?: 0
+            val start = responseObj.intField("start") ?: 0
+            SourcePage(items, hasMore = docs.size() > 0 && start + docs.size() < numFound)
         } catch (e: Exception) {
             Logger.error(TAG, "Internet Archive API request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 }

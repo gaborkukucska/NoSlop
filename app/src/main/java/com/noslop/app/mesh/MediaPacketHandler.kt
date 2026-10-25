@@ -18,24 +18,33 @@ class MediaPacketHandler(
 
     suspend fun handleMediaRequest(packet: NetworkPacket): Boolean {
         val mediaReq = packet.getMediaRequestPayload() ?: return false
-        MediaManager.handleMediaRequest(packet.senderId, mediaReq)
+        if (!MediaManager.isValidMediaId(mediaReq.mediaId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_REQUEST with invalid mediaId: ${mediaReq.mediaId}")
+            return false
+        }
+        MediaManager.handleMediaRequest(packet.senderId, mediaReq, packet.targetUserId, packet.signature)
         return true
     }
 
     suspend fun handleMediaChunk(packet: NetworkPacket): Boolean {
         val chunk = packet.getMediaChunkPayload() ?: return false
-        
-        // Zero-copy forward if we are acting as a relay
-        GossipService.forwardRelayChunk(chunk.mediaId, packet)
-        
-        // Also process locally if we are the destination/requester
+        if (!MediaManager.isValidMediaId(chunk.mediaId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_CHUNK with invalid mediaId: ${chunk.mediaId}")
+            return false
+        }
+        // Round B (D03): chunks are never forwarded to other nodes (the relay-listener path streamed our
+        // own downloads to anyone who had registered for the media id, without an access check).
         MediaManager.handleMediaChunk(packet.senderId, chunk)
         return true
     }
 
     suspend fun handleMediaRecoveryFound(packet: NetworkPacket): Boolean {
         val found = packet.getMediaRecoveryFoundPayload() ?: return false
-        MediaManager.handleRecoveryFound(packet.senderId, found.mediaId)
+        if (!MediaManager.isValidMediaId(found.mediaId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected MEDIA_RECOVERY_FOUND with invalid mediaId: ${found.mediaId}")
+            return false
+        }
+        MediaManager.handleRecoveryFound(packet.senderId, found.mediaId, found.onionAddress)
         return true
     }
 }

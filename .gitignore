@@ -1,57 +1,89 @@
-# Gradle files
-.gradle/
-build/
-/*/build/
+# Compiled and build artifacts
+*.class
+*.o
+*.obj
+*.out
+*.dll
+*.so
+*.a
+*.pyc
+__pycache__/
 
-# Kotlin / KSP
-.kotlin/
-.ksp/
-
-# Local configuration
-local.properties
+# Dependencies
+node_modules/
+venv/
+.venv/
 .env
-.env.*
+.env.local
+*.env.*
 
-# Keystores (Avoid committing any generated keystores)
-*.keystore
-*.jks
-debug.keystore.base64
+# Build directories
+dist/
+build/
+target/
+.gradle/
 
-# Platform Specific / AI Studio Build Outputs
-.build-outputs/
+# Python caches
+.mypy_cache/
+.pytest_cache/
 
-# Built artifacts
-bin/
-gen/
-out/
-captures/
-.externalNativeBuild/
-.cxx/
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.bak
 
-# Android Studio / IntelliJ IDEA
+# Editors
+.vscode/
 .idea/
-*.iml
-*.ipr
-*.iws
 
-# OS files
+# System files
 .DS_Store
 Thumbs.db
-*.bak
-*.log
 
-# Binary library artifacts (use dependency management instead)
-*.aar
-*.jar
-!gradle/wrapper/gradle-wrapper.jar
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 
-# other
-_workspace/
-tests/
-.artifacts/
-tcls/
-.vscode/
-.temp/
-get-git.sh
+# Other
+test_parse/
+local.properties
+*.keystore
+.kotlin/
 *.py
+*.sh
+
+# Captured device logs — never commit these, they contain onion addresses,
+# peer keys and the full process list of the capturing device.
+tmp_logs/
+*.logcat
+*.diff
+_workspace/
+!scripts/*.py
+!scripts/*.sh
+!scripts/*.kts

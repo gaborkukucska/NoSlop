@@ -1,18 +1,22 @@
 // FILE: app/src/main/java/com/noslop/app/mesh/Packets.kt
 package com.noslop.app.mesh
 
+import androidx.annotation.Keep
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 
+@Keep
 data class EncryptedPayload(
     val id: String,
     val nonce: String,
     val ciphertext: String,
     @SerializedName("group_id") val groupId: String? = null,
-    val timestamp: Long? = null
+    val timestamp: Long? = null,
+    @SerializedName("v") val v: Int = 1
 )
 
+@Keep
 data class PostPayload(
     val id: String,
     @SerializedName("author_id") val authorId: String,
@@ -33,12 +37,14 @@ data class PostPayload(
     @SerializedName("clearnet_media_type") val clearnetMediaType: String? = null // "video", "audio", "image", or null for article
 )
 
+@Keep
 data class CommentPayload(
     @SerializedName("post_id") val postId: String,
     val comment: CommentData,
     @SerializedName("parent_comment_id") val parentCommentId: String? = null
 )
 
+@Keep
 data class CommentData(
     val id: String,
     @SerializedName("author_id") val authorId: String,
@@ -52,6 +58,7 @@ data class CommentData(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
+@Keep
 data class MediaMetadata(
     val id: String,
     val type: String, // "audio", "video", "file", "image"
@@ -62,9 +69,11 @@ data class MediaMetadata(
     val filename: String? = null,
     @SerializedName("origin_node") val originNode: String? = null,
     @SerializedName("owner_id") val ownerId: String? = null,
-    @SerializedName("thumbnail_b64") val thumbnailB64: String? = null
+    @SerializedName("thumbnail_b64") val thumbnailB64: String? = null,
+    @SerializedName("sha256") val sha256: String? = null
 )
 
+@Keep
 data class MediaRequestPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int,
@@ -72,17 +81,23 @@ data class MediaRequestPayload(
     @SerializedName("byte_offset") val byteOffset: Long? = null,
     @SerializedName("byte_length") val byteLength: Int? = null,
     @SerializedName("access_key") val accessKey: String? = null,
-    @SerializedName("hls_file") val hlsFile: String? = null
+    @SerializedName("hls_file") val hlsFile: String? = null,
+    @SerializedName("origin_onion") val originOnion: String? = null,
+    /** Round B: request time, covered by the envelope signature (replay window for unknown requesters). */
+    @SerializedName("timestamp") val timestamp: Long? = null
 )
 
+@Keep
 data class MediaChunkPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int,
     @SerializedName("total_chunks") val totalChunks: Int,
     @SerializedName("byte_offset") val byteOffset: Long? = null,
+    @SerializedName("total_size") val totalSize: Long? = null,
     val data: String // Base64 encoded
 )
 
+@Keep
 data class MediaRelayRequestPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("origin_node") val originNode: String? = null,
@@ -91,37 +106,61 @@ data class MediaRelayRequestPayload(
     val metadata: MediaMetadata? = null
 )
 
+@Keep
 data class MediaRecoveryFoundPayload(
-    @SerializedName("media_id") val mediaId: String
-)
-
-data class MediaPendingPayload(
     @SerializedName("media_id") val mediaId: String,
-    @SerializedName("chunk_index") val chunkIndex: Int
+    @SerializedName("onion_address") val onionAddress: String? = null
 )
 
+@Keep
 data class MediaTransferAckPayload(
     @SerializedName("media_id") val mediaId: String
 )
 
+@Keep
 data class PeerHandshakePayload(
     val id: String,
     @SerializedName("from_user_id") val fromUserId: String,
     @SerializedName("from_username") val fromUsername: String,
     @SerializedName("from_display_name") val fromDisplayName: String,
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     @SerializedName("from_home_node") val fromHomeNode: String,
     @SerializedName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
     val timestamp: Long,
-    val signature: String? = null
+    val signature: String? = null,
+    @SerializedName("request_nonce") val requestNonce: String? = null,
+    @SerializedName("in_reply_to_nonce") val inReplyToNonce: String? = null,
+    @SerializedName("target_user_id") val targetUserId: String? = null,
+    val version: Int = 1,
+    /** D10b: ContactIntro.QR_CAMERA when the requester scanned our QR code with the camera; signed. */
+    @SerializedName("intro") val intro: String? = null
 )
 
+@Keep
 data class AnnouncePeerPayload(
     @SerializedName("author_id") val authorId: String,
+    @SerializedName("onion_address") val onionAddress: String? = null,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
+data class AnnounceDiscoverablePayload(
+    @SerializedName("author_id") val authorId: String,
+    val handle: String,
+    @SerializedName("onion_address") val onionAddress: String,
+    @SerializedName("enc_public_key") val encPublicKey: String,
+    @SerializedName("is_creator") val isCreator: Boolean = false,
+    @SerializedName("fund_me_link") val fundMeLink: String? = null,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+
+@Keep
 data class ReactionPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("reaction_type") val reactionType: String, // e.g., "like", "upvote", "downvote"
@@ -131,15 +170,18 @@ data class ReactionPayload(
     val action: String = "add" // "add" or "remove"
 )
 
+@Keep
 data class ChatReactionPayload(
     @SerializedName("message_id") val messageId: String,
     @SerializedName("reaction_type") val reactionType: String,
     @SerializedName("author_id") val authorId: String,
     val timestamp: Long,
     val signature: String,
-    val action: String = "add"
+    val action: String = "add",
+    @SerializedName("group_id") val groupId: String? = null
 )
 
+@Keep
 data class CommentReactionPayload(
     @SerializedName("comment_id") val commentId: String,
     @SerializedName("reaction_type") val reactionType: String,
@@ -149,6 +191,7 @@ data class CommentReactionPayload(
     val action: String = "add"
 )
 
+@Keep
 data class VotePayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("vote_type") val voteType: String, // "upvote" or "downvote"
@@ -158,6 +201,7 @@ data class VotePayload(
     val action: String = "add"
 )
 
+@Keep
 data class CommentVotePayload(
     @SerializedName("comment_id") val commentId: String,
     @SerializedName("vote_type") val voteType: String, // "upvote" or "downvote"
@@ -167,34 +211,326 @@ data class CommentVotePayload(
     val action: String = "add"
 )
 
+@Keep
 data class IdentityUpdatePayload(
     @SerializedName("user_id") val userId: String,
     val handle: String,
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
 data class UserExitPayload(
     @SerializedName("user_id") val userId: String,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
+data class PeerRemovedPayload(
+    @SerializedName("user_id") val userId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+@Keep
 data class ConnectionRejectedPayload(
     @SerializedName("from_user_id") val fromUserId: String,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
 data class EditPostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    val content: String,
+    val timestamp: Long,
+    val signature: String,
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+    val privacy: String? = null,
+    @SerializedName("clearnet_url") val clearnetUrl: String? = null
+)
+
+@Keep
+data class EditCommentPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
     val signature: String
 )
 
+@Keep
+data class DeleteCommentPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+
+@Keep
+data class DeleteMessagePayload(
+    @SerializedName("message_id") val messageId: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    @SerializedName("group_id") val groupId: String? = null
+)
+
+@Keep
+data class FollowPayload(
+    @SerializedName("followed_public_key") val followedPublicKeyB64: String,
+    @SerializedName("follower_public_key") val followerPublicKeyB64: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "follow" // "follow" or "unfollow"
+)
+
+@Keep
+data class GroupMemberInfo(
+    val handle: String? = null,
+    @SerializedName("enc_public_key") val encPublicKey: String? = null,
+    @SerializedName("onion_address") val onionAddress: String? = null
+)
+
+@Keep
+fun canonicalMemberDetailsString(memberDetails: Map<String, GroupMemberInfo>?): String {
+    if (memberDetails.isNullOrEmpty()) return ""
+    val sorted = memberDetails.toSortedMap()
+    val entryParts = sorted.entries.map { (pub, info) ->
+        com.noslop.app.crypto.CryptoService.encodeForSigning(
+            pub,
+            info.encPublicKey ?: "",
+            info.onionAddress ?: "",
+            info.handle ?: ""
+        )
+    }
+    return com.noslop.app.crypto.CryptoService.encodeForSigning(*entryParts.toTypedArray())
+}
+
+@Keep
+fun canonicalMemberHandlesString(memberHandles: Map<String, String>?): String {
+    if (memberHandles.isNullOrEmpty()) return ""
+    val sorted = memberHandles.toSortedMap()
+    val entryParts = sorted.entries.map { (pub, handle) ->
+        com.noslop.app.crypto.CryptoService.encodeForSigning(pub, handle)
+    }
+    return com.noslop.app.crypto.CryptoService.encodeForSigning(*entryParts.toTypedArray())
+}
+
+@Keep
+fun encodeOptString(value: String?): String = when {
+    value == null -> "ABSENT"
+    value.isEmpty() -> "CLEAR"
+    else -> "SET:$value"
+}
+
+@Keep
+fun encodeOptBool(value: Boolean?): String = when (value) {
+    null -> "ABSENT"
+    true -> "TRUE"
+    false -> "FALSE"
+}
+
+@Keep
+fun encodeOptBanned(banned: List<String>?): String = when {
+    banned == null -> "ABSENT"
+    banned.isEmpty() -> "CLEAR"
+    else -> "SET:" + banned.sorted().joinToString(",")
+}
+
+@Keep
+fun canonicalGroupUpdatePayload(
+    groupId: String,
+    title: String?,
+    signerPublicKeyB64: String,
+    timestamp: Long,
+    sortedAdded: String,
+    sortedRemoved: String,
+    sortedBanned: String,
+    description: String?,
+    avatarB64: String?,
+    allowMemberInvites: Boolean?,
+    allowMemberSelfRemove: Boolean?,
+    sortedMemberDetails: String = "",
+    sortedMemberHandles: String = ""
+): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
+    groupId,
+    encodeOptString(title),
+    signerPublicKeyB64,
+    timestamp.toString(),
+    sortedAdded,
+    sortedRemoved,
+    sortedBanned,
+    encodeOptString(description),
+    encodeOptString(avatarB64),
+    encodeOptBool(allowMemberInvites),
+    encodeOptBool(allowMemberSelfRemove),
+    sortedMemberDetails,
+    sortedMemberHandles
+)
+
+@Keep
+fun canonicalGroupSyncPayload(
+    groupId: String,
+    groupChatJson: String,
+    timestamp: Long,
+    sortedMemberDetails: String = ""
+): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
+    groupId,
+    groupChatJson,
+    timestamp.toString(),
+    sortedMemberDetails
+)
+
+@Keep
+fun canonicalGroupInvitePayload(
+    groupId: String,
+    title: String,
+    adminPublicKeyB64: String,
+    signerPublicKeyB64: String,
+    timestamp: Long,
+    sortedMembers: String,
+    allowMemberInvites: Boolean,
+    allowMemberSelfRemove: Boolean,
+    description: String? = null,
+    avatarB64: String? = null,
+    adminOnion: String? = null,
+    adminEncPublicKey: String? = null,
+    sortedMemberDetails: String = "",
+    sortedMemberHandles: String = ""
+): String = com.noslop.app.crypto.CryptoService.encodeForSigning(
+    groupId,
+    title,
+    adminPublicKeyB64,
+    signerPublicKeyB64,
+    timestamp.toString(),
+    sortedMembers,
+    allowMemberInvites.toString(),
+    allowMemberSelfRemove.toString(),
+    description ?: "",
+    avatarB64 ?: "",
+    adminOnion ?: "",
+    adminEncPublicKey ?: "",
+    sortedMemberDetails,
+    sortedMemberHandles
+)
+
+@Keep
+data class GroupInvitePayload(
+    @SerializedName("group_id") val groupId: String,
+    val title: String,
+    @SerializedName("admin_public_key") val adminPublicKeyB64: String,
+    val members: List<String>,
+    @SerializedName("avatar_b64") val avatarB64: String? = null,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
+    @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
+    @SerializedName("allow_member_invites") val allowMemberInvites: Boolean = true,
+    @SerializedName("allow_member_self_remove") val allowMemberSelfRemove: Boolean = true,
+    val timestamp: Long,
+    val signature: String,
+    @SerializedName("admin_onion") val adminOnion: String? = null,
+    @SerializedName("admin_enc_public_key") val adminEncPublicKey: String? = null
+)
+
+@Keep
+data class GroupUpdatePayload(
+    @SerializedName("group_id") val groupId: String,
+    val title: String? = null,
+    @SerializedName("avatar_b64") val avatarB64: String? = null,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("added_members") val addedMembers: List<String>? = null,
+    @SerializedName("removed_members") val removedMembers: List<String>? = null,
+    @SerializedName("banned_members") val bannedMembers: List<String>? = null,
+    @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
+    @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
+    @SerializedName("allow_member_invites") val allowMemberInvites: Boolean? = null,
+    @SerializedName("allow_member_self_remove") val allowMemberSelfRemove: Boolean? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+@Keep
+data class GroupDeletePayload(
+    @SerializedName("group_id") val groupId: String,
+    @SerializedName("admin_public_key") val adminPublicKeyB64: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+@Keep
+data class GroupQueryPayload(
+    @SerializedName("group_id") val groupId: String,
+    @SerializedName("requester_id") val requesterId: String,
+    val timestamp: Long
+)
+
+@Keep
+data class GroupSyncPayload(
+    @SerializedName("group_chat_json") val groupChatJson: String,
+    @SerializedName("member_details") val memberDetails: Map<String, GroupMemberInfo>? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+@Keep
+data class GroupMessagePayload(
+    val id: String,
+    @SerializedName("group_id") val groupId: String,
+    @SerializedName("sender_handle") val senderHandle: String,
+    @SerializedName("sender_tripcode") val senderTripcode: String? = null,
+    val content: String,
+    val timestamp: Long,
+    val privacy: String = "public",
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+    @SerializedName("reply_to") val replyToMessageId: String? = null,
+    @SerializedName("signature") val signature: String? = null
+)
+
+@Keep
+data class DmAckPayload(
+    @SerializedName("msg_id") val msgId: String,
+    /**
+     * The legacy acknowledgement: "ACK" sealed exactly like a MESSAGE (same AAD label). Still sent
+     * to peers not yet known to read [ackCiphertext], since earlier builds only check this one;
+     * blank once the peer has sent us a domain-separated ACK itself (D05).
+     */
+    val nonce: String,
+    val ciphertext: String,
+    val timestamp: Long? = null,
+    @SerializedName("v") val v: Int = 2,
+    /** D05: "ACK" sealed under the acknowledgement AAD label (CryptoService.DM_AAD_ACK). */
+    @SerializedName("ack_nonce") val ackNonce: String? = null,
+    @SerializedName("ack_ciphertext") val ackCiphertext: String? = null
+)
+
+@Keep
+data class TypingPayload(
+    @SerializedName("chat_with_peer_pub") val chatWithPeerPub: String,
+    @SerializedName("is_typing") val isTyping: Boolean,
+    val timestamp: Long
+)
+
+@Keep
+data class ReadReceiptPayload(
+    @SerializedName("message_id") val messageId: String,
+    @SerializedName("reader_public_key") val readerPublicKeyB64: String,
+    val timestamp: Long
+)
+
+@Keep
 data class DeletePostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
@@ -202,19 +538,28 @@ data class DeletePostPayload(
     val signature: String
 )
 
+@Keep
 data class SyncRequestPayload(
     val since: Long
 )
 
+@Keep
 data class InventoryItem(
     val id: String,
     val hash: String
 )
 
+@Keep
 data class InventorySyncRequestPayload(
     val inventory: List<InventoryItem>
 )
 
+@Keep
+data class DmSyncRequestPayload(
+    @SerializedName("since") val since: Long
+)
+
+@Keep
 data class CommentSyncData(
     val id: String,
     @SerializedName("post_id") val postId: String,
@@ -230,6 +575,7 @@ data class CommentSyncData(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
+@Keep
 data class ReactionSyncData(
     val id: String,
     @SerializedName("post_id") val postId: String,
@@ -239,12 +585,14 @@ data class ReactionSyncData(
     val signature: String
 )
 
+@Keep
 data class SyncResponsePayload(
     val posts: List<PostPayload>,
     val comments: List<CommentSyncData>? = null,
     val reactions: List<ReactionSyncData>? = null
 )
 
+@Keep
 data class NetworkPacket(
     val id: String? = null,
     val hops: Int? = null,
@@ -252,112 +600,175 @@ data class NetworkPacket(
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
     val type: String,
-    val payload: JsonElement? = null
+    val payload: JsonElement? = null,
+    /** C09 (round E2): envelope signature version ([EnvelopeAuth.VERSION]). */
+    @SerializedName("env_v") val envV: Int? = null,
+    /** C09: when the envelope was signed (ms); checked against [EnvelopeAuth.MAX_SKEW_MS]. */
+    @SerializedName("env_ts") val envTs: Long? = null,
+    /** C09: Ed25519 signature by [senderId] over everything but `hops` ([EnvelopeAuth.signingString]). */
+    @SerializedName("env_sig") val envSig: String? = null
 ) {
-    fun toJson(): String = Gson().toJson(this)
+    fun toJson(): String = com.noslop.app.util.Json.gson.toJson(this)
 
     companion object {
-        fun fromJson(json: String): NetworkPacket = Gson().fromJson(json, NetworkPacket::class.java)
+        fun fromJson(json: String): NetworkPacket = com.noslop.app.util.Json.gson.fromJson(json, NetworkPacket::class.java)
     }
 
     // Strongly typed accessor helpers
     fun getPostPayload(): PostPayload? = if (type == "POST" && payload != null) {
-        Gson().fromJson(payload, PostPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PostPayload::class.java)
     } else null
 
     fun getMessagePayload(): EncryptedPayload? = if (type == "MESSAGE" && payload != null) {
-        Gson().fromJson(payload, EncryptedPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, EncryptedPayload::class.java)
     } else null
 
     fun getConnectionRequestPayload(): PeerHandshakePayload? = if (type == "CONNECTION_REQUEST" && payload != null) {
-        Gson().fromJson(payload, PeerHandshakePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PeerHandshakePayload::class.java)
     } else null
 
     fun getUserHandshakePayload(): PeerHandshakePayload? = if (type == "USER_HANDSHAKE" && payload != null) {
-        Gson().fromJson(payload, PeerHandshakePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, PeerHandshakePayload::class.java)
     } else null
 
     fun getSyncRequestPayload(): SyncRequestPayload? = if (type == "SYNC_REQUEST" && payload != null) {
-        Gson().fromJson(payload, SyncRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, SyncRequestPayload::class.java)
     } else null
 
     fun getSyncResponsePayload(): SyncResponsePayload? = if (type == "SYNC_RESPONSE" && payload != null) {
-        Gson().fromJson(payload, SyncResponsePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, SyncResponsePayload::class.java)
     } else null
 
     fun getMediaRequestPayload(): MediaRequestPayload? = if (type == "MEDIA_REQUEST" && payload != null) {
-        Gson().fromJson(payload, MediaRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaRequestPayload::class.java)
     } else null
 
     fun getMediaChunkPayload(): MediaChunkPayload? = if (type == "MEDIA_CHUNK" && payload != null) {
-        Gson().fromJson(payload, MediaChunkPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaChunkPayload::class.java)
     } else null
 
     fun getMediaRelayRequestPayload(): MediaRelayRequestPayload? = if (type == "MEDIA_RELAY_REQUEST" && payload != null) {
-        Gson().fromJson(payload, MediaRelayRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaRelayRequestPayload::class.java)
     } else null
 
     fun getMediaRecoveryFoundPayload(): MediaRecoveryFoundPayload? = if (type == "MEDIA_RECOVERY_FOUND" && payload != null) {
-        Gson().fromJson(payload, MediaRecoveryFoundPayload::class.java)
-    } else null
-
-    fun getMediaPendingPayload(): MediaPendingPayload? = if (type == "MEDIA_PENDING" && payload != null) {
-        Gson().fromJson(payload, MediaPendingPayload::class.java)
-    } else null
-
-    fun getMediaTransferAckPayload(): MediaTransferAckPayload? = if (type == "MEDIA_TRANSFER_ACK" && payload != null) {
-        Gson().fromJson(payload, MediaTransferAckPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, MediaRecoveryFoundPayload::class.java)
     } else null
 
     fun getCommentPayload(): CommentPayload? = if (type == "COMMENT" && payload != null) {
-        Gson().fromJson(payload, CommentPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, CommentPayload::class.java)
     } else null
 
     fun getReactionPayload(): ReactionPayload? = if (type == "REACTION" && payload != null) {
-        Gson().fromJson(payload, ReactionPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ReactionPayload::class.java)
     } else null
 
     fun getChatReactionPayload(): ChatReactionPayload? = if (type == "CHAT_REACTION" && payload != null) {
-        Gson().fromJson(payload, ChatReactionPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ChatReactionPayload::class.java)
     } else null
 
     fun getCommentReactionPayload(): CommentReactionPayload? = if (type == "COMMENT_REACTION" && payload != null) {
-        Gson().fromJson(payload, CommentReactionPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, CommentReactionPayload::class.java)
     } else null
 
     fun getVotePayload(): VotePayload? = if (type == "VOTE" && payload != null) {
-        Gson().fromJson(payload, VotePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, VotePayload::class.java)
     } else null
 
     fun getCommentVotePayload(): CommentVotePayload? = if (type == "COMMENT_VOTE" && payload != null) {
-        Gson().fromJson(payload, CommentVotePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, CommentVotePayload::class.java)
     } else null
 
     fun getAnnouncePeerPayload(): AnnouncePeerPayload? = if (type == "ANNOUNCE_PEER" && payload != null) {
-        Gson().fromJson(payload, AnnouncePeerPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, AnnouncePeerPayload::class.java)
+    } else null
+
+    fun getAnnounceDiscoverablePayload(): AnnounceDiscoverablePayload? = if (type == "ANNOUNCE_DISCOVERABLE" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, AnnounceDiscoverablePayload::class.java)
+    } else null
+
+
+    fun getFollowPayload(): FollowPayload? = if ((type == "FOLLOW" || type == "UNFOLLOW") && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, FollowPayload::class.java)
+    } else null
+
+    fun getGroupInvitePayload(): GroupInvitePayload? = if (type == "GROUP_INVITE" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupInvitePayload::class.java)
+    } else null
+
+    fun getGroupUpdatePayload(): GroupUpdatePayload? = if (type == "GROUP_UPDATE" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupUpdatePayload::class.java)
+    } else null
+
+    fun getGroupDeletePayload(): GroupDeletePayload? = if (type == "GROUP_DELETE" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupDeletePayload::class.java)
+    } else null
+
+    fun getGroupQueryPayload(): GroupQueryPayload? = if (type == "GROUP_QUERY" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupQueryPayload::class.java)
+    } else null
+
+    fun getGroupSyncPayload(): GroupSyncPayload? = if (type == "GROUP_SYNC" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupSyncPayload::class.java)
+    } else null
+
+    fun getGroupMessagePayload(): GroupMessagePayload? = if (type == "GROUP_MESSAGE" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, GroupMessagePayload::class.java)
+    } else null
+
+    fun getDmAckPayload(): DmAckPayload? = if (type == "DM_ACK" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, DmAckPayload::class.java)
+    } else null
+
+    fun getTypingPayload(): TypingPayload? = if (type == "TYPING" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, TypingPayload::class.java)
+    } else null
+
+    fun getReadReceiptPayload(): ReadReceiptPayload? = if (type == "READ_RECEIPT" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, ReadReceiptPayload::class.java)
     } else null
 
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {
-        Gson().fromJson(payload, InventorySyncRequestPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, InventorySyncRequestPayload::class.java)
+    } else null
+
+    fun getDmSyncRequestPayload(): DmSyncRequestPayload? = if (type == "DM_SYNC_REQUEST" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, DmSyncRequestPayload::class.java)
     } else null
 
     fun getIdentityUpdatePayload(): IdentityUpdatePayload? = if (type == "IDENTITY_UPDATE" && payload != null) {
-        Gson().fromJson(payload, IdentityUpdatePayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, IdentityUpdatePayload::class.java)
     } else null
 
     fun getUserExitPayload(): UserExitPayload? = if (type == "USER_EXIT" && payload != null) {
-        Gson().fromJson(payload, UserExitPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, UserExitPayload::class.java)
+    } else null
+
+    fun getPeerRemovedPayload(): PeerRemovedPayload? = if (type == "PEER_REMOVED" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, PeerRemovedPayload::class.java)
     } else null
 
     fun getConnectionRejectedPayload(): ConnectionRejectedPayload? = if (type == "CONNECTION_REJECTED" && payload != null) {
-        Gson().fromJson(payload, ConnectionRejectedPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, ConnectionRejectedPayload::class.java)
     } else null
 
     fun getEditPostPayload(): EditPostPayload? = if (type == "EDIT_POST" && payload != null) {
-        Gson().fromJson(payload, EditPostPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, EditPostPayload::class.java)
     } else null
 
     fun getDeletePostPayload(): DeletePostPayload? = if (type == "DELETE_POST" && payload != null) {
-        Gson().fromJson(payload, DeletePostPayload::class.java)
+        com.noslop.app.util.Json.gson.fromJson(payload, DeletePostPayload::class.java)
+    } else null
+
+    fun getEditCommentPayload(): EditCommentPayload? = if (type == "EDIT_COMMENT" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, EditCommentPayload::class.java)
+    } else null
+
+    fun getDeleteCommentPayload(): DeleteCommentPayload? = if (type == "DELETE_COMMENT" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, DeleteCommentPayload::class.java)
+    } else null
+
+    fun getDeleteMessagePayload(): DeleteMessagePayload? = if (type == "DELETE_MESSAGE" && payload != null) {
+        com.noslop.app.util.Json.gson.fromJson(payload, DeleteMessagePayload::class.java)
     } else null
 }

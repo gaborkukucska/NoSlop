@@ -21,6 +21,38 @@ import kotlinx.coroutines.withContext
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
 class SettingsRepository(private val appSettingDao: AppSettingDao) {
+    private val _useTorForClearnet = MutableStateFlow(true)
+    val useTorForClearnet: StateFlow<Boolean> = _useTorForClearnet.asStateFlow()
+
+    suspend fun initTorForClearnetSetting() = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("use_tor_for_clearnet")
+        val isEnabled = setting == null || setting == "true" // true by default
+        _useTorForClearnet.value = isEnabled
+        com.noslop.app.net.HttpClientProvider.useTorForClearnet = isEnabled
+    }
+
+    suspend fun setUseTorForClearnet(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("use_tor_for_clearnet", enabled.toString()))
+        _useTorForClearnet.value = enabled
+        com.noslop.app.net.HttpClientProvider.useTorForClearnet = enabled
+    }
+
+    private val _isAutoUpdateEnabled = MutableStateFlow(true)
+    val isAutoUpdateEnabled: StateFlow<Boolean> = _isAutoUpdateEnabled.asStateFlow()
+
+    suspend fun initAutoUpdateSetting() = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("auto_update_enabled")
+        val isEnabled = setting == null || setting == "true" // true by default
+        _isAutoUpdateEnabled.value = isEnabled
+        com.noslop.app.net.HttpClientProvider.isAutoUpdateEnabled = isEnabled
+    }
+
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("auto_update_enabled", enabled.toString()))
+        _isAutoUpdateEnabled.value = enabled
+        com.noslop.app.net.HttpClientProvider.isAutoUpdateEnabled = enabled
+    }
+
 
     private val _mediaSettingsFlow = MutableStateFlow(MediaSettings())
     /** Current media settings; updated by [getMediaSettings] and [updateMediaSettings]. */
@@ -33,6 +65,10 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     private val _isForegroundServiceEnabled = MutableStateFlow(false)
     /** Whether the user enabled the always-on foreground service. */
     val isForegroundServiceEnabled: StateFlow<Boolean> = _isForegroundServiceEnabled.asStateFlow()
+
+    private val _meshFilterSettingsFlow = MutableStateFlow(MeshFilterSettings())
+    /** Current mesh filter settings; updated by [getMeshFilterSettings] and [updateMeshFilterSettings]. */
+    val meshFilterSettingsFlow: StateFlow<MeshFilterSettings> = _meshFilterSettingsFlow.asStateFlow()
 
     private val _isSendOnEnterEnabled = MutableStateFlow(false)
     /** Whether to send chat messages on keyboard enter. */
@@ -66,6 +102,35 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
         _notificationSettingsFlow.value = settings
     }
 
+    /** Load mesh filter settings from storage, hydrating [meshFilterSettingsFlow]. */
+    suspend fun getMeshFilterSettings(): MeshFilterSettings = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("mesh_filter_settings")
+        val settings = MeshFilterSettings.fromJson(json)
+        _meshFilterSettingsFlow.value = settings
+        settings
+    }
+
+    /** Persist mesh filter settings and push them to [meshFilterSettingsFlow]. */
+    suspend fun updateMeshFilterSettings(settings: MeshFilterSettings) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("mesh_filter_settings", settings.toJson()))
+        _meshFilterSettingsFlow.value = settings
+    }
+
+    private val _feedMixSettingsFlow = MutableStateFlow(FeedMixSettings())
+    val feedMixSettingsFlow: StateFlow<FeedMixSettings> = _feedMixSettingsFlow.asStateFlow()
+
+    suspend fun getFeedMixSettings(): FeedMixSettings = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("feed_mix_settings")
+        val settings = FeedMixSettings.fromJson(json)
+        _feedMixSettingsFlow.value = settings
+        settings
+    }
+
+    suspend fun updateFeedMixSettings(settings: FeedMixSettings) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("feed_mix_settings", settings.toJson()))
+        _feedMixSettingsFlow.value = settings
+    }
+
     /** Hydrate [isForegroundServiceEnabled] from storage (defaults to false when unset). */
     suspend fun initForegroundServiceSetting() = withContext(Dispatchers.IO) {
         val setting = appSettingDao.getSetting("foreground_service_enabled")
@@ -88,5 +153,46 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     suspend fun setSendOnEnterEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting("send_on_enter_enabled", enabled.toString()))
         _isSendOnEnterEnabled.value = enabled
+    }
+
+    // --- Break / Exit Reminder Settings ---
+    private val _breakReminderEnabled = MutableStateFlow(true)
+    val breakReminderEnabled: StateFlow<Boolean> = _breakReminderEnabled.asStateFlow()
+
+    private val _breakReminderMode = MutableStateFlow("time") // "slides" or "time" (default time)
+    val breakReminderMode: StateFlow<String> = _breakReminderMode.asStateFlow()
+
+    private val _breakReminderIntervalSlides = MutableStateFlow(30)
+    val breakReminderIntervalSlides: StateFlow<Int> = _breakReminderIntervalSlides.asStateFlow()
+
+    private val _breakReminderIntervalMinutes = MutableStateFlow(30)
+    val breakReminderIntervalMinutes: StateFlow<Int> = _breakReminderIntervalMinutes.asStateFlow()
+
+    suspend fun initBreakReminderSettings() = withContext(Dispatchers.IO) {
+        val enabledSetting = appSettingDao.getSetting("break_reminder_enabled")
+        _breakReminderEnabled.value = enabledSetting == null || enabledSetting == "true" // ON by default
+        _breakReminderMode.value = appSettingDao.getSetting("break_reminder_mode") ?: "time"
+        _breakReminderIntervalSlides.value = appSettingDao.getSetting("break_reminder_interval_slides")?.toIntOrNull() ?: 30
+        _breakReminderIntervalMinutes.value = appSettingDao.getSetting("break_reminder_interval_minutes")?.toIntOrNull() ?: 30
+    }
+
+    suspend fun setBreakReminderEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_enabled", enabled.toString()))
+        _breakReminderEnabled.value = enabled
+    }
+
+    suspend fun setBreakReminderMode(mode: String) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_mode", mode))
+        _breakReminderMode.value = mode
+    }
+
+    suspend fun setBreakReminderIntervalSlides(interval: Int) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_interval_slides", interval.toString()))
+        _breakReminderIntervalSlides.value = interval
+    }
+
+    suspend fun setBreakReminderIntervalMinutes(interval: Int) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_interval_minutes", interval.toString()))
+        _breakReminderIntervalMinutes.value = interval
     }
 }

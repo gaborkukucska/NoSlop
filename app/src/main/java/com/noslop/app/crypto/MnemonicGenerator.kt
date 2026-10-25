@@ -7,14 +7,29 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
 /**
- * Implementation of BIP39-style mnemonic generation and seed derivation.
- * Used for the "Word Cloud" password / Identity recovery.
+ * Mnemonic generation and seed derivation for the "Word Cloud" / identity recovery.
+ *
+ * NOSLOP_WORDLIST_TRUTH_V1
+ * This is BIP-39-SHAPED, NOT BIP-39-COMPATIBLE. Two deliberate divergences:
+ *   1. The wordlist below has 2053 entries and is not the canonical BIP-39
+ *      English list (25 words are ours, 20 BIP-39 words are absent).
+ *   2. There is no checksum word, so a mistyped phrase silently derives the
+ *      wrong seed instead of failing validation.
+ *
+ * Entropy is fine — 12 independent draws from 2053 words is ~132 bits. Do not
+ * describe this as BIP-39 in user-facing copy, and do not expect a phrase to
+ * restore in any BIP-39 wallet.
+ *
+ * NOTE FOR ANY FUTURE FIX: deriveSeed() runs PBKDF2 over the mnemonic *string*,
+ * so replacing the list with the canonical 2048-word one does NOT invalidate
+ * existing users' phrases. Adding a checksum word would.
  */
 object MnemonicGenerator {
 
     private const val TAG = "MNEMONIC"
 
-    // Official BIP39 English wordlist (2048 words)
+    // NoSlop wordlist — 2053 entries. See the class header: this is NOT the
+    // canonical BIP-39 English list, despite historically being labelled as one.
     private val wordList = listOf(
         "abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse",
         "access", "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across", "act",
@@ -235,19 +250,58 @@ object MnemonicGenerator {
 
     /**
      * Derives a 512-bit seed from the mnemonic using PBKDF2WithHmacSHA512.
-     * This follows the BIP39 standard.
+     * Uses BIP-39's KDF parameters (2048 iterations, "mnemonic" + salt) but the
+     * phrase itself is not BIP-39 — see the class header.
      */
     fun deriveSeed(mnemonic: String, salt: String = "noslop"): ByteArray {
         val startTime = System.currentTimeMillis()
         Logger.info(TAG, "Deriving seed from mnemonic...")
         
         val saltBytes = "mnemonic$salt".toByteArray(Charsets.UTF_8)
-        val spec = PBEKeySpec(mnemonic.toCharArray(), saltBytes, 2048, 512)
-        val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512")
-        val seed = skf.generateSecret(spec).encoded
+        // C14: Bouncy Castle lightweight implementation ensures PBKDF2-HMAC-SHA512 works on API 24-25
+        val seed = try {
+            val gen = org.bouncycastle.crypto.generators.PKCS5S2ParametersGenerator(
+                org.bouncycastle.crypto.digests.SHA512Digest()
+            )
+            gen.init(mnemonic.toByteArray(Charsets.UTF_8), saltBytes, 2048)
+            (gen.generateDerivedParameters(512) as org.bouncycastle.crypto.params.KeyParameter).key
+        } catch (_: Exception) {
+            val spec = PBEKeySpec(mnemonic.toCharArray(), saltBytes, 2048, 512)
+            val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA512")
+            skf.generateSecret(spec).encoded
+        }
         
         Logger.info(TAG, "Seed derivation complete in ${System.currentTimeMillis() - startTime}ms")
         return seed
+    }
+
+    /**
+     * R5: the canonical form of a Word Cloud as typed: trimmed, lower case, single spaces. Generated
+     * phrases are already in this form; keyboards add capitals (first word), trailing spaces and
+     * line breaks. New backups are encrypted under this form (BackupManager.exportData).
+     */
+    fun normalize(mnemonic: String): String =
+        mnemonic.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+
+    /**
+     * R5: the forms of [entered] a backup may have been encrypted under. Until this round the export
+     * used the Word Cloud exactly as typed, so an archive made with an auto-capitalised first word or
+     * a trailing space only opens with that exact string. The canonical form comes first.
+     */
+    fun restoreCandidates(entered: String): List<String> {
+        val norm = normalize(entered)
+        val capitalised = norm.replaceFirstChar { it.uppercase() }
+        val trimmed = entered.trim()
+        return listOf(
+            norm,
+            entered,
+            trimmed,
+            capitalised,
+            "$norm ",
+            "$capitalised ",
+            "$norm\n",
+            trimmed.lowercase()
+        ).filter { it.isNotBlank() }.distinct()
     }
 
     /**

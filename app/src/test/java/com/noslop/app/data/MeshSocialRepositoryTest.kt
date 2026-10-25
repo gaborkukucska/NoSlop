@@ -45,6 +45,8 @@ class MeshSocialRepositoryTest {
 
     @Before
     fun setup() {
+        com.noslop.app.mesh.GossipService.resetForTesting()
+        com.noslop.app.mesh.GossipService.resetForTesting()
         reactionDao = FakeReactionDao()
         voteDao = FakeVoteDao()
         peerDao = FakePeerDao()
@@ -110,7 +112,8 @@ class MeshSocialRepositoryTest {
         peerDao.insertPeer(
             Peer(
                 publicKeyB64 = bob.publicKeyB64, handle = "bob", tripcode = bob.tripcode,
-                onionAddress = "bob.onion", encPublicKeyB64 = bob.encPublicKeyB64, isTrusted = true,
+                onionAddress = "bob.onion", encPublicKeyB64 = bob.encPublicKeyB64,
+                relationship = PeerRelationship.ACCEPTED,
             )
         )
 
@@ -139,17 +142,39 @@ class MeshSocialRepositoryTest {
     @Test
     fun acceptConnectionRequest_trustsPeerAndClearsIncoming() = runBlocking {
         val bob = CryptoService.generateIdentity("bob")
+        // D01: only a stored INCOMING_PENDING request can be accepted.
         val peer = Peer(
             publicKeyB64 = bob.publicKeyB64, handle = "bob", tripcode = bob.tripcode,
             onionAddress = "bob.onion", encPublicKeyB64 = bob.encPublicKeyB64, isTrusted = false,
+            relationship = PeerRelationship.INCOMING_PENDING, pendingNonce = "bob-nonce",
         )
+        peerDao.insertPeer(peer)
         repo.setIncomingRequest(peer)
         assertNotNull(repo.incomingRequestFlow.value)
 
         assertTrue(repo.acceptConnectionRequest(peer))
 
         assertTrue("accepted peer becomes trusted", peerDao.peers[bob.publicKeyB64]!!.isTrusted)
+        assertEquals(PeerRelationship.ACCEPTED, peerDao.peers[bob.publicKeyB64]!!.relationship)
         assertNull("the incoming request is cleared", repo.incomingRequestFlow.value)
         coVerify { meshTransport.sendPacket("bob.onion", any(), any()) }
+    }
+
+    /** D11 (E1): without the contact's X25519 key nothing is stored or sent (no Ed25519 stand-in). */
+    @Test
+    fun sendDirectMessage_withoutEncryptionKey_failsAndSendsNothing() = runBlocking {
+        val bob = CryptoService.generateIdentity("bob")
+        peerDao.insertPeer(
+            Peer(
+                publicKeyB64 = bob.publicKeyB64, handle = "bob", tripcode = bob.tripcode,
+                onionAddress = "bob.onion", encPublicKeyB64 = "",
+                relationship = PeerRelationship.ACCEPTED,
+            )
+        )
+
+        assertFalse(repo.sendDirectMessage(bob.publicKeyB64, "secret"))
+
+        assertEquals("nothing stored", 0, messageDao.messages.size)
+        coVerify(exactly = 0) { meshTransport.sendPacket(any(), any(), any()) }
     }
 }

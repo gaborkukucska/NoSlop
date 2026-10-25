@@ -1,6 +1,7 @@
 package com.noslop.app.crypto
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,8 +16,9 @@ import org.junit.Test
  * for the same identity and the network fragments. These vectors pin the current Android behavior so
  * any refactor that changes it fails loudly here.
  *
- * The expected values were computed by an INDEPENDENT reference implementation (Python `hashlib`,
- * same SHA3-256 + custom-alphabet Base32), so this doubles as the cross-language conformance vector.
+ * The expected values were computed by INDEPENDENT reference implementations (Python `hashlib` for
+ * SHA3-256, `argon2-cffi` for Argon2id, same custom-alphabet Base32), so this doubles as the
+ * cross-language conformance vector.
  *
  * These functions use only BouncyCastle + Kotlin stdlib (no `android.util.Base64`, no `Build`), so
  * they run as plain fast JVM unit tests — no Robolectric required.
@@ -36,8 +38,15 @@ class CryptoDerivationTest {
 
     @Test
     fun deriveTripcode_matchesGoldenVector() {
-        // GOLDEN: first 6 chars of base32(SHA3-256(rawKey)). Independently computed.
-        assertEquals("aufeq4", CryptoService.deriveTripcode(knownRawPubKey))
+        // GOLDEN (D10b): first 8 chars of base32(Argon2id(rawKey, salt "noslop-tag-v2", t=2,
+        // m=19456 KiB, p=1, 16 bytes)). Independently computed with argon2-cffi.
+        assertEquals("wdbuab42", CryptoService.deriveTripcode(knownRawPubKey))
+    }
+
+    @Test
+    fun deriveLegacyTripcode_matchesGoldenVector() {
+        // GOLDEN: the pre-D10b tag, first 6 chars of base32(SHA3-256(rawKey)). Independently computed.
+        assertEquals("aufeq4", CryptoService.deriveLegacyTripcode(knownRawPubKey))
     }
 
     @Test
@@ -45,9 +54,22 @@ class CryptoDerivationTest {
         val a = CryptoService.deriveTripcode(knownRawPubKey)
         val b = CryptoService.deriveTripcode(knownRawPubKey.copyOf())
         assertEquals("same key must yield same tripcode", a, b)
-        assertEquals("tripcode is exactly 6 chars", 6, a.length)
+        assertEquals("tripcode is exactly 8 chars", 8, a.length)
+        assertEquals(CryptoService.TRIPCODE_LENGTH, a.length)
         assertTrue("tripcode uses only the lowercase base32 alphabet",
             a.all { it in base32Alphabet })
+    }
+
+    @Test
+    fun isTripcodeOf_acceptsTheCurrentAndTheLegacyTag_only() {
+        assertTrue(CryptoService.isTripcodeOf(knownRawPubKey, "wdbuab42"))
+        assertTrue(CryptoService.isTripcodeOf(knownRawPubKey, "aufeq4"))
+        assertFalse(CryptoService.isTripcodeOf(knownRawPubKey, "wdbuab4"))
+        assertFalse(CryptoService.isTripcodeOf(knownRawPubKey, "aaaaaaaa"))
+        assertFalse(CryptoService.isTripcodeOf(knownRawPubKey, ""))
+        assertEquals("alice", CryptoService.stripIdentityTag("alice.wdbuab42", knownRawPubKey))
+        assertEquals("alice", CryptoService.stripIdentityTag("alice.aufeq4", knownRawPubKey))
+        assertEquals("alice.aaaaaaaa", CryptoService.stripIdentityTag("alice.aaaaaaaa", knownRawPubKey))
     }
 
     @Test

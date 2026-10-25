@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -9,16 +11,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -26,22 +32,40 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.noslop.app.data.ChatMessage
 import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
+fun PeerItem(
+    peer: Peer, 
+    lastMsg: ChatMessage?, 
+    viewModel: NoSlopViewModel,
+    onLongPress: (() -> Unit)? = null,
+    onNavigateToAuthorFeed: ((String, String) -> Unit)? = null
+) {
     var showContactCard by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { viewModel.selectChatPeer(peer.publicKeyB64) },
+            .combinedClickable(
+                onClick = { viewModel.selectChatPeer(peer.publicKeyB64) },
+                onLongClick = onLongPress
+            ),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, if (peer.isTrusted) AccentGreen.copy(alpha = 0.3f) else DestructiveRed.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, when {
+            peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.3f)
+            peer.isTrusted -> AccentGreen.copy(alpha = 0.3f)
+            else -> DestructiveRed.copy(alpha = 0.3f)
+        })
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -75,15 +99,18 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "${peer.handle}.${peer.tripcode}",
+                        text = peer.handle,
                         fontWeight = FontWeight.Bold,
                         color = TextLight,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 14.sp
                     )
-                    if (peer.isTrusted) {
+                    if (peer.isTrusted && peer.isTemporary) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted", tint = AccentGreen, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.AccessTime, contentDescription = "Temporary Contact".tr, tint = TemporaryAmber, modifier = Modifier.size(14.dp))
+                    } else if (peer.isTrusted) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted".tr, tint = AccentGreen, modifier = Modifier.size(14.dp))
                     }
                 }
 
@@ -99,13 +126,8 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
 
             // Actions
             Row {
-                if (!peer.isTrusted) {
-                    IconButton(onClick = { viewModel.togglePeerTrust(peer) }) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Trust Peer", tint = AccentGreen)
-                    }
-                }
                 IconButton(onClick = { showContactCard = true }) {
-                    Icon(Icons.Default.Info, contentDescription = "Contact Info", tint = TextMuted)
+                    Icon(Icons.Default.Info, contentDescription = "Contact Info".tr, tint = TextMuted)
                 }
             }
         }
@@ -116,7 +138,10 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
         ContactCardDialog(
             peer = peer,
             onDismiss = { showContactCard = false },
-            onDelete = { viewModel.removePeer(peer.publicKeyB64) }
+            onDelete = { viewModel.removePeer(peer.publicKeyB64) },
+            onConnect = if (!peer.isTrusted) { { viewModel.acceptHandshake(peer); showContactCard = false } } else null,
+            viewModel = viewModel,
+            onNavigateToAuthorFeed = onNavigateToAuthorFeed
         )
     }
 }
@@ -149,7 +174,11 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = peer.handle.take(1).uppercase(),
-                color = if (peer.isTrusted) AccentGreen else TextMuted,
+                color = when {
+                    peer.isTrusted && peer.isTemporary -> TemporaryAmber
+                    peer.isTrusted -> AccentGreen
+                    else -> TextMuted
+                },
                 fontWeight = FontWeight.Bold,
                 fontSize = (size / 2.2).sp
             )
@@ -157,37 +186,299 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * D10b: whether this contact is verified in person, and their safety fingerprint (C11) on request.
+ * A contact is verified in person when one of you scanned the other's QR code with the camera and the
+ * other approved (see NoSlopRepository.acceptConnectionRequest). The mark holds only while the stored
+ * fingerprint equals the current one; after a key change it shows as changed until the next scan.
+ */
 @Composable
-private fun ContactCardDialog(
+fun SafetyFingerprintPanel(peer: Peer, fingerprint: String) {
+    val stored = peer.verifiedFingerprint
+    val isVerified = stored != null && stored == fingerprint
+    val isStale = stored != null && stored != fingerprint
+    var showKeys by remember(peer.publicKeyB64) { mutableStateOf(false) }
+
+    Spacer(modifier = Modifier.height(16.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PrimaryBlack)
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            when {
+                isVerified -> {
+                    Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Verified in person".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                }
+                isStale -> {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Changed since you verified it".tr, color = DestructiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                }
+                else -> Text("Not verified in person".tr, color = TextMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            }
+            TextButton(onClick = { showKeys = !showKeys }) {
+                Text(if (showKeys) "Hide keys".tr else "Compare keys".tr, color = AccentGreen, fontSize = 12.sp)
+            }
+        }
+        if (!isVerified) {
+            Text(
+                text = "Scan each other's QR code with the camera when you meet to verify.".tr,
+                color = TextMuted,
+                fontSize = 11.sp
+            )
+        }
+        if (showKeys) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Safety Fingerprint".tr,
+                color = TextMuted,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+            Text(
+                text = fingerprint,
+                color = TextLight,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Their own ID card shows the same fingerprint. The first two groups are the check code.".tr,
+                color = TextMuted,
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+/**
+ * D10b: who sent a connection request, for the user to compare before accepting: name.tag (the tag is
+ * derived from their key), the check code, a note when they scanned our QR code with the camera
+ * (accepting then verifies them in person), and a warning when a contact already has this name.
+ */
+@Composable
+fun ConnectionRequestIdentity(peer: Peer, viewModel: NoSlopViewModel) {
+    val peers by viewModel.peers.collectAsState()
+    val checkCode = remember(peer.publicKeyB64, peer.encPublicKeyB64) {
+        com.noslop.app.crypto.CryptoService.deriveCheckCode(peer.publicKeyB64, peer.encPublicKeyB64)
+    }
+    val fromScan by produceState(initialValue = false, peer.publicKeyB64) {
+        value = viewModel.requestCameFromScan(peer.publicKeyB64)
+    }
+    val sameName = remember(peers, peer.handle, peer.publicKeyB64) {
+        com.noslop.app.data.sameNameContact(peers, peer.handle, peer.publicKeyB64)
+    }
+    val name = com.noslop.app.data.handleWithoutTag(peer.handle)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = if (peer.tripcode.isNotBlank()) "$name.${peer.tripcode}" else name,
+            color = AccentGreen,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 16.sp
+        )
+        if (checkCode != null) {
+            Text(
+                text = "Check code: {code}".tr.replace("{code}", checkCode),
+                color = TextLight,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Ask them to read the name and check code from their own ID card, in person or over a chat you already trust. Accept only if both match.".tr,
+            color = TextMuted,
+            fontSize = 11.sp
+        )
+        if (fromScan) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "They scanned your QR code with their camera. If the check code matches, accepting marks them as verified in person.".tr,
+                color = AccentGreen,
+                fontSize = 12.sp
+            )
+        }
+        if (sameName != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "You already have a contact named {name}. If this is meant to be the same person, compare the check code with them before you continue.".tr
+                    .replace("{name}", "${com.noslop.app.data.handleWithoutTag(sameName.handle)}.${sameName.tripcode}"),
+                color = DestructiveRed,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun PeerMeshContentList(
+    posts: List<com.noslop.app.data.MeshPost>,
+    onPostClick: (com.noslop.app.data.MeshPost) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (posts.isEmpty()) return
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Mesh Broadcasts ({count})".tr.replace("{count}", posts.size.toString()),
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(posts, key = { it.id }) { post ->
+                val thumbB64 = post.thumbnailB64
+                val thumbBitmap = remember(thumbB64) {
+                    if (thumbB64 != null) {
+                        try {
+                            val bytes = android.util.Base64.decode(thumbB64, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        } catch (_: Exception) { null }
+                    } else null
+                }
+
+                val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SurfaceDark.copy(alpha = 0.8f))
+                        .border(1.dp, BorderSubtle.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .clickable { onPostClick(post) }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(PrimaryBlack),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (thumbBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = thumbBitmap,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else if (!post.clearnetThumbnailUrl.isNullOrBlank()) {
+                            coil.compose.AsyncImage(
+                                model = post.clearnetThumbnailUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else {
+                            val icon = if (effectiveMediaType == "video") Icons.Default.PlayArrow else Icons.Default.Info
+                            Icon(icon, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        val rawText = post.clearnetTitle?.takeIf { it.isNotBlank() }
+                            ?: post.content.takeIf { it.isNotBlank() }
+                            ?: "Mesh Broadcast".tr
+                        val cleanLine = rawText.lines().joinToString(" ").trim()
+                        val annotatedContent = remember(cleanLine) {
+                            com.noslop.app.util.MarkdownUtils.parseMarkdown(cleanLine)
+                        }
+                        Text(
+                            text = annotatedContent,
+                            color = TextLight,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(post.timestamp))
+                        Text(
+                            text = dateStr,
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ContactCardDialog(
     peer: Peer,
     onDismiss: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: (() -> Unit)? = null,
+    onConnect: (() -> Unit)? = null,
+    viewModel: NoSlopViewModel? = null,
+    onNavigateToAuthorFeed: ((String, String) -> Unit)? = null
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceDark,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, BorderSubtle)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Large Avatar
+            Text(
+                text = "User Profile".tr,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+            val effectiveDonationUrl = if (peer.publicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+                peer.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+            } else {
+                peer.fundMeLink?.takeIf { it.isNotBlank() }
+            }
+
+            // Large Avatar with Donation & Online Badges
+            Box(modifier = Modifier.size(96.dp)) {
                 Box(
                     modifier = Modifier
-                        .size(96.dp)
+                        .fillMaxSize()
                         .clip(RoundedCornerShape(16.dp))
                         .border(
                             2.dp,
-                            if (peer.isTrusted) AccentGreen.copy(alpha = 0.5f) else BorderSubtle,
+                            when {
+                                peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
+                                peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
+                                else -> BorderSubtle
+                            },
                             RoundedCornerShape(16.dp)
                         )
                 ) {
@@ -196,90 +487,168 @@ private fun ContactCardDialog(
                         size = 96,
                         modifier = Modifier.fillMaxSize()
                     )
-
-                    // Online indicator
-                    if (peer.isTrusted && peer.isOnline) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = 4.dp, y = 4.dp)
-                                .size(18.dp)
-                                .clip(CircleShape)
-                                .background(AccentGreen)
-                                .border(3.dp, SurfaceDark, CircleShape)
-                        )
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                // Online indicator
+                if (peer.isTrusted && peer.isOnline) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 4.dp, y = 4.dp)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(AccentGreen)
+                            .border(3.dp, SurfaceDark, CircleShape)
+                    )
+                }
 
-                // Handle + Tripcode
-                Text(
-                    text = peer.handle,
-                    fontWeight = FontWeight.Bold,
-                    color = TextLight,
-                    fontSize = 22.sp
-                )
+                // Donation icon on top right corner of avatar
+                if (peer.isCreator && effectiveDonationUrl != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = AccentGreen,
+                        border = BorderStroke(2.dp, SurfaceDark),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 6.dp, y = (-6).dp)
+                            .size(28.dp)
+                            .clickable { activeDonationUrl = effectiveDonationUrl }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            var cleanHandle = peer.handle
+            if (cleanHandle.endsWith(".${peer.tripcode}")) cleanHandle = cleanHandle.removeSuffix(".${peer.tripcode}")
+            val fullName = if (peer.tripcode.isNotBlank()) "${cleanHandle}.${peer.tripcode}" else cleanHandle
+
+            Text(
+                text = if (peer.isTrusted) fullName else cleanHandle,
+                fontWeight = FontWeight.Bold,
+                color = TextLight,
+                fontSize = 20.sp,
+                fontFamily = FontFamily.Monospace
+            )
+
+            if (!peer.bio.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = ".${peer.tripcode}",
-                    fontFamily = FontFamily.Monospace,
+                    text = peer.bio,
                     color = TextMuted,
-                    fontSize = 13.sp
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 )
+            }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Trust badge
-                if (peer.isTrusted) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(AccentGreen.copy(alpha = 0.1f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = AccentGreen,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Trusted Contact",
-                            color = AccentGreen,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DestructiveRed.copy(alpha = 0.1f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = DestructiveRed,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Pending Trust",
-                            color = DestructiveRed,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+            if (peer.isCreator) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    if (effectiveDonationUrl != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = AccentGreen.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, AccentGreen),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clickable { activeDonationUrl = effectiveDonationUrl }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(20.dp))
+            if (activeDonationUrl != null) {
+                com.noslop.app.ui.ArticleWebViewDialog(
+                    url = activeDonationUrl!!,
+                    title = "${"Support".tr} ${peer.handle}",
+                    onDismiss = { activeDonationUrl = null }
+                )
+            }
 
-                // Onion address (truncated)
+            Spacer(modifier = Modifier.height(8.dp))
+            // Trust badge
+            if (peer.isTrusted && peer.isTemporary) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(TemporaryAmber.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.AccessTime,
+                        contentDescription = null,
+                        tint = TemporaryAmber,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Temporary Contact".tr,
+                        color = TemporaryAmber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (peer.isTrusted) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AccentGreen.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = AccentGreen,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Trusted Contact".tr,
+                        color = AccentGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DestructiveRed.copy(alpha = 0.1f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = DestructiveRed,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Pending Trust".tr,
+                        color = DestructiveRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Onion address (truncated, shown only when not connected)
+            if (!peer.isTrusted && peer.onionAddress.isNotBlank()) {
+                Spacer(modifier = Modifier.height(16.dp))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -288,7 +657,7 @@ private fun ContactCardDialog(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "ONION ADDRESS",
+                        text = "ONION ADDRESS".tr,
                         color = TextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -296,7 +665,7 @@ private fun ContactCardDialog(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = peer.onionAddress.take(24) + "...",
+                        text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
                         color = TextLight.copy(alpha = 0.7f),
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
@@ -304,43 +673,122 @@ private fun ContactCardDialog(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+            }
 
-                Spacer(modifier = Modifier.height(24.dp))
+            // D10b: a pending request shows what to compare before accepting it.
+            if (peer.relationship == com.noslop.app.data.PeerRelationship.INCOMING_PENDING && viewModel != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                ConnectionRequestIdentity(peer = peer, viewModel = viewModel)
+            }
 
-                // Action Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Close button
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, BorderSubtle),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
-                    ) {
-                        Text("Close", fontWeight = FontWeight.Bold)
+            // D10/D10b: verified in person or not, and the safety fingerprint (C11) on request.
+            val fingerprint = remember(peer.publicKeyB64, peer.encPublicKeyB64) {
+                com.noslop.app.crypto.CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, peer.encPublicKeyB64)
+            }
+            if (fingerprint != null && peer.relationship != com.noslop.app.data.PeerRelationship.INCOMING_PENDING) {
+                SafetyFingerprintPanel(peer = peer, fingerprint = fingerprint)
+            }
+
+            val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+            // D10b: by key only. Anyone can post under the same handle.
+            val userPosts = remember(authorPosts, peer.publicKeyB64) {
+                authorPosts.filter { post -> !post.isOrphaned && post.authorPublicKeyB64 == peer.publicKeyB64 }
+            }
+
+            if (userPosts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                PeerMeshContentList(
+                    posts = userPosts,
+                    onPostClick = { clickedPost ->
+                        onDismiss()
+                        if (onNavigateToAuthorFeed != null) {
+                            onNavigateToAuthorFeed(peer.publicKeyB64, clickedPost.id)
+                        } else {
+                            viewModel?.viewAuthorPosts(peer.publicKeyB64, clickedPost.id)
+                        }
                     }
+                )
+            }
 
-                    // Delete button
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Action Buttons
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (!peer.isTrusted && onConnect != null) {
                     Button(
-                        onClick = { showDeleteConfirmation = true },
-                        modifier = Modifier.weight(1f),
+                        onClick = { onConnect?.invoke() },
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Connect".tr, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (peer.isTrusted && onDelete != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { showDeleteConfirmation = true },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DestructiveRed.copy(alpha = 0.15f),
+                                contentColor = DestructiveRed
+                            )
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Remove".tr, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel?.banNode(peer.publicKeyB64, peer.handle)
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DestructiveRed.copy(alpha = 0.15f),
+                                contentColor = DestructiveRed
+                            )
+                        ) {
+                            Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel?.banNode(peer.publicKeyB64, peer.handle)
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = DestructiveRed.copy(alpha = 0.15f),
                             contentColor = DestructiveRed
                         )
                     ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Remove", fontWeight = FontWeight.Bold)
+                        Text("Ban Node 🚫".tr, fontWeight = FontWeight.Bold)
                     }
+                }
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+                ) {
+                    Text("Close".tr, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -362,7 +810,7 @@ private fun ContactCardDialog(
             },
             title = {
                 Text(
-                    "Are you sure?",
+                    "Are you sure?".tr,
                     fontWeight = FontWeight.Bold,
                     color = TextLight,
                     textAlign = TextAlign.Center
@@ -370,7 +818,7 @@ private fun ContactCardDialog(
             },
             text = {
                 Text(
-                    "You are about to remove ${peer.handle}.${peer.tripcode} from your contacts. " +
+                    "You are about to remove ${peer.handle} from your contacts. " +
                             "All messages with this peer will be lost. This cannot be undone.",
                     color = TextMuted,
                     textAlign = TextAlign.Center,
@@ -381,8 +829,8 @@ private fun ContactCardDialog(
                 Button(
                     onClick = {
                         showDeleteConfirmation = false
-                        onDelete()
-                        // onDismiss for the contact card is implicit since the peer gets removed
+                        onDelete?.invoke()
+                        onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = DestructiveRed,
@@ -390,7 +838,7 @@ private fun ContactCardDialog(
                     ),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Yes, Remove", fontWeight = FontWeight.Bold)
+                    Text("Yes, Remove".tr, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -400,7 +848,7 @@ private fun ContactCardDialog(
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                 ) {
-                    Text("Cancel", fontWeight = FontWeight.Bold)
+                    Text("Cancel".tr, fontWeight = FontWeight.Bold)
                 }
             }
         )

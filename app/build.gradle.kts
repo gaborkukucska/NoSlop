@@ -5,29 +5,88 @@ plugins {
     alias(libs.plugins.google.devtools.ksp)
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+base {
+    archivesName.set("NoSlop")
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("androidx.concurrent:concurrent-futures:1.2.0")
+        force("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+    }
+}
+
 android {
     namespace = "com.noslop.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.noslop.app"
+        applicationId = "com.noslop.me.app"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.1-alpha"
+        targetSdk = 36
+        versionCode = 71
+        versionName = "0.7.1-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
+
+        // NOSLOP_PROXY_SECRET_V1
+        // The API proxy endpoint and its HMAC key. Set NOSLOP_PROXY_URL and
+        // NOSLOP_PROXY_SECRET in ~/.gradle/gradle.properties so the shipped
+        // values are not committed. The defaults preserve current behaviour for
+        // anyone building from a clean clone.
+        //
+        // NOSLOP_PROXY_LEGACY_SECRET controls whether the raw secret is still
+        // sent as an X-Proxy-Secret header. Defaults to false.
+        buildConfigField(
+            "String",
+            "PROXY_URL",
+            "\"" + (project.findProperty("NOSLOP_PROXY_URL") ?: "https://yt-proxy.megadreamland.workers.dev") + "\""
+        )
+        buildConfigField(
+            "String",
+            "PROXY_SECRET",
+            "\"" + (project.findProperty("NOSLOP_PROXY_SECRET") ?: "") + "\""
+        )
+        buildConfigField(
+            "boolean",
+            "PROXY_SEND_LEGACY_SECRET",
+            (project.findProperty("NOSLOP_PROXY_LEGACY_SECRET") ?: "false").toString()
+        )
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            applicationId = "com.noslop.me.app"
+            buildConfigField("boolean", "ENABLE_IN_APP_UPDATER", "false")
+        }
+        create("github") {
+            dimension = "distribution"
+            applicationId = "com.noslop.app"
+            buildConfigField("boolean", "ENABLE_IN_APP_UPDATER", "true")
+        }
     }
     
-    // Release signing is only wired when the keystore props are supplied (e.g. -PNOSLOP_STORE_FILE=… or in
-    // ~/.gradle/gradle.properties). Reading them eagerly with project.property() threw on every Gradle
-    // invocation — including unrelated tasks like :composeApp:runHub — so this is gated on their presence.
-    val hasSigning = project.findProperty("NOSLOP_STORE_FILE") != null
-    if (hasSigning) {
-        signingConfigs {
+    // NOSLOP_CONDITIONAL_SIGNING_V1
+    // project.property() throws when the property is absent, and signingConfigs is
+    // evaluated during the configuration phase — so a clone without the keystore
+    // properties failed on EVERY task, including assembleDebug and test. Configure
+    // the release signing config only when all four properties are present.
+    val hasReleaseSigning = listOf(
+        "NOSLOP_STORE_FILE", "NOSLOP_STORE_PASSWORD",
+        "NOSLOP_KEY_ALIAS", "NOSLOP_KEY_PASSWORD"
+    ).all { project.hasProperty(it) }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(project.property("NOSLOP_STORE_FILE") as String)
                 storePassword = project.property("NOSLOP_STORE_PASSWORD") as String
@@ -39,13 +98,29 @@ android {
 
     buildTypes {
         release {
-            if (hasSigning) signingConfig = signingConfigs.getByName("release")
+            // Unsigned when the keystore properties are absent; assembleRelease then
+            // produces an unsigned APK instead of failing configuration outright.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Local bind port — Tor maps external 9999 → this port.
+            buildConfigField("int", "MESH_LISTEN_PORT", "9999")
+            buildConfigField("int", "MEDIA_PROXY_PORT", "8080")
+            // Tor proxy ports
+            buildConfigField("int", "TOR_SOCKS_PORT", "9050")
+            buildConfigField("int", "TOR_CONTROL_PORT", "9051")
+            
+            val showSensitiveLogs = System.getenv("NOSLOP_SHOW_SENSITIVE_LOGS") == "true"
+            buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", showSensitiveLogs.toString())
         }
         debug {
             isDebuggable = true
@@ -56,6 +131,15 @@ android {
             // Release build instead of overwriting it.
             applicationIdSuffix = ".debug"
             resValue("string", "app_name", "NoSlop Debug")
+            // Different local bind ports so debug and release can run side-by-side.
+            // Tor will map external 9999 → local 9998 for this build.
+            buildConfigField("int", "MESH_LISTEN_PORT", "9998")
+            buildConfigField("int", "MEDIA_PROXY_PORT", "8081")
+            // Tor proxy ports for debug build
+            buildConfigField("int", "TOR_SOCKS_PORT", "9052")
+            buildConfigField("int", "TOR_CONTROL_PORT", "9053")
+            
+            buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", "true")
         }
     }
 
@@ -73,6 +157,12 @@ android {
         buildConfig = true
     }
 
+    sourceSets {
+        getByName("androidTest") {
+            assets.srcDirs(files("$projectDir/schemas"))
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -81,6 +171,10 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
+    }
+
+    lint {
+        lintConfig = file("lint.xml")
     }
 
     testOptions {
@@ -109,6 +203,7 @@ dependencies {
 
     // --- Core Android ---
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -121,6 +216,9 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    testImplementation("androidx.room:room-testing:2.7.0")
+    androidTestImplementation("androidx.room:room-testing:2.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 
     // --- Security: EncryptedSharedPreferences for private key storage ---
     implementation(libs.androidx.security.crypto)
@@ -132,27 +230,34 @@ dependencies {
     // --- Networking: OkHttp with SOCKS5 proxy support ---
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
-    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
+    implementation(libs.okhttp.dnsoverhttps)
     implementation("com.google.code.gson:gson:2.10.1")
+    // NOSLOP_EXIF_ORIENTATION_V1 — BitmapFactory ignores EXIF orientation, so
+    // every photo the app re-encoded came out sideways. See ui/ExifUtils.kt.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // --- Image loading ---
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
 
     // --- Media (ExoPlayer) ---
-    implementation("androidx.media3:media3-exoplayer:1.3.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
-    implementation("androidx.media3:media3-exoplayer-dash:1.3.1")
-    implementation("androidx.media3:media3-ui:1.3.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    // E5 (review C24/D11): was 1.3.1. Keep every Media3 artifact on one version (ReleaseBuildRulesE5Test).
+    // 1.4 changed the LoadControl interface (see AdaptiveTorLoadControl); 1.9 raised minSdk to 23.
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-transformer:1.11.1")
+    implementation("androidx.media3:media3-effect:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
 
     // --- Bouncy Castle ---
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78.1")
 
+    // --- Lazysodium ---
+
     // --- Tor ---
     implementation("info.guardianproject:tor-android:0.4.8.16")
-    implementation("info.guardianproject:jtorctl:0.4.5.7")
-    implementation("info.guardianproject.netcipher:netcipher:2.1.0")
 
     // --- CameraX / Accompanist permissions for QR code / scanning support if needed ---
     implementation(libs.androidx.camera.core)
@@ -167,9 +272,15 @@ dependencies {
     // --- WebView Proxy Support ---
     implementation("androidx.webkit:webkit:1.11.0")
 
-    // --- QR Scanning and QR Code Generation ---
-    implementation(libs.google.mlkit.barcode.scanning)
+    // --- QR Scanning and QR Code Generation (ZXing only, tracker-free) ---
     implementation(libs.zxing.core)
+
+    // --- SSH Client ---
+    // NOSLOP_JSCH_FORK_V1 — com.jcraft:jsch has been unmaintained since 2018 and
+    // supports neither rsa-sha2-* nor ssh-ed25519 host keys, so Hub deployment
+    // failed key exchange against any current OpenSSH server. This fork is a
+    // drop-in replacement and keeps the com.jcraft.jsch package names.
+    implementation("com.github.mwiede:jsch:0.2.17")
 
     // --- Testing ---
     testImplementation(libs.junit)

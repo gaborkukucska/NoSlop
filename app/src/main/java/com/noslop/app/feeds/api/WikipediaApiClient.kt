@@ -1,0 +1,144 @@
+// FILE: app/src/main/java/com/noslop/app/feeds/api/WikipediaApiClient.kt
+package com.noslop.app.feeds.api
+
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.noslop.app.data.FeedItem
+import com.noslop.app.debug.Logger
+import okhttp3.Request
+
+/**
+ * Wikipedia full-text search — keyless.
+ *
+ * NOSLOP_SEARCH_SOURCES_V1
+ *
+ * Added because Search Articles had no source able to answer an arbitrary
+ * query: NewsAPI and Guardian both require keys, Reddit 403s through the proxy,
+ * and the local RSS corpus only covers the feeds the user happens to follow.
+ *
+ * Wikipedia covers people, places and concepts broadly, needs no key, has no
+ * meaningful rate limit for this volume, and is a genuinely good answer for the
+ * kind of query that was returning nothing.
+ *
+ * Uses the extracts API so each result carries a real summary rather than a
+ * search snippet full of markup.
+ */
+object WikipediaApiClient {
+
+    private const val TAG = "WIKIPEDIA_API"
+    private val gson = com.noslop.app.util.Json.gson
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+
+    suspend fun searchArticles(
+        query: String,
+        sourceId: String = "api-wikipedia-search",
+        limit: Int = 12,
+        language: String = "en"
+    ): List<FeedItem> = searchArticlesPage(query, 1, sourceId, limit, language).items
+
+    /** E5s2: one page of [searchArticles] (pages numbered from 1; Wikipedia pages by result offset). */
+    suspend fun searchArticlesPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-wikipedia-search",
+        limit: Int = 12,
+        language: String = "en"
+    ): SourcePage {
+        if (query.isBlank()) return SourcePage.NONE
+
+        return try {
+            val q = java.net.URLEncoder.encode(query, "UTF-8")
+            // generator=search feeds the matched pages straight into prop=extracts,
+            // so one request gets both the hit list and readable summaries.
+            val url = "https://$language.wikipedia.org/w/api.php?action=query" +
+                "&generator=search&gsrsearch=$q&gsrlimit=$limit&gsrnamespace=0" +
+                (if (page > 1) "&gsroffset=${(page - 1) * limit}" else "") +
+                "&prop=extracts|pageimages|info&exintro=1&explaintext=1&exlimit=max" +
+                "&piprop=thumbnail|original&pithumbsize=800&pilicense=any&inprop=url&format=json&formatversion=2"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .build()
+
+            val body = client.newCall(request).execute().use { res ->
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Wikipedia returned ${res.code}")
+                    return SourcePage.failed()
+                }
+                res.body?.string()
+            } ?: return SourcePage.failed()
+
+            val root = gson.fromJson(body, JsonObject::class.java)
+            val pages = root.getAsJsonObject("query")?.getAsJsonArray("pages")
+                ?: return SourcePage.END
+
+            val items = mutableListOf<FeedItem>()
+            for (element in pages) {
+                try {
+                    val obj = element.asJsonObject
+                    val pageId = obj.get("pageid")?.takeIf { !it.isJsonNull }?.asString ?: continue
+                    val title = obj.str("title") ?: continue
+                    val extract = obj.str("extract")
+                    val pageUrl = obj.str("fullurl")
+                        ?: "https://$language.wikipedia.org/?curid=$pageId"
+
+                    var thumb = try {
+                        obj.getAsJsonObject("thumbnail")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                            ?: obj.getAsJsonObject("original")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                    } catch (_: Exception) { null }
+
+                    // Fallback to Wikipedia REST summary API if thumbnail is still missing
+                    if (thumb.isNullOrBlank()) {
+                        try {
+                            val encTitle = java.net.URLEncoder.encode(title.replace(" ", "_"), "UTF-8")
+                            val summaryUrl = "https://$language.wikipedia.org/api/rest_v1/page/summary/$encTitle"
+                            val sumReq = Request.Builder()
+                                .url(summaryUrl)
+                                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                                .build()
+                            client.newCall(sumReq).execute().use { sumRes ->
+                                if (sumRes.isSuccessful) {
+                                    val sumBody = sumRes.body?.string()
+                                    if (sumBody != null) {
+                                        val sumObj = gson.fromJson(sumBody, JsonObject::class.java)
+                                        thumb = sumObj.getAsJsonObject("thumbnail")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                                            ?: sumObj.getAsJsonObject("originalimage")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    items.add(
+                        FeedItem(
+                            id = "wikipedia_$pageId",
+                            sourceId = sourceId,
+                            title = title,
+                            url = pageUrl,
+                            author = "Wikipedia",
+                            excerpt = extract?.take(400),
+                            thumbnailUrl = thumb,
+                            // Undated on purpose: an encyclopaedia article has no
+                            // meaningful publication date, and stamping it "now"
+                            // is the bug that floated stale content to the top.
+                            publishedAt = 0L,
+                            mediaUrl = null,
+                            mediaType = null,   // article
+                            apiSource = "wikipedia"
+                        )
+                    )
+                } catch (e: Exception) {
+                    Logger.debug(TAG, "Skipping Wikipedia entry: ${e.message}")
+                }
+            }
+
+            Logger.info(TAG, "Wikipedia '${Logger.redact(query)}': ${items.size} articles" + pageSuffix(page))
+            // Wikipedia names the offset of the next page in "continue" while there is one.
+            SourcePage(items, hasMore = root.getAsJsonObject("continue")?.has("gsroffset") == true)
+        } catch (e: Exception) {
+            Logger.error(TAG, "Wikipedia request failed", e.message)
+            SourcePage.failed()
+        }
+    }
+}

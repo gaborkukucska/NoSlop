@@ -1,0 +1,456 @@
+// FILE: app/src/main/java/com/noslop/app/mesh/MeshPacketVerifier.kt
+package com.noslop.app.mesh
+
+import com.noslop.app.crypto.CryptoService
+import com.noslop.app.debug.Logger
+
+/**
+ * Stateless Ed25519 verification for mesh packets, callable BEFORE a packet is
+ * relayed.
+ *
+ * --- NOSLOP_VERIFY_BEFORE_FORWARD_V1 ---
+ *
+ * WHY THIS EXISTS
+ * Every signature check in the app used to live inside a per-type handler, and
+ * handlers run AFTER GossipService.processIncoming() has already forwarded the
+ * packet to every trusted peer. A node therefore relayed forgeries across its
+ * whole neighbourhood and only then discovered they were forgeries. This class
+ * lets the gossip layer make that decision first.
+ *
+ * WHAT IT IS NOT
+ * It is not a replacement for the handler checks. Those stay, and they remain
+ * the authority: several of them apply additional rules this class deliberately
+ * cannot (author-matches-stored-post on EDIT_POST, admin-matches-stored-group on
+ * GROUP_DELETE, membership on group messages). This is a cheaper gate in front
+ * of them, and the redundancy is the point — a reconstruction mistake here
+ * costs relay reach for one packet type instead of breaking the app.
+ *
+ * THE RECONSTRUCTION RISK, STATED PLAINLY
+ * The strings below are copies of the ones in the handlers, because the signed
+ * payload format is a `|`-delimited concatenation with no canonical encoder to
+ * share. If a handler's format changes and this file is not updated in the same
+ * commit, valid packets start being dropped. Two mitigations: [enforce] turns
+ * dropping off without a code change, and MeshPacketVerifierTest restates every
+ * format independently so a one-sided edit fails the build.
+ *
+ * The real fix is to collapse both copies onto one canonical, injection-safe
+ * encoder — see FINDINGS.md #4, which also covers why `|` concatenation over
+ * user-controlled free text is a signature-canonicalisation bug in its own right.
+ */
+object MeshPacketVerifier {
+
+    private const val TAG = "SIGVERIFY"
+
+    enum class Verdict {
+        /** Signature reconstructs against the claimed signer. */
+        VALID,
+
+        /** A signature was expected and present, and it does not verify. Drop. */
+        INVALID,
+
+        /**
+         * Nothing checkable at this layer: no envelope signature by design
+         * (TYPING, READ_RECEIPT), authenticated elsewhere (MESSAGE via AEAD,
+         * SYNC_* per inner item), or needs stored state to resolve the signer
+         * (GROUP_UPDATE, GROUP_SYNC). Also returned for a malformed or absent
+         * payload, so that rejecting junk stays the handler's job and this class
+         * never turns a parse failure into a mesh-wide drop.
+         */
+        UNVERIFIABLE
+    }
+
+    /**
+     * Kill switch. When false, [Verdict.INVALID] is still computed and logged
+     * but callers are expected to let the packet through. Flip this if a format
+     * drift ever starts eating legitimate traffic; it is a rebuild, not a
+     * setting, on purpose — this should be a deliberate act.
+     */
+    @Volatile
+    var enforce: Boolean = true
+
+    /** What was signed, and by whom, for the types we can check statelessly. */
+    private data class Signed(val payload: String, val signature: String?, val signerPublicKeyB64: String?)
+
+    fun verify(packet: NetworkPacket): Verdict {
+        // S14: Check for known structural violations before describe to prevent relay bypass
+        if (packet.type == "POST") {
+            val p = packet.getPostPayload()
+            if (p != null) {
+                if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) {
+                    Logger.warn(TAG, "POST packet ${packet.id} has mismatched mediaId and mediaMetadata.id — INVALID")
+                    return Verdict.INVALID
+                }
+                if (p.mediaId != null && p.mediaMetadata == null) {
+                    Logger.warn(TAG, "POST packet ${packet.id} has mediaId without mediaMetadata — INVALID")
+                    return Verdict.INVALID
+                }
+            }
+        } else if (packet.type == "EDIT_POST") {
+            val p = packet.getEditPostPayload()
+            if (p != null) {
+                if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) {
+                    Logger.warn(TAG, "EDIT_POST packet ${packet.id} has mismatched mediaId and mediaMetadata.id — INVALID")
+                    return Verdict.INVALID
+                }
+            }
+        }
+
+        // Any malformed field from a hostile peer must produce UNVERIFIABLE, not
+        // an exception that kills the receive loop. Gson will happily leave a
+        // non-null Kotlin field null when the wire key does not match.
+        val signed = try {
+            describe(packet)
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Could not build signing payload for ${packet.type}: ${e.message}")
+            return Verdict.UNVERIFIABLE
+        } ?: return Verdict.UNVERIFIABLE
+
+        val signature = signed.signature
+        val signer = signed.signerPublicKeyB64
+        if (signature.isNullOrBlank() || signer.isNullOrBlank()) {
+            // A type we know should be signed, arriving without a signature, is
+            // not "unverifiable" — it is wrong. The handler would reject it too.
+            Logger.warn(TAG, "${packet.type} packet ${packet.id} is missing its signature or signer")
+            return Verdict.INVALID
+        }
+
+        return try {
+            if (CryptoService.verify(signed.payload, signature, signer)) Verdict.VALID else Verdict.INVALID
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Verification threw for ${packet.type}: ${e.message}")
+            Verdict.UNVERIFIABLE
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Payload reconstruction. Each block mirrors exactly one handler. The
+    // handler and line are named so the pair can be kept in step.
+    // -----------------------------------------------------------------------
+
+    private fun describe(packet: NetworkPacket): Signed? = when (packet.type) {
+
+        // --- PostPacketHandler ---
+        "POST" -> packet.getPostPayload()?.let { p ->
+            if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) return@let null
+            if (p.mediaId != null && p.mediaMetadata == null) return@let null
+
+            val mediaHash = p.mediaMetadata?.sha256
+            val encCanonicalV2 = if (mediaHash != null) {
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
+                    p.privacy, p.mediaId, p.clearnetUrl, mediaHash
+                )
+            } else null
+            val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
+                p.privacy, p.mediaId, p.clearnetUrl
+            )
+            if (encCanonicalV2 != null && p.signature != null && CryptoService.verify(encCanonicalV2, p.signature, p.authorId)) {
+                Signed(encCanonicalV2, p.signature, p.authorId)
+            } else {
+                Signed(encCanonical, p.signature, p.authorId)
+            }
+        }
+
+        "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
+            if (p.mediaMetadata != null && p.mediaId != p.mediaMetadata.id) return@let null
+
+            val effectivePrivacy = p.privacy ?: "public"
+            val mediaHash = p.mediaMetadata?.sha256
+            val encCanonicalV2 = if (mediaHash != null) {
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
+                    effectivePrivacy, p.mediaId, p.clearnetUrl, mediaHash
+                )
+            } else null
+            val encCanonical = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64,
+                effectivePrivacy, p.mediaId, p.clearnetUrl
+            )
+            if (encCanonicalV2 != null && p.signature != null && CryptoService.verify(encCanonicalV2, p.signature, p.authorId)) {
+                Signed(encCanonicalV2, p.signature, p.authorId)
+            } else {
+                Signed(encCanonical, p.signature, p.authorId)
+            }
+        }
+
+        "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+        }
+
+        // --- CommentPacketHandler ---
+        "COMMENT" -> packet.getCommentPayload()?.let { p ->
+            val mediaHash = p.comment.mediaMetadata?.sha256
+            val encV2 = if (mediaHash != null) {
+                com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString(), p.comment.authorAvatarB64, mediaHash
+                )
+            } else null
+            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString(), p.comment.authorAvatarB64
+            )
+            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.comment.id, p.comment.content, p.comment.timestamp.toString()
+            )
+            var pipePayload = "${p.postId}|${p.comment.id}|${p.comment.content}|${p.comment.timestamp}"
+            if (p.comment.authorAvatarB64 != null) pipePayload += "|${p.comment.authorAvatarB64}"
+
+            val sig = p.comment.signature
+            val signer = p.comment.authorId
+            val matchedPayload = when {
+                sig != null && encV2 != null && com.noslop.app.crypto.CryptoService.verify(encV2, sig, signer) -> encV2
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipePayload, sig, signer) -> pipePayload
+                else -> encWithAvatar
+            }
+            Signed(matchedPayload, sig, signer)
+        }
+
+        "EDIT_COMMENT" -> packet.getEditCommentPayload()?.let { p ->
+            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.commentId, p.content, p.timestamp.toString(), p.authorAvatarB64
+            )
+            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.commentId, p.content, p.timestamp.toString()
+            )
+            var pipePayload = "${p.postId}|${p.commentId}|${p.content}|${p.timestamp}"
+            if (p.authorAvatarB64 != null) pipePayload += "|${p.authorAvatarB64}"
+
+            val sig = p.signature
+            val signer = p.authorId
+            val matchedPayload = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encWithAvatar, sig, signer) -> encWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipePayload, sig, signer) -> pipePayload
+                else -> encWithAvatar
+            }
+            Signed(matchedPayload, sig, signer)
+        }
+
+        "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.commentId, p.authorId, p.timestamp.toString())
+            val pipe = "${p.postId}|${p.commentId}|${p.authorId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
+        }
+
+        // --- ReactionPacketHandler ---
+        "REACTION" -> packet.getReactionPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.reactionType, p.authorId, p.timestamp.toString())
+            val pipe = "${p.postId}|${p.reactionType}|${p.authorId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(enc, sig, signer)) enc else pipe
+            Signed(matched, sig, signer)
+        }
+
+        "VOTE" -> packet.getVotePayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.voteType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+        }
+
+        "COMMENT_VOTE" -> packet.getCommentVotePayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.commentId, p.voteType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+        }
+
+        "CHAT_REACTION" -> packet.getChatReactionPayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.messageId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+        }
+
+        "COMMENT_REACTION" -> packet.getCommentReactionPayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.commentId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
+        }
+
+        // --- HandshakePacketHandler. These sign the ENVELOPE or payload. ---
+        "CONNECTION_REQUEST", "USER_HANDSHAKE" -> {
+            val p = if (packet.type == "CONNECTION_REQUEST") {
+                packet.getConnectionRequestPayload()
+            } else {
+                packet.getUserHandshakePayload()
+            }
+            p?.let {
+                val sig = packet.signature ?: it.signature
+                val signer = it.fromUserId
+                val nonce = it.requestNonce ?: it.inReplyToNonce ?: ""
+                val targetUser = it.targetUserId ?: packet.targetUserId ?: ""
+                val encPub = it.fromEncryptionPublicKey ?: ""
+
+                val v2Payload = com.noslop.app.crypto.CryptoService.canonicalHandshakePayloadV2(
+                    fromUserId = it.fromUserId,
+                    fromUsername = it.fromUsername,
+                    fromHomeNode = it.fromHomeNode,
+                    fromEncryptionPublicKey = encPub,
+                    targetUserId = targetUser,
+                    nonce = nonce,
+                    timestamp = it.timestamp,
+                    authorAvatarB64 = it.authorAvatarB64,
+                    bio = it.bio,
+                    intro = it.intro
+                )
+
+                val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString(),
+                    it.authorAvatarB64, it.bio.takeIf { b -> !b.isNullOrBlank() }
+                )
+                val encPayload4 = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString()
+                )
+                var pipePayload = "${it.fromUserId}|${it.fromUsername}|${it.fromHomeNode}|${it.timestamp}"
+                if (it.authorAvatarB64 != null) pipePayload += "|${it.authorAvatarB64}"
+                if (!it.bio.isNullOrBlank()) pipePayload += "|${it.bio}"
+
+                if (sig != null && CryptoService.verify(v2Payload, sig, signer)) {
+                    Signed(v2Payload, sig, signer)
+                } else if (sig != null && CryptoService.verify(pipePayload, sig, signer)) {
+                    Signed(pipePayload, sig, signer)
+                } else if (sig != null && CryptoService.verify(encPayload4, sig, signer)) {
+                    Signed(encPayload4, sig, signer)
+                } else {
+                    Signed(encPayload, sig, signer)
+                }
+            }
+        }
+
+        "CONNECTION_REJECTED" -> packet.getConnectionRejectedPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.fromUserId, p.timestamp.toString())
+            val pipe = "${p.fromUserId}|${p.timestamp}"
+            val sig = packet.signature ?: p.signature
+            val signer = p.fromUserId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
+        }
+
+        // S2 (round E2): v2 only; the signature covers the onion address (see HandshakePacketHandler).
+        "ANNOUNCE_PEER" -> packet.getAnnouncePeerPayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.canonicalAnnouncePeerV2(p.authorId, p.onionAddress, p.timestamp), p.signature, p.authorId)
+        }
+
+        "ANNOUNCE_DISCOVERABLE" -> packet.getAnnounceDiscoverablePayload()?.let { p ->
+            val full = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:" +
+                "${p.fundMeLink ?: ""}:${p.authorAvatarB64 ?: ""}:${p.bio ?: ""}:${p.timestamp}"
+            val noBio = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:" +
+                "${p.fundMeLink ?: ""}:${p.authorAvatarB64 ?: ""}:${p.timestamp}"
+            val simple = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:${p.timestamp}"
+            val pipe = "${p.authorId}|${p.handle}|${p.onionAddress}|${p.encPublicKey}|${p.isCreator}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(full, sig, signer) -> full
+                sig != null && com.noslop.app.crypto.CryptoService.verify(noBio, sig, signer) -> noBio
+                sig != null && com.noslop.app.crypto.CryptoService.verify(simple, sig, signer) -> simple
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer) -> pipe
+                else -> full
+            }
+            Signed(matched, sig, signer)
+        }
+
+        // Senders (MeshSocialRepository.broadcastIdentityUpdate / broadcastCreatorIdentityUpdate) sign
+        // the encodeForSigning form; HandshakePacketHandler.handleIdentityUpdate accepts it and the older
+        // pipe form (2026-10-09). This copy used to check the pipe form only, so every IDENTITY_UPDATE was
+        // INVALID here and dropped before reaching the handler.
+        "IDENTITY_UPDATE" -> packet.getIdentityUpdatePayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.userId, p.handle, p.timestamp.toString(), p.authorAvatarB64, p.bio
+            )
+            var pipe = "${p.userId}|${p.handle}|${p.timestamp}"
+            if (p.authorAvatarB64 != null) pipe += "|${p.authorAvatarB64}"
+            if (!p.bio.isNullOrBlank()) pipe += "|${p.bio}"
+            val sig = p.signature
+            val signer = p.userId
+            val matched = if (com.noslop.app.crypto.CryptoService.verify(enc, sig, signer)) enc else pipe
+            Signed(matched, sig, signer)
+        }
+
+        "USER_EXIT" -> packet.getUserExitPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.userId, p.timestamp.toString())
+            val pipe = "${p.userId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.userId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
+        }
+
+        "PEER_REMOVED" -> packet.getPeerRemovedPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.userId, p.timestamp.toString())
+            val pipe = "${p.userId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.userId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
+        }
+
+        "FOLLOW", "UNFOLLOW" -> packet.getFollowPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.followedPublicKeyB64, p.followerPublicKeyB64, p.timestamp.toString())
+            val pipe = "${p.followedPublicKeyB64}|${p.followerPublicKeyB64}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.followerPublicKeyB64
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(enc, sig, signer)) enc else pipe
+            Signed(matched, sig, signer)
+        }
+
+        "GROUP_INVITE" -> packet.getGroupInvitePayload()?.let { p ->
+            val candidates = (listOf(p.adminPublicKeyB64) + p.members).distinct()
+            val sortedMembers = p.members.sorted().joinToString(",")
+            val sortedDetails = canonicalMemberDetailsString(p.memberDetails)
+            val sortedHandles = canonicalMemberHandlesString(p.memberHandles)
+
+            for (candidate in candidates) {
+                if (candidate.isBlank()) continue
+                val encCanonical = canonicalGroupInvitePayload(
+                    p.groupId, p.title, p.adminPublicKeyB64, candidate, p.timestamp,
+                    sortedMembers, p.allowMemberInvites, p.allowMemberSelfRemove,
+                    p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey,
+                    sortedDetails, sortedHandles
+                )
+                if (CryptoService.verify(encCanonical, p.signature, candidate)) {
+                    return@let Signed(encCanonical, p.signature, candidate)
+                }
+
+                // U03: 7-field legacy invite ONLY permitted if admin self-signed AND all unsigned fields are empty
+                val unsignedFieldsEmpty = p.description.isNullOrEmpty() && p.avatarB64.isNullOrEmpty() &&
+                    p.adminOnion.isNullOrEmpty() && p.adminEncPublicKey.isNullOrEmpty() &&
+                    p.memberDetails.isNullOrEmpty() && p.memberHandles.isNullOrEmpty()
+                if (candidate == p.adminPublicKeyB64 && unsignedFieldsEmpty) {
+                    val enc7Field = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                        p.groupId, p.title, candidate, p.timestamp.toString(),
+                        sortedMembers, p.allowMemberInvites.toString(), p.allowMemberSelfRemove.toString()
+                    )
+                    if (CryptoService.verify(enc7Field, p.signature, candidate)) {
+                        return@let Signed(enc7Field, p.signature, candidate)
+                    }
+                }
+            }
+            val fallbackCanonical = canonicalGroupInvitePayload(
+                p.groupId, p.title, p.adminPublicKeyB64, p.adminPublicKeyB64, p.timestamp,
+                sortedMembers, p.allowMemberInvites, p.allowMemberSelfRemove,
+                p.description, p.avatarB64, p.adminOnion, p.adminEncPublicKey,
+                sortedDetails, sortedHandles
+            )
+            Signed(fallbackCanonical, p.signature, p.adminPublicKeyB64)
+        }
+
+        // The handler additionally requires the admin key to match the STORED
+        // group. That check needs the database and stays where it is; this one
+        // is a strict subset, so it can never reject something the handler would
+        // have accepted.
+        "GROUP_DELETE" -> packet.getGroupDeletePayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, "delete", p.adminPublicKeyB64, p.timestamp.toString()), p.signature, p.adminPublicKeyB64)
+        }
+
+        "DELETE_MESSAGE" -> packet.getDeleteMessagePayload()?.let { p ->
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.messageId, p.authorId, p.timestamp.toString()), packet.signature, p.authorId)
+        }
+
+
+        // Everything else: MESSAGE (AEAD-authenticated at decrypt time), MEDIA_*,
+        // SYNC_REQUEST / SYNC_RESPONSE / INVENTORY_SYNC_REQUEST (inner items
+        // verified individually by SyncPacketHandler), GROUP_UPDATE and
+        // GROUP_SYNC (signer resolved against stored group state), GROUP_QUERY
+        // (no inner signature), TYPING and READ_RECEIPT (no inner signature by design).
+        // Since round E2 every packet has already passed the envelope signature check
+        // (EnvelopeAuth, in MeshTransport) by the time it gets here.
+        else -> null
+    }
+}

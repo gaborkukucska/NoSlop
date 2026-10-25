@@ -8,266 +8,1418 @@ import com.noslop.app.debug.Logger
 import java.util.UUID
 
 /**
- * Handles incoming HANDSHAKE mesh packets (handleConnectionRequest, handleUserHandshake, handleConnectionRejected, handleAnnouncePeer, handleIdentityUpdate, handleUserExit).
- *
- * Extracted from the monolithic MeshPacketHandler (Phase 0, Stage 0.3) into one handler per packet
- * domain behind a dispatcher. Constructed with (repo, db) like the original; method bodies are a
- * verbatim move (ADR-004). The dispatcher routes by packet type; this class owns the per-type logic.
+ * R3 (register R7b): the timestamp a GROUP_SYNC answer is signed with. The admin uses its signing
+ * time, so members already at the same state revision still apply it (member-initiated changes
+ * never advance the revision); a member answer keeps the state revision, so a stale member copy
+ * never passes the receiver's freshness gate.
  */
+internal fun groupSyncTimestamp(group: GroupChat, answeringAsAdmin: Boolean, now: Long): Long =
+    if (answeringAsAdmin) maxOf(now, group.createdAt, group.revision) else maxOf(group.createdAt, group.revision)
+
 class HandshakePacketHandler(
     private val repo: NoSlopRepository,
     private val db: NoSlopDatabase
 ) {
     private val TAG = "MESH_HANDLER"
     private val peerDao = db.peerDao()
+    // --- NOSLOP_DELETION_BUDGET_V1 --- see refreshDeletionBudgetFor()
+    private val postDao = db.postDao()
     private val notificationDao = db.notificationDao()
+    private val autoAcceptRateLimits = java.util.concurrent.ConcurrentHashMap<String, MutableList<Long>>()
 
-    suspend fun handleConnectionRequest(packet: NetworkPacket): Boolean {
-        val connPay = packet.getConnectionRequestPayload() ?: return false
-        
-        val signature = packet.signature
-        if (signature == null) {
-            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Missing signature")
-            return false
+    /**
+     * Round A2: newest request timestamp per sender that was answered on its own connection.
+     * The requester re-signs every probe with a fresh timestamp, so a replayed copy of an earlier
+     * request (e.g. one that travelled through gossip) never collects a reply.
+     */
+    private val lastAnsweredRequestTs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun claimReplySlot(fromUserId: String, timestamp: Long): Boolean {
+        var claimed = false
+        lastAnsweredRequestTs.compute(fromUserId) { _, previous ->
+            if (previous == null || timestamp > previous) {
+                claimed = true
+                timestamp
+            } else previous
         }
-        var payloadToVerify = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
-        if (connPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${connPay.authorAvatarB64}"
-        }
-        val isValid = CryptoService.verify(payloadToVerify, signature, connPay.fromUserId)
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Signature verification failed")
-            return false
-        }
-        
-        val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
-        val tripcode = CryptoService.deriveTripcode(pubBytes)
-        val peer = Peer(
-            publicKeyB64 = connPay.fromUserId,
-            handle = connPay.fromUsername.split(".")[0],
-            tripcode = tripcode,
-            onionAddress = connPay.fromHomeNode,
-            encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
-            isTrusted = false,
-            lastSeenAt = System.currentTimeMillis(),
-            authorAvatarB64 = connPay.authorAvatarB64
+        return claimed
+    }
+
+    private suspend fun syncMemberPeers(memberDetails: Map<String, GroupMemberInfo>?) {
+        repo.syncMemberPeers(memberDetails)
+    }
+
+    /**
+     * D07: legacy (pre-v0.7.0) handshakes are signed without the encryption key, target or nonce.
+     * They are never accepted — this only recognises them so the user can be told the other side
+     * runs an older NoSlop version instead of the request vanishing silently.
+     */
+    private fun isLegacyHandshakeSignature(pay: PeerHandshakePayload, signature: String): Boolean {
+        val encodePayload = CryptoService.encodeForSigning(
+            pay.fromUserId, pay.fromUsername, pay.fromHomeNode, pay.timestamp.toString(),
+            pay.authorAvatarB64, pay.bio.takeIf { !it.isNullOrBlank() }
         )
-        peerDao.insertPeer(peer)
-        repo.setIncomingRequest(peer)
+        var pipePayload = "${pay.fromUserId}|${pay.fromUsername}|${pay.fromHomeNode}|${pay.timestamp}"
+        if (pay.authorAvatarB64 != null) pipePayload += "|${pay.authorAvatarB64}"
+        if (!pay.bio.isNullOrBlank()) pipePayload += "|${pay.bio}"
+        return CryptoService.verify(encodePayload, signature, pay.fromUserId) ||
+            CryptoService.verify(pipePayload, signature, pay.fromUserId)
+    }
 
-        val title = "New Connection Request"
-        val msg = "${peer.handle} wants to connect with you."
-        val route = "notifications"
-        
+    /** D07: v2 is the only accepted handshake encoding; it binds enc key, recipient and nonce. */
+    private fun isV2HandshakeSignature(pay: PeerHandshakePayload, signature: String, target: String, nonce: String): Boolean {
+        val v2Payload = CryptoService.canonicalHandshakePayloadV2(
+            fromUserId = pay.fromUserId,
+            fromUsername = pay.fromUsername,
+            fromHomeNode = pay.fromHomeNode,
+            fromEncryptionPublicKey = pay.fromEncryptionPublicKey ?: "",
+            targetUserId = target,
+            nonce = nonce,
+            timestamp = pay.timestamp,
+            authorAvatarB64 = pay.authorAvatarB64,
+            bio = pay.bio,
+            intro = pay.intro
+        )
+        return CryptoService.verify(v2Payload, signature, pay.fromUserId)
+    }
+
+    /**
+     * D07: remember that this key spoke the legacy protocol, and tell the user (at most once a day).
+     * Read back by the "Sent requests" list in the DMs tab.
+     */
+    private suspend fun recordLegacyProtocolPeer(pay: PeerHandshakePayload) {
+        val key = "peer_legacy_protocol_${pay.fromUserId}"
+        val now = System.currentTimeMillis()
+        val last = db.appSettingDao().getSetting(key)?.toLongOrNull() ?: 0L
+        db.appSettingDao().insertSetting(AppSetting(key, now.toString()))
+        if (now - last < 24 * 60 * 60 * 1000L) return
+        val title = com.noslop.app.util.LanguageManager.translate("Older NoSlop Version")
+        val msg = com.noslop.app.util.LanguageManager.translate("{author} tried to connect using an older NoSlop version. Both of you need to update before you can connect.")
+            .replace("{author}", pay.fromUsername.ifBlank { pay.fromUserId.take(8) })
         notificationDao.insertNotification(
             NotificationItem(
-                id = UUID.randomUUID().toString(),
-                type = "CONNECTION_REQUEST",
+                id = "legacy_proto_${pay.fromUserId}",
+                type = "SYSTEM",
                 title = title,
                 body = msg,
-                targetRoute = route,
-                iconType = "handshake",
-                senderPub = peer.publicKeyB64
+                targetRoute = "notifications",
+                iconType = "handshake_declined",
+                senderPub = pay.fromUserId
             )
         )
+    }
 
-        com.noslop.app.util.NotificationHelper.showNotification(
-            context = repo.context,
-            title = title,
-            message = msg,
-            deepLinkRoute = route
+    /**
+     * [reply] is present only when the request arrived on a direct inbound connection (Round A2).
+     * It is used solely after the request passed the signature, target and freshness checks below,
+     * and only once per request timestamp ([claimReplySlot]), so a forged or replayed request can
+     * never collect our handshake.
+     */
+    suspend fun handleConnectionRequest(packet: NetworkPacket, reply: ReplyChannel? = null): Boolean {
+        val connPay = packet.getConnectionRequestPayload() ?: return false
+        val myPubKey = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
+        if (myPubKey == connPay.fromUserId || myBurnablePubKey == connPay.fromUserId) {
+            return false
+        }
+
+        // C02/D07: the request must name one of our identities, and the envelope may not disagree.
+        val targetUser = connPay.targetUserId ?: packet.targetUserId
+        if (targetUser.isNullOrBlank() || !repo.isLocalUser(targetUser)) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: targetUserId ${targetUser?.take(12)} is not a local identity")
+            return false
+        }
+        if (packet.targetUserId != null && packet.targetUserId != targetUser) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: envelope target does not match signed target")
+            return false
+        }
+
+        val signature = packet.signature ?: connPay.signature ?: return false
+        val nonce = connPay.requestNonce ?: ""
+
+        // D07: hard protocol break — only v2 signatures (binding enc key, target and nonce) are accepted.
+        if (nonce.isBlank() || !isV2HandshakeSignature(connPay, signature, targetUser, nonce)) {
+            if (isLegacyHandshakeSignature(connPay, signature)) {
+                Logger.warn(TAG, "Rejected CONNECTION_REQUEST from ${connPay.fromUserId.take(12)}: legacy (pre-v2) handshake — peer must update NoSlop")
+                recordLegacyProtocolPeer(connPay)
+            } else {
+                Logger.warn(TAG, "Rejected CONNECTION_REQUEST: signature verification failed for ${connPay.fromUserId.take(12)}")
+            }
+            return false
+        }
+        // D05: a key that signs v2 handshakes runs a client that speaks DM v2; its v1 DMs are refused.
+        DmPacketHandler.markDmV2Seen(db, connPay.fromUserId)
+
+        val existingPeer = peerDao.getPeerByPublicKey(connPay.fromUserId)
+        val isOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 5 * 60 * 1000L
+        val isVeryOldPacket = (System.currentTimeMillis() - connPay.timestamp) > 60 * 60 * 1000L // 1 hour
+        val isFromFuture = (connPay.timestamp - System.currentTimeMillis()) > 5 * 60 * 1000L
+        // Round A2: the reply channel is usable only for a fresh request, once per timestamp.
+        fun replyChannelIfFresh(): ReplyChannel? =
+            if (reply != null && !isOldPacket && !isFromFuture && claimReplySlot(connPay.fromUserId, connPay.timestamp)) reply else null
+
+        // D06: BLOCKED is only ever left by explicit user action.
+        if (existingPeer?.relationship == PeerRelationship.BLOCKED) {
+            Logger.info(TAG, "Ignored CONNECTION_REQUEST from blocked peer ${connPay.fromUserId.take(12)}")
+            return true
+        }
+
+        // Round A2: the requester keeps re-sending its pending request (same nonce) until it hears
+        // back. Once the user declined that request, answer with the rejection instead of asking the
+        // user again; a new request (new nonce, i.e. the requester tapped Re-send) is asked normally.
+        val declinedNonce = db.appSettingDao().getSetting("declined_request_${connPay.fromUserId}")
+        if (declinedNonce != null) {
+            if (declinedNonce == nonce && (existingPeer == null || existingPeer.relationship == PeerRelationship.NONE)) {
+                val channel = replyChannelIfFresh()
+                if (channel != null) {
+                    repo.answerDeclinedRequest(targetUser, connPay.fromUserId, channel)
+                }
+                Logger.info(TAG, "CONNECTION_REQUEST from ${connPay.fromUserId.take(12)} repeats a request the user declined; not asking again")
+                return true
+            }
+            db.appSettingDao().removeSetting("declined_request_${connPay.fromUserId}")
+        }
+
+        // Ignore zombie requests from deleted peers if they are older than 1 hour
+        if (existingPeer == null && isVeryOldPacket) {
+            Logger.debug(TAG, "Ignored ancient CONNECTION_REQUEST from unknown peer.")
+            return false
+        }
+
+        // Drop requests from peers we recently deleted (unless fresh intentional reconnect)
+        if (existingPeer == null && GossipService.isPeerRecentlyDeleted(connPay.fromUserId, connPay.timestamp)) {
+            Logger.warn(TAG, "Ignored CONNECTION_REQUEST from recently deleted peer: ${connPay.fromUserId}")
+            return false
+        }
+
+        val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
+        var handleToUse = if (connPay.fromUsername.isNotBlank()) connPay.fromUsername else existingPeer?.handle ?: "Unknown"
+        handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
+        val signedEncKey = connPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() }
+
+        val burnable = repo.getBurnableIdentity()
+        val requestedBurnable = burnable != null && targetUser == burnable.publicKeyB64
+
+        if (existingPeer != null && existingPeer.relationship == PeerRelationship.ACCEPTED) {
+            // A friend re-requesting (reinstall, lost our row). Re-send our handshake echoing THEIR
+            // nonce. D10b: a new encryption key signed by their identity key (C02) is applied, the
+            // in-person verification (for the old key) is cleared and the chat shows a notice.
+            if (isOldPacket) {
+                Logger.debug(TAG, "Ignored old CONNECTION_REQUEST from accepted peer ${existingPeer.handle}.")
+                return true
+            }
+            val keyChanged = signedEncKey != null && existingPeer.encPublicKeyB64.isNotBlank() &&
+                !CryptoService.sameX25519PublicKey(signedEncKey, existingPeer.encPublicKeyB64)
+            if (keyChanged) {
+                Logger.warn(TAG, "Encryption key changed for ACCEPTED peer ${existingPeer.handle} (via CONNECTION_REQUEST, signed by their identity key); applied")
+            }
+            peerDao.insertPeer(existingPeer.copy(
+                handle = handleToUse,
+                onionAddress = connPay.fromHomeNode.ifBlank { existingPeer.onionAddress },
+                encPublicKeyB64 = if (keyChanged || existingPeer.encPublicKeyB64.isBlank()) (signedEncKey ?: existingPeer.encPublicKeyB64) else existingPeer.encPublicKeyB64,
+                pendingEncKey = null,
+                verifiedFingerprint = if (keyChanged) null else existingPeer.verifiedFingerprint,
+                pendingNonce = nonce,
+                authorAvatarB64 = connPay.authorAvatarB64 ?: existingPeer.authorAvatarB64,
+                bio = connPay.bio ?: existingPeer.bio,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+            if (keyChanged) repo.recordKeyChange(existingPeer.publicKeyB64)
+            Logger.info(TAG, "Recent CONNECTION_REQUEST from accepted peer ${existingPeer.handle}; re-sending USER_HANDSHAKE")
+            repo.acceptConnectionRequest(existingPeer, replyChannelIfFresh())
+            return true
+        }
+
+        if (existingPeer != null && existingPeer.relationship == PeerRelationship.OUTGOING_PENDING) {
+            // D06: crossing requests. We asked them (user action — OUTGOING_PENDING is only ever
+            // created by sendConnectionRequest from the UI) and they asked us with a valid v2 request
+            // addressed to us: mutual consent. Stage the row as INCOMING_PENDING carrying THEIR nonce
+            // and let acceptConnectionRequest promote it and answer with a USER_HANDSHAKE. Their
+            // handshake answering our own nonce then lands as an ACCEPTED profile refresh.
+            Logger.info(TAG, "Crossing CONNECTION_REQUEST from ${existingPeer.handle}: mutual consent, promoting to ACCEPTED")
+            peerDao.insertPeer(existingPeer.copy(
+                handle = handleToUse,
+                onionAddress = connPay.fromHomeNode.ifBlank { existingPeer.onionAddress },
+                encPublicKeyB64 = signedEncKey ?: existingPeer.encPublicKeyB64,
+                relationship = PeerRelationship.INCOMING_PENDING,
+                pendingNonce = nonce,
+                authorAvatarB64 = connPay.authorAvatarB64 ?: existingPeer.authorAvatarB64,
+                bio = connPay.bio ?: existingPeer.bio,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+            repo.acceptConnectionRequest(existingPeer, replyChannelIfFresh())
+            GossipService.flushFirewallBuffer(connPay.fromUserId)
+            return true
+        }
+
+        val isNewRequest = existingPeer?.relationship != PeerRelationship.INCOMING_PENDING
+
+        // D01: record which of our identities was asked — but do NOT bind the contact identity
+        // (contact_identity_*) until the user (or the creator auto-accept below) consents.
+        db.appSettingDao().insertSetting(
+            AppSetting("requested_identity_${connPay.fromUserId}", if (requestedBurnable) "burnable" else "main")
         )
+        // D10b: the requester says (signed, see isV2HandshakeSignature) that they scanned our QR code
+        // with their camera. If the user accepts after comparing name and check code, the contact is
+        // marked verified in person (NoSlopRepository.acceptConnectionRequest).
+        if (connPay.intro == ContactIntro.QR_CAMERA) {
+            db.appSettingDao().insertSetting(AppSetting("request_intro_${connPay.fromUserId}", ContactIntro.QR_CAMERA))
+        } else {
+            db.appSettingDao().removeSetting("request_intro_${connPay.fromUserId}")
+        }
+
+        // C01/D06: INCOMING_PENDING, merged onto any existing row (group stub, discoverable node).
+        val base = existingPeer ?: Peer(
+            publicKeyB64 = connPay.fromUserId,
+            handle = handleToUse,
+            tripcode = tripcode,
+            onionAddress = connPay.fromHomeNode
+        )
+        val peer = base.copy(
+            handle = handleToUse,
+            tripcode = tripcode,
+            onionAddress = connPay.fromHomeNode.ifBlank { base.onionAddress },
+            encPublicKeyB64 = signedEncKey ?: base.encPublicKeyB64,
+            relationship = PeerRelationship.INCOMING_PENDING,
+            pendingNonce = nonce,
+            lastSeenAt = System.currentTimeMillis(),
+            authorAvatarB64 = connPay.authorAvatarB64 ?: base.authorAvatarB64,
+            isTemporary = base.isTemporary || requestedBurnable,
+            bio = connPay.bio ?: base.bio
+        )
+        peerDao.insertPeer(peer)
+
+        val isLocalCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true" ||
+                             db.appSettingDao().getSetting("is_creator") == "true"
+        // D01: creator auto-accept applies only to followers who addressed the burnable (creator) identity.
+        if (isLocalCreator && requestedBurnable) {
+            val now = System.currentTimeMillis()
+            val senderLimits = autoAcceptRateLimits.getOrPut(connPay.fromUserId) { mutableListOf() }
+            var allowed = false
+            synchronized(senderLimits) {
+                senderLimits.removeAll { now - it > 3600_000L }
+                if (senderLimits.size < 5) {
+                    senderLimits.add(now)
+                    allowed = true
+                }
+            }
+
+            if (allowed) {
+                repo.acceptConnectionRequest(peer, replyChannelIfFresh())
+                GossipService.flushFirewallBuffer(connPay.fromUserId)
+                Logger.info(TAG, "Auto-accepted follower connection request from ${peer.handle} (creator identity)")
+            } else {
+                repo.setIncomingRequest(peer)
+            }
+        } else {
+            repo.setIncomingRequest(peer)
+
+            // ONLY NOTIFY ON BRAND NEW REQUESTS
+            if (isNewRequest) {
+                val notifSettings = repo.notificationSettingsFlow.value
+                if (notifSettings.connectionRequests) {
+                    val title = com.noslop.app.util.LanguageManager.translate("New Connection Request")
+                    val msg = com.noslop.app.util.LanguageManager.translate("{author} wants to connect with you.")
+                        .replace("{author}", peer.handle)
+                    val route = "notifications"
+
+                    notificationDao.insertNotification(
+                        NotificationItem(
+                            id = "conn_req_${peer.publicKeyB64}",
+                            type = "CONNECTION_REQUEST",
+                            title = title,
+                            body = msg,
+                            targetRoute = route,
+                            iconType = "handshake",
+                            senderPub = peer.publicKeyB64
+                        )
+                    )
+
+                    com.noslop.app.util.NotificationHelper.showNotification(
+                        context = repo.context,
+                        title = title,
+                        message = msg,
+                        deepLinkRoute = route,
+                        notificationId = peer.publicKeyB64.hashCode()
+                    )
+                }
+            }
+        }
 
         return true
     }
 
     suspend fun handleUserHandshake(packet: NetworkPacket): Boolean {
         val handPay = packet.getUserHandshakePayload() ?: return false
-        
-        val signature = packet.signature
-        if (signature == null) {
-            Logger.warn(TAG, "Rejected USER_HANDSHAKE: Missing signature")
+        val signature = packet.signature ?: handPay.signature ?: return false
+        val myPubKey = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
+        if (myPubKey == handPay.fromUserId || myBurnablePubKey == handPay.fromUserId) return false
+
+        // C02/D07: the handshake must name one of our identities, and the envelope may not disagree.
+        val targetUser = handPay.targetUserId ?: packet.targetUserId
+        if (targetUser.isNullOrBlank() || !repo.isLocalUser(targetUser)) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: targetUserId ${targetUser?.take(12)} is not a local identity")
             return false
         }
-        var payloadToVerify = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
-        if (handPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${handPay.authorAvatarB64}"
-        }
-        val isValid = CryptoService.verify(payloadToVerify, signature, handPay.fromUserId)
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected USER_HANDSHAKE: Signature verification failed")
+        if (packet.targetUserId != null && packet.targetUserId != targetUser) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: envelope target does not match signed target")
             return false
         }
 
-        val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
-        if (peer != null) {
-            peerDao.insertPeer(peer.copy(
-                isTrusted = true,
-                lastSeenAt = System.currentTimeMillis(),
-                onionAddress = handPay.fromHomeNode,
-                encPublicKeyB64 = handPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() } ?: peer.encPublicKeyB64,
-                authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64
-            ))
-        } else {
+        val nonce = handPay.inReplyToNonce ?: ""
+        val encPub = handPay.fromEncryptionPublicKey ?: ""
+
+        // D07: hard protocol break — the nonce echo only proves consent when the signature covers it,
+        // so legacy encodings are never accepted for promotion or key updates (or at all).
+        if (!isV2HandshakeSignature(handPay, signature, targetUser, nonce)) {
+            if (isLegacyHandshakeSignature(handPay, signature)) {
+                Logger.warn(TAG, "Rejected USER_HANDSHAKE from ${handPay.fromUserId.take(12)}: legacy (pre-v2) handshake — peer must update NoSlop")
+                recordLegacyProtocolPeer(handPay)
+            } else {
+                Logger.warn(TAG, "Rejected USER_HANDSHAKE: signature verification failed for ${handPay.fromUserId.take(12)}")
+            }
+            return false
+        }
+        // D05: a key that signs v2 handshakes runs a client that speaks DM v2; its v1 DMs are refused.
+        DmPacketHandler.markDmV2Seen(db, handPay.fromUserId)
+
+        var peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
+        if (peer == null) {
+            peer = peerDao.getAllPeersList().find {
+                it.onionAddress.isNotBlank() && it.onionAddress == handPay.fromHomeNode && it.publicKeyB64 == handPay.fromUserId
+            }
+        }
+
+        // C01: Reject unsolicited handshakes if we don't have a record
+        if (peer == null) {
+            val isRecentlyDeleted = GossipService.isPeerRecentlyDeleted(handPay.fromUserId, handPay.timestamp)
+            if (isRecentlyDeleted) {
+                Logger.warn(TAG, "Received USER_HANDSHAKE from recently deleted peer ${handPay.fromUserId}. Ignoring to prevent forced re-connection.")
+                return false
+            }
             val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
-            val newPeer = Peer(
-                publicKeyB64 = handPay.fromUserId,
-                handle = handPay.fromUsername.split(".")[0],
-                tripcode = tripcode,
-                onionAddress = handPay.fromHomeNode,
-                encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
+            val allGroups = db.groupChatDao().getAllGroupChatsList()
+            val isInGroup = allGroups.any { g ->
+                g.adminPublicKeyB64.trim() == handPay.fromUserId.trim() ||
+                parseMembers(g.membersJson).any { it.trim() == handPay.fromUserId.trim() }
+            }
+            // If sender is a group member, store their keys for group messaging without making them a 1:1 contact
+            if (isInGroup) {
+                val fallbackHandle = "Member_${handPay.fromUserId.take(6)}"
+                val stubPeer = Peer(
+                    publicKeyB64 = handPay.fromUserId,
+                    handle = if (handPay.fromUsername.isNotBlank() && handPay.fromUsername != "Member") handPay.fromUsername else fallbackHandle,
+                    tripcode = tripcode,
+                    onionAddress = handPay.fromHomeNode,
+                    encPublicKeyB64 = encPub,
+                    isTrusted = false,
+                    relationship = PeerRelationship.NONE,
+                    isTemporary = false,
+                    lastSeenAt = System.currentTimeMillis()
+                )
+                peerDao.insertPeer(stubPeer)
+                Logger.info(TAG, "Stored keys for group member: ${handPay.fromUserId.take(8)}... (${stubPeer.handle})")
+                return true
+            } else {
+                Logger.warn(TAG, "Rejected unsolicited USER_HANDSHAKE from non-contact ${handPay.fromUserId.take(8)}...")
+                return false
+            }
+        }
+
+        val isOldPacket = (System.currentTimeMillis() - handPay.timestamp) > 5 * 60 * 1000L
+        if (peer.relationship == PeerRelationship.ACCEPTED && isOldPacket) {
+            Logger.debug(TAG, "Ignored old USER_HANDSHAKE from already accepted peer ${peer.handle}.")
+            return true
+        }
+
+        val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
+
+        var handleToUse = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else peer.handle
+        handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
+
+        // C01: Relationship state transition enforcement
+        val isOutgoingPending = peer.relationship == PeerRelationship.OUTGOING_PENDING
+        val isAlreadyAccepted = peer.relationship == PeerRelationship.ACCEPTED
+
+        if (isOutgoingPending) {
+            // Verify inReplyToNonce matches the pendingNonce we generated when sending CONNECTION_REQUEST
+            val expectedNonce = peer.pendingNonce
+            if (expectedNonce.isNullOrBlank() || handPay.inReplyToNonce != expectedNonce) {
+                Logger.warn(TAG, "Rejected USER_HANDSHAKE from ${peer.handle}: nonce mismatch (expected=${expectedNonce?.take(8)}, received=${handPay.inReplyToNonce?.take(8)})")
+                return false
+            }
+
+            // Both nonce and signature matched! Promote to ACCEPTED
+            val encKeyToSave = if (encPub.isNotBlank()) encPub else peer.encPublicKeyB64
+            val updated = peer.copy(
+                handle = handleToUse,
                 isTrusted = true,
+                relationship = PeerRelationship.ACCEPTED,
+                pendingNonce = null,
+                pendingEncKey = null,
                 lastSeenAt = System.currentTimeMillis(),
-                authorAvatarB64 = handPay.authorAvatarB64
+                onionAddress = handPay.fromHomeNode,
+                encPublicKeyB64 = encKeyToSave,
+                authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64,
+                bio = handPay.bio ?: peer.bio
             )
-            peerDao.insertPeer(newPeer)
+            peerDao.insertPeer(updated)
+            // E4: the answer to a "Share Permanent Identity" request moves the contact to that identity.
+            repo.meshSocialRepository.completeMainIdentityShare(handPay.fromUserId, handPay.inReplyToNonce)
+
+            GossipService.recordSendSuccess(handPay.fromHomeNode)
+            GossipService.flushFirewallBuffer(handPay.fromUserId)
+            repo.requestInventorySync(updated)
+            repo.shareDiscoverableNodesWith(updated)
+
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.system) {
+                val title = com.noslop.app.util.LanguageManager.translate("Connection Accepted")
+                val msg = com.noslop.app.util.LanguageManager.translate("{author} accepted your connection request.")
+                    .replace("{author}", handPay.fromUsername)
+                val route = "chat/${handPay.fromUserId}"
+
+                notificationDao.insertNotification(
+                    NotificationItem(
+                        id = "conn_acc_${handPay.fromUserId}",
+                        type = "SYSTEM",
+                        title = title,
+                        body = msg,
+                        targetRoute = route,
+                        iconType = "handshake",
+                        senderPub = handPay.fromUserId
+                    )
+                )
+
+                com.noslop.app.util.NotificationHelper.showNotification(
+                    context = repo.context,
+                    title = title,
+                    message = msg,
+                    deepLinkRoute = route,
+                    notificationId = handPay.fromUserId.hashCode()
+                )
+            }
+            repo.setHandshakeAccepted(updated)
+            Logger.info(TAG, "Promoted peer ${updated.handle} (${updated.publicKeyB64.take(8)}) to ACCEPTED / trusted")
+            return true
+
+        } else if (isAlreadyAccepted) {
+            // C02/D10b: a changed encryption key, signed by the contact's identity key, is applied.
+            // The in-person verification (for the old key) is cleared and the chat shows a notice.
+            val keyChanged = encPub.isNotBlank() && peer.encPublicKeyB64.isNotBlank() &&
+                !CryptoService.sameX25519PublicKey(encPub, peer.encPublicKeyB64)
+            if (keyChanged) {
+                Logger.warn(TAG, "Encryption key changed for ACCEPTED peer ${peer.handle} (signed by their identity key); applied")
+            }
+            val encKey = if (encPub.isNotBlank() && (keyChanged || peer.encPublicKeyB64.isBlank())) encPub else peer.encPublicKeyB64
+            peerDao.insertPeer(peer.copy(
+                handle = handleToUse,
+                lastSeenAt = System.currentTimeMillis(),
+                onionAddress = handPay.fromHomeNode,
+                encPublicKeyB64 = encKey,
+                authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64,
+                bio = handPay.bio ?: peer.bio,
+                pendingEncKey = null,
+                verifiedFingerprint = if (keyChanged) null else peer.verifiedFingerprint,
+                pendingNonce = if (!peer.pendingNonce.isNullOrBlank() && handPay.inReplyToNonce == peer.pendingNonce) null else peer.pendingNonce
+            ))
+            if (keyChanged) repo.recordKeyChange(peer.publicKeyB64)
+            // E4: a temporary chat's contact accepting our personal identity ("Share Permanent Identity").
+            repo.meshSocialRepository.completeMainIdentityShare(handPay.fromUserId, handPay.inReplyToNonce)
+            Logger.info(TAG, "Refreshed profile details for already ACCEPTED peer ${peer.handle}")
+            return true
+
+        } else {
+            // Any other state (INCOMING_PENDING, NONE, BLOCKED, group stub) cannot become trusted via incoming handshake
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE from ${peer.handle}: peer relationship is ${peer.relationship}, not OUTGOING_PENDING")
+            return false
         }
-
-        // Generate the accepted notification
-        val title = "Connection Accepted"
-        val msg = "${handPay.fromUsername.split(".")[0]} accepted your connection request."
-        val route = "chat/${handPay.fromUserId}"
-
-        notificationDao.insertNotification(
-            NotificationItem(
-                id = UUID.randomUUID().toString(),
-                type = "SYSTEM",
-                title = title,
-                body = msg,
-                targetRoute = route,
-                iconType = "handshake",
-                senderPub = handPay.fromUserId
-            )
-        )
-
-        com.noslop.app.util.NotificationHelper.showNotification(
-            context = repo.context,
-            title = title,
-            message = msg,
-            deepLinkRoute = route
-        )
-
-        // Signal the UI that our outgoing request was accepted
-        val acceptedPeer = peerDao.getPeerByPublicKey(handPay.fromUserId)
-        if (acceptedPeer != null) {
-            repo.setHandshakeAccepted(acceptedPeer)
-        }
-
-        return true
     }
 
     suspend fun handleConnectionRejected(packet: NetworkPacket): Boolean {
         val rejectPay = packet.getConnectionRejectedPayload() ?: return false
-        val signature = packet.signature
-        if (signature == null) {
-            Logger.warn(TAG, "Rejected CONNECTION_REJECTED: Missing signature")
-            return false
-        }
+        val signature = packet.signature ?: return false
+        val isOldPacket = (System.currentTimeMillis() - rejectPay.timestamp) > 5 * 60 * 1000L
+        if (isOldPacket) return true
 
-        val payloadToVerify = "${rejectPay.fromUserId}|${rejectPay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, signature, rejectPay.fromUserId)) {
-            Logger.warn(TAG, "Rejected CONNECTION_REJECTED: Signature verification failed")
-            return false
-        }
+        val encPayload = CryptoService.encodeForSigning(rejectPay.fromUserId, rejectPay.timestamp.toString())
+        val pipePayload = "${rejectPay.fromUserId}|${rejectPay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, signature, rejectPay.fromUserId) ||
+            CryptoService.verify(pipePayload, signature, rejectPay.fromUserId)
+        if (!isValid) return false
 
         val peer = peerDao.getPeerByPublicKey(rejectPay.fromUserId)
-        if (peer != null) {
-            // Remove the pending untrusted peer since they rejected us
+        // D06: a rejection only cancels OUR pending request; it can never delete a group stub,
+        // an incoming request or a discoverable node row.
+        if (peer != null && peer.relationship == PeerRelationship.OUTGOING_PENDING) {
             peerDao.deletePeer(peer)
+            db.appSettingDao().removeSetting("contact_identity_${peer.publicKeyB64}")
 
-            val title = "Connection Declined"
-            val msg = "${peer.handle} declined your connection request."
-            val route = "notifications"
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.system) {
+                val title = com.noslop.app.util.LanguageManager.translate("Connection Declined")
+                val msg = com.noslop.app.util.LanguageManager.translate("{author} declined your connection request.")
+                    .replace("{author}", peer.handle)
+                val route = "notifications"
 
-            notificationDao.insertNotification(
-                NotificationItem(
-                    id = UUID.randomUUID().toString(),
-                    type = "SYSTEM",
-                    title = title,
-                    body = msg,
-                    targetRoute = route,
-                    iconType = "handshake_declined",
-                    senderPub = peer.publicKeyB64
+                notificationDao.insertNotification(
+                    NotificationItem(
+                        id = "conn_rej_${peer.publicKeyB64}",
+                        type = "SYSTEM",
+                        title = title,
+                        body = msg,
+                        targetRoute = route,
+                        iconType = "handshake_declined",
+                        senderPub = peer.publicKeyB64
+                    )
                 )
-            )
 
-            com.noslop.app.util.NotificationHelper.showNotification(
-                context = repo.context,
-                title = title,
-                message = msg,
-                deepLinkRoute = route
-            )
+                com.noslop.app.util.NotificationHelper.showNotification(
+                    context = repo.context,
+                    title = title,
+                    message = msg,
+                    deepLinkRoute = route,
+                    notificationId = peer.publicKeyB64.hashCode()
+                )
+            }
         }
         return true
     }
 
     suspend fun handleAnnouncePeer(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnouncePeerPayload() ?: return false
-        val payloadToVerify = "${announcePay.authorId}|${announcePay.timestamp}"
-        val isValid = CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected ANNOUNCE_PEER: Signature verification failed")
+        // S2 (round E2): only the v2 signature, which covers the onion address, is accepted. v1 signed the
+        // author and time only, so the onion in a relayed announce could be replaced, and it was stored.
+        val v2Payload = CryptoService.canonicalAnnouncePeerV2(announcePay.authorId, announcePay.onionAddress, announcePay.timestamp)
+        if (!CryptoService.verify(v2Payload, announcePay.signature, announcePay.authorId)) {
+            Logger.warn(TAG, "ANNOUNCE_PEER signature verification failed for ${announcePay.authorId} (not v2-signed?)")
             return false
         }
         
+        val isOldPacket = (System.currentTimeMillis() - announcePay.timestamp) > 5 * 60 * 1000L
+        if (isOldPacket) return true
+
         val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
         if (peer != null) {
             val wasOffline = !peer.isOnline
-            peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
-            Logger.debug(TAG, "ANNOUNCE_PEER received: ${peer.handle} is online")
-
-            // Catch-up sync: when a trusted peer transitions from offline → online,
-            // request their inventory so we receive any posts/comments/reactions we missed.
-            if (wasOffline && peer.isTrusted) {
-                Logger.info(TAG, "Trusted peer ${peer.handle} came online — requesting inventory sync")
-                repo.requestInventorySync(peer)
+            // S2 (round E2): a NoSlop onion address is derived from the identity key, so any other address
+            // is not stored (presence is still updated).
+            val announcedOnion = announcePay.onionAddress?.takeIf { it.isNotBlank() }
+            val newOnion = if (announcedOnion != null && CryptoService.isOnionOf(announcePay.authorId, announcedOnion)) {
+                announcedOnion
+            } else {
+                if (announcedOnion != null && announcedOnion != peer.onionAddress) {
+                    Logger.warn(TAG, "ANNOUNCE_PEER from ${peer.handle}: onion address is not derived from the key; not stored")
+                }
+                peer.onionAddress
+            }
+            GossipService.recordSendSuccess(newOnion)
+            peerDao.insertPeer(peer.copy(
+                isOnline = true,
+                lastSeenAt = System.currentTimeMillis(),
+                onionAddress = newOnion
+            ))
+            if (peer.isTrusted) {
+                // Instantly flush any pending outbox DMs and request missed messages
+                // R3: the peer just announced itself — retry now, not after the backoff.
+                repo.flushOutboxForPeer(peer.publicKeyB64, newOnion, force = true)
+                repo.requestDmSync(peer)
+                if (wasOffline) {
+                    repo.requestInventorySync(peer)
+                    resendGroupInvitesForPeer(peer.publicKeyB64, newOnion)
+                }
             }
         }
         return true
     }
 
+    suspend fun handleAnnounceDiscoverable(packet: NetworkPacket): Boolean {
+        val announcePay = packet.getAnnounceDiscoverablePayload() ?: return false
+        val myPubKey = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
+        
+        if (myPubKey == announcePay.authorId || myBurnablePubKey == announcePay.authorId) return false // Ignore our own announcements
+        
+        val existingPeers = peerDao.getAllPeersList()
+        val hasMatchingTrustedPeer = announcePay.handle.isNotBlank() && announcePay.handle != "Anonymous" &&
+            existingPeers.any { it.publicKeyB64 != announcePay.authorId && it.isTrusted && it.handle.equals(announcePay.handle, ignoreCase = true) }
+        if (hasMatchingTrustedPeer) {
+            Logger.info("HANDSHAKE", "Ignoring ANNOUNCE_DISCOVERABLE from ${announcePay.handle} because we already have a trusted peer with this handle.")
+            return false
+        }
+        
+        val s1 = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.bio ?: ""}:${announcePay.timestamp}"
+        val s2 = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.timestamp}"
+        val s3 = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.timestamp}"
+        val s4 = "${announcePay.authorId}|${announcePay.handle}|${announcePay.onionAddress}|${announcePay.encPublicKey}|${announcePay.isCreator}|${announcePay.timestamp}"
+        val sig = announcePay.signature
+        val authorId = announcePay.authorId
+        val isValid = CryptoService.verify(s1, sig, authorId) ||
+            CryptoService.verify(s2, sig, authorId) ||
+            CryptoService.verify(s3, sig, authorId) ||
+            CryptoService.verify(s4, sig, authorId)
+        if (!isValid) {
+            Logger.warn("HANDSHAKE", "Signature mismatch for ANNOUNCE_DISCOVERABLE from ${announcePay.handle}")
+            return false
+        }
+        
+        val isOldPacket = Math.abs(System.currentTimeMillis() - announcePay.timestamp) > 30 * 60 * 1000L
+        if (isOldPacket) return true
+
+        val pubBytes = Base64.decode(announcePay.authorId, Base64.DEFAULT)
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
+        
+        var handleToUse = announcePay.handle
+        handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
+        
+        val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
+        if (peer == null) {
+            val newPeer = Peer(
+                publicKeyB64 = announcePay.authorId,
+                handle = handleToUse,
+                tripcode = tripcode,
+                onionAddress = announcePay.onionAddress,
+                encPublicKeyB64 = announcePay.encPublicKey,
+                isTrusted = false,
+                relationship = PeerRelationship.NONE,
+                isTemporary = true,
+                isDiscoverable = true,
+                isCreator = announcePay.isCreator,
+                fundMeLink = announcePay.fundMeLink,
+                authorAvatarB64 = announcePay.authorAvatarB64,
+                bio = announcePay.bio,
+                isOnline = true,
+                lastSeenAt = System.currentTimeMillis()
+            )
+            peerDao.insertPeer(newPeer)
+            db.appSettingDao().insertSetting(AppSetting("disc_packet_${announcePay.authorId}", packet.toJson()))
+        } else {
+            db.appSettingDao().insertSetting(AppSetting("disc_packet_${announcePay.authorId}", packet.toJson()))
+            val cameBackOnline = !peer.isOnline
+            peerDao.insertPeer(peer.copy(
+                handle = handleToUse,
+                onionAddress = announcePay.onionAddress,
+                isTemporary = peer.isTemporary,
+                isDiscoverable = true,
+                isCreator = announcePay.isCreator,
+                fundMeLink = announcePay.fundMeLink,
+                authorAvatarB64 = announcePay.authorAvatarB64 ?: peer.authorAvatarB64,
+                bio = announcePay.bio ?: peer.bio,
+                isOnline = true,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+            if (cameBackOnline && peer.isTrusted) {
+                refreshDeletionBudgetFor(peer.handle)
+                resendGroupInvitesForPeer(announcePay.authorId, announcePay.onionAddress)
+            }
+            GossipService.recordSendSuccess(announcePay.onionAddress)
+        }
+        return true
+    }
+
+    private val lastInviteResendTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private suspend fun resendGroupInvitesForPeer(peerPubKey: String, peerOnion: String) {
+        val now = System.currentTimeMillis()
+        val lastTime = lastInviteResendTimes[peerPubKey] ?: 0L
+        if (now - lastTime < 60 * 1000L) {
+            return
+        }
+        lastInviteResendTimes[peerPubKey] = now
+        try {
+            val myKeys = repo.getLocalIdentity() ?: return
+            val burnableKeys = repo.getBurnableIdentity()
+            val groups = db.groupChatDao().getAllGroupChatsList()
+            for (group in groups) {
+                val members = parseMembers(group.membersJson)
+                if (members.contains(peerPubKey)) {
+                    val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+                    if (!isAdmin) continue
+                    val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
+                    val timestamp = group.createdAt
+                    val sortedMembers = members.sorted().joinToString(",")
+                    val allMembers = (members + group.adminPublicKeyB64).distinct()
+                    // D04: the admin key's own handle (the creator handle for an open group's creator key).
+                    val adminHandle = repo.ownHandleFor(adminKeys.publicKeyB64)
+                    val memberDetailsMap = allMembers.mapNotNull { pub ->
+                        val p = peerDao.getPeerByPublicKey(pub)
+                        if (p != null) {
+                            pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
+                        } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
+                            pub to GroupMemberInfo(adminHandle, adminKeys.encPublicKeyB64, adminKeys.onionAddress)
+                        } else null
+                    }.toMap()
+                    val sortedDetails = canonicalMemberDetailsString(memberDetailsMap)
+                    val sortedHandles = canonicalMemberHandlesString(group.getMemberHandles())
+                    val payloadToSign = canonicalGroupInvitePayload(
+                        group.groupId, group.title, group.adminPublicKeyB64, adminKeys.publicKeyB64, timestamp,
+                        sortedMembers, group.allowMemberInvites, group.allowMemberSelfRemove,
+                        group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64,
+                        sortedDetails, sortedHandles
+                    )
+                    val signature = CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
+
+                    val invitePayload = GroupInvitePayload(
+                        groupId = group.groupId,
+                        title = group.title,
+                        adminPublicKeyB64 = group.adminPublicKeyB64,
+                        members = members,
+                        avatarB64 = group.avatarB64,
+                        description = group.description,
+                        memberHandles = group.getMemberHandles(),
+                        memberDetails = memberDetailsMap,
+                        allowMemberInvites = group.allowMemberInvites,
+                        allowMemberSelfRemove = group.allowMemberSelfRemove,
+                        timestamp = timestamp,
+                        signature = signature,
+                        adminOnion = adminKeys.onionAddress,
+                        adminEncPublicKey = adminKeys.encPublicKeyB64
+                    )
+                    val packet = NetworkPacket(
+                        id = java.util.UUID.randomUUID().toString(),
+                        senderId = if (group.allowMemberInvites) adminKeys.publicKeyB64 else myKeys.publicKeyB64,
+                        targetUserId = peerPubKey,
+                        type = "GROUP_INVITE",
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
+                    )
+                    Logger.info(TAG, "Re-sending GROUP_INVITE for '${group.title}' to connected peer $peerPubKey")
+                    repo.dispatchPacket(peerOnion, packet)
+                }
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Could not resend group invites: ${e.message}")
+        }
+    }
+
+    private suspend fun refreshDeletionBudgetFor(peerHandle: String) {
+        try {
+            val myPubKey = repo.getLocalIdentity()?.publicKeyB64 ?: return
+            postDao.resetDeletionBroadcasts(myPubKey)
+            Logger.info(TAG, "Peer $peerHandle reconnected — refreshed deletion announce budget")
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Could not refresh deletion budget: ${e.message}")
+        }
+    }
+
     suspend fun handleIdentityUpdate(packet: NetworkPacket): Boolean {
         val identityPay = packet.getIdentityUpdatePayload() ?: return false
+        // Senders sign with CryptoService.encodeForSigning (MeshSocialRepository.broadcastIdentityUpdate),
+        // but only the older pipe-joined form was checked here, so no IDENTITY_UPDATE was ever accepted
+        // and profile changes never reached contacts. Both forms are accepted now.
+        val canonical = CryptoService.encodeForSigning(
+            identityPay.userId, identityPay.handle, identityPay.timestamp.toString(),
+            identityPay.authorAvatarB64, identityPay.bio
+        )
         var payloadToVerify = "${identityPay.userId}|${identityPay.handle}|${identityPay.timestamp}"
         if (identityPay.authorAvatarB64 != null) {
             payloadToVerify += "|${identityPay.authorAvatarB64}"
         }
-        val isValid = CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)
-        if (!isValid) return false
+        if (!identityPay.bio.isNullOrBlank()) {
+            payloadToVerify += "|${identityPay.bio}"
+        }
+        if (!CryptoService.verify(canonical, identityPay.signature, identityPay.userId) &&
+            !CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)) return false
+
+        val isOldPacket = (System.currentTimeMillis() - identityPay.timestamp) > 5 * 60 * 1000L
+        if (isOldPacket) return true
 
         val peer = peerDao.getPeerByPublicKey(identityPay.userId)
         if (peer != null) {
+            val pubBytes = Base64.decode(identityPay.userId, Base64.DEFAULT)
+            val tripcode = CryptoService.deriveTripcode(pubBytes)
+            
+            var handleToUse = if (identityPay.handle.isNotBlank()) identityPay.handle else peer.handle
+            handleToUse = CryptoService.stripIdentityTag(handleToUse, pubBytes)
+            
             peerDao.insertPeer(peer.copy(
-                handle = identityPay.handle,
+                handle = handleToUse,
                 lastSeenAt = System.currentTimeMillis(),
-                authorAvatarB64 = identityPay.authorAvatarB64 ?: peer.authorAvatarB64
+                authorAvatarB64 = identityPay.authorAvatarB64 ?: peer.authorAvatarB64,
+                bio = identityPay.bio ?: peer.bio
             ))
-            Logger.debug(TAG, "IDENTITY_UPDATE applied for ${identityPay.userId}")
         }
         return true
     }
 
     suspend fun handleUserExit(packet: NetworkPacket): Boolean {
         val exitPay = packet.getUserExitPayload() ?: return false
+        if (exitPay.userId != packet.senderId) return false
 
-        if (exitPay.userId != packet.senderId) {
-            Logger.warn(TAG, "Rejected USER_EXIT: userId does not match packet sender")
-            return false
-        }
+        val isOldPacket = Math.abs(System.currentTimeMillis() - exitPay.timestamp) > 30 * 60 * 1000L
+        if (isOldPacket) return true
 
-        val payloadToVerify = "${exitPay.userId}|${exitPay.timestamp}"
-        val isValid = CryptoService.verify(payloadToVerify, exitPay.signature, exitPay.userId)
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected USER_EXIT: Signature verification failed")
-            return false
+        val encPayload = CryptoService.encodeForSigning(exitPay.userId, exitPay.timestamp.toString())
+        val pipePayload = "${exitPay.userId}|${exitPay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, exitPay.signature, exitPay.userId) ||
+            CryptoService.verify(pipePayload, exitPay.signature, exitPay.userId)
+        if (!isValid) return false
+
+        if (packet.targetUserId != null && repo.isLocalUser(packet.targetUserId)) {
+            Logger.info(TAG, "Received targeted USER_EXIT from ${exitPay.userId.take(12)} — removing peer and purging content")
+            repo.deletePeer(exitPay.userId, notifyRemote = false)
+            return true
         }
 
         val peer = peerDao.getPeerByPublicKey(exitPay.userId)
         if (peer != null) {
-            peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))
-            Logger.debug(TAG, "USER_EXIT processed for ${exitPay.userId}")
+            peerDao.updatePresence(peer.publicKeyB64, false, System.currentTimeMillis())
+        }
+        if (repo.isNodeBanned(exitPay.userId)) {
+            Logger.info(TAG, "Banned node ${exitPay.userId.take(8)}... exited/shut down — removing from ban list")
+            repo.unbanNode(exitPay.userId)
         }
         return true
     }
+
+    suspend fun handlePeerRemoved(packet: NetworkPacket): Boolean {
+        val removePay = packet.getPeerRemovedPayload() ?: return false
+        val senderId = packet.senderId
+        if (removePay.userId != senderId) return false
+
+        val encPayload = CryptoService.encodeForSigning(removePay.userId, removePay.timestamp.toString())
+        val pipePayload = "${removePay.userId}|${removePay.timestamp}"
+        val sig = removePay.signature
+        if (!CryptoService.verify(encPayload, sig, removePay.userId) &&
+            !CryptoService.verify(pipePayload, sig, removePay.userId)) {
+            Logger.warn(TAG, "PEER_REMOVED signature verification failed for ${removePay.userId}")
+            return false
+        }
+
+        Logger.info(TAG, "Peer ${removePay.userId.take(12)} removed us — deleting peer and all their content locally")
+        if (repo.isNodeBanned(removePay.userId)) {
+            repo.unbanNode(removePay.userId)
+        }
+        repo.deletePeer(removePay.userId, notifyRemote = false)
+        return true
+    }
+
+    suspend fun handleFollow(packet: NetworkPacket): Boolean {
+        val followPay = packet.getFollowPayload() ?: return false
+        val signature = followPay.signature
+        val encPayload = CryptoService.encodeForSigning(
+            followPay.followedPublicKeyB64, followPay.followerPublicKeyB64, followPay.timestamp.toString()
+        )
+        val pipePayload = "${followPay.followedPublicKeyB64}|${followPay.followerPublicKeyB64}|${followPay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, signature, followPay.followerPublicKeyB64) ||
+            CryptoService.verify(pipePayload, signature, followPay.followerPublicKeyB64)
+        if (!isValid) {
+            Logger.warn(TAG, "Invalid signature on FOLLOW packet from ${followPay.followerPublicKeyB64}")
+            return false
+        }
+        val isFollow = followPay.action == "follow"
+        peerDao.updateFollowState(followPay.followerPublicKeyB64, isFollow)
+        Logger.info(TAG, "Updated follow state for ${followPay.followerPublicKeyB64} to isFollowing=$isFollow")
+        return true
+    }
+
+    private fun parseMembers(membersJson: String): MutableList<String> = try {
+        com.noslop.app.util.Json.gson.fromJson(membersJson, Array<String>::class.java).toMutableList()
+    } catch (e: Exception) { mutableListOf() }
+
+    private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
+        val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
+        val sortedAdded = update.addedMembers?.sorted()?.joinToString(",") ?: ""
+        val sortedRemoved = update.removedMembers?.sorted()?.joinToString(",") ?: ""
+        val sortedBanned = encodeOptBanned(update.bannedMembers)
+        val sortedDetails = canonicalMemberDetailsString(update.memberDetails)
+        val sortedHandles = canonicalMemberHandlesString(update.memberHandles)
+        for (candidate in candidates) {
+            if (candidate.isBlank()) continue
+            // W02: Strictly require canonical 13-field signature binding directory maps, permissions, and bans
+            val canonicalPayload = canonicalGroupUpdatePayload(
+                update.groupId, update.title, candidate, update.timestamp,
+                sortedAdded, sortedRemoved, sortedBanned, update.description, update.avatarB64,
+                update.allowMemberInvites, update.allowMemberSelfRemove,
+                sortedDetails, sortedHandles
+            )
+            if (CryptoService.verify(canonicalPayload, update.signature, candidate)) return candidate
+        }
+        return null
+    }
+
+    suspend fun handleGroupInvite(packet: NetworkPacket): Boolean {
+        val invite = packet.getGroupInvitePayload() ?: return false
+
+        val existing = db.groupChatDao().getGroupChatById(invite.groupId)
+        val candidates = if (existing != null) {
+            val existingMembers = parseMembers(existing.membersJson)
+            (listOf(existing.adminPublicKeyB64) + existingMembers).distinct()
+        } else {
+            (listOf(invite.adminPublicKeyB64) + invite.members).distinct()
+        }
+        val sortedMembers = invite.members.sorted().joinToString(",")
+        val sortedDetails = canonicalMemberDetailsString(invite.memberDetails)
+        val sortedHandles = canonicalMemberHandlesString(invite.memberHandles)
+        var verifiedSigner: String? = null
+        for (candidate in candidates) {
+            if (candidate.isBlank()) continue
+            val canonicalPayload = canonicalGroupInvitePayload(
+                invite.groupId, invite.title, invite.adminPublicKeyB64, candidate, invite.timestamp,
+                sortedMembers, invite.allowMemberInvites, invite.allowMemberSelfRemove,
+                invite.description, invite.avatarB64, invite.adminOnion, invite.adminEncPublicKey,
+                sortedDetails, sortedHandles
+            )
+            if (CryptoService.verify(canonicalPayload, invite.signature, candidate)) {
+                verifiedSigner = candidate
+                break
+            }
+
+            val unsignedFieldsEmpty = invite.description.isNullOrEmpty() && invite.avatarB64.isNullOrEmpty() &&
+                invite.adminOnion.isNullOrEmpty() && invite.adminEncPublicKey.isNullOrEmpty() &&
+                invite.memberDetails.isNullOrEmpty() && invite.memberHandles.isNullOrEmpty()
+            if (candidate == invite.adminPublicKeyB64 && unsignedFieldsEmpty) {
+                val enc7Field = CryptoService.encodeForSigning(
+                    invite.groupId, invite.title, candidate, invite.timestamp.toString(),
+                    sortedMembers, invite.allowMemberInvites.toString(), invite.allowMemberSelfRemove.toString()
+                )
+                if (CryptoService.verify(enc7Field, invite.signature, candidate)) {
+                    verifiedSigner = candidate
+                    break
+                }
+            }
+        }
+        if (verifiedSigner == null) {
+            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: signature matches no admin or group member")
+            return false
+        }
+
+        val myKeys = repo.getLocalIdentity()
+        val burnable = repo.getBurnableIdentity()
+        val meInGroup = invite.members.any {
+            it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
+        }
+        if (!meInGroup) {
+            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: our identity is not in the member list")
+            return false
+        }
+
+        if (existing != null) {
+            if (existing.adminPublicKeyB64 != invite.adminPublicKeyB64) {
+                Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: admin key does not match the stored group")
+                return false
+            }
+            return true
+        }
+
+        val isMyGroup = invite.adminPublicKeyB64 == myKeys?.publicKeyB64 || invite.adminPublicKeyB64 == burnable?.publicKeyB64
+        if (isMyGroup) {
+            syncMemberPeers(invite.memberDetails)
+            val membersJson = com.noslop.app.util.Json.gson.toJson(invite.members)
+            val memberHandlesJson = com.noslop.app.util.Json.gson.toJson(invite.memberHandles ?: emptyMap<String, String>())
+            val group = GroupChat(
+                groupId = invite.groupId,
+                title = invite.title,
+                adminPublicKeyB64 = invite.adminPublicKeyB64,
+                membersJson = membersJson,
+                createdAt = invite.timestamp,
+                description = invite.description,
+                avatarB64 = invite.avatarB64,
+                memberHandlesJson = memberHandlesJson
+            )
+            db.groupChatDao().insertGroupChat(group)
+            Logger.info(TAG, "Joined own group chat '${invite.title}' (${invite.groupId})")
+            return true
+        }
+
+        val jsonPayload = com.noslop.app.util.Json.gson.toJson(invite)
+        db.appSettingDao().insertSetting(AppSetting("pending_group_invite_${invite.groupId}", jsonPayload))
+
+        val inviterPeer = peerDao.getPeerByPublicKey(verifiedSigner)
+        val inviterName = inviterPeer?.handle ?: invite.memberHandles?.get(verifiedSigner) ?: (if (verifiedSigner == invite.adminPublicKeyB64) "Group Admin" else "A contact")
+        val title = com.noslop.app.util.LanguageManager.translate("Group Chat Invite")
+        val body = com.noslop.app.util.LanguageManager.translate("{author} invited you to join '{group}'")
+            .replace("{author}", inviterName)
+            .replace("{group}", invite.title)
+        val route = "group_invite/${invite.groupId}"
+
+        notificationDao.insertNotification(
+            NotificationItem(
+                id = "group_invite_${invite.groupId}",
+                type = "GROUP_INVITE",
+                title = title,
+                body = body,
+                targetRoute = route,
+                iconType = "group",
+                senderPub = invite.adminPublicKeyB64,
+                timestamp = invite.timestamp
+            )
+        )
+
+        com.noslop.app.util.NotificationHelper.showNotification(
+            context = repo.context,
+            title = title,
+            message = body,
+            deepLinkRoute = route
+        )
+
+        Logger.info(TAG, "Received group invite for '${invite.title}' (${invite.groupId}) - created pending notification")
+        return true
+    }
+
+    suspend fun handleGroupUpdate(packet: NetworkPacket): Boolean {
+        val update = packet.getGroupUpdatePayload() ?: return false
+        val existing = db.groupChatDao().getGroupChatById(update.groupId) ?: return false
+
+        val currentMembers = parseMembers(existing.membersJson)
+
+        if (update.timestamp <= existing.revision) {
+            Logger.debug(TAG, "Ignoring stale GROUP_UPDATE for ${update.groupId} (update ts ${update.timestamp} <= existing revision ${existing.revision})")
+            return true
+        }
+
+        val signer = resolveUpdateSigner(update, existing, currentMembers)
+        if (signer == null) {
+            Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: signature matches no current member")
+            return false
+        }
+        val isAdmin = signer == existing.adminPublicKeyB64
+
+        val added = update.addedMembers.orEmpty()
+        val removed = update.removedMembers.orEmpty()
+
+        if (!isAdmin) {
+            val metadataChanged =
+                (update.title != null && update.title != existing.title) ||
+                (update.description != null && update.description != existing.description) ||
+                (update.avatarB64 != null && update.avatarB64 != existing.avatarB64)
+            if (metadataChanged) {
+                Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: only the admin may change group metadata")
+                return false
+            }
+            if (added.isNotEmpty() && !existing.allowMemberInvites) {
+                Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: member invites are disabled for this group")
+                return false
+            }
+            if (removed.isNotEmpty()) {
+                val selfRemovalOnly = removed.all { it == signer }
+                if (!selfRemovalOnly || !existing.allowMemberSelfRemove) {
+                    Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: a member may only remove themselves")
+                    return false
+                }
+            }
+        }
+        if (removed.contains(existing.adminPublicKeyB64)) {
+            Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: the admin cannot be removed")
+            return false
+        }
+
+        syncMemberPeers(update.memberDetails)
+        val bannedSet = if (isAdmin && update.bannedMembers != null) update.bannedMembers.toSet() else existing.getBannedMembers().toSet()
+        val filteredAdded = added.filter { it !in bannedSet }
+        currentMembers.addAll(filteredAdded)
+        currentMembers.removeAll(removed.toSet())
+        currentMembers.removeAll(bannedSet)
+        val updatedTitle = update.title ?: existing.title
+
+        val handlesMap = existing.getMemberHandles().toMutableMap()
+        update.memberHandles?.let { handlesMap.putAll(it) }
+
+        val allowInvites = if (isAdmin && update.allowMemberInvites != null) update.allowMemberInvites else existing.allowMemberInvites
+        val allowSelfRemove = if (isAdmin && update.allowMemberSelfRemove != null) update.allowMemberSelfRemove else existing.allowMemberSelfRemove
+
+        val updatedGroup = existing.copy(
+            title = updatedTitle,
+            description = update.description ?: existing.description,
+            avatarB64 = update.avatarB64 ?: existing.avatarB64,
+            allowMemberInvites = allowInvites,
+            allowMemberSelfRemove = allowSelfRemove,
+            membersJson = com.noslop.app.util.Json.gson.toJson(currentMembers.distinct()),
+            memberHandlesJson = com.noslop.app.util.Json.gson.toJson(handlesMap),
+            bannedMembersJson = if (isAdmin && update.bannedMembers != null) com.noslop.app.util.Json.gson.toJson(bannedSet.toList()) else existing.bannedMembersJson,
+            revision = if (isAdmin) maxOf(existing.revision, update.timestamp) else existing.revision
+        )
+
+        val myPub = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnable = repo.getBurnableIdentity()?.publicKeyB64
+        val stillAMember = currentMembers.any { it == myPub || (myBurnable != null && it == myBurnable) }
+        if (!stillAMember) {
+            val previousMembers = parseMembers(existing.membersJson)
+            repo.cleanupOrphanedGroupPeers(previousMembers + existing.adminPublicKeyB64, excludedGroupId = update.groupId)
+            db.groupChatDao().deleteGroupChat(update.groupId)
+            Logger.info(TAG, "Left group chat ${update.groupId}: we were removed by ${if (isAdmin) "the admin" else "a member"} and cleaned up group peers")
+            return true
+        }
+
+        if (removed.isNotEmpty()) {
+            repo.cleanupOrphanedGroupPeers(removed, excludedGroupId = update.groupId)
+        }
+
+        db.groupChatDao().insertGroupChat(updatedGroup)
+        Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId}) by ${if (isAdmin) "admin" else "member"}")
+
+        val myLocalPub = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnablePub = repo.getBurnableIdentity()?.publicKeyB64
+        val isLocalAdmin = existing.adminPublicKeyB64 == myLocalPub || (myBurnablePub != null && existing.adminPublicKeyB64 == myBurnablePub)
+        if (isLocalAdmin && !isAdmin && removed.isNotEmpty()) {
+            for (memberPub in currentMembers) {
+                if (memberPub == myLocalPub || memberPub == myBurnablePub || memberPub == signer) continue
+                val p = peerDao.getPeerByPublicKey(memberPub)
+                if (p != null && p.onionAddress.isNotBlank()) {
+                    val relayPacket = packet.copy(id = java.util.UUID.randomUUID().toString(), targetUserId = memberPub)
+                    repo.dispatchPacket(p.onionAddress, relayPacket)
+                }
+            }
+        }
+        return true
+    }
+
+    suspend fun handleGroupDelete(packet: NetworkPacket): Boolean {
+        val del = packet.getGroupDeletePayload() ?: return false
+        val existing = db.groupChatDao().getGroupChatById(del.groupId) ?: return false
+
+        if (existing.adminPublicKeyB64 != del.adminPublicKeyB64) {
+            Logger.warn(TAG, "Rejected GROUP_DELETE ${del.groupId}: not from the stored admin")
+            return false
+        }
+        val encodePayload = CryptoService.encodeForSigning(del.groupId, "delete", del.adminPublicKeyB64, del.timestamp.toString())
+        val pipePayload = "${del.groupId}|delete|${del.adminPublicKeyB64}|${del.timestamp}"
+        if (!CryptoService.verify(encodePayload, del.signature, del.adminPublicKeyB64) &&
+            !CryptoService.verify(pipePayload, del.signature, del.adminPublicKeyB64)) {
+            Logger.warn(TAG, "Rejected GROUP_DELETE ${del.groupId}: bad admin signature")
+            return false
+        }
+
+        db.groupChatDao().deleteGroupChat(del.groupId)
+        val previousMembers = try {
+            com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        repo.cleanupOrphanedGroupPeers(previousMembers + existing.adminPublicKeyB64, excludedGroupId = del.groupId)
+        Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet and cleaned up group peers")
+        return true
+    }
+
+    suspend fun handleGroupQuery(packet: NetworkPacket): Boolean {
+        val query = packet.getGroupQueryPayload() ?: return false
+        val group = db.groupChatDao().getGroupChatById(query.groupId) ?: return false
+
+        val members = parseMembers(group.membersJson)
+        val senderPeer = peerDao.getPeerByPublicKey(packet.senderId)
+
+        // G1 (round E2): the answer is the whole group record (member keys, names, onion addresses), so only
+        // a member or the admin gets one, never a banned key. The sender is authenticated by the envelope
+        // signature (C09), and the requester named in the query must be that sender. Groups that allow
+        // member invites used to answer anyone who knew the group id (former members included), and the
+        // answer to a sender with no stored address was broadcast to all our contacts.
+        val refusal = groupQueryRefusal(
+            senderId = packet.senderId,
+            requesterId = query.requesterId,
+            members = members,
+            adminPub = group.adminPublicKeyB64,
+            banned = group.getBannedMembers()
+        )
+        if (refusal != null) {
+            Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: $refusal")
+            return false
+        }
+
+        val myKeys = repo.getLocalIdentity() ?: return false
+        val burnableKeys = repo.getBurnableIdentity()
+        val signingKey = if (burnableKeys != null && (members.contains(burnableKeys.publicKeyB64) || group.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
+
+        val groupJson = com.noslop.app.util.Json.gson.toJson(group)
+        // R3 (register R7b): the admin answers with the time it signed its current state. Stamped with
+        // the state revision (as before), the answer was ignored by every member already at that
+        // revision, and member-initiated changes (leaves, member invites) never advance the revision,
+        // so a member that missed one could never catch up. A member's answer keeps the state
+        // revision: its copy is not authoritative and must not pass the receiver's freshness gate.
+        val answeringAsAdmin = signingKey.publicKeyB64 == group.adminPublicKeyB64
+        val stateTimestamp = groupSyncTimestamp(group, answeringAsAdmin, System.currentTimeMillis())
+
+        val allMembers = parseMembers(group.membersJson) + group.adminPublicKeyB64
+        val memberDetails = allMembers.distinct().mapNotNull { pub ->
+            val p = peerDao.getPeerByPublicKey(pub)
+            if (p != null) pub to GroupMemberInfo(p.handle, p.encPublicKeyB64, p.onionAddress)
+            else if (pub == myKeys.publicKeyB64 || (burnableKeys != null && pub == burnableKeys.publicKeyB64)) {
+                pub to GroupMemberInfo(repo.ownHandleFor(signingKey.publicKeyB64), signingKey.encPublicKeyB64, signingKey.onionAddress)
+            } else null
+        }.toMap()
+
+        val sortedDetails = canonicalMemberDetailsString(memberDetails)
+        val payloadToSign = canonicalGroupSyncPayload(group.groupId, groupJson, stateTimestamp, sortedDetails)
+        val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
+
+        val syncPayload = GroupSyncPayload(
+            groupChatJson = groupJson,
+            memberDetails = memberDetails,
+            timestamp = stateTimestamp,
+            signature = signature
+        )
+
+        val syncPacket = NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = 1,
+            senderId = signingKey.publicKeyB64,
+            targetUserId = packet.senderId,
+            type = "GROUP_SYNC",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(syncPayload)
+        )
+        val targetOnion = senderPeer?.onionAddress?.takeIf { it.isNotBlank() }
+        if (!targetOnion.isNullOrBlank()) {
+            repo.dispatchPacket(targetOnion, syncPacket)
+        } else {
+            GossipService.broadcast(syncPacket)
+        }
+        Logger.info(TAG, "Responded to GROUP_QUERY for group ${query.groupId} to ${packet.senderId}")
+        return true
+    }
+
+    suspend fun handleGroupSync(packet: NetworkPacket): Boolean {
+        val sync = packet.getGroupSyncPayload() ?: return false
+        val group = try {
+            com.noslop.app.util.Json.gson.fromJson(sync.groupChatJson, GroupChat::class.java)
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Failed to parse GroupChat from GROUP_SYNC: ${e.message}")
+            return false
+        } ?: return false
+
+        val sortedDetails = canonicalMemberDetailsString(sync.memberDetails)
+        val encCanonical = canonicalGroupSyncPayload(group.groupId, sync.groupChatJson, sync.timestamp, sortedDetails)
+        val encLegacy = CryptoService.encodeForSigning(group.groupId, sync.groupChatJson, sync.timestamp.toString())
+        val pipePayload = "${group.groupId}|${sync.groupChatJson}|${sync.timestamp}"
+        val existing = db.groupChatDao().getGroupChatById(group.groupId)
+
+        val allowedSigners = if (existing != null) {
+            val existingMembers = parseMembers(existing.membersJson)
+            (listOf(existing.adminPublicKeyB64) + existingMembers).distinct()
+        } else {
+            listOf(group.adminPublicKeyB64)
+        }
+        val isValid = allowedSigners.any { cand ->
+            CryptoService.verify(encCanonical, sync.signature, cand) ||
+            (sync.memberDetails.isNullOrEmpty() && (CryptoService.verify(encLegacy, sync.signature, cand) || CryptoService.verify(pipePayload, sync.signature, cand)))
+        }
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: signature verification failed against stored authority")
+            return false
+        }
+
+        val myKeys = repo.getLocalIdentity()
+        val burnable = repo.getBurnableIdentity()
+        val incomingMembersList = parseMembers(group.membersJson)
+        val meInGroup = incomingMembersList.any {
+            it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
+        } || group.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && group.adminPublicKeyB64 == burnable.publicKeyB64)
+
+        val signerIsAdmin = if (existing != null) {
+            CryptoService.verify(encCanonical, sync.signature, existing.adminPublicKeyB64) ||
+            (sync.memberDetails.isNullOrEmpty() && (CryptoService.verify(encLegacy, sync.signature, existing.adminPublicKeyB64) || CryptoService.verify(pipePayload, sync.signature, existing.adminPublicKeyB64)))
+        } else {
+            CryptoService.verify(encCanonical, sync.signature, group.adminPublicKeyB64) ||
+            (sync.memberDetails.isNullOrEmpty() && (CryptoService.verify(encLegacy, sync.signature, group.adminPublicKeyB64) || CryptoService.verify(pipePayload, sync.signature, group.adminPublicKeyB64)))
+        }
+
+        if (existing != null && sync.timestamp <= existing.revision) {
+            Logger.debug(TAG, "Ignoring stale GROUP_SYNC for ${group.groupId} (sync ts ${sync.timestamp} <= existing revision ${existing.revision})")
+            return true
+        }
+        // R3: an admin GROUP_SYNC is stamped with its signing time; never apply one older than (or as
+        // old as) the newest admin sync already applied, so a replayed snapshot cannot roll state back.
+        val adminSyncKey = "group_admin_sync_ts_${group.groupId}"
+        if (existing != null && signerIsAdmin) {
+            val lastAdminSync = db.appSettingDao().getSetting(adminSyncKey)?.toLongOrNull() ?: 0L
+            if (sync.timestamp <= lastAdminSync) {
+                Logger.debug(TAG, "Ignoring replayed GROUP_SYNC for ${group.groupId} (sync ts ${sync.timestamp} <= last applied admin sync $lastAdminSync)")
+                return true
+            }
+        }
+
+        if (existing != null && signerIsAdmin && !meInGroup) {
+            Logger.info(TAG, "Authoritative admin GROUP_SYNC for ${group.groupId} excluded us — applying removal and deleting group locally")
+            repo.deleteGroupChat(group.groupId)
+            return true
+        }
+
+        if (!meInGroup) {
+            Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: our identity is not in the group members list")
+            return false
+        }
+
+        if (existing == null) {
+            val isMyGroup = group.adminPublicKeyB64 == myKeys?.publicKeyB64 || (burnable != null && group.adminPublicKeyB64 == burnable.publicKeyB64)
+            val hasPendingInvite = db.appSettingDao().getSetting("pending_group_invite_${group.groupId}") != null
+            if (isMyGroup) {
+                syncMemberPeers(sync.memberDetails)
+                // R3: the stored revision is the state's own (signed) revision; the sync stamp is the
+                // signing time and is remembered separately for replay protection.
+                db.groupChatDao().insertGroupChat(group.copy(revision = maxOf(group.revision, group.createdAt)))
+                if (signerIsAdmin) db.appSettingDao().insertSetting(AppSetting(adminSyncKey, sync.timestamp.toString()))
+                Logger.info(TAG, "Received own group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
+                return true
+            } else if (hasPendingInvite) {
+                syncMemberPeers(sync.memberDetails)
+                Logger.info(TAG, "Updated pending invite directory for '${group.title}' via GROUP_SYNC")
+                return true
+            } else {
+                Logger.warn(TAG, "Rejected GROUP_SYNC for unknown group '${group.groupId}': no invite accepted")
+                return false
+            }
+        }
+
+        syncMemberPeers(sync.memberDetails)
+
+        val bannedSet = if (signerIsAdmin) group.getBannedMembers().toSet() else existing.getBannedMembers().toSet()
+        val existingMembers = parseMembers(existing.membersJson)
+        val incomingFiltered = incomingMembersList.filter { it !in bannedSet }
+
+        val mergedMembers = if (signerIsAdmin) {
+            incomingFiltered.distinct()
+        } else if (existing.allowMemberInvites) {
+            (existingMembers + incomingFiltered).distinct()
+        } else {
+            existingMembers
+        }
+
+        val mergedHandles = existing.getMemberHandles().toMutableMap()
+        group.getMemberHandles().forEach { (k, v) -> mergedHandles[k] = v }
+
+        val mergedGroup = if (signerIsAdmin) {
+            existing.copy(
+                title = group.title,
+                description = group.description,
+                avatarB64 = group.avatarB64,
+                allowMemberInvites = group.allowMemberInvites,
+                allowMemberSelfRemove = group.allowMemberSelfRemove,
+                membersJson = com.noslop.app.util.Json.gson.toJson(mergedMembers),
+                memberHandlesJson = com.noslop.app.util.Json.gson.toJson(mergedHandles),
+                bannedMembersJson = com.noslop.app.util.Json.gson.toJson(bannedSet.toList()),
+                // R3: advance to the admin's state revision, not the signing time, so member updates
+                // signed after that state (e.g. a leave still in flight) are still accepted afterwards.
+                revision = maxOf(existing.revision, group.revision)
+            )
+        } else {
+            existing.copy(
+                membersJson = com.noslop.app.util.Json.gson.toJson(mergedMembers),
+                memberHandlesJson = com.noslop.app.util.Json.gson.toJson(mergedHandles),
+                revision = existing.revision
+            )
+        }
+
+        db.groupChatDao().insertGroupChat(mergedGroup)
+        if (signerIsAdmin) db.appSettingDao().insertSetting(AppSetting(adminSyncKey, sync.timestamp.toString()))
+        Logger.info(TAG, "Synced and merged group chat '${mergedGroup.title}' (${group.groupId}) via GROUP_SYNC (members: ${mergedMembers.size})")
+        return true
+    }
+}
+
+/**
+ * G1 (round E2): why a GROUP_QUERY must not be answered, or null when it may be. [senderId] is the
+ * envelope-authenticated sender (C09); [requesterId] is the requester named in the query.
+ */
+internal fun groupQueryRefusal(
+    senderId: String,
+    requesterId: String,
+    members: Collection<String>,
+    adminPub: String,
+    banned: Collection<String>
+): String? {
+    val sender = senderId.trim()
+    if (requesterId.trim() != sender) return "the requester named in the query is not the sender"
+    if (banned.any { it.trim() == sender }) return "the sender is banned from the group"
+    val isMemberOrAdmin = members.any { it.trim() == sender } || adminPub.trim() == sender
+    if (!isMemberOrAdmin) return "the sender is not a member or the admin"
+    return null
 }

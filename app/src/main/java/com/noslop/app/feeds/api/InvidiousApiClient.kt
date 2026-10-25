@@ -6,65 +6,70 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Invidious API client (YouTube alternative frontend).
- * Dynamically fetches live instances from api.invidious.io,
- * falling back to a hardcoded list when the registry is unreachable.
- * Uses direct YouTube thumbnail URLs that work regardless of instance health.
+ * Decentralized video stream resolver querying Invidious .onion hidden services
+ * and Piped API instances in parallel over Tor.
  */
 object InvidiousApiClient {
     private const val TAG = "INVIDIOUS_API"
-    private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val gson = com.noslop.app.util.Json.gson
 
     private const val BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
-    /**
-     * Dedicated probe client for resolveStreamUrl().
-     * Built once from scratch (not from clearnetClient.newBuilder()) so it has
-     * NO interceptors — in particular, clearnetClient's browser User-Agent
-     * interceptor does NOT apply here. Building from scratch avoids UA leakage.
-     * Short per-instance timeouts so dead instances are skipped quickly.
-     */
-    private val probeClient: okhttp3.OkHttpClient by lazy {
+    private val probeClientDirect: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
             .dns(com.noslop.app.net.HttpClientProvider.cascadingDns)
-            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
-    // Hardcoded fallback instances (known-good as of June 2026)
-    private val FALLBACK_INSTANCES = listOf(
-        "https://iv.melmac.space",
-        "https://inv.zzls.xyz",
-        "https://invidious.nerdvpn.de",
-        "https://invidious.no-logs.com",
-        "https://invidious.io.lol",
-        "https://inv.tux.pizza",
+    private val probeClientTor: okhttp3.OkHttpClient by lazy {
+        com.noslop.app.net.HttpClientProvider.torClient.newBuilder()
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
+    private val probeClient: okhttp3.OkHttpClient
+        get() = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) probeClientTor else probeClientDirect
+
+    // Hardcoded Invidious instances (including .onion services and active public servers)
+    private val INVIDIOUS_INSTANCES = listOf(
+        "https://yewtu.be",
+        "https://invidious.flokinet.to",
         "https://invidious.privacydev.net",
-        "https://inv.nadeko.net",
-        "https://invidious.lunar.icu",
-        "https://yt.drgnz.club"
+        "https://iv.datura.network",
+        "https://invidious.projectsegfau.lt",
+        "https://invidious.einfachzocken.eu",
+        "http://inv.nadekonw7plitnjuawu6ytjsl7jlglk2t6pyq6eftptmiv3dvqndwvyd.onion",
+        "http://nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion"
     )
 
-    // Cached dynamic instances
-    @Volatile private var cachedInstances: List<String>? = null
-    @Volatile private var cacheTimestamp: Long = 0L
-    private const val CACHE_DURATION_MS = 3600_000L // 1 hour
+    // Robust Piped API instances that deliver clean MP4 streams over Tor
+    private val PIPED_INSTANCES = listOf(
+        "https://pipedapi.adminforge.de",
+        "https://piped-api.privacy.com.de",
+        "https://api.piped.privacydev.net",
+        "https://pipedapi.drgns.space"
+    )
 
-    /**
-     * Per-instance failure tracking for the current session.
-     * Maps instance URL → timestamp of first consecutive failure.
-     * An instance is skipped (blacklisted) for INSTANCE_COOLDOWN_MS after its
-     * first failure.
-     */
     private val instanceFailureTime = ConcurrentHashMap<String, Long>()
-    private const val INSTANCE_COOLDOWN_MS = 5 * 60_000L // 5 minutes
+    private const val INSTANCE_COOLDOWN_MS = 5 * 60_000L
 
     private fun isInstanceCoolingDown(instance: String): Boolean {
         val t = instanceFailureTime[instance] ?: return false
@@ -79,314 +84,370 @@ object InvidiousApiClient {
         instanceFailureTime.remove(instance)
     }
 
-    /**
-     * Fetch healthy Invidious instances from the official registry.
-     * Filters for HTTPS instances that are up and have API enabled.
-     * Falls back to hardcoded list on failure.
-     */
-    @Synchronized
-    private fun getInstances(): List<String> {
-        val now = System.currentTimeMillis()
-        val cached = cachedInstances
-        if (cached != null && (now - cacheTimestamp) < CACHE_DURATION_MS) {
-            return cached
+    fun preWarmInstances() {
+        com.noslop.app.util.AppScopes.io.launch {
+            // Proactively warm up healthy instances in background
+            healthyInvidiousInstances()
+        }
+    }
+
+    private const val RACE_WIDTH = 8
+
+    private suspend fun okhttp3.Call.awaitResponse(): okhttp3.Response =
+        suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { runCatching { cancel() } }
+            enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+                    if (!cont.isCancelled) cont.resumeWith(Result.failure(e))
+                }
+
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    if (cont.isCancelled) {
+                        runCatching { response.close() }
+                        return
+                    }
+                    cont.resumeWith(Result.success(response))
+                }
+            })
         }
 
-        return try {
+    private suspend fun <T : Any> queryInstance(
+        label: String,
+        instance: String,
+        url: String,
+        parse: (String, String) -> T?
+    ): T? = withContext(Dispatchers.IO) {
+        try {
             val request = Request.Builder()
-                .url("https://api.invidious.io/instances.json?sort_by=type,health")
+                .url(url)
                 .header("User-Agent", BROWSER_USER_AGENT)
                 .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                response.close()
-                Logger.warn(TAG, "Instance registry returned ${response.code}, using fallback")
-                return FALLBACK_INSTANCES
-            }
-
-            val body = response.body?.string() ?: return FALLBACK_INSTANCES
-            val array = gson.fromJson(body, JsonArray::class.java)
-
-            val liveInstances = mutableListOf<String>()
-            for (element in array) {
-                try {
-                    val pair = element.asJsonArray
-                    val details = pair[1].asJsonObject
-                    val type = details.get("type")?.asString ?: continue
-                    if (type != "https") continue
-
-                    val uri = details.get("uri")?.asString ?: continue
-                    val apiEnabled = try { details.get("api")?.asBoolean ?: false } catch (_: Exception) { false }
-
-                    val monitor = details.getAsJsonObject("monitor")
-                    val isDown = try { monitor?.get("down")?.asBoolean ?: false } catch (_: Exception) { false }
-
-                    if (!isDown) {
-                        if (apiEnabled) {
-                            liveInstances.add(0, uri)
-                        } else {
-                            liveInstances.add(uri)
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Skip malformed entry
+            probeClient.newCall(request).awaitResponse().use { response ->
+                if (!response.isSuccessful) {
+                    Logger.warn(TAG, "$label: $instance returned HTTP ${response.code}")
+                    markInstanceFailed(instance)
+                    return@withContext null
                 }
+                val body = response.body?.string() ?: return@withContext null
+                val parsed = try {
+                    parse(instance, body)
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "$label: $instance returned an unusable payload: ${e.message}")
+                    null
+                }
+                if (parsed != null) {
+                    markInstanceOk(instance)
+                }
+                return@withContext parsed
             }
-
-            if (liveInstances.isNotEmpty()) {
-                val result = liveInstances.take(12)
-                cachedInstances = result
-                cacheTimestamp = now
-                Logger.info(TAG, "Fetched ${result.size} live Invidious instances from registry")
-                result
-            } else {
-                Logger.warn(TAG, "No live instances found in registry, using fallback")
-                FALLBACK_INSTANCES
-            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Logger.warn(TAG, "Failed to fetch instance registry: ${e.message}, using fallback")
-            FALLBACK_INSTANCES
+            Logger.warn(TAG, "$label: $instance failed: ${e.message}")
+            markInstanceFailed(instance)
+            null
         }
     }
 
-    /**
-     * Returns the best available Invidious instance synchronously, for use from non-suspending
-     * contexts.
-     */
-    fun getPrimaryInstance(): String {
-        val instances = cachedInstances ?: FALLBACK_INSTANCES
-        return instances.firstOrNull { !isInstanceCoolingDown(it) }
-            ?: FALLBACK_INSTANCES.first()
+    private suspend fun <T : Any> raceBatch(
+        label: String,
+        batch: List<String>,
+        urlFor: (String) -> String,
+        parse: (String, String) -> T?
+    ): T? = coroutineScope {
+        val winner = CompletableDeferred<T?>()
+        val racers = batch.map { instance ->
+            launch {
+                val result = queryInstance(label, instance, urlFor(instance), parse)
+                if (result != null) winner.complete(result)
+            }
+        }
+        val watcher = launch {
+            racers.joinAll()
+            winner.complete(null)
+        }
+        val result = winner.await()
+        racers.forEach { it.cancel() }
+        watcher.cancel()
+        result
     }
 
-    /**
-     * Resolve a direct playable stream URL for a YouTube video ID via the Invidious API.
-     */
-    fun resolveStreamUrl(videoId: String): String? {
-        val allInstances = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
-
-        // FIX: Only try healthy instances. If all instances have failed recently (cooldown),
-        // fast-fail immediately to the WebView embed. This prevents the UI from locking up 
-        // for 45 seconds per video trying to probe dead instances!
-        val healthy = allInstances.filter { !isInstanceCoolingDown(it) }
-
-        if (healthy.isEmpty()) {
-            Logger.warn(TAG, "resolveStreamUrl: all instances are in cooldown for $videoId, fast-failing to WebView embed")
+    private suspend fun <T : Any> raceInstances(
+        label: String,
+        instances: List<String>,
+        deadlineMs: Long,
+        urlFor: (String) -> String,
+        parse: (String, String) -> T?
+    ): T? {
+        if (instances.isEmpty()) {
+            Logger.warn(TAG, "$label: no healthy instances available")
             return null
         }
-
-        val deadlineMs = System.currentTimeMillis() + 45_000L
-
-        for (instance in healthy) {
+        for (batch in instances.chunked(RACE_WIDTH)) {
             if (System.currentTimeMillis() >= deadlineMs) {
-                Logger.warn(TAG, "resolveStreamUrl: deadline exceeded for $videoId, aborting")
-                break
+                Logger.warn(TAG, "$label: deadline exceeded, aborting")
+                return null
             }
-            try {
-                val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats"
-                val request = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", BROWSER_USER_AGENT)
-                    .build()
-
-                val response = probeClient.newCall(request).execute()
-                if (!response.isSuccessful) {
-                    response.close()
-                    Logger.warn(TAG, "resolveStreamUrl: $instance returned ${response.code}")
-                    markInstanceFailed(instance)
-                    continue
-                }
-
-                val body = response.body?.string()
-                if (body == null) {
-                    response.close()
-                    continue
-                }
-                val root = gson.fromJson(body, JsonObject::class.java)
-
-                // --- Prefer muxed (audio+video) streams ---
-                val formatStreams = root.getAsJsonArray("formatStreams")
-                if (formatStreams != null && formatStreams.size() > 0) {
-                    val byQuality = mutableMapOf<String, String>()
-                    for (el in formatStreams) {
-                        val obj = el.asJsonObject
-                        val quality = obj.get("qualityLabel")?.asString ?: continue
-                        val streamUrl = obj.get("url")?.asString ?: continue
-                        byQuality[quality] = streamUrl
-                    }
-
-                    val preferred = listOf("720p", "480p", "360p", "240p")
-                    for (q in preferred) {
-                        val streamUrl = byQuality[q]
-                        if (streamUrl != null) {
-                            Logger.info(TAG, "Resolved muxed stream for $videoId at $q via $instance")
-                            markInstanceOk(instance)
-                            return streamUrl
-                        }
-                    }
-
-                    val fallback = formatStreams[0].asJsonObject.get("url")?.asString
-                    if (fallback != null) {
-                        Logger.info(TAG, "Resolved muxed stream (fallback quality) for $videoId via $instance")
-                        markInstanceOk(instance)
-                        return fallback
-                    }
-                }
-
-                // --- Fall back to adaptive (video-only) streams if no muxed found ---
-                val adaptiveFormats = root.getAsJsonArray("adaptiveFormats")
-                if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-                    var bestUrl: String? = null
-                    var bestBitrate = 0
-                    for (el in adaptiveFormats) {
-                        val obj = el.asJsonObject
-                        val mimeType = obj.get("type")?.asString ?: continue
-                        if (!mimeType.startsWith("video/")) continue
-                        val streamUrl = obj.get("url")?.asString ?: continue
-                        val bitrate = obj.get("bitrate")?.asInt ?: 0
-                        if (mimeType.contains("mp4") && bitrate > bestBitrate) {
-                            bestBitrate = bitrate
-                            bestUrl = streamUrl
-                        } else if (bestUrl == null) {
-                            bestUrl = streamUrl
-                        }
-                    }
-                    if (bestUrl != null) {
-                        Logger.info(TAG, "Resolved adaptive video stream for $videoId via $instance (bitrate=$bestBitrate)")
-                        markInstanceOk(instance)
-                        return bestUrl
-                    }
-                }
-
-                Logger.warn(TAG, "resolveStreamUrl: no usable streams for $videoId from $instance")
-            } catch (e: Exception) {
-                Logger.warn(TAG, "resolveStreamUrl: instance $instance failed: ${e.message}")
-                markInstanceFailed(instance)
+            val result = raceBatch(label, batch, urlFor, parse)
+            if (result != null) {
+                Logger.info(TAG, "$label: answered")
+                return result
             }
         }
-
-        Logger.error(TAG, "resolveStreamUrl: all instances exhausted for $videoId", null)
+        Logger.warn(TAG, "$label: all instances exhausted")
         return null
     }
 
-    suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> {
-        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val instances = getInstances()
-
-        for (instance in instances) {
-            val url = "$instance/api/v1/search?q=$encodedQuery&type=video"
-            try {
-                Logger.info(TAG, "Trying Invidious instance: $instance")
-                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
-                val response = client.newCall(request).execute()
-
-                if (response.isSuccessful) {
-                    val body = response.body?.string()
-                    if (body == null) {
-                        response.close()
-                        continue
-                    }
-                    val array = gson.fromJson(body, JsonArray::class.java)
-                    val items = parseVideoArray(array, sourceId)
-                    Logger.info(TAG, "Invidious search successful via $instance. Fetched ${items.size} videos")
-                    markInstanceOk(instance)
-                    return items
-                } else {
-                    response.close()
-                    Logger.warn(TAG, "Instance $instance returned HTTP ${response.code}")
-                    markInstanceFailed(instance)
-                }
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Instance $instance failed: ${e.message}")
-                markInstanceFailed(instance)
-            }
+    private suspend fun healthyInvidiousInstances(): List<String> = withContext(Dispatchers.IO) {
+        val all = INVIDIOUS_INSTANCES.distinct()
+        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        val usable = if (isTor) {
+            all.filter { it.contains(".onion") } + all.filter { !it.contains(".onion") }
+        } else {
+            all.filter { !it.contains(".onion") }
         }
-
-        Logger.error(TAG, "All Invidious instances failed for search", null)
-        return emptyList()
+        val nonCooling = usable.filter { !isInstanceCoolingDown(it) }
+        if (nonCooling.isNotEmpty()) nonCooling else {
+            instanceFailureTime.clear()
+            usable
+        }
     }
 
-    suspend fun getTrendingVideos(sourceId: String = "api-invidious-trending"): List<FeedItem> {
-        val instances = getInstances()
+    private fun healthyPipedInstances(): List<String> {
+        val nonCooling = PIPED_INSTANCES.filter { !isInstanceCoolingDown(it) }
+        return if (nonCooling.isNotEmpty()) nonCooling else {
+            instanceFailureTime.clear()
+            PIPED_INSTANCES
+        }
+    }
 
-        for (instance in instances) {
-            val url = "$instance/api/v1/trending?type=Video"
-            try {
-                Logger.info(TAG, "Trying Invidious instance: $instance")
-                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
-                val response = client.newCall(request).execute()
+    /**
+     * Resolve a direct playable stream URL for a YouTube video ID.
+     * Races Piped API and Invidious .onion endpoints in parallel over Tor.
+     */
+    suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? {
+        // 1. Race Piped API instances over Tor (6s budget)
+        val pipedHealthy = healthyPipedInstances()
+        val pipedResult = raceInstances(
+            label = "resolvePiped(${Logger.redact(videoId)})",
+            instances = pipedHealthy,
+            deadlineMs = System.currentTimeMillis() + 6_000L,
+            urlFor = { "$it/streams/$videoId" },
+            parse = { _, body -> pickPipedStreamUrl(videoId, body, quality) }
+        )
+        if (pipedResult != null) return pipedResult
 
-                if (response.isSuccessful) {
-                    val body = response.body?.string()
-                    if (body == null) {
-                        response.close()
-                        continue
-                    }
-                    val array = gson.fromJson(body, JsonArray::class.java)
-                    val items = parseVideoArray(array, sourceId)
-                    Logger.info(TAG, "Invidious trending successful via $instance. Fetched ${items.size} videos")
-                    markInstanceOk(instance)
-                    return items
-                } else {
-                    response.close()
-                    markInstanceFailed(instance)
-                }
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Instance $instance failed: ${e.message}")
-                markInstanceFailed(instance)
+        // 2. Race Invidious instances (8s budget)
+        val invidiousHealthy = healthyInvidiousInstances()
+        return raceInstances(
+            label = "resolveInvidious(${Logger.redact(videoId)})",
+            instances = invidiousHealthy,
+            deadlineMs = System.currentTimeMillis() + 8_000L,
+            urlFor = { "$it/api/v1/videos/$videoId?local=true" },
+            parse = { instance, body -> pickInvidiousStreamUrl(videoId, instance, body, quality) }
+        )
+    }
+
+    private fun pickPipedStreamUrl(videoId: String, body: String, quality: String): String? {
+        val root = try {
+            val el = com.google.gson.JsonParser.parseString(body)
+            if (el.isJsonObject) el.asJsonObject else null
+        } catch (_: Exception) { null } ?: return null
+
+        val videoStreams = root.getAsJsonArray("videoStreams") ?: return null
+        val muxed = mutableListOf<JsonObject>()
+        for (el in videoStreams) {
+            val obj = el.asJsonObject
+            val videoOnly = try { obj.get("videoOnly")?.asBoolean ?: false } catch (_: Exception) { false }
+            val url = obj.get("url")?.asString
+            if (!videoOnly && !url.isNullOrBlank()) {
+                muxed.add(obj)
             }
         }
 
-        Logger.error(TAG, "All Invidious instances failed for trending", null)
-        return emptyList()
+        if (muxed.isNotEmpty()) {
+            val sorted = muxed.sortedBy { it.get("bitrate")?.asInt ?: 0 }
+            val chosen = when (quality) {
+                "low" -> sorted.first()
+                "medium" -> sorted[sorted.size / 2]
+                else -> sorted.last()
+            }
+            val url = chosen.get("url")?.asString
+            if (!url.isNullOrBlank()) {
+                Logger.info(TAG, "Resolved Piped stream for ${Logger.redact(videoId)} (${chosen.get("quality")?.asString}): $url")
+                return url
+            }
+        }
+
+        val hls = root.get("hls")?.asString
+        if (!hls.isNullOrBlank()) {
+            Logger.info(TAG, "Resolved Piped HLS stream for ${Logger.redact(videoId)}: $hls")
+            return hls
+        }
+
+        return null
+    }
+
+    private fun pickInvidiousStreamUrl(videoId: String, instance: String, body: String, quality: String): String? {
+        val root = try {
+            val el = com.google.gson.JsonParser.parseString(body)
+            if (el.isJsonObject) el.asJsonObject else null
+        } catch (_: Exception) { null } ?: return null
+
+        if (root.has("error")) return null
+
+        fun formatStreamUrl(raw: String, itag: Int = 18): String {
+            return if (raw.startsWith("http://") || raw.startsWith("https://")) {
+                if (raw.contains("googlevideo.com") && com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    "$instance/latest_version?id=$videoId&itag=$itag&local=true"
+                } else {
+                    raw
+                }
+            } else {
+                "$instance${if (raw.startsWith("/")) "" else "/"}$raw"
+            }
+        }
+
+        val formatStreams = root.getAsJsonArray("formatStreams")
+        if (formatStreams != null && formatStreams.size() > 0) {
+            val byQuality = mutableMapOf<String, Pair<String, Int>>()
+            for (el in formatStreams) {
+                val obj = el.asJsonObject
+                val q = obj.get("qualityLabel")?.asString ?: continue
+                val url = obj.get("url")?.asString ?: continue
+                val itag = obj.get("itag")?.asInt ?: 18
+                byQuality[q] = Pair(url, itag)
+            }
+
+            val preferred = when (quality) {
+                "low" -> listOf("360p", "480p", "240p", "720p")
+                "medium" -> listOf("720p", "480p", "360p", "240p")
+                else -> listOf("720p", "1080p", "480p", "360p")
+            }
+
+            for (q in preferred) {
+                val pair = byQuality[q]
+                if (pair != null) {
+                    val finalUrl = formatStreamUrl(pair.first, pair.second)
+                    Logger.info(TAG, "Resolved Invidious stream for ${Logger.redact(videoId)} ($q) via $instance")
+                    return finalUrl
+                }
+            }
+
+            val fallback = formatStreams[0].asJsonObject
+            val fbUrl = fallback.get("url")?.asString
+            if (fbUrl != null) {
+                val itag = fallback.get("itag")?.asInt ?: 18
+                return formatStreamUrl(fbUrl, itag)
+            }
+        }
+
+        // Do NOT fall back to adaptiveFormats: those are video-only or audio-only by definition.
+        // Returning a soundless 1080p stream over Tor causes 10s buffering stalls. Only return muxed formatStreams.
+        return null
+    }
+
+    private fun jsonArrayOrNull(body: String): JsonArray? {
+        return try {
+            val root = com.google.gson.JsonParser.parseString(body)
+            if (root.isJsonArray) root.asJsonArray else null
+        } catch (_: Exception) { null }
+    }
+
+    suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> =
+        searchVideosPage(query, sourceId = sourceId) ?: emptyList()
+
+    /**
+     * E5s: one page of a video search. The defaults are what [searchVideos] has always asked for (first
+     * page, by relevance, uploads of the last month). A user search asks for every date, newest first,
+     * and then for page 2, 3, ... Returns null when no instance answered with results: Invidious ends the
+     * results with an empty page, so null means "failed or no more", and the caller treats it as such.
+     */
+    suspend fun searchVideosPage(
+        query: String,
+        page: Int = 1,
+        newestFirst: Boolean = false,
+        lastMonthOnly: Boolean = true,
+        sourceId: String = "api-invidious-search"
+    ): List<FeedItem>? {
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        return raceInstances(
+            label = "search '${Logger.redact(query)}'" + (if (page > 1) " page $page" else ""),
+            instances = healthyInvidiousInstances(),
+            deadlineMs = System.currentTimeMillis() + 15_000L,
+            urlFor = { searchUrl(it, encodedQuery, page, newestFirst, lastMonthOnly) },
+            parse = { _, body ->
+                jsonArrayOrNull(body)
+                    ?.let { arr -> parseVideoArray(arr, sourceId) }
+                    ?.takeIf { it.isNotEmpty() }
+            }
+        )
+    }
+
+    /**
+     * E5s: the search URL. `sort` is the current API's name for the order and `sort_by` the one older
+     * instances still read; each ignores the other.
+     */
+    internal fun searchUrl(instance: String, encodedQuery: String, page: Int, newestFirst: Boolean, lastMonthOnly: Boolean): String =
+        buildString {
+            append("$instance/api/v1/search?q=$encodedQuery&type=video")
+            if (lastMonthOnly) append("&date=month")
+            if (newestFirst) append("&sort=date&sort_by=upload_date")
+            if (page > 1) append("&page=$page")
+        }
+
+    suspend fun getTrendingVideos(sourceId: String = "api-invidious-trending"): List<FeedItem> {
+        return raceInstances(
+            label = "trending",
+            instances = healthyInvidiousInstances(),
+            deadlineMs = System.currentTimeMillis() + 15_000L,
+            urlFor = { "$it/api/v1/trending?type=Video" },
+            parse = { _, body ->
+                jsonArrayOrNull(body)
+                    ?.let { arr -> parseVideoArray(arr, sourceId) }
+                    ?.takeIf { it.isNotEmpty() }
+            }
+        ) ?: emptyList()
     }
 
     suspend fun searchChannels(query: String): List<String> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val instances = getInstances()
-
-        for (instance in instances) {
-            val url = "$instance/api/v1/search?q=$encodedQuery&type=channel"
-            try {
-                Logger.info(TAG, "Trying Invidious instance for channel search: $instance")
-                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
-                val response = client.newCall(request).execute()
-
-                if (response.isSuccessful) {
-                    val body = response.body?.string()
-                    if (body == null) {
-                        response.close()
-                        continue
-                    }
-                    val array = gson.fromJson(body, JsonArray::class.java)
-                    val channels = mutableListOf<String>()
-                    for (element in array) {
-                        try {
-                            val v = element.asJsonObject
-                            val author = v.get("author")?.asString
-                            if (author != null && author.isNotBlank()) {
-                                channels.add(author)
-                            }
-                        } catch (e: Exception) {
-                            // Skip malformed
+        return raceInstances(
+            label = "channel search '${Logger.redact(query)}'",
+            instances = healthyInvidiousInstances(),
+            deadlineMs = System.currentTimeMillis() + 10_000L,
+            urlFor = { "$it/api/v1/search?q=$encodedQuery&type=channel" },
+            parse = { _, body ->
+                val array = jsonArrayOrNull(body) ?: return@raceInstances null
+                val channels = mutableListOf<String>()
+                for (element in array) {
+                    try {
+                        val v = element.asJsonObject
+                        val author = v.get("author")?.asString
+                        if (!author.isNullOrBlank()) {
+                            channels.add(author)
                         }
-                    }
-                    Logger.info(TAG, "Channel search successful via $instance. Fetched ${channels.size} channels")
-                    markInstanceOk(instance)
-                    return channels.take(3)
-                } else {
-                    response.close()
-                    Logger.warn(TAG, "Instance $instance returned HTTP ${response.code}")
-                    markInstanceFailed(instance)
+                    } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Instance $instance failed: ${e.message}")
-                markInstanceFailed(instance)
+                channels.take(3).takeIf { it.isNotEmpty() }
             }
-        }
+        ) ?: emptyList()
+    }
 
-        Logger.error(TAG, "All Invidious instances failed for channel search", null)
-        return emptyList()
+    suspend fun getChannelJoinedTimestamp(authorIdOrName: String): Long? {
+        if (authorIdOrName.isBlank()) return null
+        val encoded = java.net.URLEncoder.encode(authorIdOrName, "UTF-8")
+        return raceInstances(
+            label = "channel joined date",
+            instances = healthyInvidiousInstances(),
+            deadlineMs = System.currentTimeMillis() + 3_000L,
+            urlFor = { "$it/api/v1/channels/$encoded" },
+            parse = { _, body ->
+                val root = com.google.gson.JsonParser.parseString(body).asJsonObject
+                val joinedSec = try { root.get("joined")?.asLong } catch (_: Exception) { null }
+                if (joinedSec != null && joinedSec > 0L) joinedSec * 1000L else null
+            }
+        )
     }
 
     private fun parseVideoArray(array: JsonArray, sourceId: String): List<FeedItem> {
@@ -397,8 +458,8 @@ object InvidiousApiClient {
                 val videoId = v.get("videoId")?.asString ?: continue
                 val title = v.get("title")?.asString ?: "Untitled"
                 val author = v.get("author")?.asString ?: "Unknown"
-                val desc = try { v.get("description")?.asString?.take(300) } catch (e: Exception) { null }
-                val published = try { v.get("published")?.asLong?.times(1000) } catch (e: Exception) { System.currentTimeMillis() }
+                val desc = try { v.get("description")?.asString?.take(300) } catch (_: Exception) { null }
+                val published = try { v.get("published")?.asLong?.times(1000) } catch (_: Exception) { System.currentTimeMillis() }
                 val lengthSeconds = try { v.get("lengthSeconds")?.asInt } catch (_: Exception) { null }
 
                 val thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
@@ -424,14 +485,12 @@ object InvidiousApiClient {
                     author = author,
                     excerpt = excerpt,
                     thumbnailUrl = thumbnailUrl,
-                    publishedAt = published ?: System.currentTimeMillis(),
+                    publishedAt = published ?: 0L,
                     mediaUrl = ytUrl,
                     mediaType = "video",
                     apiSource = "youtube"
                 ))
-            } catch (e: Exception) {
-                Logger.debug(TAG, "Skipping video result: ${e.message}")
-            }
+            } catch (_: Exception) {}
         }
         return items
     }

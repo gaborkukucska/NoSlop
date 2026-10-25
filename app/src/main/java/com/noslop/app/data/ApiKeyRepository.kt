@@ -17,46 +17,88 @@ class ApiKeyRepository(context: Context) {
 
     private val TAG = "API_KEY_REPO"
 
-    private val prefs: SharedPreferences = try {
-        EncryptedSharedPreferences.create(
-            context,
+    private fun createEncryptedPrefs(ctx: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            ctx,
             "noslop_api_keys",
-            MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build(),
+            masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+    }
+
+    private val prefs: SharedPreferences = try {
+        createEncryptedPrefs(context)
     } catch (e: Exception) {
-        Logger.error(TAG, "EncryptedSharedPreferences init failed for API keys. Falling back to unencrypted.", e.message)
-        context.getSharedPreferences("noslop_api_keys_fallback", Context.MODE_PRIVATE)
+        val apiFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_api_keys.xml")
+        var recovered: SharedPreferences? = null
+        if (apiFile.exists()) {
+            try {
+                apiFile.delete()
+                recovered = createEncryptedPrefs(context)
+                Logger.info(TAG, "Recovered EncryptedSharedPreferences for API keys after clearing foreign file")
+            } catch (recoveryError: Exception) {
+                Logger.warn(TAG, "Recovering API key storage failed: ${recoveryError.message}")
+            }
+        }
+        recovered ?: run {
+            Logger.error(TAG, "EncryptedSharedPreferences init failed for API keys. Falling back to unencrypted.", e.message)
+            context.getSharedPreferences("noslop_api_keys_fallback", Context.MODE_PRIVATE)
+        }
+    }
+
+    init {
+        syncRuntimeOverrides()
+    }
+
+    private fun syncRuntimeOverrides() {
+        val customUrl = getKey("custom_proxy_url")
+        val customSecret = getKey("custom_proxy_secret")
+        com.noslop.app.feeds.api.ProxyAuth.setCustomProxy(customUrl, customSecret)
+        com.noslop.app.feeds.api.JamendoApiClient.userClientId = getKey("jamendo")
     }
 
     fun getKey(service: String): String? = prefs.getString("api_key_$service", null)
 
-    fun setKey(service: String, key: String) {
-        prefs.edit().putString("api_key_$service", key).apply()
-        Logger.info(TAG, "API key updated for service: $service")
+    fun setKey(service: String, key: String): Boolean {
+        val success = prefs.edit().putString("api_key_$service", key).commit()
+        if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
+            syncRuntimeOverrides()
+        }
+        Logger.info(TAG, "API key updated for service: $service (committed=$success)")
+        return success
     }
 
     fun hasKey(service: String): Boolean = !getKey(service).isNullOrBlank()
 
-    fun removeKey(service: String) {
-        prefs.edit().remove("api_key_$service").apply()
+    fun removeKey(service: String): Boolean {
+        val success = prefs.edit().remove("api_key_$service").commit()
+        if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
+            syncRuntimeOverrides()
+        }
         Logger.info(TAG, "API key removed for service: $service")
+        return success
     }
 
     companion object {
         /** All supported API services with their display names and whether they're required */
         val SERVICES = listOf(
-            ServiceInfo("youtube", "YouTube Data API v3", true, "console.developers.google.com"),
+            ServiceInfo("youtube", "YouTube InnerTube API", false, "Keyless (InnerTube proxy)"),
             ServiceInfo("pexels", "Pexels API", true, "pexels.com/api"),
             ServiceInfo("newsapi", "NewsAPI", true, "newsapi.org/register"),
             ServiceInfo("guardian", "The Guardian API", true, "open-platform.theguardian.com/access"),
             ServiceInfo("nasa", "NASA API", false, "api.nasa.gov (DEMO_KEY works without signup)"),
             ServiceInfo("vimeo", "Vimeo API", true, "developer.vimeo.com"),
             ServiceInfo("podcastindex", "Podcast Index API Key", true, "api.podcastindex.org"),
-            ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org")
+            ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org"),
+            ServiceInfo("instagram", "Instagram Graph API User Token", true, "developers.facebook.com"),
+            ServiceInfo("tiktok", "TikTok Display API Client Key", true, "developers.tiktok.com"),
+            ServiceInfo("jamendo", "Jamendo Client ID", false, "developer.jamendo.com (Optional, defaults to public client)"),
+            ServiceInfo("custom_proxy_url", "Custom API Proxy URL", false, "Self-hosted Cloudflare Worker or reverse proxy URL"),
+            ServiceInfo("custom_proxy_secret", "Custom API Proxy Secret", false, "HMAC secret for your self-hosted proxy (Optional)")
         )
     }
 

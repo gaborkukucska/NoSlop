@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-06-19)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-13)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -18,6 +18,34 @@ This document merges what used to be two separate files
 payload types; that coverage is now folded into §2 below so there's one place
 to look up any packet's shape.
 
+> **⚠️ Breaking change (2026-10-07, review round 2 D07): v2-only handshakes.**
+> `CONNECTION_REQUEST` and `USER_HANDSHAKE` are accepted **only** with a
+> `canonicalHandshakePayloadV2` signature (§3, §7). Nodes running an older
+> NoSlop sign handshakes with the legacy encoding and can no longer connect to
+> updated nodes, and vice versa — **both sides must update**. Rejected legacy
+> handshakes are logged (`legacy (pre-v2) handshake — peer must update NoSlop`),
+> the sender's key is remembered, and the user is told ("Older NoSlop
+> Version"; the DMs tab's *Sent requests* list marks such peers).
+>
+> **⚠️ Breaking change (2026-10-13, round E2, review C09): envelope signature
+> on every packet.** Every packet must carry a valid `env_v` / `env_ts` /
+> `env_sig` envelope signature by its `sender_id` (§1.1). Packets without one
+> are dropped on arrival, so nodes before E2 and E2 nodes can no longer talk to
+> each other — **both sides must update** (owner decision: hard break). Same
+> round: `ANNOUNCE_PEER` is signed over its onion address (v2, S2; v1 refused)
+> and `GROUP_QUERY` is answered only for members (G1). Round E4: a
+> `GROUP_QUERY` keeps its sender on every copy.
+>
+> **2026-10-07/08 additions** (no other envelope or payload changes):
+> the handshake reply path (§3.1), `media_metadata` on `CommentSyncData`
+> and v2 (media-hash) signature acceptance in `SYNC_RESPONSE` (§3, §4.3),
+> and the 256 KB chunk window (§6). 2026-10-08 (round R3): the group leave
+> signature, the member signing identity and the `GROUP_SYNC` timestamp rules
+> (§3 GROUP_UPDATE / GROUP_SYNC), and the DM outbox limits (§3 DM_ACK).
+> 2026-10-10 (review D05): `DM_ACK` `v: 3` with `ack_nonce` / `ack_ciphertext`
+> under its own AAD label, and the per-key v1 latch for `MESSAGE` (§3 MESSAGE,
+> §3 DM_ACK). `MESSAGE` itself is unchanged.
+
 ---
 
 ## 1. Envelope
@@ -30,7 +58,10 @@ data class NetworkPacket(
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
     val type: String,
-    val payload: JsonElement? = null
+    val payload: JsonElement? = null,
+    @SerializedName("env_v") val envV: Int? = null,
+    @SerializedName("env_ts") val envTs: Long? = null,
+    @SerializedName("env_sig") val envSig: String? = null
 )
 ```
 
@@ -43,11 +74,14 @@ data class NetworkPacket(
 | `signature` | String | No | Ed25519 signature (only meaningful for packet types that use it — see §6) |
 | `type` | String | Yes | Packet type string, e.g. `"POST"`, `"MESSAGE"` |
 | `payload` | Object | No | The specific payload for the type |
+| `env_v` | Integer | Yes (since E2) | Envelope signature version, `1` (§1.1) |
+| `env_ts` | Long | Yes (since E2) | When the envelope was signed, epoch ms |
+| `env_sig` | String | Yes (since E2) | Base64 Ed25519 envelope signature by `sender_id` (§1.1) |
 
 Wire format: newline-delimited JSON over the SOCKS5/Tor mesh transport
 (`MeshTransport`, port 9999, loopback-bound — see TECHNICAL_REFERENCE.md
-§4.1). One `NetworkPacket` per line, serialized via a fresh `Gson()` instance
-each call (`toJson()`/`fromJson()`).
+§4.1). One `NetworkPacket` per line, serialized with the shared
+`Json.gson` instance (`toJson()`/`fromJson()`), which leaves out null fields.
 
 13 typed payload accessor methods on `NetworkPacket` (`getPostPayload()`,
 `getMessagePayload()`, etc.) each guard on `type == "<TYPE>"` before
@@ -57,18 +91,56 @@ type mismatch or `payload == null`.
 All JSON wire fields use `snake_case` via `@SerializedName`, while Kotlin
 properties use `camelCase`.
 
+### 1.1 Envelope signature (round E2, 2026-10-13; review C09)
+
+`mesh/EnvelopeAuth.kt`. Before E2, `sender_id` was taken on trust: for the
+packet types with no signature of their own (`TYPING`, `READ_RECEIPT`,
+`SYNC_REQUEST`, `INVENTORY_SYNC_REQUEST`, `DM_SYNC_REQUEST`, `GROUP_QUERY`,
+`MEDIA_TRANSFER_ACK`), anyone who could reach an onion could claim to be one
+of its contacts, and the firewall, rate limits and cooldown reset trusted it.
+
+- **Signed string:**
+  `encodeForSigning("noslop-env-v1", id, type, sender_id, target_user_id, signature, env_ts, payloadDigest)`,
+  with `""` for an absent id, target or inner signature. Signed with the
+  private key of `sender_id`; `env_sig` is the Base64 Ed25519 signature.
+- **`payloadDigest`:** lowercase hex SHA-256 of the payload as the receiver
+  sees it: Gson's rendering of the payload tree with object members whose
+  value is null removed (Gson leaves those out on the wire; nulls inside
+  arrays stay). A missing or JSON-null payload hashes as the empty string.
+- **Not covered:** `hops`, which relays decrement. A relay that keeps the
+  original `sender_id` keeps the original envelope; a relay re-stamped with
+  the relaying node's key gets that node's envelope.
+- **Receiver rules** (`MeshTransport`, before any handler): drop if the
+  envelope is missing, `env_v` is not 1, `env_ts` is more than 1 hour from
+  the receiver's clock either way (`MAX_SKEW_MS`), the signature does not
+  verify, or the same `sender_id` | `id` | `env_sig` was already processed
+  (replay guard). Applies to the listener and to replies read on a
+  handshake connection (§3.1). A packet the app cannot sign as one of its own
+  identities, and that carries no envelope, is never sent.
+- **Not checked:** packets built inside the app that never cross the socket
+  (Hub pulls, Hub web-UI DMs) — a known gap (PROJECT_STATUS.md, 2026-10-13).
+- Tested (unit: `EnvelopeAuthTest`, `HandshakeReplyPathTest`, `WireProtocolTest`).
+
 ---
 
-## 2. Full Packet Type Catalog (24 distinct type strings)
+## 2. Full Packet Type Catalog
+
+> The numbered rows below group some families onto one line (row 19 covers
+> six media types), so the row count is not the number of distinct `type`
+> strings. The authoritative list is the `when (packet.type)` block in
+> `MeshPacketHandler.handleIncomingPacket`, plus `MEDIA_RELAY_REQUEST`, which
+> `GossipService` intercepts before dispatch (Round B: it is handed to
+> `MediaManager.handleRecoveryRequest` and never forwarded).
 
 `Packets.kt`'s `type` field KDoc comment lists 19 non-media type strings;
 together with the 6 `MEDIA_*` types (§5) and `CONNECTION_REJECTED`, that's
 **24 distinct `type` values** total in active use, plus `ANNOUNCE_PEER`'s
 payload class which sits alongside them. `MeshPacketHandler.handlePacket`'s
-`when` block dispatches **21 cases** (not all 24 — `MEDIA_RELAY_REQUEST` and
-`MEDIA_RECOVERY_FOUND`'s relay-forwarding side is intercepted earlier inside
-`GossipService.processIncoming` itself, before reaching the dispatcher; see
-§5 and §6 of TECHNICAL_REFERENCE.md §4.2 for that routing logic).
+`when` block dispatches **21 cases** (not all 24 — `MEDIA_RELAY_REQUEST` is
+intercepted earlier inside `GossipService.processIncoming` itself, before
+reaching the dispatcher; see §6 and TECHNICAL_REFERENCE.md §4.2/§4.3).
+Since Round B (2026-10-08) every `MEDIA_*` packet is point-to-point: it is
+processed only by the node it is addressed to and never gossiped.
 
 **Architecture note**: the per-type handler logic does **not** live inside
 one large `MeshPacketHandler.kt` file. As of a "Phase 0, Stage 0.3"
@@ -83,16 +155,16 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | `PostPacketHandler` | `POST`, `EDIT_POST`, `DELETE_POST` |
 | `CommentPacketHandler` | `COMMENT` |
 | `ReactionPacketHandler` | `REACTION`, `VOTE`, `COMMENT_VOTE`, `CHAT_REACTION`, `COMMENT_REACTION` |
-| `DmPacketHandler` | `MESSAGE` |
+| `DmPacketHandler` | `MESSAGE`, `DELETE_MESSAGE` |
 | `HandshakePacketHandler` | `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `CONNECTION_REJECTED`, `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT` |
 | `MediaPacketHandler` | `MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_RECOVERY_FOUND` |
 
 | # | `type` | Payload class | Signed string format | Handler (class.method) | Persistence |
 |---|---|---|---|---|---|
 | 1 | `POST` | `PostPayload` | `id\|authorId\|content\|timestamp` (+`\|authorAvatarB64` if set) | `PostPacketHandler.handlePost` | `postDao.insertPost`; triggers media auto-download |
-| 2 | `MESSAGE` | `EncryptedPayload` | n/a (encryption is the auth) | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; auto-download if media |
-| 3 | `CONNECTION_REQUEST` | `PeerHandshakePayload` | carried but **not verified** on receipt | `HandshakePacketHandler.handleConnectionRequest` | inserts untrusted `Peer`, sets `_incomingRequestFlow` |
-| 4 | `USER_HANDSHAKE` | `PeerHandshakePayload` | carried but **not verified** on receipt | `HandshakePacketHandler.handleUserHandshake` | upserts `Peer` with `isTrusted = true` |
+| 2 | `MESSAGE` | `EncryptedPayload` | Pairwise directional ChaCha20-Poly1305 with AAD (`v: 2`); v1 (unauthenticated) only from a key never seen speaking v2 | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; outbox retry until `DM_ACK` |
+| 3 | `CONNECTION_REQUEST` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleConnectionRequest` | inserts untrusted `Peer`, sets `_incomingRequestFlow` |
+| 4 | `USER_HANDSHAKE` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleUserHandshake` | upserts `Peer` with `isTrusted = true` |
 | 5 | `SYNC_REQUEST` | `SyncRequestPayload` | n/a | `SyncPacketHandler.handleSyncRequest` | none — replies `SYNC_RESPONSE` |
 | 6 | `SYNC_RESPONSE` | `SyncResponsePayload` | per-post `id\|authorId\|content\|timestamp` | `SyncPacketHandler.handleSyncResponse` | `postDao.insertPost` per valid post; also processes `comments`/`reactions` arrays |
 | 7 | `INVENTORY_SYNC_REQUEST` | `InventorySyncRequestPayload` | n/a | `SyncPacketHandler.handleInventorySyncRequest` | none — replies with a `SYNC_RESPONSE` containing only missing/updated posts + their comments/reactions |
@@ -102,13 +174,28 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 11 | `COMMENT_REACTION` | `CommentReactionPayload` | `commentId\|reactionType\|authorId\|timestamp` | `ReactionPacketHandler.handleCommentReaction` | `commentReactionDao.insertReaction`/`deleteReactionById` |
 | 12 | `VOTE` | `VotePayload` | `postId\|voteType\|authorId\|timestamp` | `ReactionPacketHandler.handleVote` | `voteDao.insertVote`/`deleteVoteById` per `action` |
 | 13 | `COMMENT_VOTE` | `CommentVotePayload` | `commentId\|voteType\|authorId\|timestamp` | `ReactionPacketHandler.handleCommentVote` | `commentVoteDao.insertVote`/`deleteVoteById` |
-| 14 | `ANNOUNCE_PEER` | `AnnouncePeerPayload` | `authorId\|timestamp` (signed) | `HandshakePacketHandler.handleAnnouncePeer` | `peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = now))` |
+| 14 | `ANNOUNCE_PEER` | `AnnouncePeerPayload` | `canonicalAnnouncePeerV2(authorId, onionAddress, timestamp)` (signed, v2 only since E2) | `HandshakePacketHandler.handleAnnouncePeer` | `peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = now))` |
 | 15 | `IDENTITY_UPDATE` | `IdentityUpdatePayload` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) | `HandshakePacketHandler.handleIdentityUpdate` | updates `Peer.handle`/`Peer.authorAvatarB64` for `userId` |
 | 16 | `USER_EXIT` | `UserExitPayload` | `userId\|timestamp` (signed) | `HandshakePacketHandler.handleUserExit` | `peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = now))` |
 | 17 | `EDIT_POST` | `EditPostPayload` | `postId\|authorId\|content\|timestamp` | `PostPacketHandler.handleEditPost` | updates `mesh_posts.content` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 18 | `DELETE_POST` | `DeletePostPayload` | `postId\|authorId\|timestamp` | `PostPacketHandler.handleDeletePost` | marks `mesh_posts.isOrphaned = true` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 19 | `MEDIA_REQUEST` / `MEDIA_CHUNK` / `MEDIA_RELAY_REQUEST` / `MEDIA_RECOVERY_FOUND` / `MEDIA_PENDING` / `MEDIA_TRANSFER_ACK` | see §5 | none | see §5 for routing (`GossipService` vs `MediaPacketHandler`/`MediaManager`) | see §5 |
-| 20 | `CONNECTION_REJECTED` | `ConnectionRejectedPayload` | `fromUserId\|timestamp` (signed) | `HandshakePacketHandler.handleConnectionRejected` | Deletes the untrusted `Peer` locally and triggers a decline notification |
+| 20 | `CONNECTION_REJECTED` | `ConnectionRejectedPayload` | `fromUserId\|timestamp` (signed, dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleConnectionRejected` | Deletes the untrusted `Peer` locally and triggers a decline notification |
+| 21 | `GROUP_INVITE` | `GroupInvitePayload` | `groupId\|title\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupInvite` | `groupChatDao.insertGroupChat` — only if the signature verifies against `adminPublicKeyB64`, our identity is in `members`, and any existing group of that id has the same admin |
+| 22 | `GROUP_UPDATE` | `GroupUpdatePayload` | `groupId\|title\|signerPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupUpdate` | `groupChatDao.insertGroupChat` with the merged member list, or `deleteGroupChat` if the update removed us |
+| 23 | `GROUP_DELETE` | `GroupDeletePayload` | `groupId\|delete\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupDelete` | `groupChatDao.deleteGroupChat` — admin only, signature-verified |
+| 24 | `TYPING` | `TypingPayload` | **none — unsigned** | `DmPacketHandler.handleTyping` | none; updates the in-memory `peerTypingStates` flow |
+| 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
+| 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
+| 27 | `GROUP_MESSAGE` | *(retired)* | *(retired)* | *(retired — unencrypted cleartext packet eliminated per C22; all group messaging strictly uses pairwise E2EE `MESSAGE` fan-out)* | none |
+| 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
+| 29 | `GROUP_QUERY` | `GroupQueryPayload` | n/a (envelope signature only; queries group state and member keys) | `HandshakePacketHandler.handleGroupQuery` | Answered only for a member or the admin, not banned, with `requester_id` = `sender_id` (G1); replies with `GROUP_SYNC` containing full group schema and `memberDetails` to the sender's stored onion (broadcast when none is stored — open) |
+| 30 | `GROUP_SYNC` | `GroupSyncPayload` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` | `HandshakePacketHandler.handleGroupSync` | Merges group members, handles, and member details; verified against admin or member keys |
+| 31 | `EDIT_COMMENT` | `EditCommentPayload` | `postId|commentId|content|timestamp` (+`|authorAvatarB64`) (dual-mode: encodeForSigning & pipe in verifier & handler) | `CommentPacketHandler.handleEditComment` | updates `mesh_comments.content`, `timestamp`, `signature` |
+| 32 | `DELETE_COMMENT` | `DeleteCommentPayload` | `postId|commentId|authorId|timestamp` (dual-mode: encodeForSigning & pipe) | `CommentPacketHandler.handleDeleteComment` | marks `mesh_comments.content = '[Deleted]'` |
+| 33 | `FOLLOW` / `UNFOLLOW` | `FollowPayload` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (dual-mode: encodeForSigning & pipe) | `HandshakePacketHandler.handleFollow` | `peerDao.updateFollowState` |
+| 34 | `ANNOUNCE_INVIDIOUS_INSTANCE` | *(retired)* | *(retired)* | *(retired — unauthenticated video instance gossip eliminated per C05 to prevent SSRF and resolver hijacking)* | none |
+| 35 | `DM_ACK` | `DmAckPayload` | AEAD directional ChaCha20-Poly1305 AAD authentication over `(msg_id, senderPub, recipientPub, timestamp)` | `DmPacketHandler.handleDmAck` | `messageDao.updateDeliveryStatus(msgId, 'DELIVERED')`; removes message from persistent outbox |
 
 Notes:
 
@@ -124,16 +211,59 @@ Notes:
   like `POST`'s `hops = 6`) and is signed — every other "heartbeat style"
   packet (`SYNC_REQUEST`, `MEDIA_REQUEST`, etc.) has no signature field at
   all, making `ANNOUNCE_PEER` the only repeatedly-broadcast, low-TTL packet
-  that is nonetheless signature-checked.
+  that is nonetheless signature-checked. (Since round E2 every packet,
+  heartbeat-style ones included, also carries the envelope signature, §1.1.)
 - Row 15 (`IDENTITY_UPDATE`): the payload's field is named `handle` (not
   `displayName`), and the signed string uses that same field name —
   `userId|handle|timestamp`.
-- Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) remain the one documented
-  verification gap: `PeerHandshakePayload.signature` is populated by the
-  sender (`NoSlopRepository.sendConnectionRequest`/`acceptConnectionRequest`
-  both call `CryptoService.sign`) but `MeshPacketHandler` does not verify it
-  on receipt. Still open — tracked in `docs/PROJECT_STATUS.md`'s "Handshake
-  Signature Verification Gap" item.
+- Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) verify signatures
+  on receipt using dual-mode verification: length-prefixed `CryptoService.encodeForSigning`
+  as primary, with fallback to legacy pipe-delimited strings (`fromUserId|fromUsername|fromHomeNode|timestamp`
+  + optional `authorAvatarB64` and `bio`).
+- `ANNOUNCE_PEER` (row 14) and `DM_SYNC_REQUEST` are whitelisted through
+  the gossip firewall (`GossipService.processIncoming`), ensuring presence
+  heartbeats and direct message sync packets are processed and peer online
+  states update correctly. Directed `MESSAGE` packets (row 2) addressed to
+  the local node bypass the untrusted sender gate so ChaCha20-Poly1305 AEAD
+  decryption in `DmPacketHandler` serves as the cryptographic authenticity check.
+  Unauthenticated incoming DMs are rate-limited to 10 packets per 60 seconds per
+  sender in `GossipService.processIncoming`, and peer contact identities are only
+  associated with burnable identities after cryptographic decryption succeeds.
+- - **Friends-Only Broadcast Isolation**: Outbound packets for friends-only broadcasts (`POST` with `privacy = "friends"`,
+  and `EDIT_POST`, `DELETE_POST`, `COMMENT`, `REACTION`, etc. with `hops = 1`) are strictly isolated to trusted
+  direct peer connections (`isTrusted && !isTemporary && contactSetting != "burnable"`) and the post author. Temporary
+  contacts and creator nodes connected via severable temporary connections are excluded from broadcast distribution
+  and historical/inventory sync.
+
+On multi-identity Creator Nodes, outbound `POST` broadcasts dynamically stamp `senderId`
+  with either the burnable identity public key (for temporary follower contacts) or main identity public key
+  (for personal contacts), ensuring recipient firewalls accept the packet.
+- **Friends-Only Broadcast Isolation**: Outbound packets for friends-only broadcasts (`POST` with `privacy = "friends"`,
+  and `EDIT_POST`, `DELETE_POST`, `COMMENT`, `REACTION`, etc. with `hops = 1`) are strictly isolated to trusted
+  direct peer connections (`isTrusted && !isTemporary && !isCreator && contactSetting != "burnable"`). Temporary
+  contacts and creator nodes connected via severable temporary connections are excluded from broadcast distribution
+  and historical/inventory sync.
+- Rows 21–23 (the `GROUP_*` family): all three carry a signature and all
+  three verify it. `GROUP_INVITE` and `GROUP_DELETE` verify against the
+  `adminPublicKeyB64` in the payload, and `GROUP_DELETE` additionally
+  requires that key to equal the *stored* group's admin — a packet-supplied
+  key matching itself proves nothing.
+
+  `GROUP_UPDATE` is the awkward one: it has no signer field, and
+  `GossipService.forwardPacket` re-stamps `senderId` on relay, so neither
+  can identify who signed it. `resolveUpdateSigner` recovers the signer by
+  testing the signature against the admin key and each current member key in
+  turn — O(members) Ed25519 verifies, on this packet type only. Once the
+  signer is known, authorisation is per-field: only the admin may change
+  title / description / avatar; a non-admin may add members only when
+  `allowMemberInvites` is set, and may remove only itself and only when
+  `allowMemberSelfRemove` is set. The admin can never be removed by an
+  inbound packet. These two switches live on the `GroupChat` entity and were
+  previously stored but never enforced on the wire.
+- Rows 24–25 (`TYPING`/`READ_RECEIPT`) are unsigned by design — they carry
+  no durable state and are cheap to spoof. `READ_RECEIPT` marks exactly the
+  message named by `messageId`; it used to mark the whole conversation read
+  and ignore that field entirely.
 
 ---
 
@@ -164,6 +294,15 @@ Every payload class in `Packets.kt`, with wire (`snake_case`) field names.
 | `clearnet_title`? | String | Original title if sharing a clearnet article |
 | `clearnet_thumbnail_url`? | String | URL of the thumbnail for the clearnet article |
 
+When `media_metadata.sha256` is present the author signs the **v2** form
+(the 8 canonical fields plus the digest, §7). A receiver that can only verify
+the 8-field form treats the digest as unsigned. In `SYNC_RESPONSE` the digest
+is then removed before auto-download (2026-10-08), and since 2026-10-10
+(review D08) the live `POST` / `EDIT_POST` path does the same. A receiver
+replaces a stored post's signature at the same `timestamp` only if every
+signed field matches (including `author_avatar_b64`) and the new signature
+covers the digest already recorded for the post.
+
 ### MESSAGE (Secure Direct Messages)
 **Type:** `MESSAGE` · class `EncryptedPayload`
 
@@ -172,13 +311,46 @@ Every payload class in `Packets.kt`, with wire (`snake_case`) field names.
 | `id` | String | Unique message ID |
 | `nonce` | String | Initialization Vector/Nonce for encryption |
 | `ciphertext` | String | Encrypted payload (Base64) |
-| `group_id`? | String | Reserved, unused — group chats are not implemented (see GAP_ANALYSIS.md §3) |
+| `group_id`? | String | Set when this DM is one fan-out leg of a group message; the receiver files it under this group's thread instead of a 1:1 thread. `null` for ordinary DMs. |
 | `timestamp`? | Long | Epoch timestamp |
+| `v` | Int | `2` = directional key + AAD `encodeForSigning("noslop-dm-v2", senderEdPub, recipientEdPub, id, group_id ?: "", timestamp)`; `1` = legacy (SHA3-256 of the X25519 secret, no AAD). Not authenticated; receivers always try v2 first |
+
+**v1 latch (D05, 2026-10-10).** A receiver tries v2 first. It falls back to v1
+only for a 1:1 message, and only if the sender's key has never been seen
+speaking v2: a v2 message, an authenticated `DM_ACK`, or a v2-signed
+`CONNECTION_REQUEST` / `USER_HANDSHAKE` from that key sets
+`app_settings["dm_v2_seen_<key>"]` for good. v1 binds neither id nor direction,
+so a relay could otherwise reflect captured v1 traffic under a new id. Group
+legs are v2 only. Senders never produce v1: DMs written in the Hub web UI and
+DM sync re-sends are sealed as v2 too.
 
 If a DM carries media, the decrypted plaintext is a JSON object
 `{"content": "<text>", "media": <MediaMetadata>}` rather than raw text;
 `handleDirectMessage` attempts to parse it as JSON and falls back to raw
 text if parsing fails.
+
+**Group messages** ride on this same `MESSAGE` type. `sendGroupMessage`
+encrypts the body once per member with that member's X25519 key and sends N
+separate packets, each carrying the same `group_id` and the same message
+`id`. The plaintext JSON also carries a `groupId` field, which
+`handleDirectMessage` reads as a fallback for senders that only populate it
+there. On receipt, a packet with a resolved group id is checked against the
+local `GroupChat` — unknown group, or a sender who is not a member, and the
+packet is dropped. Accepted group messages are stored with
+`chatWithPeerPub = groupId` (matching what the sender's own local echo does)
+and with the *decrypted* text in the `ciphertext` column, because a group
+thread has no single counterparty key for the chat screen to decrypt against
+at render time.
+
+The sender of every leg is the member identity listed in the group (see
+GROUP_UPDATE, "Signing identity"); the v2 AAD binds it, so a leg sent under
+another key cannot be decrypted. Legs queued for members without a known onion
+(`pending_group_messages`) are flushed later under the identity of the local
+echo's `senderPub` and as `v = 2` (until 2026-10-08 they were flushed as the
+main identity and `v = 1`, which failed for burnable-identity senders). Group
+legs from a member of a stored group are exempt from the untrusted-sender DM
+limit (10/min per sender, 30/min overall), which still applies to everyone
+else.
 
 ### CONNECTION_REQUEST / USER_HANDSHAKE
 **Type:** `CONNECTION_REQUEST` or `USER_HANDSHAKE` · class `PeerHandshakePayload` (shared, unified type per milestone 56)
@@ -190,10 +362,93 @@ text if parsing fails.
 | `from_username` | String | Sender's handle |
 | `from_display_name` | String | Sender's display name |
 | `author_avatar_b64`? | String | Sender's avatar, if set |
+| `bio`? | String | Sender's bio, if set |
 | `from_home_node` | String | Sender's onion address |
 | `from_encryption_public_key`? | String | Sender's X25519 public key |
 | `timestamp` | Long | Epoch timestamp |
-| `signature`? | String | Computed and sent, but **not verified on receipt** — see §2 row 3–4 |
+| `signature`? | String | v2 signature (below); the envelope `signature` takes precedence when both are set |
+| `request_nonce`? | String | `CONNECTION_REQUEST`: 128-bit random nonce chosen by the requester. **Required** (blank → rejected) |
+| `in_reply_to_nonce`? | String | `USER_HANDSHAKE`: echo of the requester's `request_nonce`; promotion to `ACCEPTED` requires it to match the stored `pendingNonce` |
+| `target_user_id`? | String | Identity this handshake is addressed to (main or burnable key). Must be a local identity and must equal the envelope `targetUserId` when that is set |
+| `version` | Int | `2` for handshakes built by current clients |
+| `intro`? | String | Round D10b, `CONNECTION_REQUEST` only: `"qr_camera"` when the requester scanned the recipient's QR code with the camera. Absent otherwise. Signed (below); the recipient uses it only to mark the requester verified in person after the user approves |
+
+**Signature (v2 only).** `canonicalHandshakePayloadV2` =
+`encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode,
+fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?[, intro])`,
+where `nonce` is `request_nonce` for a request and `in_reply_to_nonce` for a
+handshake. `intro` is appended only when present, so packets without it sign
+exactly as before; adding or removing it breaks the signature. Legacy encodings (`fromUserId|fromUsername|fromHomeNode|timestamp…`)
+are recognised only to report "peer must update"; they are never accepted.
+
+**Receiver rules (`HandshakePacketHandler`).** Requests older than 1 hour from
+unknown peers are ignored, as are requests from a peer deleted within the last
+7 days unless the request was created after the deletion (a deliberate
+reconnect). A
+`BLOCKED` peer's request is ignored. A request crossing our own
+`OUTGOING_PENDING` request is treated as mutual consent. A request from an
+`ACCEPTED` friend re-sends our handshake echoing their nonce. A changed
+encryption key (signed by their identity key) is applied, any in-person
+verification is cleared and the chat shows a notice (Round D10b, see
+TECHNICAL_REFERENCE §3.4.1).
+
+#### 3.1 Handshake reply path (Round A2, 2026-10-07)
+
+A freshly published onion descriptor can take minutes to propagate, so the
+requester can often reach the accepter long before the accepter can reach the
+requester. The answer therefore travels back on the requester's own
+connection:
+
+1. The requester writes the `CONNECTION_REQUEST` and keeps the socket open for
+   `MeshTransport.HANDSHAKE_REPLY_WINDOW_MS` = **6 s**, reading newline-delimited
+   frames. It accepts exactly one `USER_HANDSHAKE` or `CONNECTION_REJECTED`
+   whose envelope `senderId` equals the identity it contacted (the request's
+   `targetUserId`); anything else on that socket is ignored.
+2. The accepter may write a reply on that inbound connection only after the
+   request passed signature, target and freshness checks (timestamp within
+   ±5 minutes), and at most once per request timestamp per sender (a
+   timestamp must be strictly newer than the last one answered). A replayed
+   or forged request never collects a handshake.
+3. Reply content: `USER_HANDSHAKE` when the user has accepted (or the peer is
+   already `ACCEPTED`); `CONNECTION_REJECTED` when the request repeats a nonce
+   the user declined (`declined_request_<pub>`); nothing while the request is
+   still awaiting the user — the requester learns by probing.
+4. **Probing.** While a request is `OUTGOING_PENDING`, the requester re-sends it
+   every **15 s** for up to **10 min**: same `request_nonce`, same identity,
+   fresh `timestamp`, fresh packet `id` (so dedup lets it through), each
+   probe re-signed. Probes are direct only (no Hub, outbox, gossip or cooldown
+   bookkeeping) and stop once the row leaves `OUTGOING_PENDING` or its nonce
+   changes. A pending request is never re-notified to the accepting user;
+   *Re-send* creates a new nonce and is asked normally.
+
+The normal (separate-connection) delivery of `USER_HANDSHAKE` and
+`CONNECTION_REJECTED` still happens as before; the reply path is an addition.
+
+**Identity per peer (2026-10-09, review D04).** Every packet a node sends to a
+peer names the identity that peer knows (`IdentityRouter`): the creator
+(burnable) identity for creator contacts, the personal one otherwise. A node's
+own broadcasts follow `GossipService.outboundFor` (TECHNICAL_REFERENCE §4.2):
+packets written by the personal identity are not sent to creator contacts;
+packets written by the creator identity reach the personal identity's contacts
+in relay form (hops − 1, relay envelope). The creator identity now sends its own
+`ANNOUNCE_PEER`, and handshakes, posts, comments and `ANNOUNCE_DISCOVERABLE`
+from it carry the creator profile (handle, bio, avatar), never the personal one.
+No field or signature changed.
+
+**`IDENTITY_UPDATE` verification (2026-10-09).** Senders sign
+`encodeForSigning(user_id, handle, timestamp, author_avatar_b64, bio)`
+(absent avatar or bio = `"0:"`). Receivers only checked the older pipe form
+`user_id|handle|timestamp[|avatar][|bio]`, so no update was ever accepted.
+Both forms are accepted now, by the handler and by the pre-relay check
+`MeshPacketVerifier` (which had the same pipe-only copy). Older receivers still
+ignore updates from any sender, as before.
+
+**No broadcast handshakes (2026-10-09).** `USER_HANDSHAKE` is only ever sent to
+one peer, naming it in `targetUserId`. `NoSlopRepository.updateOnionAddress`
+used to broadcast an untargeted, legacy-signed `USER_HANDSHAKE` (6 hops) on
+every app start; every receiver relayed it and then rejected it ("targetUserId
+null is not a local identity"). It no longer sends anything. Peers learn our
+onion address from the `ANNOUNCE_PEER` presence heartbeat (`onion_address`).
 
 ### ANNOUNCE_PEER
 **Type:** `ANNOUNCE_PEER` · class `AnnouncePeerPayload`
@@ -201,8 +456,25 @@ text if parsing fails.
 | Field | Type | Description |
 |---|---|---|
 | `author_id` | String | Sender's public key |
+| `onion_address`? | String | Sender's current onion address. Covered by the signature since round E2 (S2); stored only when it is the onion derived from `author_id` (`CryptoService.isOnionOf`) |
 | `timestamp` | Long | Epoch timestamp |
-| `signature` | String | Ed25519 signature over `authorId\|timestamp` |
+| `signature` | String | Ed25519 signature over `canonicalAnnouncePeerV2(authorId, onionAddress, timestamp)` = `encodeForSigning("noslop-announce-v2", authorId, onionAddress or "", timestamp)`. The v1 form (`authorId\|timestamp`, which left the onion unsigned) is refused |
+
+### ANNOUNCE_DISCOVERABLE
+**Type:** `ANNOUNCE_DISCOVERABLE` · class `AnnounceDiscoverablePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `author_id` | String | Sender's public key |
+| `handle` | String | Sender's handle |
+| `onion_address` | String | Sender's onion address |
+| `enc_public_key` | String | Sender's X25519 public key |
+| `is_creator` | Boolean | True if the node is a creator |
+| `fund_me_link`? | String | Donation link, if set |
+| `author_avatar_b64`? | String | Sender's avatar, if set |
+| `bio`? | String | Sender's bio, if set |
+| `timestamp` | Long | Epoch timestamp |
+| `signature` | String | Signature over payload (using colons `:`) |
 
 ### IDENTITY_UPDATE
 **Type:** `IDENTITY_UPDATE` · class `IdentityUpdatePayload`
@@ -212,6 +484,7 @@ text if parsing fails.
 | `user_id` | String | Subject's public key (verifying key) |
 | `handle` | String | New handle/display name |
 | `author_avatar_b64`? | String | New avatar, if changed |
+| `bio`? | String | New bio, if changed |
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Signature over `userId\|handle\|timestamp` (+`\|authorAvatarB64` if present) |
 
@@ -233,6 +506,12 @@ text if parsing fails.
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Signature over `fromUserId\|timestamp` |
 
+Sent by the identity the request addressed. Since 2026-10-07 it can also arrive
+as the answer on the requester's own connection (§3.1), and the decliner
+remembers the declined nonce so repeated probes get this packet instead of a
+new prompt. Received `CONNECTION_REJECTED` only cancels our own
+`OUTGOING_PENDING` request; it never removes an accepted friend.
+
 ### EDIT_POST
 **Type:** `EDIT_POST` · class `EditPostPayload`
 
@@ -240,9 +519,14 @@ text if parsing fails.
 |---|---|---|
 | `post_id` | String | ID of the post being edited |
 | `author_id` | String | Claimed author's public key (verifying key; cross-checked against the stored post's author) |
+| `author_avatar_b64`? | String | Author's avatar Base64, if set |
 | `content` | String | New content |
 | `timestamp` | Long | Epoch timestamp (must be ≥ stored post's timestamp to apply) |
-| `signature` | String | Signature over `postId\|authorId\|content\|timestamp` |
+| `signature` | String | Canonical 8-field signature, or the v2 form with `media_metadata.sha256` (§7); see POST for how an unsigned digest is treated |
+| `media_id`? | String | ID of updated media attachment, if present |
+| `media_metadata`? | Object | Media descriptor object, if present |
+| `privacy`? | String | `"public"` (hops=6) or `"friends"` (hops=1) |
+| `clearnet_url`? | String | Clearnet URL anchor if editing a shared post |
 
 ### DELETE_POST
 **Type:** `DELETE_POST` · class `DeletePostPayload`
@@ -266,7 +550,8 @@ text if parsing fails.
 `CommentData.signature` covers `postId|commentId|content|timestamp`.
 
 ### REACTION / CHAT_REACTION / COMMENT_REACTION
-**Types:** `REACTION`, `CHAT_REACTION`, `COMMENT_REACTION` · classes `ReactionPayload`, `ChatReactionPayload`, `CommentReactionPayload` (identical shape, different target-ID field name)
+
+**Types:** `REACTION`, `CHAT_REACTION`, `COMMENT_REACTION` · classes `ReactionPayload`, `ChatReactionPayload`, `CommentReactionPayload`
 
 | Field | Type | Description |
 |---|---|---|
@@ -276,6 +561,7 @@ text if parsing fails.
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Ed25519 signature (see §2 for exact per-type string) |
 | `action` | String | `"add"` (default) or `"remove"` — toggles the reaction |
+| `group_id`? | String | Optional group identifier (present on `CHAT_REACTION` for group messages) |
 
 ### VOTE / COMMENT_VOTE
 **Types:** `VOTE`, `COMMENT_VOTE` · classes `VotePayload`, `CommentVotePayload`
@@ -312,13 +598,289 @@ text if parsing fails.
 | `comments`? | Array\<`CommentSyncData`\> | Comments attached to those posts (milestone 159/172) |
 | `reactions`? | Array\<`ReactionSyncData`\> | Reactions attached to those posts (milestone 159/172) |
 
-`CommentSyncData`: `id, post_id, author_id, author_name, author_avatar_b64?, content, timestamp, signature, parent_comment_id?`
+`CommentSyncData`: `id, post_id, author_id, author_name, author_avatar_b64?, content, timestamp, signature, parent_comment_id?, media_id?, media_type?, media_metadata?`
+
+`posts[i].media_metadata.sha256` and `comments[i].media_metadata.sha256` carry
+the signed media digest (from 2026-10-08). The sender takes it from the
+`media_owner` index, or hashes its local copy; a missing or wrong digest can
+only make the receiver fall back to (or fail) the 8-field / legacy check,
+never accept a forged item.
 `ReactionSyncData`: `id, post_id, author_id, reaction_type, timestamp, signature`
 
 There is **no** separate `INVENTORY_SYNC_RESPONSE` type — both `SYNC_REQUEST`
 and `INVENTORY_SYNC_REQUEST` reply using this same `SYNC_RESPONSE` type,
 distinguished only by whether `comments`/`reactions` are populated (older
 timestamp-based replies leave them `null`).
+
+### GROUP_INVITE
+
+**Type:** `GROUP_INVITE` · class `GroupInvitePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier (UUID, minted by the creator) |
+| `title` | String | Group name |
+| `admin_public_key` | String | Creator's Ed25519 key; also the verifying key for the signature |
+| `members` | Array<String> | Full member list as Ed25519 public keys |
+| `avatar_b64`? | String | Group picture |
+| `description`? | String | Group description |
+| `member_handles`? | Map<String, String> | Display handles of members |
+| `member_details`? | Map<String, GroupMemberInfo> | Directory of member onion addresses and X25519 encryption keys |
+| `allow_member_invites`? | Boolean | Whether non-admin members are permitted to invite peers (default: true) |
+| `allow_member_self_remove`? | Boolean | Whether members may voluntarily leave the group (default: true) |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `groupId|title|adminPublicKeyB64|timestamp` |
+| `admin_onion`? | String | Onion address of group admin |
+| `admin_enc_public_key`? | String | X25519 encryption public key of group admin |
+
+Rejected unless the signature verifies against `admin_public_key`, our own
+(or burnable) identity appears in `members`, and — if we already hold a group
+with this `group_id` — the admin key matches the stored one. An inbound
+packet can never reassign a group's admin.
+
+### GROUP_UPDATE
+
+**Type:** `GROUP_UPDATE` · class `GroupUpdatePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier |
+| `title`? | String | New title, or the unchanged current title |
+| `avatar_b64`? | String | New group picture |
+| `description`? | String | New description |
+| `added_members`? | Array<String> | Members added by this update (a delta, not the full list) |
+| `removed_members`? | Array<String> | Members removed by this update |
+| `banned_members`? | Array<String> | Members blacklisted/banned by this update (admin only) |
+| `member_handles`? | Map<String, String> | Display handles of members |
+| `member_details`? | Map<String, GroupMemberInfo> | Directory of member onion addresses and X25519 encryption keys |
+| `allow_member_invites`? | Boolean | Updated invite permission flag (admin only) |
+| `allow_member_self_remove`? | Boolean | Updated self-remove permission flag (admin only) |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Canonical 13-field `canonicalGroupUpdatePayload` (§7), signed by the admin or by the member's own group identity |
+
+**Leaving a group** is a `GROUP_UPDATE` from the leaving member with only
+`group_id`, `removed_members = [own key]`, `timestamp` and `signature` set,
+signed with the same 13-field form as every other update (absent fields
+encoded `ABSENT`, empty directory strings) — `NoSlopRepository.groupLeavePayload`.
+Until 2026-10-08 the leave was signed as an 11-field `encodeForSigning` with
+`""` for the absent fields; no receiver could verify it, so leaves never
+propagated (regression register R7a).
+
+**Signing identity (2026-10-08).** A member signs (and sends, invites and
+reacts) as the key that is actually listed in the group:
+`NoSlopRepository.groupMemberIdentity` — the burnable key if it is a member,
+else the main key if it is a member, else (not listed yet) burnable for open
+groups and main for closed ones. Previously an open group made a member sign
+with its burnable identity even when it had been invited under its main key,
+and receivers rejected the packet (no member matched).
+
+`added_members` / `removed_members` are genuine deltas computed by
+`NoSlopRepository.updateGroupChat` against the stored member list. They were
+previously the *whole* new member list in `added_members` with
+`removed_members` never populated, which is why removals could not propagate:
+the receiver does `addAll(added)` then `distinct()`.
+
+There is no signer field — see the note under §2 rows 21–23 for how the
+signer is recovered and what each role is permitted to change.
+
+### GROUP_DELETE
+**Type:** `GROUP_DELETE` · class `GroupDeletePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier |
+| `admin_public_key` | String | Claimed admin key; must equal the stored group's admin |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+
+### GROUP_QUERY
+**Type:** `GROUP_QUERY` · class `GroupQueryPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier |
+| `requester_id` | String | Public key of the member requesting group catch-up; must equal the envelope `sender_id` |
+| `timestamp` | Long | Epoch milliseconds |
+
+**Who gets an answer (G1, round E2, 2026-10-13; `groupQueryRefusal`).** The
+answer is the whole group record (member keys, names, onion addresses), so a
+node answers only when the envelope-authenticated `sender_id` is the
+`requester_id`, is in its member list or is the admin, and is not banned. The
+`GROUP_SYNC` goes to the sender's stored onion (the requester's address is no
+longer used). Before, groups that allow member invites answered anyone who
+knew the group id (former members included). **Open:** when the sender has no
+stored onion, the answer is broadcast, and `GossipService.broadcast` sends it
+to all trusted contacts as well as group members. A user invited by a member is answered only by members whose copy
+already lists them. **Sender (E4):** `GossipService.broadcast` sends a
+`GROUP_QUERY` unchanged (or as a relay that keeps its sender), never
+re-stamped per peer, so the requester always matches the sender. Tested (unit: `AnnouncePeerAndGroupQueryE2Test`, `IdentityLeftoversE4Test`).
+
+### GROUP_SYNC
+**Type:** `GROUP_SYNC` · class `GroupSyncPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_chat_json` | String | Serialized GroupChat JSON |
+| `member_details`? | Map<String, GroupMemberInfo> | Directory of member handles, onion addresses, and X25519 encryption keys |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)` |
+
+**`timestamp` semantics (2026-10-08, register R7b).** Any member that has the
+group answers a `GROUP_QUERY` with a `GROUP_SYNC`:
+
+- the **admin** stamps the answer with its **signing time**
+  (`groupSyncTimestamp(..., answeringAsAdmin = true, now)`);
+- a **member** stamps it with the state revision `max(createdAt, revision)`,
+  as before, so a possibly stale member copy does not pass the freshness gate.
+
+Receiver rules (`handleGroupSync`): drop when `timestamp <= stored revision`;
+for an admin-signed sync also drop when `timestamp <=` the last applied admin
+sync (`app_settings["group_admin_sync_ts_<groupId>"]`, replay protection).
+Applying an admin sync sets the stored revision to the **state's** revision
+(from the signed `group_chat_json`), not to the signing time, so member updates
+signed after that state (e.g. a leave still in flight) are still accepted.
+Before, the answer was stamped with the state revision, and because
+member-initiated changes (leaves, member invites) never advance the revision,
+a member that missed one could never catch up through `GROUP_QUERY`.
+
+### EDIT_COMMENT
+**Type:** `EDIT_COMMENT` · class `EditCommentPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `post_id` | String | ID of the post containing the comment |
+| `comment_id` | String | ID of the comment being edited |
+| `author_id` | String | Author's public key (verifying key) |
+| `author_avatar_b64`? | String | Author avatar Base64, if set |
+| `content` | String | New comment content |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `postId|commentId|content|timestamp` (+`|authorAvatarB64`) |
+
+### DELETE_COMMENT
+**Type:** `DELETE_COMMENT` · class `DeleteCommentPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `post_id` | String | ID of the post containing the comment |
+| `comment_id` | String | ID of the comment being deleted |
+| `author_id` | String | Author's public key (verifying key) |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `postId|commentId|authorId|timestamp` |
+
+### FOLLOW / UNFOLLOW
+**Types:** `FOLLOW`, `UNFOLLOW` · class `FollowPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `followed_public_key` | String | Public key of the node being followed |
+| `follower_public_key` | String | Public key of the follower (verifying key) |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `followedPublicKeyB64|followerPublicKeyB64|timestamp` |
+| `action` | String | `"follow"` or `"unfollow"` |
+
+### DM_ACK (Direct Message Delivery Acknowledgment)
+**Type:** `DM_ACK` · class `DmAckPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `msg_id` | String | ID of the acknowledged message |
+| `nonce` | String | Legacy form: IV. Empty once the peer is known to read `ack_*` |
+| `ciphertext` | String | Legacy form: `"ACK"` sealed exactly like a `MESSAGE` (AAD label `noslop-dm-v2`). Empty once the peer is known to read `ack_*` |
+| `timestamp`? | Long | Epoch timestamp (bound by the AAD) |
+| `v` | Int | `3` since 2026-10-10 (`2` from earlier builds). Informational |
+| `ack_nonce`? | String | D05: IV of `ack_ciphertext` |
+| `ack_ciphertext`? | String | D05: `"ACK"` sealed with the same directional key under AAD `encodeForSigning("noslop-dm-ack-v3", ackSenderEdPub, ackRecipientEdPub, msg_id, "", timestamp)` |
+
+Carries authenticated delivery confirmation from the recipient back to the message author. Keyed using the counterparty's directional key (`k_dir = HKDF-SHA256(X25519, recipient -> sender)`), guaranteeing receipt cannot be forged or reflected by network intermediaries.
+
+Only 1:1 messages are acknowledged; group fan-out legs (`MESSAGE` with
+`group_id`) never are. The sender keeps a 1:1 `MESSAGE` in its persistent
+outbox until the ACK arrives, re-sending it (same `id`, `nonce`,
+`ciphertext`) with backoff; since 2026-10-08 it gives up after **7 days** or
+**50 deliveries without an ACK** and marks the message `FAILED` (the chat
+offers a retry, which re-sends the identical packet). The receiver
+de-duplicates by message id and echoes the ACK for a duplicate.
+
+**Domain separation (D05, 2026-10-10).** An ACK must open to exactly `"ACK"`.
+The receiver tries `ack_ciphertext` (label `noslop-dm-ack-v3`) first; success
+records `app_settings["dm_ack_v3_<key>"]`. The legacy `ciphertext` (label
+`noslop-dm-v2`, the `MESSAGE` label) is accepted only from a key not so
+recorded. The sender includes the legacy form until the peer has sent it a
+new-form ACK, so earlier builds (which read only `ciphertext`) still see their
+messages delivered. An ACK is refused for a message that isn't in the
+sender's own chat. Distinct labels mean an ACK can't be passed off as a message
+or the other way round.
+
+### TYPING
+**Type:** `TYPING` · class `TypingPayload` · **unsigned**
+
+| Field | Type | Description |
+|---|---|---|
+| `chat_with_peer_pub` | String | Sender's own public key, i.e. which thread the indicator belongs to from the receiver's point of view |
+| `is_typing` | Boolean | Whether the indicator should show |
+| `timestamp` | Long | Epoch milliseconds |
+
+### READ_RECEIPT
+**Type:** `READ_RECEIPT` · class `ReadReceiptPayload` · **unsigned**
+
+| Field | Type | Description |
+|---|---|---|
+| `message_id` | String | The specific message being acknowledged |
+| `reader_public_key` | String | Reader's public key |
+| `timestamp` | Long | Epoch milliseconds |
+
+Blank `message_id` is rejected. Neither of these two types is signed, so
+neither should be treated as evidence of anything.
+
+### PEER_REMOVED
+**Type:** `PEER_REMOVED` · class `PeerRemovedPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `user_id` | String | Public key of the peer initiating the removal |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `userId\|timestamp` (supporting both `encodeForSigning` and pipe) |
+
+Directly informs a connected peer that they have been removed from contacts, triggering symmetric peer deletion and complete local content/media purging.
+
+### DELETE_MESSAGE
+**Type:** `DELETE_MESSAGE` · class `DeleteMessagePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `message_id` | String | ID of the message to delete |
+| `author_id` | String | Public key of the user requesting deletion |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `messageId\|authorId\|timestamp` |
+| `group_id` | String? | Optional. When present, enables group-mode authorization: the deleter may be either the message's original author or the group admin. When absent, only the message's original sender may delete it (DM mode). |
+
+**DM mode** (`group_id` absent): `authorId` must equal `packet.senderId` and
+the message is deleted via `deleteMessageByIdAndSender`.
+
+**Group mode** (`group_id` present): the handler loads the group, checks
+that `authorId` is either the message's `senderPub` (author deleting own
+message) or the group's `adminPublicKeyB64` (admin purging any message).
+The message is deleted via `deleteMessageById` (no sender constraint).
+
+### GROUP_MESSAGE
+**Type:** `GROUP_MESSAGE` · class `GroupMessagePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | String | Unique message ID (UUID) |
+| `group_id` | String | Target group identifier |
+| `sender_handle` | String | Display name/handle of the author |
+| `sender_tripcode`? | String | Short tripcode fingerprint |
+| `content` | String | Plaintext message body |
+| `timestamp` | Long | Epoch milliseconds |
+| `privacy` | String | `"public"` (relayed mesh-wide, hops=6) or `"friends"` (direct contacts only, hops=1) |
+| `media_id`? | String | Attached media ID, if present |
+| `media_type`? | String | MIME category (`image`, `video`, `file`, `audio`), if present |
+| `media_metadata`? | Object (`MediaMetadata`, §5) | Media descriptor object |
+| `reply_to`? | String | ID of the message being replied to |
+
+Delivers group messages across multi-hop mesh relays to non-connected members
+in open groups without exposing the sender's raw public keys or onion addresses.
 
 ---
 
@@ -356,11 +918,19 @@ strategies.
 
 ### 4.3 `handleSyncResponse` Verification
 
-Each post in `posts` is independently signature-verified
-(`id|authorId|content|timestamp`) before `postDao.insertPost`; invalid
-signatures are dropped per-post with a warning log. The `comments` and
-`reactions` arrays are similarly verified using their own signed formats
-before insertion via `commentDao`/`reactionDao`.
+Each post in `posts` is independently signature-verified before
+`postDao.insertPostSafely`, accepting — as the live `POST` handler does — the
+**v2** form (canonical 8 fields + `media_metadata.sha256`) or the canonical
+8-field form (§7); invalid signatures are dropped per post with a warning log.
+Until 2026-10-08 only the 8-field form was accepted here, so every post with a
+media digest was rejected by sync (regression R5). When v2 verified, the digest
+is recorded (`NoSlopRepository.recordMediaDigest`) so the item can be re-served
+with its v2 signature; when only the 8-field form verified, `sha256` is
+stripped before auto-download.
+
+The `comments` array is verified the same way (v2 comment form with the media
+digest, then the older comment encodings); `reactions` use their own signed
+format. Accepted items are inserted via `commentDao` / `reactionDao`.
 
 ---
 
@@ -369,12 +939,16 @@ before insertion via `commentDao`/`reactionDao`.
 ### 5.1 `ANNOUNCE_PEER`
 
 - Broadcast every **60 seconds** (`MeshSocialRepository.startPresenceHeartbeat`)
-  to trusted peers, with `hops = 1`, carrying the sender's `authorId` and
-  timestamp, signed.
+  to trusted peers, with `hops = 1`, carrying the sender's `authorId`, onion
+  address and timestamp, signed with the v2 form, which covers the onion
+  (round E2, S2).
 - `handleAnnouncePeer` verifies the signature and, on failure, logs
   `"Rejected ANNOUNCE_PEER: Signature verification failed"` and drops the
   packet.
 - On success: `peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = now))`.
+  The announced onion replaces the stored one only when it is derived from
+  the sender's key; otherwise presence is still updated and the onion is not
+  stored (logged).
 - **Staleness is actively swept, not just UI-derived**: the same
   60-second heartbeat loop that broadcasts `ANNOUNCE_PEER` also iterates all
   known peers and, for any peer whose `lastSeenAt` is older than **3
@@ -404,53 +978,96 @@ before insertion via `commentDao`/`reactionDao`.
 
 | Type | Payload | Role |
 |---|---|---|
-| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, access_key?, hls_file?}` | Requests a specific chunk of a media item by index |
-| `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64)}` | Carries one chunk's bytes |
-| `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id, origin_node?, owner_id?, access_key?, metadata?}` | Broadcast to trusted peers when the direct author is unreachable/unknown |
-| `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id}` | Sent back along the relay chain once the media's source node is located |
+| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, byte_offset?, byte_length?, access_key?, hls_file?, origin_onion?, timestamp?}` | Requests a byte range of a media item, addressed (`targetUserId`, hops=1) to the media's holder. `chunk_size` and `byte_length` must be in `1..262144` (256 KB, `MAX_CHUNK_BYTES`) and `byte_offset ≥ 0`; `chunk_size = 0` with no `byte_length` is a metadata request. Since Round B the packet is **signed** (see "Signed media requests" below) and carries `timestamp` (ms). The reply goes to the requester's stored onion, or — for a non-contact with a valid signature — to the onion derived from its public key (C03/R6b); `origin_onion` is never used as a reply target. `access_key` is ignored (see "Who is served"). |
+| `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64), total_size?}` | Carries one chunk's bytes. `total_size` (optional Long) communicates the sender's known file size so receivers with indeterminate metadata can compute accurate download progress. |
+| `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id}` (other fields of the class are no longer populated) | "Do you hold this media?" — sent hops=1, addressed, to each **direct** trusted peer (or member of the owning group) when the author is unreachable. Never forwarded (Round B, D03). |
+| `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id, onion_address?}` | Direct answer (hops=1, addressed) from a peer that holds the file **and** whose own ACL authorises the asker. The receiver downloads from the answering peer's **stored** onion; `onion_address` is informational only. |
 | `MEDIA_PENDING` | `MediaPendingPayload {media_id, chunk_index}` | Signals an in-flight/awaited chunk — used by the AIMD inflight-tracking state in `MediaManager` |
 | `MEDIA_TRANSFER_ACK` | `MediaTransferAckPayload {media_id}` | Transfer-completion acknowledgement |
 
-`MediaMetadata` (embedded in `PostPayload.media_metadata` and
+> **Identities on media packets.** The requester signs as
+> `MediaManager.requesterIdentity`: the group-member identity for group media,
+> the DM identity for DM media, the **burnable** identity for a temporary
+> contact or a contact bound to the burnable identity, the burnable identity
+> (falling back to main) when the holder is not a contact at all, and main
+> otherwise. The responder answers (`MEDIA_METADATA_RESPONSE`, `MEDIA_CHUNK`,
+> `MEDIA_RECOVERY_FOUND`) as `MediaManager.responderIdentity`: the local
+> identity the request was addressed to (`targetUserId`) if it is one of ours,
+> else the burnable identity for a temporary/burnable-bound peer, else main —
+> so the reply always comes from the key the requester's firewall knows.
+
+**Signed media requests (Round B, R6b).** `MEDIA_REQUEST.signature` is
+`Ed25519(encodeForSigning("noslop-media-req-v1", senderId, targetUserId ?: "",
+media_id, chunk_index, chunk_size, byte_offset ?: -1, byte_length ?: -1,
+timestamp ?: 0))` made with the sending identity's key. A holder that has the
+sender stored as a peer replies to the stored onion and does not need the
+signature. For a sender it does not know (e.g. a non-contact fetching public
+post media), `MediaManager.replyOnionFor` requires a valid signature, a
+`timestamp` within ±5 min (`SIGNED_REQUEST_MAX_SKEW_MS`) and a request not seen
+before (LRU of 4096), then replies to `deriveOnionAddress(senderId)`. Because a
+NoSlop onion is derived from the Ed25519 key, the reply can only reach the key
+holder; an attacker cannot point the reply at a victim. Unsigned, stale,
+replayed, forged or tampered requests from strangers are dropped (logged at
+WARN — they used to be dropped silently, R6c).
+
+**Point-to-point only.** `GossipService.processIncoming` drops any `MEDIA_*`
+packet whose `targetUserId` is not a local identity, processes the rest
+locally and never re-broadcasts them. A `MEDIA_CHUNK` for a download in
+progress is exempt from the 2 MB/60 s cap on untrusted senders (a public-media
+holder is often not a contact).
+
+**Chunk window and sender limits (2026-10-07).** The downloader's byte window
+starts at 256 KB, halves on a chunk timeout (down to 128 KB, `MIN_CHUNK_SIZE`)
+and grows back by 32 KB per received chunk, capped at **256 KB**
+(`MAX_CHUNK_SIZE = MAX_CHUNK_BYTES`). It used to grow to
+1 MB while senders reject anything above 256 KB, which stalled every file
+needing more than two requests (the "video stuck at 9%" bug). Pending ranges
+larger than 256 KB are split without gaps before being requested. Senders
+serve at most **16 MB per requester per 60 s** (previously 5 MB). Since
+Round B a sender that hits the limit waits for the window to reset (up to 3
+attempts) instead of silently dropping the request.
+
+**Who is served (deny by default, Round B, D02).**
+`MediaManager.isMediaAuthorizedForSender` allows the local node's own
+identities and otherwise decides **only** from the `media_owner` index:
+public post/comment media → anyone not BLOCKED; private → the author;
+friends-only → the author and direct friends (accepted, not temporary, not
+bound to our burnable identity); DM → the conversation partner; group →
+members and admin, minus banned members. Media with no index row is refused.
+The legacy per-table scans and the "trusted peer" fallback are removed.
+`access_key` is **not** checked and no key is issued: the identity-based ACL
+already decides every case, and a bearer key would add sync and protocol
+surface without adding protection (anyone who received the key also received
+the post that carries it).
+
+`MediaMetadata` (embedded in `PostPayload.media_metadata`,
+`CommentSyncData.media_metadata`, DM plaintext and
 `MediaRelayRequestPayload.metadata`): `id, type ("audio"|"video"|"file"|
 "image"), mime_type, size, chunk_count, access_key?, filename?, origin_node?,
-owner_id?, thumbnail_b64?`.
+owner_id?, thumbnail_b64?, sha256?` (C17 whole-file SHA-256 integrity digest).
 
-### 6.1 Relay Routing (`GossipService`)
+### 6.1 Recovery (direct peers only) — Round B
 
-`MEDIA_RELAY_REQUEST` and `MEDIA_RECOVERY_FOUND` are intercepted inside
-`GossipService.processIncoming` itself (not the `MeshPacketHandler`
-dispatcher table in §2):
+The old relay routing (`relayStates`, `handleRelayRequest`,
+`handleRecoveryFound`, the stale-route sweeper) and zero-copy chunk forwarding
+(`forwardRelayChunk`) were removed in Round B (D03): any node could register
+as a listener for any `media_id` and receive copies of its chunks, and every
+request advertised the media id across up to 6 hops.
 
-- **`handleRelayRequest(senderId, packet)`**: checks the local media
-  directory for a file named `mediaId`. If present, immediately sends
-  `MEDIA_RECOVERY_FOUND` (hops=1) directly back to `senderId`. If absent,
-  registers `senderId` as a listener in `relayStates[mediaId]` (creating the
-  entry with `payload.metadata` if new), then forwards the request along the
-  mesh.
-- **`handleRecoveryFound(senderId, packet)`**: sets
-  `relayStates[mediaId].sourceNode = senderId`, then for each registered
-  listener (excluding self), sends `MEDIA_RECOVERY_FOUND` (hops=1) to that
-  listener's onion address.
+Now, when a download has no reachable source,
+`MediaManager.attemptMeshRecovery` sends `MEDIA_RELAY_REQUEST {media_id}`
+(hops=1, addressed) to each direct peer that has an onion, is not BLOCKED and
+is either trusted or a member of the group owning the media, signed as the
+identity that peer knows. The receiving node
+(`MediaManager.handleRecoveryRequest`) answers `MEDIA_RECOVERY_FOUND` only if
+it holds the file, knows the asker's onion, and its own ACL authorises the
+asker; otherwise it stays silent. The asker then downloads directly from the
+answering peer with normal signed `MEDIA_REQUEST`s.
 
-`RelayState` tracks `establishedAt`/`lastActivity` per `mediaId`; a periodic
-60-second sweeper evicts any entry idle for more than 5 minutes.
+### 6.2 Chunk Forwarding — Removed (Round B)
 
-### 6.2 Zero-Copy Chunk Forwarding — Implemented
-
-When a relay node receives a `MEDIA_CHUNK` packet, `MediaPacketHandler.
-handleMediaChunk` calls `GossipService.forwardRelayChunk(mediaId, packet)`
-**before** also calling `MediaManager.handleMediaChunk` for its own local
-copy. `forwardRelayChunk` looks up `relayStates[mediaId]`, refreshes
-`lastActivity`, and for every registered listener (other than the original
-sender), re-stamps the packet with a fresh `id` (to bypass the next node's
-dedup cache), decrements `hops`, sets `senderId` to the local node's key, and
-sends it on — a live, in-flight forward to all downstream listeners rather
-than a "fetch the whole file, then maybe re-share" model. This closes the
-gap an earlier revision of this documentation flagged as unimplemented (see
-GAP_ANALYSIS.md §6, corrected). Note the relay node *also* runs
-`MediaManager.handleMediaChunk` for itself in the same call, so it is not a
-pure disk-free pass-through — it forwards live **and** retains its own copy.
+Media chunks are no longer forwarded by intermediate nodes. Each chunk travels
+directly from the holder to the requester over Tor.
 
 ### 6.3 AIMD Congestion Control
 
@@ -482,20 +1099,34 @@ and still accurate.
 
 | Packet type | Signed string |
 |---|---|
-| `POST` / `SYNC_RESPONSE.posts[i]` | `id\|authorId\|content\|timestamp` (+`\|authorAvatarB64` if set on `POST`) |
-| `COMMENT` / `SYNC_RESPONSE.comments[i]` | `postId\|commentId\|content\|timestamp` |
+| *every packet* (envelope, since E2) | `encodeForSigning("noslop-env-v1", id, type, senderId, targetUserId, signature, envTs, sha256(payload))` in `env_sig`, by `senderId` (§1.1) |
+| `POST` / `SYNC_RESPONSE.posts[i]` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl, sha256)`. Otherwise canonical 8-field `encodeForSigning(id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Both forms are accepted by the live handler and, since 2026-10-08, by sync. Legacy unauthenticated fallback restricted strictly to public posts without attachments (`id\|authorId\|content\|timestamp` + optional avatar). |
+| `COMMENT` / `SYNC_RESPONSE.comments[i]` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(postId, commentId, content, timestamp, authorAvatarB64, sha256)`. Otherwise `encodeForSigning(postId, commentId, content, timestamp, authorAvatarB64)`, `encodeForSigning(postId, commentId, content, timestamp)`, or pipe `postId\|commentId\|content\|timestamp` (+`\|authorAvatarB64`) |
 | `REACTION` / `SYNC_RESPONSE.reactions[i]` | `postId\|reactionType\|authorId\|timestamp` |
 | `CHAT_REACTION` | `messageId\|reactionType\|authorId\|timestamp` |
 | `COMMENT_REACTION` | `commentId\|reactionType\|authorId\|timestamp` |
 | `VOTE` | `postId\|voteType\|authorId\|timestamp` |
 | `COMMENT_VOTE` | `commentId\|voteType\|authorId\|timestamp` |
-| `ANNOUNCE_PEER` | `authorId\|timestamp` |
-| `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) |
+| `ANNOUNCE_PEER` | `encodeForSigning("noslop-announce-v2", authorId, onionAddress, timestamp)` (v2 only since E2; v1 `authorId\|timestamp` refused) |
+| `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
-| `EDIT_POST` | `postId\|authorId\|content\|timestamp` |
+| `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
+| `EDIT_POST` | **v2** (when `media_metadata.sha256` is set): `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl, sha256)`. Otherwise canonical 8-field `encodeForSigning(postId, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl)`. Legacy fallbacks strictly eliminated; complete signed state is atomically persisted to database. A caption-only edit of a media post carries the recorded digest, so it is v2-signed (D08). |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
-| `CONNECTION_REJECTED` | `fromUserId\|timestamp` |
-| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | computed and sent (`PeerHandshakePayload.signature`) but **never verified on receipt** — see §2 row 3–4 |
+| `CONNECTION_REJECTED` | `fromUserId\|timestamp` (supporting encodeForSigning and pipe) |
+| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | **v2 only** (D07 hard break): `encodeForSigning("noslop-hs-v2", fromUserId, fromUsername, fromHomeNode, fromEncryptionPublicKey, targetUserId, nonce, timestamp, authorAvatarB64?, bio?[, intro])` with `nonce` = `request_nonce` (request) or `in_reply_to_nonce` (handshake); `intro` only when present (D10b). The legacy `fromUserId\|fromUsername\|fromHomeNode\|timestamp` forms are rejected. |
+| `GROUP_INVITE` | Canonical `canonicalGroupInvitePayload(groupId, title, adminPublicKeyB64, signerPublicKeyB64, timestamp, sortedMembers, allowMemberInvites, allowMemberSelfRemove, description, avatarB64, adminOnion, adminEncPublicKey, sortedMemberDetails, sortedMemberHandles)`. Legacy 7-field fallback strictly restricted to admin self-signed payloads with empty unsigned fields. |
+| `GROUP_UPDATE` | Canonical 13-field presence-encoded `canonicalGroupUpdatePayload(groupId, encodeOptString(wireTitle), signerPublicKeyB64, timestamp, sortedAdded, sortedRemoved, encodeOptBanned(banned), encodeOptString(wireDesc), encodeOptString(wireAvatar), encodeOptBool(wireAllowInvites), encodeOptBool(wireAllowSelfRemove), sortedMemberDetails, sortedMemberHandles)`. Distinguishes absent (`ABSENT`) from cleared (`CLEAR`) values per W03. |
+| `GROUP_SYNC` | Canonical `canonicalGroupSyncPayload(groupId, groupChatJson, timestamp, sortedMemberDetails)`. Legacy fallback only permitted when `memberDetails` is empty. |
+| `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+| `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
+| `DM_ACK` | AEAD authenticated with directional key `HKDF-SHA256(sharedSecret, recipientEdPub -> senderEdPub)` and AAD `encodeForSigning("noslop-dm-ack-v3", recipientEdPub, senderEdPub, msgId, "", timestamp)` in `ack_ciphertext`; legacy form with label `"noslop-dm-v2"` in `ciphertext` (accepted only until the peer sends the new form; plaintext must be `"ACK"`) |
+| `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
+| `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
+| `EDIT_COMMENT` | `postId|commentId|content|timestamp` (+`|authorAvatarB64` if set) (supporting encodeForSigning and pipe) |
+| `DELETE_COMMENT` | `postId|commentId|authorId|timestamp` (supporting encodeForSigning and pipe) |
+| `FOLLOW` / `UNFOLLOW` | `followedPublicKeyB64|followerPublicKeyB64|timestamp` (supporting encodeForSigning and pipe) |
+| `TYPING` / `READ_RECEIPT` | *(no inner signature by design; envelope signature only)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64
 no-wrap encoding, over the UTF-8 bytes of the literal pipe-delimited string.
@@ -519,7 +1150,7 @@ and are not duplicated in this document:
   client roster, feed sync pipeline, RSS parsing).
 - §8 (clearnet-to-mesh bridge: deterministic anchor IDs).
 - §9 (Tor integration).
-- §10 (Room schema v23).
+- §10 (Room schema v19).
 - §11–14 (background work, build configuration, future HUB architecture,
   known discrepancies).
 

@@ -7,8 +7,13 @@ import com.noslop.app.feeds.FeedParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Owns the **clearnet content aggregator**: feed sources & items (CRUD + observable flows), the
@@ -29,6 +34,39 @@ import kotlinx.coroutines.withContext
  *
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
+sealed class FeedSyncResult {
+    object Success : FeedSyncResult()
+    object AlreadyRunning : FeedSyncResult()
+    object Disabled : FeedSyncResult()
+    data class RetryableFailure(val reason: String) : FeedSyncResult()
+    data class FatalError(val exception: Throwable) : FeedSyncResult()
+}
+
+internal fun matchesNegativeKeywords(text: String, negativeKeywords: List<String>): Boolean {
+    val lowerText = text.lowercase()
+    for (kw in negativeKeywords) {
+        val clean = kw.trim().lowercase()
+        if (clean.isBlank()) continue
+        val regex = Regex("\\b${Regex.escape(clean)}\\b", RegexOption.IGNORE_CASE)
+        if (regex.containsMatchIn(lowerText)) {
+            return true
+        }
+    }
+    return false
+}
+
+/**
+ * E5s: the PublicApiService category for a user search with this search-modal filter. "All" (any
+ * other filter) is its own category; it used to share the background interest searches' one.
+ */
+internal fun userSearchCategory(filterMode: String?): String = when (filterMode) {
+    "Videos" -> "Search Videos"
+    "Audio" -> "Search Audio"
+    "Images" -> "Search Images"
+    "Articles" -> "Search Articles"
+    else -> "Search All"
+}
+
 class FeedRepository(
     private val context: Context,
     private val feedDao: FeedDao,
@@ -42,10 +80,32 @@ class FeedRepository(
     private val OFFICIAL_NEGATIVE_KEYWORDS =
         listOf("nude", "porn", "murder", "rape", "gore", "nsfw", "sex", "kill")
 
+    private val syncMutex = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var activeSyncDeferred: kotlinx.coroutines.Deferred<FeedSyncResult>? = null
+    private var currentGeneration = 0L
+    private val syncScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
+
+    suspend fun cancelSync() {
+        val deferred = syncMutex.withLock {
+            val d = activeSyncDeferred
+            activeSyncDeferred = null
+            ++currentGeneration
+            d?.cancel()
+            _feedBuildStatus.value = ""
+            d
+        }
+        try {
+            deferred?.join()
+        } catch (_: Exception) {}
+    }
+
     // --- Observable feed state ---
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
     val allFeedItems: Flow<List<FeedItem>> = feedDao.getAllItems()
     val savedFeedItems: Flow<List<FeedItem>> = feedDao.getSavedItems()
+    
+    private val _feedBuildStatus = MutableStateFlow("")
+    val feedBuildStatus: StateFlow<String> = _feedBuildStatus.asStateFlow()
 
     // --- Source / item CRUD ---
     suspend fun insertSource(source: FeedSource) = withContext(Dispatchers.IO) {
@@ -79,6 +139,18 @@ class FeedRepository(
     suspend fun clearFeedData() = withContext(Dispatchers.IO) {
         feedDao.clearUnsavedItems()
         Logger.info(TAG, "Cleared previous feed items and sources")
+    }
+
+    /** Purge YouTube items so they are re-fetched with correct dates */
+    suspend fun deleteYouTubeItems() = withContext(Dispatchers.IO) {
+        feedDao.deleteYouTubeItems()
+        Logger.info(TAG, "Purged stale YouTube items from DB")
+    }
+
+    /** Purge feed items from a banned author */
+    suspend fun deleteFeedItemsByAuthor(author: String) = withContext(Dispatchers.IO) {
+        feedDao.deleteItemsByAuthor(author)
+        Logger.info(TAG, "Purged items for banned author $author from DB")
     }
 
     /**
@@ -115,7 +187,7 @@ class FeedRepository(
 
         // Restore default categories (all of them) so the API pipeline has something to work with
         val allCategories = com.noslop.app.feeds.SourceLibrary.categories
-        val json = com.google.gson.Gson().toJson(allCategories)
+        val json = com.noslop.app.util.Json.gson.toJson(allCategories)
         appSettingDao.insertSetting(AppSetting("selected_categories", json))
 
         // Also re-mark onboarding as complete in Room (it survived in ESP but Room was wiped)
@@ -129,97 +201,252 @@ class FeedRepository(
     }
 
     /**
+     * Ensures all keyless built-in API sources (such as YouTube InnerTube) are present in the
+     * database's feed_sources table. Fixes issues where onboarding skipped keyless API sources.
+     */
+    suspend fun ensureDefaultApiSourcesExist() = withContext(Dispatchers.IO) {
+        val existing = feedDao.getActiveSourcesList().map { it.id }.toSet()
+        val keylessApiSources = com.noslop.app.feeds.SourceLibrary.sources.filter { src ->
+            if (src.feedType != "api") false
+            else {
+                val serviceId = src.url.split(":").firstOrNull() ?: ""
+                val requiresKey = ApiKeyRepository.SERVICES.find { it.id == serviceId }?.requiresUserKey == true
+                !requiresKey
+            }
+        }
+        for (src in keylessApiSources) {
+            if (src.id !in existing) {
+                feedDao.insertSource(
+                    FeedSource(
+                        id = src.id,
+                        url = src.url,
+                        title = src.title,
+                        feedType = src.feedType,
+                        category = src.category,
+                        addedDuringOnboarding = true,
+                        isActive = true
+                    )
+                )
+                Logger.info(TAG, "Auto-seeded missing keyless API source: ${src.id} (${src.title})")
+            }
+        }
+    }
+
+    /**
      * Loops over active feed sources and parses them, storing items in Room database.
      * Then runs the public API pipeline for content enrichment.
      */
-    suspend fun refreshFeeds() = withContext(Dispatchers.IO) {
+    suspend fun refreshFeeds(awaitCompletion: Boolean = false): FeedSyncResult = withContext(Dispatchers.IO) {
         if (!isAggregatorEnabled()) {
             Logger.info(TAG, "Aggregator is disabled via settings. Skipping feed fetch.")
-            return@withContext
+            return@withContext FeedSyncResult.Disabled
         }
 
-        Logger.info(TAG, "Starting feed synchronization...")
-        val activeSources = feedDao.getActiveSourcesList()
-        val userCategories = preferencesRepository.getUserSelectedCategories()
-
-        if (activeSources.isEmpty() && userCategories.isEmpty()) {
-            Logger.warn(TAG, "No active feed sources or categories found to sync")
-            return@withContext
+        val (deferred, _) = syncMutex.withLock {
+            val existing = activeSyncDeferred
+            if (existing != null && existing.isActive) {
+                if (awaitCompletion) {
+                    existing to currentGeneration
+                } else {
+                    Logger.info(TAG, "Feed sync is already in progress. Skipping redundant request.")
+                    null to currentGeneration
+                }
+            } else {
+                val nextGen = ++currentGeneration
+                val newDeferred = syncScope.async(Dispatchers.IO) {
+                    executeSyncPass(nextGen)
+                }
+                activeSyncDeferred = newDeferred
+                newDeferred to nextGen
+            }
         }
+        if (deferred == null) return@withContext FeedSyncResult.AlreadyRunning
 
-        // Load preferences
-        val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
-        val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
-        val langPrefList = preferencesRepository.getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
-        val creatorKeywordList = preferencesRepository.getCreatorKeywords()
-        val apiKeyRepo = ApiKeyRepository(context)
-
-        // Split sources
-        val rssSources = activeSources.filter { it.feedType != "api" }.toMutableList()
-        val explicitApiSources = activeSources.filter { it.feedType == "api" }
-        val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct().toMutableList()
-
-        // Limited parallel dispatcher
-        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4)
-
-        // --- Phase 1: Ramp-Up (Fast diverse fetch) ---
-        val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
-
-        val firstRss = rssSources.firstOrNull()
-        if (firstRss != null) {
-            rssSources.remove(firstRss)
-            rampUpJobs.add(async(dispatcher) { fetchRssSource(firstRss, allNegative) })
+        return@withContext if (awaitCompletion) {
+            try {
+                deferred.await()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                FeedSyncResult.FatalError(e)
+            }
+        } else {
+            FeedSyncResult.Success
         }
-
-        val priorityCats = listOf("Video Platforms", "Music", "Photography").mapNotNull { cat -> activeCategories.find { it == cat } }
-        val firstApiCat = priorityCats.firstOrNull() ?: activeCategories.firstOrNull()
-        if (firstApiCat != null) {
-            activeCategories.remove(firstApiCat)
-            rampUpJobs.add(async(dispatcher) {
-                fetchApiCategory(firstApiCat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
-            })
-        }
-
-        // Wait for Ramp-Up to finish so UI is populated
-        kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
-
-        // --- Phase 2: Background Sync ---
-        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
-
-        for (source in rssSources) {
-            backgroundJobs.add(async(dispatcher) { fetchRssSource(source, allNegative) })
-        }
-
-        for (category in activeCategories) {
-            backgroundJobs.add(async(dispatcher) {
-                fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
-            })
-        }
-
-        // --- Phase 3: Creator Specific API searches ---
-        // We pick 5 random creators per sync to avoid massive API spikes
-        val sampledCreators = creatorKeywordList.shuffled().take(5)
-        for (creator in sampledCreators) {
-            backgroundJobs.add(async(dispatcher) {
-                try {
-                    searchCustomFeed(creator, null)
-                } catch(e: Exception) { Logger.error(TAG, "Creator sync failed", e.message) }
-            })
-        }
-
-        kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
-        Logger.info(TAG, "Feed synchronization completed.")
     }
 
-    private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {
+    private suspend fun executeSyncPass(generation: Long): FeedSyncResult = kotlinx.coroutines.coroutineScope {
+        var sourcesAttempted = 0
+        var sourcesSucceeded = 0
         try {
+            ensureDefaultApiSourcesExist()
+
+            // --- NOSLOP_TOR_GATE_UI_V1 ---
+            if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+                Logger.warn(TAG, "Tor not ready — skipping feed sync rather than fetching outside Tor")
+                return@coroutineScope FeedSyncResult.RetryableFailure("Tor not ready")
+            }
+
+            Logger.info(TAG, "Starting feed synchronization...")
+            val activeSources = feedDao.getActiveSourcesList()
+            val userCategories = preferencesRepository.getUserSelectedCategories()
+
+            if (activeSources.isEmpty() && userCategories.isEmpty()) {
+                Logger.warn(TAG, "No active feed sources or categories found to sync")
+                return@coroutineScope FeedSyncResult.Success
+            }
+
+            val hasExistingItems = feedDao.getItemCount() > 0
+            if (hasExistingItems) {
+                _feedBuildStatus.value = ""
+            } else {
+                _feedBuildStatus.value = "Preparing your feed..."
+            }
+
+            // Load preferences
+            val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
+            val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+            val langPrefList = preferencesRepository.getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
+            val creatorKeywordList = preferencesRepository.getCreatorKeywords()
+            val apiKeyRepo = ApiKeyRepository(context)
+
+            // Split sources
+            val rssSources = activeSources.filter { it.feedType != "api" }.toMutableList()
+            val explicitApiSources = activeSources.filter { it.feedType == "api" }
+            val activeCategories = (activeSources.mapNotNull { it.category } + userCategories + com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories).distinct().toMutableList()
+
+            // Single-worker dispatcher over Tor to prevent starving foreground video streaming
+            val parallelism = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 1 else 2
+            val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(parallelism)
+
+            val shuffledCreators = creatorKeywordList.shuffled()
+            val (rampUpCreators, remainingCreators) = if (!hasExistingItems) {
+                val count = 4.coerceAtMost(shuffledCreators.size)
+                shuffledCreators.take(count) to shuffledCreators.drop(count)
+            } else {
+                emptyList<String>() to shuffledCreators
+            }
+
+            // --- Phase 1: Ramp-Up (Fast initial fetch only needed if database is empty) ---
+            if (!hasExistingItems) {
+                val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Boolean>>()
+
+                val firstRss = rssSources.firstOrNull()
+                if (firstRss != null) {
+                    rssSources.remove(firstRss)
+                    rampUpJobs.add(async(dispatcher) {
+                        _feedBuildStatus.value = "Preparing your feed..."
+                        fetchRssSource(firstRss, allNegative)
+                    })
+                }
+
+                for (creator in rampUpCreators) {
+                    rampUpJobs.add(async(dispatcher) {
+                        _feedBuildStatus.value = "Preparing your feed..."
+                        fetchCreatorVideos(creator)
+                    })
+                }
+
+                val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
+                for (cat in priorityCats) {
+                    activeCategories.remove(cat)
+                    rampUpJobs.add(async(dispatcher) {
+                        _feedBuildStatus.value = "Preparing your feed..."
+                        fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                    })
+                }
+
+                val rampUpResults = kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
+                sourcesAttempted += rampUpResults.size
+                sourcesSucceeded += rampUpResults.count { it }
+                _feedBuildStatus.value = ""
+            }
+
+            // --- Phase 2 & 3: Background Sync (R08: owned by activeSyncDeferred) ---
+            for (source in rssSources) {
+                while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                    kotlinx.coroutines.delay(2000L)
+                }
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    kotlinx.coroutines.delay(1000L)
+                } else {
+                    kotlinx.coroutines.delay(250L)
+                }
+                sourcesAttempted++
+                val ok = fetchRssSource(source, allNegative)
+                if (ok) sourcesSucceeded++
+            }
+
+            for (category in activeCategories) {
+                while (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                    kotlinx.coroutines.delay(2000L)
+                }
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    kotlinx.coroutines.delay(1200L)
+                }
+                sourcesAttempted++
+                val ok = fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                if (ok) sourcesSucceeded++
+            }
+
+            for (creator in remainingCreators) {
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    kotlinx.coroutines.delay(1800L)
+                } else {
+                    kotlinx.coroutines.delay(300L)
+                }
+                sourcesAttempted++
+                val ok = fetchCreatorVideos(creator)
+                if (ok) sourcesSucceeded++
+            }
+
+            Logger.info(TAG, "Feed background synchronization completed. Succeeded: $sourcesSucceeded/$sourcesAttempted")
+            if (sourcesAttempted > 0 && sourcesSucceeded == 0) {
+                return@coroutineScope FeedSyncResult.RetryableFailure("All attempted feed sources failed to fetch")
+            }
+            return@coroutineScope FeedSyncResult.Success
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Logger.error(TAG, "Feed sync setup/execution failed: ${e.message}")
+            return@coroutineScope FeedSyncResult.RetryableFailure(e.message ?: "Sync failed")
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                _feedBuildStatus.value = ""
+                syncMutex.withLock {
+                    if (currentGeneration == generation) {
+                        activeSyncDeferred = null
+                    }
+                }
+            }
+        }
+    }
+
+    companion object {
+        // Feeds protected by Cloudflare WAF / bot-protection that block Tor exit nodes (HTTP 403 / challenge HTML)
+        private val TOR_BLOCKED_DOMAINS = setOf(
+            "500px.com",
+            "nme.com",
+            "juxtapoz.com",
+            "hifructose.com"
+        )
+    }
+
+    private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>): Boolean {
+        try {
+            if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && TOR_BLOCKED_DOMAINS.any { source.url.contains(it) }) {
+                Logger.debug(TAG, "Skipping Tor-blocked RSS source ${source.title} while Route Clearnet via Tor is active")
+                return true
+            }
             Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
             val items = FeedParser.fetchAndParse(source.url, source.id)
             if (items.isNotEmpty()) {
+                val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
                 val filteredItems = items.filter { item ->
                     val text = "${item.title} ${item.excerpt}".lowercase()
-                    allNegative.none { text.contains(it) }
+                    val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
+                    !isBanned && !matchesNegativeKeywords(text, allNegative)
                 }
                 if (filteredItems.isNotEmpty()) {
                     feedDao.insertItems(filteredItems)
@@ -228,8 +455,44 @@ class FeedRepository(
                 feedDao.updateSource(source.copy(lastFetchedAt = System.currentTimeMillis(), unreadCount = unread))
                 Logger.info(TAG, "Fetched ${filteredItems.size} items for ${source.title}")
             }
+            return true
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.error(TAG, "Failed syncing source ${source.title}", e.message)
+            return false
+        }
+    }
+
+    private suspend fun fetchCreatorVideos(creator: String): Boolean {
+        try {
+            Logger.info(TAG, "Fetching latest videos for creator: $creator")
+            var items = com.noslop.app.feeds.api.YouTubeInternalClient.searchVideos(creator, maxResults = 15, recentOnly = true)
+            if (items.isEmpty()) {
+                items = com.noslop.app.feeds.api.YouTubeInternalClient.searchVideos(creator, maxResults = 15, recentOnly = false)
+            }
+            if (items.isNotEmpty()) {
+                val sixtyDaysAgo = System.currentTimeMillis() - (60L * 24 * 60 * 60 * 1000L)
+                val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
+                val userNegative = preferencesRepository.getUserNegativeKeywords()
+                val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+                val filteredItems = items.filter { item ->
+                    val text = "${item.title} ${item.excerpt}".lowercase()
+                    val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
+                    // Enforce < 60 days old content constraint
+                    val isFresh = item.publishedAt <= 0L || item.publishedAt >= sixtyDaysAgo
+                    isFresh && !isBanned && !matchesNegativeKeywords(text, allNegative)
+                }
+                if (filteredItems.isNotEmpty()) {
+                    feedDao.insertItems(filteredItems)
+                    Logger.info(TAG, "Fetched ${filteredItems.size} videos for creator: $creator")
+                }
+            }
+            return true
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Logger.warn(TAG, "Failed fetching videos for creator $creator: ${e.message}")
+            return false
         }
     }
 
@@ -240,52 +503,67 @@ class FeedRepository(
         langPref: String,
         allNegative: List<String>,
         apiKeyRepo: ApiKeyRepository
-    ) {
+    ): Boolean {
         try {
             val keywords = preferencesRepository.getUserKeywordsForCategory(category).toMutableList()
+
             if (category == "Music") {
                 val genres = preferencesRepository.getSelectedMusicGenres()
-                if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                if (genres.isNotEmpty()) keywords.add(0, genres.random())
             } else if (category == "Video Platforms") {
                 val genres = preferencesRepository.getSelectedVideoGenres()
-                if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                if (genres.isNotEmpty()) keywords.add(0, genres.random())
             }
 
             var categoryApiSourceIds = explicitApiSources.filter { it.category == category }.map { it.id }
-            if (categoryApiSourceIds.isEmpty() && userCategories.contains(category)) {
+            if (categoryApiSourceIds.isEmpty() && (userCategories.contains(category) || com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories.contains(category))) {
                 categoryApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
                     .filter { it.feedType == "api" && it.category == category }
                     .map { it.id }
             }
 
-            if (categoryApiSourceIds.isEmpty()) return
+            // Combine category specific fallbacks with ALL other active API sources
+            // so cross-category plugins (like YouTube search) execute correctly
+            val allActiveIds = (explicitApiSources.map { it.id } + categoryApiSourceIds + com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" && (it.category == category || com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories.contains(it.category)) }.map { it.id }).distinct()
 
             val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                 category = category,
                 userKeywords = keywords,
                 apiKeyRepo = apiKeyRepo,
-                activeApiSourceIds = categoryApiSourceIds,
+                activeApiSourceIds = allActiveIds,
                 language = langPref
             )
             if (apiItems.isNotEmpty()) {
+                val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
                 val filteredApiItems = apiItems.filter { item ->
                     val text = "${item.title} ${item.excerpt}".lowercase()
-                    allNegative.none { text.contains(it) }
+                    val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
+                    !isBanned && !matchesNegativeKeywords(text, allNegative)
                 }
                 if (filteredApiItems.isNotEmpty()) {
                     feedDao.insertItems(filteredApiItems)
                     Logger.info(TAG, "API pipeline: fetched ${filteredApiItems.size} items for $category")
                 }
             }
+            return true
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Logger.error(TAG, "API pipeline failed for $category", e.message)
+            return false
         }
     }
 
     /** Custom Feed Search Pipeline — used by manual search and the per-sync creator sampling. */
-    suspend fun searchCustomFeed(query: String, filterMode: String?) = withContext(Dispatchers.IO) {
-        if (!isAggregatorEnabled()) return@withContext
-        Logger.info(TAG, "Starting custom search for query: $query and filter: $filterMode")
+    suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) return@withContext emptyList()
+
+        // --- NOSLOP_TOR_GATE_UI_V1 --- see refreshFeeds
+        if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+            Logger.warn(TAG, "Tor not ready — skipping search rather than fetching outside Tor")
+            return@withContext emptyList()
+        }
+        Logger.info(TAG, "Starting custom search for query: ${Logger.redact(query)} and filter: $filterMode")
 
         try {
             val apiKeyRepo = ApiKeyRepository(context)
@@ -311,24 +589,83 @@ class FeedRepository(
                 language = langPref
             )
 
-            if (apiItems.isNotEmpty()) {
-                val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
-                val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
-
-                val filteredApiItems = apiItems.filter { item ->
-                    val text = "${item.title} ${item.excerpt}".lowercase()
-                    allNegative.none { text.contains(it) }
-                }
-
-                if (filteredApiItems.isNotEmpty()) {
-                    feedDao.insertItems(filteredApiItems)
-                    Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '$query'")
-                }
-            }
+            return@withContext storeSearchResults(query, apiItems)
         } catch (e: Exception) {
-            Logger.error(TAG, "Search pipeline failed for query '$query'", e.message)
+            Logger.error(TAG, "Search pipeline failed for query '${Logger.redact(query)}'", e.message)
         }
+        return@withContext emptyList()
     }
+
+    /**
+     * Stores the search results that pass the negative keywords (the content floor and the user's own
+     * block list) and returns their ids, in the order the sources gave them. Shared by both searches.
+     */
+    private suspend fun storeSearchResults(query: String, apiItems: List<FeedItem>): List<String> {
+        if (apiItems.isEmpty()) return emptyList()
+        val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
+        val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+
+        val filteredApiItems = apiItems.filter { item ->
+            val text = "${item.title} ${item.excerpt}".lowercase()
+            !matchesNegativeKeywords(text, allNegative)
+        }
+
+        if (filteredApiItems.isEmpty()) return emptyList()
+        feedDao.insertItems(filteredApiItems)
+        Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '${Logger.redact(query)}'")
+        return filteredApiItems.map { it.id }
+    }
+
+    /**
+     * E5s: a search from the search modal, one page at a time. [cursor] belongs to this search: the
+     * [firstPage] call asks every source (and the local library) for its first page, each later call
+     * only the sources that page (YouTube, Invidious, Reddit) for their next one. Newest first, every
+     * date. What it finds depends on [query] and the modal's [filterMode] only: never on the user's
+     * categories, genres or keywords. Returns the ids of the stored results, in source order.
+     */
+    suspend fun searchCustomFeedPage(
+        query: String,
+        filterMode: String?,
+        cursor: com.noslop.app.feeds.PublicApiService.SearchCursor,
+        firstPage: Boolean
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) return@withContext emptyList()
+        // --- NOSLOP_TOR_GATE_UI_V1 --- see refreshFeeds
+        if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+            Logger.warn(TAG, "Tor not ready — skipping search rather than fetching outside Tor")
+            return@withContext emptyList()
+        }
+        val category = userSearchCategory(filterMode)
+        if (!firstPage && !cursor.hasMore(category)) return@withContext emptyList()
+        Logger.info(TAG, "Search ${if (firstPage) "first page" else "next page"} for query: ${Logger.redact(query)} and filter: $filterMode")
+        try {
+            val apiKeyRepo = ApiKeyRepository(context)
+            // Use all built-in API sources for custom searches to ensure we search across all platforms
+            val activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
+            val langPrefList = preferencesRepository.getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
+
+            val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
+                category = category,
+                userKeywords = listOf(query),
+                apiKeyRepo = apiKeyRepo,
+                activeApiSourceIds = activeApiSourceIds,
+                language = langPref,
+                searchCursor = cursor,
+                nextPagesOnly = !firstPage
+            )
+            return@withContext storeSearchResults(query, apiItems)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.error(TAG, "Search page failed for query '${Logger.redact(query)}'", e.message)
+        }
+        return@withContext emptyList()
+    }
+
+    /** E5s: whether [cursor]'s sources can still return more for this search-modal filter. */
+    fun searchHasMorePages(filterMode: String?, cursor: com.noslop.app.feeds.PublicApiService.SearchCursor): Boolean =
+        cursor.hasMore(userSearchCategory(filterMode))
 
     /** Check if the clearnet aggregator is enabled (true by default). */
     suspend fun isAggregatorEnabled(): Boolean = withContext(Dispatchers.IO) {
@@ -339,6 +676,9 @@ class FeedRepository(
     /** Enable or disable the clearnet aggregator. */
     suspend fun setAggregatorEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting("enable_aggregator", enabled.toString()))
+        if (!enabled) {
+            cancelSync()
+        }
     }
 
     /**

@@ -25,7 +25,6 @@ class FakeAppSettingDao : AppSettingDao {
  * `getUserSelectedCategories` fallback); set [activeSources] in a test. The rest are inert stubs.
  */
 class FakeFeedDao : FeedDao {
-    // Settable directly by tests, and appended to by insertSource (REPLACE-on-conflict by id).
     var activeSources: List<FeedSource> = emptyList()
 
     override suspend fun getActiveSourcesList(): List<FeedSource> = activeSources
@@ -38,27 +37,30 @@ class FakeFeedDao : FeedDao {
     override suspend fun deleteSource(source: FeedSource) {}
     override fun getAllItems(): Flow<List<FeedItem>> = flowOf(emptyList())
     override fun getSavedItems(): Flow<List<FeedItem>> = flowOf(emptyList())
+    override suspend fun getSavedItemsList(): List<FeedItem> = emptyList()
+    override suspend fun searchLocalArticles(q: String, limit: Int): List<FeedItem> = emptyList()
+    override suspend fun searchLocalByType(q: String, type: String, limit: Int): List<FeedItem> = emptyList()
+    override suspend fun searchLocalAny(q: String, limit: Int): List<FeedItem> = emptyList()
     override suspend fun insertItems(items: List<FeedItem>) {}
     override suspend fun updateReadState(id: String, isRead: Boolean) {}
     override suspend fun updateSavedState(id: String, isSaved: Boolean) {}
-    override suspend fun deleteExpiredItems(beforeTimestamp: Long) {}
-    override suspend fun clearApiItems() {}
+    override suspend fun deleteYouTubeItems() {}
+    override suspend fun deleteItemsByAuthor(author: String) {}
     override suspend fun clearUnsavedItems() {}
-    override suspend fun clearApiSources() {}
+    override suspend fun getItemCount(): Int = 0
 }
 
 /** Fake [ViewedHistoryDao] preserving insert-IGNORE semantics, count, and oldest-first pruning. */
 class FakeViewedHistoryDao : ViewedHistoryDao {
-    // Insertion-ordered; pruning removes the oldest by viewedAt.
     private val items = linkedMapOf<String, ViewedHistoryItem>()
     private val flow = MutableStateFlow<List<ViewedHistoryItem>>(emptyList())
     private fun publish() { flow.value = items.values.sortedByDescending { it.viewedAt } }
 
     override suspend fun getAllViewedIds(): List<String> = items.keys.toList()
     override fun getAllViewedItems(): Flow<List<ViewedHistoryItem>> = flow
+    override suspend fun getAllViewedItemsList(): List<ViewedHistoryItem> = items.values.sortedByDescending { it.viewedAt }
 
     override suspend fun insertViewedItem(item: ViewedHistoryItem) {
-        // @Insert(onConflict = IGNORE): keep the first record for a given itemId.
         if (!items.containsKey(item.itemId)) { items[item.itemId] = item; publish() }
     }
 
@@ -67,6 +69,17 @@ class FakeViewedHistoryDao : ViewedHistoryDao {
     override suspend fun pruneOldest(count: Int) {
         items.values.sortedBy { it.viewedAt }.take(count).map { it.itemId }
             .forEach { items.remove(it) }
+        publish()
+    }
+    
+    override suspend fun deleteOlderThan(timestamp: Long) {
+        val toRemove = items.values.filter { it.viewedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { items.remove(it) }
+        publish()
+    }
+    
+    override suspend fun clearAllViewedHistory() {
+        items.clear()
         publish()
     }
 }
@@ -78,6 +91,11 @@ class FakeSwipeTrackerDao : SwipeTrackerDao {
         swipes.values.filter { it.swipeCount >= 2 }.map { it.itemId }
     override suspend fun upsertSwipe(tracker: SwipeTracker) { swipes[tracker.itemId] = tracker }
     override suspend fun getSwipeForItem(itemId: String): SwipeTracker? = swipes[itemId]
+    override suspend fun deleteOldSwipes(timestamp: Long) {
+        val toRemove = swipes.values.filter { it.lastSwipedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { swipes.remove(it) }
+    }
+    override suspend fun clearAllSwipeHistory() { swipes.clear() }
 }
 
 /** Fake [ReactionDao] with the get-by-id / insert / delete semantics the toggle logic relies on. */
@@ -89,9 +107,10 @@ class FakeReactionDao : ReactionDao {
     override fun getReactionsForPost(postId: String): Flow<List<MeshReaction>> =
         flowOf(store.values.filter { it.postId == postId })
     override fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> = flowOf(emptyList())
-    override suspend fun getReactionCountForPost(postId: String): Int = store.values.count { it.postId == postId }
+    override suspend fun deleteReactionsByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteReactionsForPost(postId: String) { store.values.removeAll { it.postId == postId } }
     override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
+    override suspend fun getAllReactionsList(): List<MeshReaction> = store.values.toList()
 }
 
 /** Fake [VoteDao] with get-by-id / insert / delete semantics for the vote toggle logic. */
@@ -102,40 +121,238 @@ class FakeVoteDao : VoteDao {
     override suspend fun deleteVoteById(id: String) { store.remove(id) }
     override fun getVotesForPost(postId: String): Flow<List<MeshVote>> =
         flowOf(store.values.filter { it.postId == postId })
+    override suspend fun deleteVotesByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteVotesForPost(postId: String) { store.values.removeAll { it.postId == postId } }
+    override suspend fun getAllVotedPostIds(): List<String> = store.values.map { it.postId }.distinct()
 }
 
 /** Fake [PeerDao] keyed by public key (REPLACE on insert). */
 class FakePeerDao : PeerDao {
     val peers = linkedMapOf<String, Peer>()
     override suspend fun getPeerByPublicKey(pubKey: String): Peer? = peers[pubKey]
-    override suspend fun insertPeer(peer: Peer) { peers[peer.publicKeyB64] = peer }
-    override suspend fun updatePeer(peer: Peer) { peers[peer.publicKeyB64] = peer }
+    // insertPeer is the interface default (D01 trust normalisation); only the raw row write is faked.
+    override suspend fun insertPeerRow(peer: Peer) { peers[peer.publicKeyB64] = peer }
+    override suspend fun setVerifiedFingerprint(pubKey: String, fingerprint: String?) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(verifiedFingerprint = fingerprint) }
+    }
+    override suspend fun applyEncKeyChange(pubKey: String, newKey: String): Int {
+        val p = peers[pubKey] ?: return 0
+        peers[pubKey] = p.copy(encPublicKeyB64 = newKey, pendingEncKey = null, verifiedFingerprint = null)
+        return 1
+    }
+    override suspend fun updateTagAndHandle(pubKey: String, tripcode: String, handle: String) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(tripcode = tripcode, handle = handle) }
+    }
+    override suspend fun updatePresence(pubKey: String, isOnline: Boolean, lastSeenAt: Long) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isOnline = isOnline, lastSeenAt = lastSeenAt) }
+    }
+    override suspend fun markOffline(pubKey: String) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isOnline = false) }
+    }
+    override suspend fun setDiscoverableFlag(pubKey: String, isDiscoverable: Boolean) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isDiscoverable = isDiscoverable) }
+    }
     override suspend fun deletePeer(peer: Peer) { peers.remove(peer.publicKeyB64) }
     override suspend fun getAllPeersList(): List<Peer> = peers.values.toList()
     override fun getAllPeers(): Flow<List<Peer>> = flowOf(peers.values.toList())
     override fun getTrustedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTrusted })
+    override fun getTemporaryPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTemporary })
+    override fun getDiscoverablePeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isDiscoverable })
+    override fun getFollowedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isFollowing })
+    override suspend fun updateFollowState(pubKey: String, isFollowing: Boolean) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isFollowing = isFollowing) }
+    }
+    override suspend fun getDiscoverablePeersList(): List<Peer> = peers.values.filter { it.isDiscoverable && !it.isTrusted }
 }
 
 /** Fake [PostDao] keyed by id (REPLACE on insert). */
 class FakePostDao : PostDao {
     val posts = linkedMapOf<String, MeshPost>()
-    override suspend fun insertPost(post: MeshPost) { posts[post.id] = post }
+    /** D02: media_owner rows maintained by the PostDao defaults, keyed by (mediaId, ownerType, ownerId). */
+    val mediaOwners = linkedMapOf<Triple<String, String, String>, MediaOwner>()
+    // insertPost / markPostOrphaned are interface defaults (they also maintain media_owner).
+    override suspend fun insertPostRow(post: MeshPost) { posts[post.id] = post }
+    override suspend fun insertMediaOwnerIgnore(owner: MediaOwner) {
+        mediaOwners.putIfAbsent(Triple(owner.mediaId, owner.ownerType, owner.ownerId), owner)
+    }
+    override suspend fun updateMediaOwnerPrivacy(ownerType: String, ownerId: String, privacy: String, authorPub: String) {
+        mediaOwners.entries.filter { it.key.second == ownerType && it.key.third == ownerId }
+            .forEach { mediaOwners[it.key] = it.value.copy(privacy = privacy, authorPub = authorPub) }
+    }
+    override suspend fun deleteOtherMediaOwners(ownerType: String, ownerId: String, keepMediaId: String) {
+        mediaOwners.keys.removeAll { it.second == ownerType && it.third == ownerId && it.first != keepMediaId }
+    }
+    override suspend fun deleteMediaOwnersFor(ownerType: String, ownerId: String) {
+        mediaOwners.keys.removeAll { it.second == ownerType && it.third == ownerId }
+    }
+    override suspend fun getRecordedMediaDigest(ownerType: String, ownerId: String): String? =
+        mediaOwners.values.firstOrNull { it.ownerType == ownerType && it.ownerId == ownerId && it.sha256 != null }?.sha256
     override suspend fun hasPost(id: String): Int = if (posts.containsKey(id)) 1 else 0
     override suspend fun getPostById(id: String): MeshPost? = posts[id]
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
-    override suspend fun markPostOrphaned(id: String) {}
-    override suspend fun updatePostContent(id: String, newContent: String) {}
+    override suspend fun getAllPostsList(): List<MeshPost> = posts.values.toList()
+    override suspend fun deletePostsByAuthor(authorId: String) { posts.values.removeAll { it.authorPublicKeyB64 == authorId } }
+    override suspend fun getPendingDeletionsByAuthor(authorId: String, maxBroadcasts: Int, limit: Int): List<MeshPost> =
+        posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId && it.deletionBroadcasts < maxBroadcasts }
+            .sortedBy { it.timestamp }.take(limit)
+    override suspend fun incrementDeletionBroadcast(id: String) {
+        posts[id]?.let { posts[id] = it.copy(deletionBroadcasts = it.deletionBroadcasts + 1) }
+    }
+    override suspend fun resetDeletionBroadcasts(authorId: String) {
+        posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId }
+            .forEach { posts[it.id] = it.copy(deletionBroadcasts = 0) }
+    }
+    override suspend fun markPostOrphanedRow(id: String) {
+        posts[id]?.let {
+            posts[id] = it.copy(
+                isOrphaned = true,
+                content = "[Deleted]",
+                mediaUrl = null,
+                thumbnailB64 = null
+            )
+        }
+    }
+    val tombstones = mutableMapOf<String, String>()
+
+    override suspend fun getTombstone(key: String): String? = tombstones[key]
+
+    override suspend fun setTombstone(key: String, value: String) {
+        tombstones[key] = value
+    }
+
+    override suspend fun updateSignatureIfUnchanged(
+        id: String,
+        authorId: String,
+        oldSignature: String,
+        expectedTimestamp: Long,
+        newSignature: String
+    ): Int {
+        val existing = posts[id] ?: return 0
+        if (existing.authorPublicKeyB64 == authorId &&
+            !existing.isOrphaned &&
+            existing.signature == oldSignature &&
+            existing.timestamp == expectedTimestamp
+        ) {
+            posts[id] = existing.copy(signature = newSignature)
+            return 1
+        }
+        return 0
+    }
+
+    override suspend fun updatePostDetails(
+        id: String,
+        newContent: String,
+        newTimestamp: Long,
+        newSignature: String,
+        authorAvatarB64: String?,
+        mediaUrl: String?,
+        mediaType: String?,
+        thumbnailB64: String?,
+        mediaSize: Long,
+        privacy: String,
+        clearnetUrl: String?
+    ) {
+        val existing = posts[id]
+        if (existing != null) {
+            posts[id] = existing.copy(
+                content = newContent,
+                timestamp = newTimestamp,
+                signature = newSignature,
+                authorAvatarB64 = authorAvatarB64,
+                mediaUrl = mediaUrl,
+                mediaType = mediaType,
+                thumbnailB64 = thumbnailB64,
+                mediaSize = mediaSize,
+                privacy = privacy,
+                clearnetUrl = clearnetUrl
+            )
+        }
+    }
 }
 
 /** Fake [MessageDao] collecting stored messages. */
 class FakeMessageDao : MessageDao {
     val messages = mutableListOf<ChatMessage>()
-    override suspend fun insertMessage(message: ChatMessage) { messages.add(message) }
+    val mediaOwners = mutableListOf<MediaOwner>()
+    val groupIds = mutableSetOf<String>()
+    // insertMessage is the interface default (it also registers attachments in media_owner).
+    override suspend fun insertMessageRow(message: ChatMessage) { messages.add(message) }
+    override suspend fun countGroupsWithId(threadKey: String): Int = if (threadKey in groupIds) 1 else 0
+    override suspend fun insertMediaOwnerIgnore(owner: MediaOwner) {
+        if (mediaOwners.none { it.mediaId == owner.mediaId && it.ownerType == owner.ownerType && it.ownerId == owner.ownerId }) {
+            mediaOwners.add(owner)
+        }
+    }
+    override suspend fun hasMessage(id: String): Int = if (messages.any { it.id == id }) 1 else 0
     override fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         flowOf(messages.filter { it.chatWithPeerPub == peerPub })
+    override suspend fun getMessagesWithPeerList(peerPub: String): List<ChatMessage> =
+        messages.filter { it.chatWithPeerPub == peerPub }
+    override suspend fun getMessageById(id: String): ChatMessage? =
+        messages.firstOrNull { it.id == id }
+    override suspend fun deleteMessageByIdAndSender(id: String, senderPub: String) {
+        messages.removeAll { it.id == id && it.senderPub == senderPub }
+    }
     override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())
-    override suspend fun markAsRead(peerPub: String) {}
+    override suspend fun markAsRead(peerPub: String) {
+        val updated = messages.map { if (it.chatWithPeerPub == peerPub) it.copy(isRead = true) else it }
+        messages.clear()
+        messages.addAll(updated)
+    }
+    override suspend fun markAsReadById(messageId: String) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index] = messages[index].copy(isRead = true)
+        }
+    }
+
+    override suspend fun updateDeliveryStatus(messageId: String, status: String) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index] = messages[index].copy(deliveryStatus = status)
+        }
+    }
+    override suspend fun getLatestReceivedTimestamp(peerPub: String): Long? =
+        messages.filter { it.chatWithPeerPub == peerPub && it.senderPub == peerPub }
+            .maxOfOrNull { it.timestamp }
+
+    override suspend fun getMessagesSentAfter(peerPub: String, myPub: String, since: Long, limit: Int): List<ChatMessage> =
+        messages.filter { it.chatWithPeerPub == peerPub && it.senderPub == myPub && it.timestamp > since }
+            .sortedBy { it.timestamp }
+            .take(limit)
+
     override suspend fun deleteMessagesWithPeer(peerPub: String) { messages.removeAll { it.chatWithPeerPub == peerPub } }
+    override suspend fun deleteGroupMessages(groupId: String) { messages.removeAll { it.chatWithPeerPub == groupId } }
+    override suspend fun deleteMessageById(id: String) { messages.removeAll { it.id == id } }
+}
+
+/** Fake [GroupChatDao] for group chat unit testing. */
+class FakeGroupChatDao : GroupChatDao {
+    private val groups = linkedMapOf<String, GroupChat>()
+    override fun getAllGroupChats(): Flow<List<GroupChat>> = flowOf(groups.values.toList())
+    override suspend fun getAllGroupChatsList(): List<GroupChat> = groups.values.toList()
+    override suspend fun getGroupChatById(groupId: String): GroupChat? = groups[groupId]
+    override suspend fun insertGroupChat(groupChat: GroupChat) { groups[groupChat.groupId] = groupChat }
+    override suspend fun deleteGroupChat(groupId: String) { groups.remove(groupId) }
+}
+
+/** Fake [PendingGroupMessageDao] for pending group message unit testing. */
+class FakePendingGroupMessageDao : PendingGroupMessageDao {
+    val pending = mutableListOf<PendingGroupMessage>()
+    override suspend fun insert(pending: PendingGroupMessage) {
+        this.pending.removeAll { it.groupId == pending.groupId && it.memberPub == pending.memberPub && it.msgId == pending.msgId }
+        this.pending.add(pending)
+    }
+    override suspend fun getPendingForMember(memberPub: String): List<PendingGroupMessage> =
+        pending.filter { it.memberPub == memberPub }
+    override suspend fun delete(groupId: String, memberPub: String, msgId: String) {
+        pending.removeAll { it.groupId == groupId && it.memberPub == memberPub && it.msgId == msgId }
+    }
+    override suspend fun deleteExpired(cutoff: Long) {
+        pending.removeAll { it.createdAt < cutoff }
+    }
+    override suspend fun deleteForMember(memberPub: String) {
+        pending.removeAll { it.memberPub == memberPub }
+    }
 }

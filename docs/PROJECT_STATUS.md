@@ -1,5 +1,3123 @@
 # Project Status - NoSlop
 
+## Review Round 2 Follow-up (Rounds E1–E5, E5s, E5s2, 2026-10-13): Summary and Known Gaps (v0.7.0-alpha)
+
+These rounds close what was still open from review round 2 (`isues.txt`: D11, D12 and the C-findings they carry) and the leftovers of D04. The legacy Android app only; the MVP is out of scope. Each round has its own entry below, newest first.
+
+* **Verified so far.** Unit tests pass (`./gradlew testGithubDebugUnitTest testPlayDebugUnitTest --rerun-tasks`) after every round. The app was built and installed after every round. On device: search (E5s, E5s2), and video, audio and seeking on Media3 1.11.1 (E5).
+* **Not yet verified.**
+  * Backup export and restore on a device (E3).
+  * A minified release build, using the new checklist `docs/RELEASE_SMOKE_TEST.md` (E5). Unit tests run the debug build, which R8 does not shrink, so they cannot catch a missing keep rule.
+* **Owner decisions recorded (2026-10-13).**
+  * **C09: hard protocol break.** A packet without a valid envelope signature is dropped. Builds before E2 can no longer talk to E2 builds; both sides must update.
+  * **C16:** kept as it is, with the red warning banner. No passphrase option is added.
+  * **C27** (persistent per-peer connections) and **R4d** (handshake budget): deferred.
+  * **Default creator node:** the same legacy app, without a Hub.
+  * **Search:** results depend only on the search terms and the filters in the search modal. They are listed newest first and loaded page by page as the user swipes. Items already seen may appear. Blocked creators, banned channels, banned nodes and anything the user voted down stay hidden.
+* **Known gaps** (open, not fixed in these rounds).
+  * **Packets pulled from a Hub skip the envelope check.** Hub pulls and Hub web-UI DMs are built inside the app and never cross the mesh socket, which is the only place the envelope is checked (`EnvelopeAuth` in `MeshTransport`).
+  * **The Hub's onion address is not checked against its key.** Peers' announced onions are (S2), but the Hub's address is taken as configured.
+  * **Clocks must agree to within 1 hour.** A packet whose envelope time is further from the receiver's clock is dropped as stale (`EnvelopeAuth.MAX_SKEW_MS`).
+  * **A group catch-up answer can reach non-members.** When the member asking (`GROUP_QUERY`) has no stored onion address, `handleGroupQuery` broadcasts the `GROUP_SYNC` answer. `GossipService.broadcast` sends it to every trusted contact and every group member, so friends who are not in the group receive its member keys, names and onion addresses. Found while writing these docs; not fixed yet.
+  * **Users invited by a member get group catch-up late.** A `GROUP_QUERY` is answered only for a key in the answering node's member list (G1). Someone invited by a member, not the admin, is answered only by members whose copy already lists them.
+  * **Older downvotes still show in search.** Downvotes made before E5s were stored only as swipes and cannot be told apart, so they are not hidden.
+  * **Search quality.** It works, but needs more work later (owner, 2026-10-13).
+  * **Hub relaying (D04).** With a Hub linked, broadcasts are handed to the Hub, which applies its own relaying rules.
+
+## Completed Changes (2026-10-13) — Round E5: Media3 1.11.1, Narrower Bouncy Castle Keep Rule, Release Smoke Test (v0.7.0-alpha)
+
+Closes C24 and the Media3 item of D11, and the smoke-test half of C27 (D12). Unit tests: `AdaptiveTorLoadControlE5Test` and `ReleaseBuildRulesE5Test` (new). On device: video swiping, seeking, audio and video attachments work. The minified release build has not been checked yet.
+
+* **Media3 1.3.1 → 1.11.1.** All seven Media3 libraries (`exoplayer`, `transformer`, `effect`, `exoplayer-hls`, `exoplayer-dash`, `ui`, `datasource-okhttp`) move together.
+  * **Why the version bump alone would have broken video.** Since 1.4, Media3 calls the `LoadControl` methods that take a `PlayerId` (and, for decisions, a `Parameters` object). The old methods still exist, but their default implementations throw. `AdaptiveTorLoadControl` (`ui/PreloadManager.kt`) implemented only the old ones, so the app would have built and then failed on the first video.
+  * **Fix.** `AdaptiveTorLoadControl` now implements the same ten methods as Media3's own `DefaultLoadControl`: `onPrepared`, `onTracksSelected`, `onStopped`, `onReleased`, `getAllocator`, `getBackBufferDurationUs`, `retainBackBufferFromKeyframe`, `shouldContinueLoading`, `shouldStartPlayback` and `shouldContinuePreloading`. Lifecycle calls go to both inner controls (preload and on-screen); decisions go to the active one. The buffer sizes are unchanged.
+  * Since 1.9 Media3 needs API 23 or newer; the app's minimum is 24.
+* **Bouncy Castle keep rule narrowed.** `-keep class org.bouncycastle.** { *; }` is replaced by keeping only the provider packages: `org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**` and `org.bouncycastle.pqc.jcajce.provider.**` (plus `-dontwarn org.bouncycastle.**`).
+  * The app calls the lightweight API directly (Ed25519, X25519, HKDF, Argon2, ChaCha20-Poly1305, SHA-3, PBKDF2), so R8 can see what it needs and keeps it.
+  * Only the provider registered in `NoSlopApp` loads classes by name, and no app code asks it for an algorithm by name.
+* **Release smoke test.** New `docs/RELEASE_SMOKE_TEST.md`: a step-by-step check of a minified release build on two devices (identity, DMs, backup, media, Tor), with the log strings to look for. Shrinking problems only show up in that build.
+* **Tests.**
+  * `AdaptiveTorLoadControlE5Test` runs a player through prepare, track selection, stop and release on the wrapper, with a one-item streaming timeline. It checks that the back buffer switches between preload (none) and on screen (60 s).
+  * `ReleaseBuildRulesE5Test` fails if any of these comes back: Bouncy Castle kept whole; app code asking the provider for an algorithm by name; Media3 libraries on different versions or older than 1.4; the wrapper missing one of the ten methods, or still overriding an old one.
+  * First run: two test-only failures, fixed in E5b. The test passed an empty timeline, which `DefaultLoadControl` cannot handle, and the source check did not allow an override's parameters on the next line.
+
+## Completed Changes (2026-10-13) — Search Round, Part 2 (E5s2): Every Source Pages (v0.7.0-alpha)
+
+Unit tests: `SearchPagingE5s2Test` (new) and `SearchPagingE5sTest` (updated). On device: searches in each tab page through as expected.
+
+* **Images, audio and articles page too.** Part 1 paged only YouTube, Invidious and Reddit. Every source that can page now does, as the user swipes (`feeds/api/SourcePage.kt`).
+  * **Images** (Openverse, Wikimedia, Pexels, NASA): by relevance, because these sources have no dates or cannot sort by them.
+  * **Articles:** Wikipedia by relevance. Hacker News, NewsAPI and the Guardian newest first.
+  * **Audio:** Openverse, and the Internet Archive, which now pages newest first instead of by most downloaded. Podcast Index cannot page, so it only fills the first page.
+  * **All:** NewsAPI, Jamendo and Pexels page too, next to YouTube, Invidious and Reddit.
+* **Limits.**
+  * NewsAPI stops after 5 pages. Its free plan serves only the first 100 results, and every page uses one of its 100 daily requests.
+  * A source with no key set, or one that fails 3 times in a row, stops for that search, so it does not hold the search open.
+* **Logs.** Jamendo no longer writes search terms to the log (C19).
+
+## Completed Changes (2026-10-13) — Search Round, Part 1 (E5s): Paging Instead of Random Extra Words (v0.7.0-alpha)
+
+Owner decisions: searches depend only on the search terms and the search-modal filters, are listed newest first with no date limit and keep loading as the user swipes; already-seen items may appear; blocked and banned content and downvoted items stay hidden. Unit tests: `SearchPagingE5sTest` (new). On device: search works; it needs more work later.
+
+* **Cause.** After E2b, testers found searches worse: not the most relevant results, and not everything for the terms. E2b was not the cause. The causes were:
+  * "All" searches went through the background interest-feed path, which asks YouTube for this year's uploads only.
+  * Invidious searches were limited to the last month (`date=month`).
+  * When the results ran out, the search ran again with a random extra word ("review", "vlog", …), up to 3 times.
+  * Results were sorted videos first.
+* **Fix.**
+  * **Paging.** A search fetches the next page of the same terms and filter, newest first, with no date limit: YouTube continuation tokens (sorted by upload date), Invidious page numbers (`sort_by=upload_date`, every date), and Reddit listing cursors (`sort=new`, `after`). Where each source has got to is kept in `PublicApiService.SearchCursor`, one per search. The next page starts loading while the user is still swiping through the current results.
+  * **When paging stops** (`ui/SearchPaging.kt`): every source has reported its end, or 3 pages in a row added nothing new, or the search has fetched 50 pages.
+  * **Order.** Results show page by page, newest first within each page. Videos no longer jump to the front (this replaces the "videos first" sort of §20.6 in TECHNICAL_REFERENCE).
+  * **"All" searches** have their own path and no longer use the interest-feed one.
+  * Searches made outside the search window send the same requests as before.
+* **Hidden from search results.**
+  * Blocked creators and banned channels, as before.
+  * Anything the user votes down (downvote, slop, vomit, clown, NoSlop), from now on. The keys are stored in the app setting `downvoted_items` (newest 3,000 kept). Downvoted items also stay out of the Videos, Audio, Images and Articles tabs, but still show in History, Liked, Saved and My Content.
+  * Posts from banned nodes.
+* **Logs (C19).** Reddit no longer logs full URLs, which carried the search terms. YouTube no longer logs response bodies.
+* **Known gap.** Downvotes made before this round were stored only as swipes, so they cannot be hidden.
+
+## Completed Changes (2026-10-13) — Round E4: Reactions and Votes as the Post's Identity, Share Permanent Identity, GROUP_QUERY Sender (v0.7.0-alpha)
+
+Closes two D04 leftovers and a group catch-up failure seen on device after E2. Unit tests: `IdentityLeftoversE4Test` (new). App built and installed; tests pass.
+
+* **Reactions and votes (D04 leftover).**
+  * **Cause.** Reactions and votes on posts and comments were always made by the personal identity. Relays carried them to creator contacts, which linked the two identities.
+  * **Fix.** A reaction or vote is made by the identity that comments on that post (`IdentityRouter.forPostAuthor`): the creator identity on our own creator posts and on posts by peers who know us as a creator, the personal identity otherwise. Taking one back always goes out from the identity that made it, including reactions made before this round.
+* **"Share Permanent Identity" in a temporary chat (D04 leftover).**
+  * **Cause.** The request was sent as the secondary identity, because the contact was bound to it.
+  * **Fix.** The request now comes from the personal identity. The contact stays bound to the secondary identity, so the temporary chat keeps working, until they answer. Only the answer to that request's nonce moves the contact to the personal identity and makes it permanent (`MeshSocialRepository.completeMainIdentityShare`; the nonce is kept in `main_share_nonce_<key>`). While the request is pending, it is probed from the personal identity too.
+* **Group catch-up was refused (G1, after E2).**
+  * **Cause.** `GossipService.broadcast` re-stamped the sender of every group packet per peer, while the `GROUP_QUERY` payload kept naming the original requester. Since E2 a query is answered only when the requester is the sender, so peers that knew our other identity refused it.
+  * **Fix.** `GROUP_QUERY` takes the per-identity route of other broadcasts (`outboundFor`): sent unchanged, as a relay that keeps its sender, or not at all.
+* **Still open from D04:** Hub relaying (a linked Hub relays on its own terms).
+
+## Completed Changes (2026-10-13) — Rounds E2b and E3: Release-Build JSON Reads, Streaming NSG2 Backups (v0.7.0-alpha)
+
+Closes C07 and C06 (D12). Unit tests: `BackupArchiveFormatE3Test`, `BackupNsg2E3Test`, `PreferencesRepositoryE2bTest`, `GroupChatParsingE2bTest` (new); `CodeHygieneArchitectureTest`, `BackupImportResultD09Test`, `BackupWordCloudFormsTest`, `WordCloudRuleTest` (updated). App built and installed; tests pass. **Backup export and restore have not been checked on a device yet.**
+
+* **E2b: settings that release builds never read.**
+  * **Cause.** In R8 full mode, `-keepattributes Signature` only applies to kept classes, so an anonymous `TypeToken` subclass lost its type argument and threw at run time. In release builds, saved categories, genres, keywords, banned nodes, and group bans and member names were never read back.
+  * **Fix.** These values are parsed through array classes or `JsonObject` (`PreferencesRepository`, `GroupChat.parseGroupMemberHandles` / `parseGroupBannedMembers`). Gson's recommended `TypeToken` keep rules are added for libraries. `CodeHygieneArchitectureTest` now fails if app code uses `TypeToken` again.
+  * **Logs (C19).** Invidious search, channel-search and resolve request labels no longer carry search terms or video ids. The hygiene test forbids that too.
+* **E3: backups are "NSG2" (C07, C06).**
+  * **Before.** "NSG1" encrypted the whole file with one AES-256-GCM stream under the first 32 bytes of the Word Cloud seed (the same seed the identity keys come from). A plaintext zip was written to disk on export and on restore, and the group messages went to a plaintext file.
+  * **Format** (`data/BackupArchiveFormat.kt`):
+    * header = `"NSG2"` | version (1) | salt (16) | nonce prefix (7);
+    * key = HKDF-SHA256 of the Word Cloud seed, with the archive's salt and the info `noslop-backup-v2`, so every archive has its own key and the key is never the raw seed;
+    * body = the chunk records of the creator identity file (NSC1, D10d): AES-256-GCM over at most 1 MiB each, the chunk number and a last-chunk flag in the nonce, the header as associated data.
+  * **Streaming.** The zip is encrypted as it is written and decrypted as it is read, so no plaintext backup, zip or group-message file is written to disk on export or restore. Each chunk is authenticated before its bytes are used.
+  * **Refused before anything changes:** a truncated, reordered, modified or extended archive, and an export that failed part way.
+  * **Older backups.** NSG1 and pre-NSG1 CBC backups still restore; a CBC backup only after the user confirms, because it is not authenticated. `secureDelete()` (claimed in 2026-10-06, never written) is not needed any more.
+  * Tests that read exports as NSG1 now go through `BackupArchiveTestSupport`.
+
+## Completed Changes (2026-10-13) — Round E2: Envelope Signature on Every Packet, ANNOUNCE_PEER v2, GROUP_QUERY for Members Only (v0.7.0-alpha)
+
+Closes C09 and S2 (D12), and most of G1, found while tracing C09. **Hard protocol break** (owner decision): nodes before E2 can no longer talk to E2 nodes. Unit tests: `EnvelopeAuthTest`, `AnnouncePeerAndGroupQueryE2Test` (new); `HandshakeReplyPathTest`, `MeshPacketVerifierTest`, `WireProtocolTest` (extended). App built and installed; tests pass.
+
+* **Envelope signature (C09).**
+  * **Cause.** `sender_id` was taken on trust. Anyone who could reach an onion could claim to be one of its contacts for the packet types with no signature of their own (`TYPING`, `READ_RECEIPT`, `SYNC_REQUEST`, `INVENTORY_SYNC_REQUEST`, `DM_SYNC_REQUEST`, `GROUP_QUERY`, `MEDIA_TRANSFER_ACK`). The firewall, the rate limits and the cooldown reset all trusted it.
+  * **Fix** (`mesh/EnvelopeAuth.kt`). Every packet carries `env_v`, `env_ts` and `env_sig`: an Ed25519 signature by the identity named in `sender_id` over the packet id, type, sender, target, inner signature, envelope time and a SHA-256 of the payload. Only `hops` is left out, because relays change it.
+  * **Sending.** `MeshTransport` signs every packet as the identity that sends it. A relay that keeps the original sender keeps that sender's envelope. A packet that cannot be signed is not sent.
+  * **Receiving.** On the listener and on the handshake reply path, a packet that is unsigned, invalid, more than 1 hour from our clock, or a replay is dropped before any handler runs.
+* **ANNOUNCE_PEER v2 (S2).**
+  * **Cause.** The signature covered only the author and the time, so a relay could replace the onion address in a fresh announce, and receivers stored it.
+  * **Fix.** The signature now covers the onion address (`CryptoService.canonicalAnnouncePeerV2`, label `noslop-announce-v2`); v1 announces are refused. Only an onion address derived from the sender's key is stored (`CryptoService.isOnionOf`).
+* **GROUP_QUERY for members only (G1).**
+  * **Cause.** The answer is the whole group record (member keys, names, onion addresses). Groups that allow member invites answered anyone who knew the group id, former members included.
+  * **Fix** (`groupQueryRefusal`). A query is answered only for the authenticated sender, when it is a member or the admin, is not banned, and is also the requester named in the query. The answer goes to the sender's stored onion address; the requester's address is no longer used.
+  * **Still open** (found in the docs round, see Known Gaps): when the sender has no stored onion address, the answer is still broadcast, which sends the group record to all trusted contacts as well as to group members.
+
+## Completed Changes (2026-10-13) — Round E1: Smaller Items from D11 (v0.7.0-alpha)
+
+Closes D11, apart from the Media3 upgrade (E5). Released together with E2 (commit `c40654e`). Unit tests: `LoggerRedactTest`, `CodeHygieneArchitectureTest` (new); `MeshSocialRepositoryTest` (extended). App built and installed; tests pass.
+
+* **"Open in Tor Browser" never appeared.** On API 30 and newer, the app cannot see another package without a `<queries>` entry. The manifest now lists `org.torproject.torbrowser` and `org.torproject.torbrowser_alpha`. The button opens whichever is installed; with only the alpha installed, it used to target the stable package and do nothing. It never falls back to the default browser, which would leave Tor.
+* **Search terms and video ids in logs (C19).** About 20 INFO/WARN/ERROR logs carried them. Release logs now show `Logger.redact(value)` instead: an 8-character tag and the length, the same within one run. Debug builds that allow sensitive logs keep the value.
+* **DMs to a contact without an encryption key.** `sendDirectMessage` used the contact's Ed25519 key in place of a missing X25519 key, so the contact could never decrypt the message. Nothing is stored or sent now, and the user sees "Message not sent: this contact's encryption key is missing. Ask them to reconnect."
+* **Coroutine scopes (C25).** Fire-and-forget `CoroutineScope(Dispatchers…)` calls use `AppScopes`. Scopes owned by a class keep their owner and gain a `SupervisorJob` and the logging exception handler, which now logs the stack trace too.
+* **Silent catches.** Catches that hid a real failure now log it. Those deliberately kept silent (cleanup, best-effort parsing, expected failures) are listed per file in `CodeHygieneArchitectureTest`, which fails on any new one.
+* **Stale comment.** The Invidious mention in `MeshPacketVerifier` (C05 leftover) is gone.
+* **Already done before this round:** the two substring membership checks (R3), and the update-certificate check, which logs a WARN when certificates cannot be read.
+
+## Completed Changes (2026-10-13) — Round D10e: Creator Identity Import on the Studio Page, Settings Tab Order (v0.7.0-alpha)
+
+Follow-up to D10d after device testing. Unit tests: `CreatorIdentityArchiveD10dTest` (updated). Not yet verified on device.
+
+* **Import on the Studio page.**
+  * A creator node can now import a creator identity file under "Import Creator Identity", next to the backup.
+  * A warning comes first: the file's identity replaces this node's creator identity, and that identity's followers lose it for good. The warning has a "Back Up First" option.
+  * The user then picks the file and enters its passphrase, and the restore runs, replacing the current creator identity.
+  * The Settings restore stays for nodes that are not creators yet.
+* **Contacts of a replaced or burned identity.**
+  * **Cause.** Replacing or burning a creator identity left its contacts bound to the secondary identity. The new identity would then talk to the old identity's followers and link the two.
+  * **Fix.** After the old identity's `USER_EXIT`, those contacts are forgotten (`NoSlopRepository.dropCreatorContacts`). Contacts in the imported file are kept.
+* **Settings tab order.**
+  * The tabs are now General, Network, Content, Studio, System.
+  * Tabs are chosen by name instead of position, so a tab that disappears (Studio, when creator mode is turned off) falls back to General instead of showing an empty page.
+
+## Completed Changes (2026-10-13) — Round D10d: One Profile by Default, Creator Identity Backup and Restore (v0.7.0-alpha)
+
+Part of the D04 follow-up work (creator identity backup, restore and move; burn warnings). Unit tests: `CreatorIdentityArchiveD10dTest` (new) and `IdentityRoutingTest` (updated). Not yet verified on device.
+
+* **One profile by default (user decision, 2026-10-13).**
+  * Every identity now uses the personal username, picture and bio.
+  * In creator mode, a field set on the Studio page replaces the personal one for the creator identity only. A blank Studio field falls back to the personal one.
+  * On a node that is not a creator, the secondary identity (used to follow discovered creators) always uses the personal profile.
+  * This replaces D04's separate creator profile, whose default name was "Creator", and D10c's personal-handle-only rule. The rule lives in `resolveSecondaryProfile` and is used by `IdentityRepository`, `IdentityRouter`, `NoSlopRepository.secondaryIdentityProfile` and the discoverable announcement.
+  * The Studio card shows which fields come from the personal profile.
+  * **Trade-off, accepted by the user.** Anyone who sees both identities can match the fields the Studio leaves blank. Keys are never shared.
+* **Creator identity backup and restore** (`CreatorIdentityArchive`).
+  * **Back up.** On the Studio page, "Back Up Creator Identity" asks for a passphrase twice (at least 10 characters) and writes one file. It holds:
+    * the creator keys, Studio profile and donation link;
+    * the contacts bound to the creator identity;
+    * the creator's posts and their media files.
+  * **Restore.** In Settings, Creator Node, "Restore Creator Identity" installs the file on this device. It turns creator mode on, registers the creator onion with Tor, and adds the contacts, posts and media.
+  * **Restoring again is safe.** Existing rows are kept, so a second restore of the same file changes nothing.
+  * **What is left out.** A contact this device already knows by its personal identity is not taken over, and is counted in the result.
+  * **Existing secondary identity.** A different secondary identity already on the device is replaced only after the user confirms.
+  * **Moving to another device.** The result dialog reminds the user to turn creator mode off on the old device, because two devices with one creator identity compete for one onion address.
+  * **File format "NSC1".**
+    * Argon2id (3 iterations, 64 MiB) derives the key from the passphrase.
+    * The body is AES-256-GCM in 1 MiB chunks. Each chunk's nonce carries its number and a last-chunk flag, and the header is the associated data.
+    * A large video never has to fit in memory, which the full backup's single GCM stream needs.
+    * A truncated, reordered, modified or extended file is refused before anything on the device changes.
+    * Rows are written as explicit JSON fields, so R8 renaming cannot break the file.
+* **Burn warnings.** Burning the creator identity and turning creator mode off now say that the identity cannot be brought back without a backup. The burn dialog has a "Back Up First" button.
+* **Shared checks.** The burnable-identity checks of a full backup restore (`IdentityRepository.burnableIdentityProblem`) are now shared with the creator restore. Their checks and messages are unchanged.
+* **Still open from D04.**
+  * Reactions and votes are not yet sent as the creator identity.
+  * In a temporary chat, "Share Permanent Identity" still sends the request as the secondary identity, because the contact is bound to it (this predates D04).
+
+## Completed Changes (2026-10-11) — Round D10c: Creator Posts, Follower Names, Attachment Identity (v0.7.0-alpha)
+
+Testers saw three problems after D10b fix 2: two older creator broadcasts still never reached followers, even after being edited to public; a follower that connected to a discovered creator with its secondary identity was listed by the creator as "Creator"; and new posts in creator mode defaulted to friends-only. Unit tests: `CreatorPostIdentityD10cTest` (new) and `IdentityRoutingTest` (updated). Not yet verified on device.
+
+* **Older creator posts.**
+  * **Cause.** The two posts were written as friends-only. In creator mode, a friends-only post is signed by the personal identity, and editing it to public kept the personal key, because a signed post's author cannot change. D04 never sends personal posts to creator contacts. The creator's log showed "2 withheld" on every inventory sync and "Not sending EDIT_POST …: written by the identity this peer doesn't know".
+  * **Fix.** In creator mode, a post's privacy decides its identity, the same rule as when it is written: public posts belong to the creator identity and friends-only posts to the personal identity (`MeshSocialRepository.identityMoveFor`).
+  * An edit that crosses that line moves the post (`moveMeshPostToOtherIdentity`). It is published again by the other identity, with a new id and the same time, attachment and clearnet link, and the old copy is deleted. Likes and comments stay with the old copy.
+  * The edit sheet explains this. For a personal post made public it offers "Move to creator" (the default) or "Keep personal". A creator post made friends-only always moves.
+* **Creator mode posting.** New posts default to Public, and the compose sheet says which identity each privacy setting posts as.
+* **"Creator" instead of the follower's name.**
+  * **Cause.** D04 named the secondary (burnable) identity after the creator profile on every node. A node that is not a creator has no creator profile, so its secondary identity went by the default "Creator".
+  * **Fix.** On a node that is not a creator, the secondary identity goes by the personal handle again, as before D04. It still never carries the personal bio or avatar. On a creator node it keeps the creator handle (`secondaryIdentityHandle`, used by `IdentityRepository` and `IdentityRouter`).
+  * `announceCreatorPresence` sends the identity's name (`IDENTITY_UPDATE`, signed by that identity) to the contacts that know it. It sends whenever the name differs from the last one sent and one of those contacts is online, so existing "Creator" rows correct themselves.
+* **Identity leak found on the way.** Attachments carried the personal onion and key (`originNode`, `ownerId`) whatever identity sent them, because the UI fills in the personal ones. This included creator posts, comments as the creator, DMs to followers and group messages sent as the creator. Each attachment now names the identity that sends it. These fields are not signed, so nothing else changes on the wire.
+* **Known limit.** Turning creator mode on reuses an existing secondary identity. The creators that identity followed knew it by the personal handle, so they can link the new creator identity to that name.
+
+## Completed Changes (2026-10-11) — Round D10b fix 2: Creator Posts Reach Followers (v0.7.0-alpha)
+
+Testers saw that posts by a creator node (a video and an older post) never appeared on a node that followed it, neither in its mesh content nor on the creator's card. Unit tests: `BulkSyncDeliveryTest` (new). Not yet verified on device.
+
+* **Cause 1: sync replies were thrown away.** When the follower synced, the creator answered "sent 1 missing posts", but `MeshTransport.sendPacket` dropped the reply carrying the post. The log said "Dropping bulk SYNC_RESPONSE …: bulk circuits busy". A bulk packet that could not get one of the 4 bulk connection slots within 4 s was dropped, and nothing sent a sync reply again.
+* **Fix.**
+  * Sync packets (`SYNC_REQUEST`, `SYNC_RESPONSE`, `INVENTORY_SYNC_REQUEST`) now wait up to 90 s for a slot (`MeshTransport.waitsForBulkSlot`).
+  * Other bulk packets keep the 4 s limit, and presence announcements are still dropped at once.
+  * `SyncPacketHandler` re-sends an undelivered sync reply in the background after 30 s and again after 90 s, with a fresh packet id.
+* **Cause 2: pending requests to creators were deleted.** The 15-minute clean-up of inactive discoverable nodes deleted every untrusted row, including a creator we had a pending request with or followed. **Fix:** it now deletes only nodes we merely saw announce themselves (`MeshSocialRepository.isDisposableDiscoverableRow`).
+* **Diagnostics.**
+  * The inventory log now says how many posts were withheld from the peer (our personal posts to a creator contact, friends-only posts to anyone who isn't a friend).
+  * The sync-response log says why posts were not stored: mesh filter, rejected, or already stored.
+  * The image, video and text mesh filters used to drop synced posts without any log line.
+
+## Completed Changes (2026-10-11) — Round D10b: Verification by Camera Scan, Automatic Key Changes, 8-Character Tags (v0.7.0-alpha)
+
+Testers found D10's manual "Mark verified" step tedious. This round replaces it: the app verifies contacts itself when people meet and scan each other's QR code. Unit tests: `ContactVerificationD10bTest` (new), `SafetyFingerprintD10Test`, `PeerTrustInvariantTest`, `CryptoDerivationTest`, `CryptoServiceRobolectricTest`. Not yet verified on device.
+
+**Compatibility.** No Room schema change; `pendingEncKey` is no longer written. `CONNECTION_REQUEST` gains an optional signed `intro` field, appended to the v2 signature only when present, so requests without it sign exactly as before. The tag changed from 6 to 8 characters (alpha testers: old tags are accepted when an identity is loaded or restored and rewritten once). `PeerDao.acceptPendingEncKey` and `clearPendingEncKey` (D10) are replaced by `applyEncKeyChange` and `updateTagAndHandle`.
+
+### Verified in person, without a button
+
+* **Scanner.** Scanning someone's QR code with the camera (`QRScanScreen`, source `ContactIntro.QR_CAMERA`) stores that code's safety fingerprint in `peers.verifiedFingerprint` when the request is sent (`MeshSocialRepository.sendConnectionRequest`). It counts only while it equals the contact's current fingerprint, so a different key in their handshake shows as "Changed since you verified it". Scanning a contact you already have, or someone whose request is pending, verifies them only if the code carries the keys already stored.
+* **Approver.** The request carries `intro = "qr_camera"` inside the v2 signature, so it can't be added or removed on the way. The receiver stores it as `request_intro_<pub>`. The request dialog, the notification card and the contact card show the requester's name.tag (the tag comes from their key), a check code (the first two groups of the safety fingerprint), and a note that they scanned your code. Accepting there calls `NoSlopRepository.acceptConnectionRequest(…, confirmedByUser = true)`. That marks them verified in person, but only if the request was a camera scan and the keys are still the ones on screen. Creator auto-accept and crossing requests never verify anyone.
+* **Not verified.** A code read from a picture, a pasted ID, or a request over the network never verifies anyone. A picture or a pasted ID shows a red warning to continue only if the code came from that person.
+* **Warnings.** The scan and approval screens warn when an accepted contact already has the same name, ignoring tags and case (`sameNameContact`). The scan screen also warns when the tag written in the code doesn't belong to its key.
+* **UI.** The contact card shows "Verified in person", "Not verified in person" or "Changed since you verified it"; "Compare keys" shows the full fingerprint. The D10 "Mark verified"/"Remove verification" buttons are gone. "My ID" shows your check code above your fingerprint.
+
+### Key changes are applied automatically (C02, D10 c)
+
+* **Cause.** D10 held a changed encryption key in `pendingEncKey` until the user tapped "Accept New Key". The new key is signed by the contact's identity key, so holding it only delayed messages.
+* **Fix.** `HandshakePacketHandler` applies a changed key from an `ACCEPTED` contact (a request or a handshake refresh). It clears `verifiedFingerprint` and records `key_changed_at_<pub>`. The same key in a different encoding is not a change (`CryptoService.sameX25519PublicKey`). The chat shows a one-line notice ("…'s security key changed on …") until dismissed (`KeyChangeNotice`), replacing D10's accept/keep banner. Keys still held from D10 are applied once at startup.
+
+### 8-character tags made with Argon2id
+
+* **Change.** `CryptoService.deriveTripcode` is now base32(Argon2id(raw Ed25519 key, salt `noslop-tag-v2`, t=2, m=19456 KiB, p=1, 16 bytes)), first 8 characters (golden vector `wdbuab42` for bytes 0..31, computed with argon2-cffi; Bouncy Castle 1.78.1 gives the same). Finding a key whose tag matches someone else's now takes about 2^40 Argon2 runs, instead of 2^30 SHA3 hashes for the old 6-character tag. Results are cached per key (4096 entries). Only one Argon2 run happens at a time, using about 19 MiB.
+* **Old tags.** `deriveLegacyTripcode` keeps the old SHA3 tag (golden `aufeq4`). `isTripcodeOf` accepts either form when a backup is restored (`IdentityRepository.validateIdentityObject` and `restoreAuthoritativeIdentity`). `loadIdentity` rewrites the stored tag and the display name suffix; `getBurnableIdentity` rewrites the stored creator tag. Handshakes, announces and identity updates strip either form from incoming handles (`stripIdentityTag`).
+* **Migration.** `NoSlopRepository.migrateIdentityTagsV2`, started by the ViewModel, runs once (setting `identity_tags_v2_done`) and again after a failure. It applies held keys, rewrites stored contacts' tags and handles and post authors' tags and legacy handle suffixes, and reloads both own identities.
+* **Cost.** The first tag for each key takes a fraction of a second (about 160 ms on a desktop JVM, cold), and later ones come from the cache. Unit tests that create many identities take a few seconds longer.
+
+### Matching people by key, not name
+
+* `MeshSocialRepository.deletePeer` (two places), `NoSlopViewModel.removePeer` and the contact card's post list used to match posts by handle as well as by key. Anyone can post under the same handle, so removing a contact could delete someone else's posts. They now match by key only.
+* `MeshSocialRepository.purgeOrphanedPeerContent` (the 30-minute clean-up, also run after accepting a request) kept a stranger's posts when their handle matched a contact's or our own. It now keeps only posts whose author key is ours or a stored contact's.
+
+## Completed Changes (2026-10-11) — Round D10: Status Honesty, Safety Fingerprints, Key Changes, Unverified Media (v0.7.0-alpha)
+
+This round closes review finding D10 and the "unverified" label left open by D08. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`; from this round on, `StatusDocCitationTest` fails the build if a label names a class that does not exist. Not yet verified on device. *(Round D10b replaced the "Mark verified" button and the key-change banner described below with verification by camera scan and automatic key changes.)*
+
+**Compatibility.** No packet, archive-format or Room schema change. Two new `PeerDao` queries on existing columns (`acceptPendingEncKey`, `clearPendingEncKey`). The fingerprint derivation changed, but nothing displayed or stored a fingerprint before this round.
+
+### Status documents cited tests that never existed (D10 a, e)
+
+* **Cause.** The 2026-10-06 entry labelled items "Tested" with classes that were never written (`IdentityRepositoryTest`, `SyncPacketHandlerTest`, `CryptoServiceTest`, `JamendoApiClientTest`, `LoggerTest`), a composable (`OnboardingScreen`), a Gradle task (`testGithubDebugUnitTest`) and, since R6b, a deleted test (`IdentityViewModelTest`). It also described a `secureDelete()` that was never added and a Bouncy Castle ProGuard change that was never made. The matrix still listed C07 (streaming backup encryption) as resolved.
+* **Fix.** Those lines now say what is true: "Implemented (untested)", the test that does cover the item, or a correction note. C07 is back to Open (D12). Two malformed matrix rows (R7a–R8, R3b–R3c) were repaired.
+* **Check.** `StatusDocCitationTest` reads `PROJECT_STATUS.md`, `TECHNICAL_REFERENCE.md`, `WIRE_PROTOCOL_REFERENCE.md` and `README.md`. Every "Tested" label must start with a backticked test class, and every backticked name ending in `Test` in it, or in the last column of a findings matrix, must be a class declared under `app/src/test` or `app/src/androidTest`. It checks that cited tests exist, not that they passed; passing is what running the suite shows.
+
+### Safety fingerprints were derived but never shown (C11, D10 b)
+
+* **Fingerprint.** `CryptoService.deriveSafetyFingerprint` now hashes SHA3-256(`"noslop-safety-fp-v1"` ‖ raw Ed25519 public key ‖ raw X25519 public key) and shows 20 Base32 characters in five groups of four. Keys are reduced to their raw 32 bytes first, so raw and X.509/SPKI-wrapped encodings give the same fingerprint. A missing or unreadable key returns `null`; it used to return `0000-0000-0000-0000-0000`, which two broken keys would have "matched".
+* **Where it shows.** Your own fingerprint is on the "My ID" card and the Creator Contact Card (`QRShareSheet`). A contact's fingerprint is on their contact card (`ContactCardDialog` → `SafetyFingerprintPanel`) with its state: Verified, Not verified, or "Changed since you verified it".
+* **Mark verified.** `NoSlopRepository.setPeerVerified` stores the current fingerprint in `peers.verifiedFingerprint` (column added in 18→19). Only an `ACCEPTED` contact with no key change pending can be marked. A verification goes stale on its own when either key changes, because the UI compares it with the current fingerprint. Verified contacts get a shield next to their name in the chat header.
+
+### A changed encryption key was held but never shown (C02, D10 c)
+
+* **Cause.** Since C02 a changed encryption key from an accepted contact is held in `peers.pendingEncKey` instead of being applied, but no screen showed it, so the contact stayed on the old key with no way forward.
+* **Fix.** The chat shows a "Safety Key Changed" banner with the new fingerprint. **Accept New Key** (after a confirmation) applies it with `PeerDao.acceptPendingEncKey`. That update only applies if the pending key is still the one the user saw, and it clears any earlier verification. **Keep Old Key** drops the pending key (`clearPendingEncKey`); if the contact keeps presenting the new key, their next handshake holds it again and the banner returns. The contact card also says when a key change is waiting.
+
+### Media whose digest the author did not sign was not marked (D08 leftover)
+
+* **Fix.** `NoSlopRepository.isMeshPostMediaVerified` re-checks the stored post signature in the v2 (C17) form over each digest recorded for its media. The feed shows an **Unverified media** label (tap for an explanation) on another author's mesh media post when no recorded digest is covered by the author's signature. A digest that is only cached on the owner rows (for example by `mediaDigestFor` from a local file) does not count, so the label stays correct even where that cache holds an unsigned hash. Own posts and posts without mesh media are never labelled.
+
+### Translations: per-language missing-key report (D10 d)
+
+* `TranslationParityTest.otherLanguageAssets_reportMissingKeysPerLanguage` prints, for each language, the number of English keys it lacks (with up to ten examples) and writes the same report to `app/build/reports/translation-parity.txt`. It never fails on missing translations, which fall back to English; unreadable JSON still fails. The English-key check is unchanged.
+* New English strings for this round: 19 keys in `content_en.json`.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `StatusDocCitationTest` | Every "Tested" label and matrix validation cell in the four documents names an existing test class |
+| `SafetyFingerprintD10Test` | Fingerprint shape; same fingerprint for raw and wrapped keys; different per identity and per encryption key; `null` for missing/unreadable keys (no shared placeholder); Mark verified stores the current fingerprint, can be removed, refused for non-accepted contacts and without an encryption key; a key change from a real v2 `CONNECTION_REQUEST` is held, blocks verifying, and Accept applies it and resets verification; Keep Old Key drops it and keeps a still-valid verification; accept/reject with nothing pending change nothing; media covered by a v2 signature is verified, an 8-field post with a digest on record is not, a different recorded digest is not, own posts and posts without mesh media are never flagged |
+| `TranslationParityTest` (changed) | Per-language missing-key report (non-failing) |
+
+---
+
+## Completed Changes (2026-10-10) — Round R6: Nothing Changes the Word Cloud (v0.7.0-alpha)
+
+**Diagnosis of the older account (R5c log, 22:04:05).** `identityVersion=1 | typedDerivesIdentity=false | storedDerivesIdentity=false`, 12 of 12 words differ. The account predates Word Cloud–derived keys (version 2, 2026-09-11): its keys are random, so no phrase derives them and the device cannot tell which of the two phrases is the "right" one. The keys, contacts and data are intact. No code in the history rewrites the stored phrase on a running install. A past restore could only bring back the exporting phone's stored phrase, or, before R6, the words typed at that export or restore when the phone had none stored. The paths that replaced keys with Word Cloud–derived ones would have made the account version 2, so they did not run here. Since R5b the account can be backed up with the written-down words ("Back Up With These Words"); that backup opens with those words, and the account keeps its stored phrase.
+
+**Rule (agreed with the user).** The Word Cloud an account keeps is written when the account is created and never changed afterwards. A restore brings back the backed-up account's own phrase; it never substitutes the words typed to open the backup, which only decrypt the file. `WordCloudGuard` (`data/WordCloudGuard.kt`) holds the rule:
+
+* **Restore** (`IdentityRepository.restoreAuthoritativeIdentity` → `WordCloudGuard.decideRestored`): the archive's phrase is kept as it is. The typed words are stored only when the archive carries no phrase **and** they derive the restored keys. Otherwise no phrase is stored (logged as a warning). Before, the typed words were stored whenever the archive had no phrase. A version 2 archive whose phrase does not derive its keys is still kept unchanged, with a warning in the log. The log records the source and booleans only, never words.
+* **Export** (`BackupManager.exportData`): the archive carries the account's stored phrase. If it can't be read, the archive carries none. Before, the archive carried the words typed for the export, which a restore then stored.
+* **Legacy cross-device rebuild** (`planLegacyRederivation`): the typed words become the account's phrase only when the archive's database names the public key they derive. An archive that records no key used to count as a match; it is now a recovery-required restore.
+* **Account creation** (`saveIdentity`) remains the only first write, reached only from `NoSlopViewModel.completeOnboarding`, which derives the new keys from the phrase it stores.
+* The old prefs-file restore of pre-portable archives copies the account's own prefs file and is unchanged; the rollback restores the pre-restore snapshot.
+* `IdentityRepository.unlock` compares against the stored phrase; an account restored with no phrase could not be unlocked, but no screen calls `logout`/`unlock` today.
+* No "show my Word Cloud" screen (user decision).
+
+**Compatibility.** No packet, archive-format or Room schema change. Archives without a `mnemonic` field are valid (the field was always optional on restore).
+
+### Removed: the unused `IdentityViewModel` (C25 leftover, D10 item; R6b)
+
+* **Why it existed.** C25 copied the account code (onboarding, Word Cloud, backup export and restore, creator identity) out of `NoSlopViewModel` into `IdentityViewModel` but never switched the screens over or deleted the originals. `NoSlopViewModel` created an instance on every launch (`val identityViewModel`) that nothing used. A project-wide search found no other reference outside its own test.
+* **Why it had to go.** The copy had drifted. Its restore still used the Boolean `importData` without the D09 results, the R5 failure reasons, or the Tor stop before restart. Its onboarding did not reset the tutorial step. It was a second account-creation path for the Word Cloud rule. Its eager flows also read the identity at every start for no use.
+* **Change.** Deleted `ui/IdentityViewModel.kt`, its instance in `NoSlopViewModel`, and `IdentityViewModelTest`. That test only covered the copy; the same `generateMnemonic` and backup-prompt state live in `NoSlopViewModel`. No behaviour change: no screen used the copy.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `WordCloudRuleTest` | Archive phrase kept when other words opened the backup (version 1 keys), and kept even when the typed words derive the keys; derivation flag; no archive phrase: typed words kept (canonical form) only when they derive the keys, otherwise nothing stored (`null`, blank, `"null"`); export with other words carries the account's own phrase; end-to-end restore with other words keeps the stored phrase; legacy rebuild needs the archive to name the derived key (no key → no match) |
+| `WordCloudWritePathsTest` | Source scan: the stored phrase is written only in `saveIdentity`, `restoreAuthoritativeIdentity` (through the guard), `exportData` (the archive copy) and `importBackup` (legacy rebuild, after the key-match gate); `saveIdentity` is reached only via `saveLocalIdentity` ← `NoSlopViewModel.completeOnboarding`, which stores the phrase it derived the new keys from; nothing removes the phrase on its own |
+
+---
+
+## Completed Changes (2026-10-10) — Round R5: Device Feedback after D09 (v0.7.0-alpha)
+
+Device report after D09: the feed tutorial swiped itself away on a new account; a QR image from the gallery was "not a QR"; an older account's backup said the Word Cloud was wrong; after a restore Tor took long to come up and replies arrived minutes late; videos buffered a lot. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Compatibility.** No packet, archive-format or Room schema change. New backups are encrypted under the canonical Word Cloud; every older archive still opens (see below).
+
+### Feed tutorial swiped itself away (regression from the Mesh Feed round)
+
+* **Cause.** Landing on tutorial slide N recorded step N + 1. The slide list is rebuilt from that step whenever the feed refreshes, which a new account does many times while it fills, so the slide on screen dropped out; the pager settled on the next slide, which recorded the one after, and so on until no tutorial was left. The Mesh Feed round keyed this effect on the item id instead of the page index, which is what let the chain run.
+* **Fix.** The slide on screen is recorded (step N), so a refresh never removes it; a slide leaves the list only once the user has moved past it. Reopening the app shows the slide last viewed.
+* Not unit-tested (Compose pager state); verify on device with a new account.
+
+### Gallery QR images were not read
+
+* **Cause.** The gallery path made one attempt: full-size RGB, no `TRY_HARDER`, no inverted pass, transparent pixels read as black. Light-on-dark codes, PNGs with a transparent background and small codes in large photos all failed. Nothing was logged.
+* **Fix.** `decodeQrFromArgb` composites over white (and black, when the image has transparency), tries full size and halved sizes, each with the hybrid and global-histogram binarizers, normal and inverted. Large images are decoded at most 2048 px on the longest side. The result is logged (`QR_SCAN Gallery image ...`).
+* Tested (unit: `QrImageDecodeTest`; existing `QrFrameDecodeTest`).
+
+### A backup said the Word Cloud was wrong
+
+* **Cause.** Export used the Word Cloud exactly as typed in the dialog (only compared case-insensitively with the stored one), so an archive made with an auto-capitalised first word or a trailing space opened only with that exact string. Onboarding also trimmed the input, and showed "Check your mnemonic" for every failure.
+* **Fix.** Export encrypts under the canonical form (`MnemonicGenerator.normalize`: trimmed, lower case, single spaces). Restore tries the canonical and the likely as-typed forms (`restoreCandidates`), picking the one whose key turns the first cipher block into a zip header (`firstBlockIsZip`); the full authenticated decryption still decides. Settings and onboarding show the actual reason (`ImportResult.Failed.reason`), e.g. "The Word Cloud does not match this backup".
+* If the old account's backup still fails, the log now names the reason; send it.
+* Tested (unit: `BackupWordCloudFormsTest`).
+
+### Export refused: "Mnemonic does not match your active Word Cloud!" (R5b, device report on the older account)
+
+* **Cause.** Before exporting, Settings (and the backup advisory) compared the typed Word Cloud with the one stored on the device using `trim()` + `equals(ignoreCase)`: any difference in spacing inside the phrase (double space, line break) failed, and a real difference was a dead end. The older account could not be backed up at all.
+* **Fix.** `WordCloudCheck.compare` compares canonical forms (case and spacing ignored). A real difference opens a dialog saying in how many places the words differ and that the backup will open only with the words typed; the user can back up with them or re-enter. The log records the counts only (`differingWords`, `typedWords`, `storedWords`), never the words.
+* Resolved in R6 (version 1 account with random keys; see Round R6). Device report: 12 of 12 words differ. No change in this session writes the stored Word Cloud on an existing install (only restores do, and their behaviour is unchanged apart from the D09 legacy re-derivation, which stores the phrase typed at restore). R5c adds to the mismatch log the identity version and whether the typed and the stored phrase derive the account's keys (booleans only).
+* Tested (unit: `BackupWordCloudFormsTest`).
+
+### Older backups could not be restored from onboarding
+
+* **Cause.** Onboarding passed no handler for an unauthenticated (pre-GCM) archive, so such a restore spun forever.
+* **Fix.** Onboarding asks for confirmation, as Settings does, and restores with it.
+
+### Replies arrived minutes late after a restore
+
+* **Cause (from the logs).** The restore restarts the app; the restored phone's Tor then sat at "Connecting to a relay" for two minutes. Its .onion came back with new introduction points while the other phone's Tor kept the old descriptor; every send to it timed out ("Connect timed out", the app's 10–25 s send timeouts being shorter than Tor's own retry) until 19:35:16, when the backlog arrived at once.
+* **Fix.**
+  * `GossipService` asks Tor for a fresh descriptor (`TorService.refreshOnionDescriptor`, control command `HSFETCH`) on the second failed send to an onion in a row, and when that peer reaches us while our sends to it were failing; at most once a minute per onion.
+  * Before the restore restart, Tor is stopped cleanly (`stopTor`), so it can save its state; a precaution, as the logs cannot show whether the abrupt kill caused the slow bootstrap.
+* Tested (unit: `OnionDescriptorRefreshTest`).
+
+### Video buffering
+
+* No defect found in the logs. The buffering burst at 18:42 is the position jumping about 10 s per step (double-tap skipping); the other waits are slow YouTube streams over Tor, and the existing stall escape moved one stream to a fresh circuit. Report a specific video with its log if it keeps happening.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `QrImageDecodeTest` | Dark-on-light, light-on-dark, dark and light modules on a transparent background, a code inside a large frame, an image with no code, 2×2 downscale |
+| `BackupWordCloudFormsTest` | Canonical form; Word Cloud check ignores case and spacing and counts differing words; export typed with capitals and spaces restores with the plain phrase; archives encrypted (as before this round) under a capitalised phrase or with a trailing space restore; a different phrase is refused with "The Word Cloud does not match this backup"; first-block key probe |
+| `OnionDescriptorRefreshTest` | Refresh on the second failure, not the first; at most once a minute per onion; when the peer reaches us after failed sends; not on plain successes; non-onion addresses ignored |
+
+---
+
+## Completed Changes (2026-10-10) — Round D09: Typed Restore Result, Pre-Commit Identity Check, X25519 Reconciliation (v0.7.0-alpha)
+
+This round closes review finding D09. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-10).** Tests passed and the build was installed; export and restore of a new account worked on device. Restoring an older account's backup failed with "wrong Word Cloud" (see Round R5).
+
+**Compatibility.** No archive format, packet or Room schema change. `BackupManager.importData` keeps its Boolean contract for existing callers (tests; `IdentityViewModel` until R6b); the app's restore path uses the new `importBackup`.
+
+### A restore that needed identity recovery reported "Import failed"
+
+* **Cause.** For a legacy archive (keystore-sealed identity prefs, no portable identity JSON) restored on another device, `importData` checked whether the Word Cloud rebuilds the archive's identity only *after* replacing the database, prefs and media. On a mismatch it deleted the sealed prefs, set the quarantine flag and returned `false`, so the UI said "Import failed" and no restart happened, although the device's data had already been replaced. A failed rebuild returned `true` with no quarantine flag, so the app restarted into an ordinary onboarding with no recovery banner. `lastRestoreNeedsIdentityRecovery` was never read.
+* **Fix.**
+  * `BackupManager.importBackup` returns an `ImportResult`: `Success`, `SuccessIdentityRecoveryRequired`, `Failed(rolledBack, reason)` or `ConfirmLegacy`. `rolledBack` is false only when a failed commit's rollback could not be verified. `ConfirmLegacy` replaces the exception for an unauthenticated archive (the Boolean `importData` still throws it). `lastRestoreNeedsIdentityRecovery` is removed.
+  * While staging, before anything is replaced, the archive's handle and public key are read from the staged database (read-only) and the identity is derived from the Word Cloud (`planLegacyRederivation`). Whether that rebuild is *needed* still depends on whether this device can open the restored prefs, which can only be probed once they are in place; a same-device legacy restore keeps working as before.
+  * After the commit, a mismatch or a failed rebuild sets `identity_quarantined` and returns `SuccessIdentityRecoveryRequired`. `NoSlopViewModel.importBackupFromUri` restarts the app for it as for a success (without the Hub prompt). `isOnboardingComplete` is false while recovery is needed, so the onboarding screen shows the "Identity Recovery Required" banner.
+* Tested (unit: `BackupImportResultD09Test`; existing `BackupManagerTest`).
+
+### The cached X25519 public key was never checked against the private key
+
+* **Cause.** `loadIdentity` reconciled the Ed25519 public key with the private key (C15) but returned the cached X25519 public key unchecked. A diverged cache was advertised in handshakes while DMs were decrypted with the private key.
+* **Fix.** `loadIdentity` and `getBurnableIdentity` derive the X25519 public key from the private key (`CryptoService.x25519PublicKeyFromPrivate`, compared encoding-independently by `sameX25519PublicKey`) and repair the caches when they differ.
+* Tested (unit: `BackupImportResultD09Test`).
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `BackupImportResultD09Test` | Portable archive → `Success`; wrong Word Cloud → `Failed(rolledBack = true)`; unauthenticated archive → `ConfirmLegacy` (Boolean form still throws); injected commit failure → `Failed(rolledBack = true)` with the identity intact; legacy archive whose identity the Word Cloud can't rebuild → data restored, `SuccessIdentityRecoveryRequired`, quarantine flag set (Boolean form returns true); legacy archive whose rebuild can't be sealed → recovery required, not a silent success; diverged cached X25519 public key repaired, matching key left as stored |
+
+---
+
+## Completed Changes (2026-10-10) — Round D08: Media Digest Downgrade and Same-Revision Signature Check (v0.7.0-alpha)
+
+This round closes review finding D08. The sync path was already fixed in R2. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-10).** Tests passed and the build was installed on the test devices; editing existing posts syncs correctly between nodes.
+
+**Protocol compatibility.** No packet layout, signature encoding or Room schema change (one new DAO query on the existing `media_owner.sha256` column).
+
+### Live POST and EDIT_POST checked downloads against an unsigned digest
+
+* **Cause.** A media post may carry the C17 v2 signature (canonical fields plus `media_metadata.sha256`) or the 8-field one, which doesn't cover the digest. `PostPacketHandler` passed `media_metadata` to auto-download as received, whichever form verified. A relay could attach the digest of its own substituted file to a post signed in the 8-field form, and the download check would then pass.
+* **Fix.** When only the 8-field form verifies, the digest is removed before auto-download (`PostPacketHandler.downloadMetadata`), as sync already did, and a warning is logged. `EDIT_POST` now also records a v2-signed digest, as `POST` does.
+* **Own caption edits lost the digest.** Editing only the caption of one's own media post rebuilt the media descriptor without `sha256`, so the edit was signed in the 8-field form and receivers had nothing signed to check the file against. The descriptor now carries the recorded digest (`mediaDigestFor`), so the edit keeps the v2 signature.
+* Tested (unit: `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test`).
+
+### Same-revision signature changes ignored signed fields (W07)
+
+* **Cause.** `PostDao.insertPostSafely` let a new signature replace the stored one at the same timestamp when content, privacy, media URL and clearnet URL matched. The avatar and the media digest are signed too and weren't compared. An older 8-field signature for the same revision could also be replayed over a v2 one, and the post was then re-served by sync as unverifiable.
+* **Fix.** `signedFieldsMatch` adds the avatar. `signatureKeepsRecordedDigest` allows a same-revision signature change only if the new signature covers the digest already recorded for the post (callers pass `signedMediaHash`, null for the 8-field form). Without a recorded digest, an upgrade from 8-field to v2 is accepted as before. `editPostSafely` refuses the same replay at an unchanged timestamp and media.
+* Tested (unit: `PostDigestBindingD08Test`; existing `PostPacketHandlerTest`, `MediaSyncAndAclRestoreTest`).
+
+### Still open (D08)
+
+* The review also asks to show such media as "unverified". Done in Round D10 (2026-10-11): the feed shows an "Unverified media" label when the author's signature covers no recorded digest.
+* `mediaDigestFor` caches the hash of a local file when no signed digest is recorded. For someone else's media that was downloaded unverified, that hash can later block a genuine same-revision v2 upgrade (the post keeps its 8-field signature; nothing wrong is accepted).
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `PostDigestBindingD08Test` | 8-field POST and EDIT_POST with an attached digest: stored, downloaded without the digest; v2 POST and EDIT_POST keep it; same-revision copy with another avatar doesn't replace the signature; an 8-field signature can't replace a v2 one once the digest is recorded; 8-field → v2 upgrade still accepted; `insertPostSafely` and `editPostSafely` digest rules directly |
+| `OwnPostEditDigestD08Test` | A caption-only edit of one's own media post is signed over the recorded digest |
+
+---
+
+## Completed Changes (2026-10-10) — Round D05: DM v1 Latch and DM_ACK Domain Separation (v0.7.0-alpha)
+
+This round closes the two open parts of review finding D05. The outbox expiry part was already done in R3. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-10).** `./gradlew testGithubDebugUnitTest --rerun-tasks` passed on the developer machine, including `DmProtocolD05Test`; the build was installed on the test devices and works. The mixed-version cases below were not reported one by one.
+
+**Protocol compatibility.** No Room schema change. `MESSAGE` is unchanged. `DM_ACK` gains two optional fields and `v: 3`. Earlier builds keep working in both directions (see below).
+
+### v1 DMs were accepted from any peer
+
+* **Cause.** `handleDirectMessage` fell back to v1 (`decryptDM`, no AAD) for every non-group message whose v2 decryption failed. v1 binds neither the message id nor the direction, so a relay could reflect a captured v1 message back to its sender under a new id. C08's reflection fix held only for v2 traffic.
+* **Fix (latch).** A key is marked as speaking v2 (`app_settings["dm_v2_seen_<key>"]`) on its first v2 message, its first authenticated `DM_ACK`, or a v2-signed `CONNECTION_REQUEST` / `USER_HANDSHAKE`. Since the D07 hard break, every handshake is v2, so every contact that connects on this build is marked. After that, a non-group message from that key that fails v2 is refused. v1 is still read from a key never seen speaking v2 (an older client accepted before D07); it stays flagged `isLegacy`.
+* **Why app settings, not a `Peer` column.** The review suggested `Peer.dmV2Seen` with a migration. Some write paths still rewrite peer rows wholesale (D06), and any one of them would reset the latch and reopen v1. A setting keyed by the public key can't be reset that way and needs no migration. It also survives removing and re-adding the contact: the key still speaks v2.
+* **Own messages still in v1 form.** Messages written in the Hub web UI were sealed as v1 and pushed to the mesh labelled as plain `MESSAGE`s, and DM sync re-sent stored v1 messages labelled `v: 2`. A v2 peer would now refuse both. `NoSlopRepository.sealHubDm` seals our own Hub messages as v2 (us → peer, same id and timestamp), and the pushed packet says `v: 2`. DM sync re-seals any stored v1 message of ours as v2 before re-sending it (`DmPacketHandler.resendableCiphertext`). Messages *from* the peer pulled from the Hub keep their v1 at-rest form; they are only read locally.
+* Tested (unit: `DmProtocolD05Test`).
+
+### DM_ACK could be confused with MESSAGE
+
+* **Cause.** A `DM_ACK` was "ACK" sealed exactly like a `MESSAGE` (same directional key, same AAD label `noslop-dm-v2`, group id empty), and `handleDmAck` never checked the plaintext. A captured message could be re-labelled as an acknowledgement for its own id. An ACK also settled any message id, including one in another chat.
+* **Fix.**
+  * New AAD label `noslop-dm-ack-v3` (`CryptoService.DM_AAD_ACK`; `canonicalDmAadV2`, `encryptDMV2` and `decryptDMV2` take a `domain`). Messages keep `noslop-dm-v2` (`DM_AAD_MESSAGE`), so they stay readable by earlier builds.
+  * `sendDmAck` sends `v: 3` with the acknowledgement under the new label in `ack_nonce` / `ack_ciphertext`. Earlier builds only read `nonce` / `ciphertext`, so the old form rides along in the same packet until the peer has sent us a new-form ACK itself (`app_settings["dm_ack_v3_<key>"]`). From then on the old fields are empty.
+  * `handleDmAck` tries the new form first. It accepts the old form only from a peer that has never sent the new one, and only if the plaintext is exactly `"ACK"`. Either form must open to `"ACK"`.
+  * An ACK is refused for a message that isn't in the sender's own chat.
+* **Why not mark "Sent" final for v1 peers.** The review also proposed skipping the ACK wait for peers known to be on v1. Since D07, such a peer can't read our v2 messages at all, so showing "Sent" would hide a message it never could read. The outbox keeps marking them `FAILED` after 7 days or 50 deliveries (R3), which is honest.
+* Tested (unit: `DmProtocolD05Test`).
+
+### Behaviour to watch on device
+
+* DMs and ACKs between two nodes on this build: the first ACK each way carries both forms, later ones only the new form. Delivery ticks should behave exactly as before.
+* With one node still on the previous build: its ACKs (old form, "ACK") are accepted; ours carry the old form it reads.
+* A contact running a pre-v2 client (accepted before D07) can still send v1 DMs, until it ever speaks v2.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `DmProtocolD05Test` | v1 accepted from a never-v2 peer (flagged legacy); latch set by a v2 message, an authenticated ACK and a v2-signed connection request; v1 refused after the latch while v2 still works; old-form ACK accepted from an earlier build; a re-labelled message refused as an ACK (plaintext not "ACK"); "ACK" sealed as a message refused in the ACK field; an ACK-domain ciphertext refused as a message; new-form ACK accepted, after which the old form from that peer is refused; ACK for another chat's message refused; outgoing ACK carries both forms until the peer is known, then only the new one; DM sync re-seals a stored v1 own message as v2 |
+
+---
+
+## Completed Changes (2026-10-09) — Round C: Creator Identity Separation (D04) (v0.7.0-alpha)
+
+This round closes review finding D04: the creator (burnable) identity could be linked to the personal one. It also fixes `IDENTITY_UPDATE` verification, which turned up on the way. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** No packet layout, signature or Room schema change. Older receivers behave as before. Nodes on this build send fewer packets across identities (see below), accept `IDENTITY_UPDATE`s they used to drop, and get an `ANNOUNCE_PEER` for the creator identity.
+
+### Where the creator identity leaked the personal one
+
+* `getBurnableIdentity().displayName` was the personal handle. Every creator handshake (request, probe, accept) carried it, together with the personal bio and avatar.
+* `ANNOUNCE_DISCOVERABLE` (heartbeat and ViewModel) carried the personal handle and bio. The Creator Studio QR card showed the personal handle.
+* Creator posts and edits were signed by the creator key but carried the personal handle and avatar. Comments always used the personal identity, including replies on one's own creator posts.
+* `GossipService.broadcast` re-stamped every copy of an original per peer. Creator contacts therefore received our personal posts, comments, reactions, `IDENTITY_UPDATE` and the personal `ANNOUNCE_PEER` (personal key and onion) from the creator node. Friends received creator posts stamped with the personal key.
+* `forwardPacket` stamped every relay with the personal key, including relays to creator contacts.
+* Sync answers sent posts, comments and reactions written by the personal identity to creator contacts. In creator mode they were sent under the creator key to everyone, so friends also dropped the friends-only posts in the answer.
+* DM sync answers looked up, and resent as, the personal identity only. A creator contact got nothing back, and every resend named the personal key.
+* Typing and follow always used the personal key. Group member handles listed the personal handle for our creator key.
+* `MediaManager` and `GossipService` decided the identity by `isTemporary`, other paths by `contact_identity_*`. When the creator identity was gone, callers fell back to the personal identity.
+
+### Fix
+
+* **Creator profile** (`creator_profile` setting): handle, bio and avatar, edited in Creator Studio (a full-screen dialog; the first build drew it in place, where it inherited the host's height and only the Save button showed). The default handle is `Creator`, never the personal handle. *Burn ID* clears it, and changes go to creator contacts as a creator-signed `IDENTITY_UPDATE`.
+* **`IdentityRouter`** (`data/IdentityRouter.kt`) is the single rule: binding first, then the addressed identity, then temporary-and-not-accepted. It picks the identity and profile for every per-peer send listed above, and returns nothing (rather than the personal identity) for a creator contact without a creator identity. `MediaManager.requesterIdentity`/`responderIdentity` use the same rule.
+* **`GossipService.outboundFor`**: personal-authored originals are not sent to creator contacts. Creator-authored originals reach friends exactly in relay form. Presence, profile, exit, follow and removal packets never cross identities. Relays to creator contacts carry the creator key.
+* **Sync** to a creator contact leaves out everything written by the personal identity. Answers use the routed identity.
+* **Presence.** The creator identity sends its own `ANNOUNCE_PEER`, plus the discoverable announcement with the creator profile, a random 5–50 s after the personal one.
+* Tested (unit: `CreatorIdentityCaptureTest`, `IdentityRoutingTest`; `MediaAccessRoundBTest` fixture now binds its follower to the creator identity, as `acceptConnectionRequest` does).
+
+### `IDENTITY_UPDATE` was never accepted
+
+* **Cause.** Senders sign with `encodeForSigning`, but receivers only verified the older pipe-joined string. Profile changes therefore never reached contacts.
+* **Fix.** Both forms are accepted, in the handler and in `MeshPacketVerifier` (the pre-relay signature gate, which had the same pipe-only copy and dropped every update before the handler). A forged update is still refused.
+* Tested (unit: `IdentityRoutingTest`, `MeshPacketVerifierTest`).
+
+### Behaviour changes to watch on device
+
+* Friends receive our creator posts in relay form (hop count one lower). Creator contacts no longer receive our personal posts directly; they can still reach them through other relays.
+* Comments on our own creator posts, and on posts by creator contacts, are made as the creator identity.
+* After creator mode is turned off, DMs, typing and syncs to former creator contacts are no longer sent at all. Before, they went out under the personal key, which those contacts don't know.
+* **Creator Studio layout and demo cards.** The AI Approval Queue no longer starts with two hard-coded demo cards; publishing one broadcast fake content to the mesh. It now starts empty until Home Hub auto-tagging supplies items. The studio is shown in two places: a full-screen settings screen and an item inside the Settings list. In the list item the height is unbounded, so the `weight(1f)` queue and empty state collapsed to nothing. Neither uses `weight` now, the queue is a plain keyed `Column`, and only the full-screen host scrolls itself.
+
+### Still open (D04)
+
+* Reactions and votes on posts still use the personal identity: the feed's "my reaction" state is keyed to it. They are not sent directly to creator contacts, but third-party relays can still carry them.
+* The capture test covers the packets listed above; group traffic keeps its own identity rule (`groupMemberIdentity`).
+* With a Hub linked, broadcasts are handed to the Hub, which relays by its own rules.
+* `IdentityViewModel` still held an unused copy of the old discoverable code; deleted in R6b.
+* New UI strings are English only, and fall back to English in other languages.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `CreatorIdentityCaptureTest` | Posts, comments, reactions, identity updates, DM, DM catch-up, typing, sync answer, handshake to a new follower, creator presence and profile updates: nothing sent to a creator contact contains the personal key, onion, handle, bio or avatar, and every envelope is the creator key. Creator side carries the creator profile. Friends get creator posts in relay form and no creator presence. Relays to a follower carry the creator key |
+| `IdentityRoutingTest` | Creator handle on the burnable identity; `knowsUsAsCreator` rules; `forPeer` returns nothing without a creator identity; `forPostAuthor`; every `outboundFor` case; `IDENTITY_UPDATE` accepted when signed as senders sign, forged one refused; nothing sent to a creator contact after creator mode is off |
+
+---
+
+## Completed Changes (2026-10-09) — Mesh Feed: Missing and Repeating Posts; No Startup Handshake Broadcast (v0.7.0-alpha)
+
+Device report: switching between All and Mesh sometimes left new mesh posts out, even after "See Old Posts", and sometimes kept showing old posts. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`.
+
+**Verification (2026-10-09).** `./gradlew testGithubDebugUnitTest --rerun-tasks` passed on the developer machine, including the three new test classes. The build was installed on the test devices and the app is working normally so far; the individual scenarios below were not reported one by one, so a regression in them should still be watched for.
+
+**Protocol compatibility.** No packet layout, signature or Room schema change. Nodes stop sending one packet that every receiver already rejected.
+
+### Posts marked seen that the user never saw
+
+* **Cause.** `UnifiedFeedTab` marked "swiped past" slides by page index (`lastSettledPage` up to the settled page). Whenever the list changed under the pager, that range covered other posts:
+  * a mesh post arriving at the top moved the current post down a page, and the new post was marked;
+  * a replaced list (mode switch, refresh, the next Mesh batch) followed by a jump to the top marked every post between the top and the old page. `logs-2` shows five posts "swiped away" within 10 ms at 10:02:55.
+  * Marked posts are excluded from Mesh by `cachedViewedIds`, so they were gone for good.
+* **Fix.** The settled item is tracked by id, with the list's ids at that moment. `itemsSwipedPast` marks everything passed over an unchanged list, only a directly adjacent item after a list change, and nothing after a jump to the top or a mode switch. The 4 s dwell is keyed on the item id too.
+* Tested (unit: `FeedSwipeMarkingTest`).
+
+### Mesh infinite scroll replaced the list
+
+* **Cause.** In the specific-filter path of `loadMoreFeedItems` (Mesh, My Content, Videos, Images, Audio, Articles, search) every batch replaced the list and scrolled to the top. With more than one batch of mesh posts, nearing the end swapped in the next batch with no way back, and the jump marked posts as above.
+* **Fix.** Only the first batch of a mode fills the list and scrolls to the top; later batches are appended.
+* Implemented (untested): ViewModel feed paths have no unit harness.
+
+### A pager load could switch mode halfway
+
+* **Cause.** `loadMoreFeedItems(mode)` for a different mode only emptied the list and set the mode. When the pager's load ran before the screen's `syncFilterMode(mode)`, the latter became a no-op. The All feed's `sessionLoadedIds` then stayed in place and hid mesh posts that had been loaded into All but never reached; "See Old Posts" and the mode flow weren't reset either.
+* **Fix.** That branch now does what `syncFilterMode` does: cache the Live Feed, empty the list, clear `sessionLoadedIds`, reset "See Old Posts" for Mesh, update `currentFilterModeFlow`.
+* Implemented (untested).
+
+### Image, GIF and audio posts were never marked seen
+
+* **Cause.** `markItemViewed`/`recordItemSwiped` skip a mesh post with media until it is downloaded **and** `markMeshMediaPlaybackStarted` was called. Only `VideoPlayer` called it. Image, GIF and audio posts were never marked seen and came back in Mesh as new every time. A post with a media type but no media id, and file posts that weren't downloaded, were held back for good.
+* **Fix.**
+  * `FullScreenMeshCardV2` reports a downloaded image or GIF once it is on screen; `AudioPlayer` gains `onPlaybackStarted`, called when audio starts playing.
+  * `isMeshMediaUnseen` applies the check only to posts with a mesh media id, and not to file attachments.
+  * The "Media shown for mesh post" log line is written once per post per session (it used to repeat every few seconds while a video looped).
+* Implemented (untested): Compose UI.
+
+### Text posts that began alike hid each other
+
+* **Cause.** `getCanonicalItemKey` keyed a mesh post without a URL by its first 80 characters (`mesh_title_…`). The feed de-duplicates by that key and stores it with viewed/swiped records, so two test posts with similar wording showed as one, and seeing one hid the other.
+* **Fix.** Such posts are keyed by their id. Clearnet shares stay keyed by URL (one link shared by several peers shows once); mesh media posts by their media URL. Existing `mesh_title_…` records are left in place and no longer match anything.
+* Tested (unit: `MeshCanonicalKeyTest`).
+
+### Untargeted USER_HANDSHAKE on every start
+
+* **Cause.** `NoSlopRepository.updateOnionAddress` runs on every app start. It broadcast a legacy-signed `USER_HANDSHAKE` with no `targetUserId` (6 hops), whether or not the address had changed. Since C02/D07 every receiver rejects it ("targetUserId null is not a local identity", in every node's log). It only spent Tor circuits right after a restart, when connections are hardest to build.
+* **Fix.** Nothing is broadcast. The address is stored only when it changed (and never as blank). Peers learn our onion from the `ANNOUNCE_PEER` heartbeat. Signing `onion_address` in `ANNOUNCE_PEER` remains open (S2).
+* Tested (unit: `OnionAddressUpdateTest`).
+
+### Not changed
+
+* Switching back to All restores the cached All feed and position on purpose, so it shows the posts it had before. New mesh posts reach All through the normal interleaving on the next load.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `FeedSwipeMarkingTest` | Forward and backward swipes over an unchanged list; a post prepended at the top; a replaced list with a jump to the top; a deleted post above; unknown or missing previous item |
+| `MeshCanonicalKeyTest` | Text posts that begin alike get different keys; the same clearnet link shares one key; mesh media posts keyed by media |
+| `OnionAddressUpdateTest` | No `USER_HANDSHAKE` broadcast on a start with the current address or with a changed one; the identity flow still fires; a blank address isn't stored |
+
+---
+
+## Completed Changes (2026-10-08) — Round B: Media Access Control, Point-to-Point Media & Non-Contact Replies (v0.6.9-alpha)
+
+This round closes review findings D02 and D03 and regression items R6b and R6c. It also stops the "MEDIA_REQUEST for unknown media" flood seen in every device log. A "Tested" label names a test class that must pass with `./gradlew testGithubDebugUnitTest`. Not yet verified on device.
+
+**Protocol compatibility.** `MEDIA_REQUEST` gains an optional `timestamp` and is now signed. Older builds ignore both. Requests from older builds are still served when the requester is a stored peer; an unsigned request from a non-contact is refused. Media packets are no longer relayed, so a node on an older build that relied on relay routing or `MEDIA_RELAY_REQUEST` forwarding gets no answer through third parties. No Room schema change.
+
+### Media flood — media packets were gossiped mesh-wide
+
+* **Cause.** A `MEDIA_REQUEST` sent without `targetUserId` was treated as a public broadcast: every node processed it ("MEDIA_REQUEST for unknown media", then a `MEDIA_RELAY_REQUEST` delegation) and re-broadcast it to all its peers. A missing file also triggered `MEDIA_RELAY_REQUEST`s that went 6 hops, and `startDownload` sent an `ANNOUNCE_DISCOVERABLE` to every media source.
+* **Fix.**
+  * Requests are addressed to the source (`targetUserId`, hops=1).
+  * `GossipService.processIncoming` treats every `MEDIA_*` packet as point-to-point (`isPointToPointMediaType`): addressed elsewhere → dropped; otherwise processed locally and never forwarded.
+  * `startDownload` no longer announces itself to media sources.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### D03 — Relay listeners received chunks without an ACL check; the recovery reply was broken
+
+* **Cause.** Any node could send `MEDIA_RELAY_REQUEST` for any media id, register as a listener and be sent a copy of every chunk that passed through (`forwardRelayChunk`), with no ACL check. The recovery reply chain also answered with the wrong identity's onion.
+* **Fix.**
+  * Removed: `RelayState`/`relayStates`, `handleRelayRequest`, `handleRecoveryFound` (GossipService), `forwardRelayChunk`, `delegateUnknownMediaRequest`, `removePeerFromRelays`, the stale-route sweeper.
+  * Recovery is one hop. `attemptMeshRecovery` asks only direct peers that are trusted or members of the owning group, each as the identity that peer knows. `MediaManager.handleRecoveryRequest` answers `MEDIA_RECOVERY_FOUND` only when it holds the file **and** its own ACL authorises the asker, as the identity the asker knows. The asker downloads from the answering peer's stored onion.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### D02 — Media ACL is deny by default
+
+* **Cause.** After the `media_owner` index allowed or fell through, legacy table scans followed and then "any trusted peer" was allowed. So any contact could fetch friends-only, DM or group media they were not entitled to, given the id.
+* **Fix.** `isMediaAuthorizedForSender` decides from the `media_owner` index only:
+  * own identities → allowed; BLOCKED peer → refused;
+  * public post/comment → anyone; private → author; friends-only → author and direct friends (not temporary, not bound to our burnable identity);
+  * DM → the conversation partner; group → members and admin, minus banned members;
+  * no index row → refused.
+* **`accessKey` not added (decision).** D02 also proposed issuing and requiring a per-media key. The identity check already decides every case, and anyone allowed to see the post receives the key with it, so it adds no protection. It would need new fields in signed payloads, back-fill and breaking older clients. `access_key` in requests is ignored. See TECHNICAL_REFERENCE §6.1.1.
+* Tested (unit: `MediaAccessRoundBTest`; existing `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest` unchanged).
+
+### R6b — Media requests from non-contacts were never served
+
+* **Cause.** The holder replied only to a requester stored in its peer table. A reader of a re-shared public post usually isn't, so public media from non-contacts never loaded. A forwarded request also arrived with `senderId` re-stamped to the relay.
+* **Fix.**
+  * `MEDIA_REQUEST` is signed over `noslop-media-req-v1|senderId|targetUserId|mediaId|chunkIndex|chunkSize|byteOffset|byteLength|timestamp`.
+  * `MediaManager.replyOnionFor`: a stored peer gets its stored onion. A stranger is answered at the onion **derived from its public key**, and only with a valid signature, a timestamp within ±5 min and no replay. Only the key holder can host that onion, so the reply cannot be aimed at someone else.
+  * Requests are never forwarded, so `senderId` is always the real requester.
+  * `requesterIdentity` uses the burnable identity (main if none) towards a holder that isn't a contact; `responderIdentity` answers as the identity the request was addressed to.
+  * A `MEDIA_CHUNK` for a download in progress is exempt from the 2 MB/60 s cap on untrusted senders, which otherwise dropped most of any larger file from a non-contact or group member.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### R6c — Media requests were dropped silently
+
+* **Fix.** Every refusal (unauthorised, unknown requester, bad signature, missing file) is logged at WARN with the reason. A requester over the 16 MB/60 s sender limit now waits for the window to reset (up to 3 attempts) instead of being dropped.
+* Tested (unit: `MediaAccessRoundBTest`).
+
+### Still open
+
+* `handleMediaChunk` accepts any offset from the source of a download in progress; the C17 whole-file SHA-256 check rejects a corrupted result.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `MediaAccessRoundBTest` | Friends-only vs temporary contacts; DM media refused to third parties; unindexed media refused; public media allowed except BLOCKED; group members allowed, banned and outsiders refused; `replyOnionFor` (known peer, unsigned, signed, replay, forged, stale, tampered); `responderIdentity`; `requesterIdentity` for strangers; media addressed elsewhere dropped, `MEDIA_RELAY_REQUEST` never forwarded |
+
+---
+
+## Completed Changes (2026-10-08) — Round R3: Group Leave & Catch-up, Group Sender Identity, DM Outbox Limits (v0.6.9-alpha)
+
+This round continues the git-history regression register. It covers the group items R7a–R7c and the DM outbox item R8. While tracing those paths, three more defects turned up in the same code; they're fixed here too. Labels are used as in the entry below: a "Tested" label names a test class that exists and must pass with `./gradlew testGithubDebugUnitTest`. Device-verified 2026-10-08 (three nodes on two devices): group messages, reactions, invites, image/GIF/video media; members no longer listed as discoverable.
+
+**Protocol compatibility.** No packet layout changed. Leaves, `GROUP_SYNC` answers and queued group messages from older builds are handled as before. Receivers on older builds also accept an updated admin's newer `GROUP_SYNC` stamp.
+
+### R7a — Leaving a group never reached anyone (regression from `7de5d96`)
+
+* **Cause.** `leaveGroupChat` signed an 11-field `encodeForSigning`, with `""` for every absent field. Receivers verify only the 13-field `canonicalGroupUpdatePayload`, where absent fields are encoded `ABSENT`. So every member and the admin rejected the leave ("signature matches no current member"), and the leaver stayed in everyone else's copy of the group.
+* **Fix.** `NoSlopRepository.groupLeavePayload` builds and signs the leave in exactly the receiver's form.
+* **Test fix.** `GroupMessageSecurityTest.groupLeave_canonicalSigning_verified` signed and verified the same 11-field string, so it passed while leaves failed on every device. It now verifies the shipped leave against the receiver's form.
+* Tested (unit: `GroupLifecycleRestoreTest`, `GroupMessageSecurityTest`).
+
+### Group sender identity (found while tracing R7a)
+
+* **Cause.** Several group paths chose the sending identity by a rule of their own, so a member could act under a key that isn't in the group. This hit a member who was invited under the main key into an open group and also had a burnable identity (any discoverable user). It affected:
+  * non-admin `updateGroupChat` (signature, `senderId`, and the invites it sends);
+  * `sendGroupMessage`;
+  * `reactToGroupChat`.
+  
+  Receivers drop group messages from non-members and reject updates no member signed, so all of these were lost.
+* **Fix.** All of them now use `NoSlopRepository.groupMemberIdentity`, which picks the key actually listed in the group. "Friends only" group messages still use the main key when it's a member.
+* `requestGroupCatchup` parses the member list instead of a substring match (review D11), and no longer sends a `GROUP_QUERY` to our own burnable identity.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### R7b — A member who missed a member-initiated change could never catch up
+
+* **Cause.**
+  * Only admin updates advance a group's `revision`. Leaves and member invites don't.
+  * `GROUP_SYNC` answers were stamped with the state revision.
+  * Receivers drop a sync whose stamp isn't newer than their stored revision.
+  
+  So the admin's answer to a `GROUP_QUERY` was ignored by every member already at that revision. (The freshness gates came in with S04/U05, `ab3333b`/`5ac03bf`; before them, any validly signed sync was applied.)
+* **Fix.**
+  * The admin stamps its answer with the signing time (`groupSyncTimestamp`).
+  * Receivers keep the last applied admin sync time in `group_admin_sync_ts_<groupId>`, so a replayed snapshot can't roll state back.
+  * Applying an admin sync sets the stored revision to the state's own revision, not the signing time, so a leave still in flight is accepted afterwards.
+  * A member's answer keeps the old stamp, so a stale member copy can't pass the gate.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### R7c — Group members hit the stranger-DM limit (regression from `34770ba`/`5b6bf1d`)
+
+* **Cause.** The untrusted directed-DM limiter (10/min per sender, 30/min overall) also applied to group messages from members who aren't contacts. Since D01, that includes the group admin. Group messages carry no ACK, so everything over 10/min was lost silently.
+* **Fix.** `GossipService.isFromMemberOfStoredGroup` exempts a directed group `MESSAGE` whose sender is a member or the admin of that stored group. A non-member naming the group is still limited.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### Queued group messages went out under the wrong sender (found while tracing R8)
+
+* **Cause.** Group legs queued for members without a known onion were flushed as the main identity and as `v = 1`. The v2 AAD binds the sender key, so every queued message from a burnable-identity sender failed to decrypt.
+* **Fix.** `MeshSocialRepository.pendingGroupPacket` uses the local echo's `senderPub`, and `v = 2`.
+* Tested (unit: `GroupLifecycleRestoreTest`).
+
+### R8 — DM outbox: limits, forced flushes, group legs (from `3c766cb`)
+
+* **Limits.** Each entry's queue time and number of unacknowledged deliveries are persisted (`pending_dm_outbox_meta`).
+  * `expireOutbox` gives up after **7 days**, or after **50 deliveries with no `DM_ACK`**. Failed connection attempts don't count toward the 50.
+  * A DM it gives up on is marked `FAILED`. The chat shows a red error icon; tapping it (`retryFailedMessage` → `retryFailedDirectMessage`) re-sends the identical packet.
+  * New string: "Not delivered. Tap to retry".
+* **Group legs.** Only 1:1 DMs wait for an ACK (`awaitsDmAck`). Group fan-out legs that went through the outbox had waited for an ACK that never comes, and were re-sent forever.
+* **Forced flushes.** Event-triggered flushes skip the backoff (15 s minimum spacing): the peer's `ANNOUNCE_PEER`, opening the chat, Tor becoming ready. Before, a DM that had backed off to 5 min waited it out even with the peer online.
+* **Ordered saves.** Outbox saves take their snapshot under a lock, so saves can't land out of order.
+* Tested (unit: `OutboxExpiryTest`).
+
+### Follow-up from device testing (2026-10-08)
+
+* **Group images/GIFs never downloaded.** In an open group, members (and the admin) are listed under their burnable key. Media requests always went out under the main key, so the owner's media check refused them; a device log showed "Rejected unauthorized MEDIA_REQUEST" on every retry.
+  * `MediaManager.requesterIdentity` now picks the identity the media's owner authorises:
+    * group media → our member key in that group;
+    * DM media → the identity bound to that contact;
+    * anything else → as before.
+  * It's used for `MEDIA_REQUEST` (including its `origin_onion`) and for `MEDIA_TRANSFER_ACK`.
+  * Tested (unit: `GroupLifecycleRestoreTest`).
+* **Group GIF/video still failing for one member (second device test).** Two more causes:
+  * The group chat screen stamped every attachment with the **burnable** onion and owner whenever a burnable identity existed, even when the message was sent under the main member key. Downloads were then pointed at the burnable onion, which one member could never reach ("Connect timed out" on every attempt), while the sender's main onion worked.
+    * Attachments now use the same identity as the message: `NoSlopRepository.groupSenderIdentity` / `groupSenderKeys`, which `sendGroupMessage` also uses.
+  * Message media is downloaded from the authenticated sender's known onion first, with `originNode` only as a fallback. Both of a node's onions reach the same app, so this also repairs attachments sent before this fix.
+  * Downloading group media no longer sends an `ANNOUNCE_DISCOVERABLE` (as the burnable identity) to the sender. Group members already know each other from the signed group directory.
+  * Tested (unit: `GroupLifecycleRestoreTest`).
+* **Create Group dialog.** The member list now starts with the creator, ticked, greyed out and labelled "You (admin)". This makes it clear that the "NoSlop · Creator" row below is the official NoSlop creator node, not the group's own creator.
+* **Invite not received by one node.** In this test that node (both apps on one emulator) couldn't be reached at all. The queued `GROUP_INVITE` was retried from the outbox every minute and is delivered once the node is reachable. No code change was needed.
+
+### Reviewed, not changed
+
+* **R7d.** After an invite is accepted, the group is stored and catch-up accepts syncs from any member. Only a member-signed sync arriving *before* acceptance is refused, which is harmless.
+* **R7e** (deliberate: only the admin can restore a group to a reinstalled member).
+* **R7f.** The `GROUP_UPDATE` freshness gate stays before the signer check. Accepting older member updates would let a replayed leave remove a re-added member.
+
+### Tests added or changed in this round
+
+| Test class | Covers |
+|---|---|
+| `GroupLifecycleRestoreTest` | R7a leave (admin and member receivers; the old form is rejected), member identity, R7b sync heal, replay guard and in-flight leave, R7c limiter, queued group sender |
+| `OutboxExpiryTest` | 7-day expiry → FAILED, ACKed DMs untouched, 50-delivery cap, group legs exempt, ACK cleanup, retry re-queues the same bytes, metadata round trip |
+| `GroupMessageSecurityTest` (changed) | Leave test now checks the shipped leave against the receiver's form |
+
+---
+
+## Completed Changes (2026-10-07 – 2026-10-08) — Review Round 2 Remediation (D01/D06/D07), Handshake Reply Path & Git-History Regression Restoration (v0.6.9-alpha)
+
+This round has two parts. The first fixes the round-2 review findings D01, D06 and D07, plus groundwork for D02. The second is a review of the last 100 commits, done because several features that used to work had stopped working on devices. It found and fixed the regressions behind the failures seen in two-device testing.
+
+**How the status labels are used.** A "Tested" label names a test class that exists under `app/src/test` and passed with `./gradlew testGithubDebugUnitTest`. Every test runs the real handlers or repositories against an in-memory Room database or a real loopback socket; none of the code under test is mocked. "Verified on device" means the developer confirmed it in two-device testing on this build.
+
+**Verified on device (2026-10-08).** These all work between a trusted peer and a burnable-identity peer:
+- DMs, including recorded video and GIFs
+- Mesh posts, including video posts
+- Reactions
+- Comments, including GIF comments
+- The keyboard in DMs and comments
+- DM video that had been stuck before the fix, which then completed
+
+Under heavy load, GIFs can be slow to arrive, but they do arrive.
+
+> **Note on version naming.** Code comments written in this round call the release "v0.7.0". `versionName` is still `0.6.9-alpha` (versionCode 69).
+
+### Breaking change: the handshake is v2-only (D07)
+
+* **Both sides must update.**
+  * `HandshakePacketHandler` now accepts only `CONNECTION_REQUEST` and `USER_HANDSHAKE` packets carrying a `canonicalHandshakePayloadV2` signature. That signature binds the encryption key, the target identity and the nonce. The packet must also have a non-blank `request_nonce`.
+  * A request signed with only the legacy encoding is rejected and logged as `legacy (pre-v2) handshake — peer must update NoSlop`.
+  * A handshake signed with only the legacy encoding never promotes the peer, even when the nonce matches.
+* **The older-version case is shown to the user.**
+  * When a key is rejected for speaking the legacy protocol, that key is recorded, and the user gets at most one notification a day: "Older NoSlop Version".
+  * `NoSlopRepository.isPeerOnLegacyProtocol(pub)` exposes this state.
+* **Sent requests are visible.**
+  * The DMs tab has a new **SENT REQUESTS** list (`OutgoingRequestRow`) showing every `OUTGOING_PENDING` row. Each row has **Re-send** and **Cancel Request** actions.
+  * When the peer is known to be on the legacy protocol, the row says so.
+  * `MeshSocialRepository.cancelOutgoingRequest` removes the pending row.
+  * Seven new strings were added to `content_en.json`.
+* **Not done.** D07 also asked the migration to map un-trusted rows from the user's own requests to `OUTGOING_PENDING`. That wasn't done; the user re-sends from the Sent Requests list instead.
+* Tested (unit: `PeerTrustInvariantTest`: `d07_*`).
+
+### Room schema 18 → 19 (`MIGRATION_18_19`)
+
+* **Changes:**
+  * Adds `peers.verifiedFingerprint`.
+  * Creates the `media_owner` table (PK `mediaId, ownerType, ownerId`, index on `mediaId`) and back-fills it from every post, comment and message attachment.
+  * Repairs trust:
+    * Contacts of the burnable identity are forced to `isTemporary = 1`.
+    * `isTrusted` is re-derived as `relationship = 'ACCEPTED'` for every row.
+    * This demotes every peer that the old startup "heal" promoted without consent, and every group admin that `acceptGroupInvite` had made a friend.
+* **Validated against the real schema.** The test builds a real v18 database from `app/schemas/.../18.json`, migrates it, and lets Room validate it against the v19 entities.
+* Tested (unit: `Migration18To19Test`).
+* No device ran the interim builds 087–089, so the late change to `MIGRATION_17_18` (register item M1) doesn't affect any installed database.
+
+### D01 — Trust has a single source of truth
+
+* **The heal is gone.** The startup "heal" block that promoted burnable-contact peers to trusted on every start was removed. Startup maintenance now lives in `NoSlopRepository.runStartupPeerMaintenance()`, so the regression test can run exactly that code.
+* **`PeerRelationship` constants** cover `NONE`, `OUTGOING_PENDING`, `INCOMING_PENDING`, `ACCEPTED` and `BLOCKED`. `ACCEPTED` is the only state that grants trust.
+* **`PeerDao.insertPeer`** is now the only write path for peers. It stores `Peer.withNormalizedTrust()`, so `isTrusted == (relationship == ACCEPTED)` holds on every write. The raw REPLACE is `insertPeerRow`.
+* **`Peer.isFriend`** (`ACCEPTED && !isTemporary`) is the single "may receive friends-only content" rule. These all use it: `SyncPacketHandler` (sync request, inventory sync and comment/reaction sender checks) and the `GossipService` friends-only inbound and outbound filters.
+* **Contact identity is bound only at accept time.**
+  * `handleConnectionRequest` records which identity the peer addressed in `requested_identity_<pub>`.
+  * `contact_identity_<pub>` is written only in `acceptConnectionRequest`.
+* **Specific decisions:**
+  * A group admin is a group member (`NONE`), not a friend.
+  * The Hub's Admin AI and Hub-restored contacts are `ACCEPTED` on purpose, because the Hub is the user's own node.
+  * `togglePeerTrust` was removed.
+* **No automatic consent.** Neither a keyless DM sender nor a keyless group member triggers an automatic `CONNECTION_REQUEST` any more. If it did, a crossing request would fake the user's consent.
+* Tested (unit: `PeerTrustInvariantTest`: `d01_*`).
+
+### D06 — Peer rows are merged, never rebuilt
+
+* `sendConnectionRequest` merges into the existing row:
+  * An `ACCEPTED` friend is never downgraded, and its fields are kept.
+  * A `BLOCKED` peer is never contacted.
+  * An existing `INCOMING_PENDING` request is simply accepted.
+* `BLOCKED` is left only by explicit user action. A request from a blocked peer is ignored.
+* **Crossing requests count as mutual consent.** If our row is `OUTGOING_PENDING` and a valid v2 request addressed to us arrives, the row is staged as `INCOMING_PENDING` with *their* nonce and promoted through `acceptConnectionRequest`.
+* A request from an accepted friend keeps them `ACCEPTED`. A changed encryption key is held in `pendingEncKey`.
+* `rejectConnectionRequest` acts only on `INCOMING_PENDING` rows, so a stale notification can never delete a friend. `CONNECTION_REJECTED` only cancels our own pending request.
+* Presence updates touch only the presence columns (`PeerDao.updatePresence`, `markOffline`, `setDiscoverableFlag`). They never re-insert a whole row.
+* Tested (unit: `PeerTrustInvariantTest`: `d06_*`).
+
+### D02 (groundwork) — The `media_owner` index
+
+* **DAO-maintained.** The `PostDao`, `CommentDao` and `MessageDao` insert, edit, orphan and delete paths keep `media_owner` up to date themselves. No caller can forget to register an attachment.
+* **Visibility rules:**
+  * Comment media inherits the visibility of its parent post.
+  * Unknown privacy values are stored as `friends` (deny by default).
+* **Write-once secrets.** `MediaOwnerDao.attachSecrets` adds the `accessKey` and `sha256` to a row and never overwrites an existing value.
+* **Still open** (closed in Round B, see top entry). The index is used by the R2 allow path (below), but the ACL isn't deny-by-default yet. The trailing "any trusted peer" fallback is still there, and no `accessKey` is generated yet.
+* Tested (unit: `MediaOwnerIndexTest`).
+
+### Round A2 — Handshake answers come back on the requester's own connection
+
+**The problem.** After a fresh install or an onion change, a newly published onion descriptor takes minutes to propagate. During that window the requester can reach the accepter, but not the other way round. So the accepter's `USER_HANDSHAKE` was lost, and the pairing never completed.
+
+* **Framing:**
+  * New `mesh/MeshFraming.kt` holds `ReplyChannel = suspend (NetworkPacket) -> Boolean`, `FrameReader` (the newline framing rules, moved out of the listener unchanged) and `FrameTooLargeException`.
+  * Tested (unit: `FrameReaderTest`).
+* **Listener:**
+  * `MeshTransport.handleIncomingConnection` gives each inbound connection a write-serialised reply channel. It passes that channel through `NoSlopRepository.handleIncomingPacket` and `MeshPacketHandler` to the handlers.
+  * Only the `CONNECTION_REQUEST` handler ever uses it.
+* **Requester:**
+  * When `MeshTransport.exchangeOverSocket` sends a `CONNECTION_REQUEST`, it keeps the socket open for `HANDSHAKE_REPLY_WINDOW_MS` (6 s).
+  * It accepts one `USER_HANDSHAKE` or `CONNECTION_REJECTED` reply, and only from the identity it contacted.
+* **Accepter rules (`HandshakePacketHandler`):**
+  * The reply channel is used only after the request passed the signature, target and freshness checks.
+  * It is used at most once per request timestamp (`claimReplySlot`), so a replayed or forged request never collects our handshake.
+* **Probing (`MeshSocialRepository.startOutgoingRequestPoll`):**
+  * While a request is `OUTGOING_PENDING`, the requester re-sends it every 15 s for up to 10 min. Each probe uses `MeshTransport.probeConnectionRequest`, which has its own 2-slot pool and a 30 s connect timeout.
+  * Each probe keeps the **same nonce** but has a fresh timestamp and a fresh packet id.
+  * Probing stops when the row leaves `OUTGOING_PENDING`, when its nonce changes, or when the user cancels.
+  * Probes never touch the Hub, the outbox, gossip or the peer cooldown.
+* **Declined requests:**
+  * `rejectConnectionRequest` resolves the addressed identity *before* it removes `requested_identity_*`, so a burnable-identity request is declined by the burnable identity.
+  * It stores the declined nonce in `declined_request_<pub>`.
+  * Later probes with that nonce are answered with `CONNECTION_REJECTED` (`answerDeclinedRequest`) instead of re-asking the user. A new request (new nonce, from **Re-send**) is asked normally.
+* `acceptConnectionRequest(peer, replyVia)` answers on the reply channel when there is one, and over a normal send otherwise.
+* Tested (unit: `HandshakeReplyPathTest`: real `MeshTransport` listener on loopback, real repository stack, real Ed25519 keys on the other end of a real TCP socket, no Tor).
+
+### Camera QR scanner
+
+* **Cause.** CameraX delivers the Y plane row-padded (`rowStride > width`) and sometimes with `pixelStride > 1`. Handing that buffer straight to ZXing sheared the image, so the scanner never decoded a code.
+* **Fix.**
+  * `QRScanScreen.packLuminancePlane` repacks the plane into a tight buffer.
+  * The camera is bound once rather than on every recomposition.
+* Tested (unit: `QrFrameDecodeTest`: padded rows, pixel stride 2, tightly packed, inverted, no code).
+
+### Keyboard did not open in DMs or comments
+
+* **Cause.** Commit `6f6dffe` changed the base class of the chat/comment input to `AppCompatEditText`. Under the app's platform theme (`android:Theme.DeviceDefault.NoActionBar`), that lost the EditText style: the field wasn't focusable in touch mode, so a tap never focused it.
+* **Fix.** `ui/components/AndroidGifTextField.kt` was rewritten around `internal class GifEditText : EditText`, which:
+  * sets `focusable`, `focusableInTouchMode` and `clickable` explicitly;
+  * refreshes its callbacks (`onValueChange`, `onMediaAttached`, `onSend`, `currentValue`) in `update` so they're never stale;
+  * uses `applySendOnEnter` to switch between send-on-Enter and multi-line.
+* Keyboard GIF/image insertion (`image/gif`, `image/png`, `image/jpeg`, `video/mp4`) is unchanged.
+* Tested (unit: `GifEditTextTest`). Verified on device.
+
+### Recorded video stuck at 9%
+
+* **Cause.**
+  * The downloader grows its chunk window by 32 KB after every chunk and allowed it to reach 1 MB.
+  * Senders reject any request above `MAX_CHUNK_BYTES` (256 KB, C03).
+  * So from the third request (288 KB) onward, every request was rejected and re-queued at the same size. A 5.3 MB video stopped at 2 of 21 chunks.
+* **Fix (`MediaManager`):**
+  * `MAX_CHUNK_SIZE = MAX_CHUNK_BYTES` (256 KB).
+  * `grownChunkSize` caps the window.
+  * `splitToServable` splits an oversized pending range into servable pieces with no gap.
+  * `chunkRequestRejection` is the single sender-side bounds check, shared with the test.
+* The outbound media limit per requester rose from 5 MB to **16 MB per 60 s** (about 270 KB/s). The old limit was below normal Tor throughput, so a single 5 MB+ video tripped it mid-transfer.
+* Tested (unit: `MediaChunkWindowTest`). Verified on device.
+
+### Git-history regression review (commits 001–096)
+
+* Every commit in the last 100 was diffed and checked against the current tree. Findings are recorded as a register:
+  * **Tier 1** (mesh delivery): R1–R8
+  * **Tier 2** (other runtime): V1–V4, F1–F4, H1–H2, B1–B2, D1–D2, L1, U1, S1, M1, C1
+  * **New security finding**: S2
+* Items marked ✔ were re-verified against the work tree. Fixed items are listed below; open items are under **Still open** at the end of this entry.
+* Already resolved, no action needed: D1 (`REQUEST_INSTALL_PACKAGES` is present in the `github` flavour manifest) and M1 (see the schema notes above).
+
+### R1 — Mesh delivery restored
+
+* **Peer cooldown (`GossipService`):**
+  * Failures accumulate only within `PEER_FAILURE_WINDOW_MS` (5 min). Since `679a5a1` and `fd958b9` the window had been 2 h, so one failed send after each Tor restart left peers in cooldown for hours.
+  * The cooldown is 30 s → 60 s → 120 s max (`cooldownFor`).
+  * An authenticated inbound packet from a peer clears its cooldown again, through `recordSendSuccess` on the sender's stored onion. That behaviour came from F18 and was removed in `4579860`.
+  * The test clock is injectable (`GossipService.clock`).
+* **Transport policy (`MeshTransport` companion):**
+  * Only background presence (`ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE`, `USER_EXIT`) is skipped for a peer in cooldown (`respectsPeerCooldown`). Since `439c83b` and `34770ba`, posts, comments, reactions, votes, edits, deletes and sync to such a peer had been silently dropped.
+  * `CONNECTION_REQUEST` and `USER_HANDSHAKE` use the priority pool again (`usesPrioritySlot`, `dmSemaphore`, blocking acquire). They had fallen into the 4-permit bulk pool and were dropped after 4 s.
+  * `TYPING`, `READ_RECEIPT` and `DM_ACK` failures no longer count toward a peer's cooldown (`countsAsPeerFailure`).
+* **DM ACKs.** `DmPacketHandler` sends `DM_ACK` fire-and-forget through `AppScopes.io`. Sending inline had held the inbound handler and a DM slot for the whole Tor send.
+* **Outbox.** `startOutboxWorker` no longer pauses while a video player is mounted. `VideoPlayer` now clears `PreloadManager.isVideoActive` when the resolved source isn't a direct stream, or the slide isn't visible. Before, embeds and unavailable sources left the flag stuck on and stalled DMs, handshakes and group messages indefinitely.
+* **Tor (`TorService`):**
+  * `forgetRegisteredHiddenServices` clears the hidden-service bookkeeping on `STATUS_OFF`, in `stopTor` and on daemon start. A restarted daemon then gets `ADD_ONION` again; before, the node's onion stayed unreachable until the app was killed.
+  * `startBlockedInBackground` makes `awaitReady` return `false` immediately when Android refused to start Tor from the background, so the work goes to the outbox instead of waiting out the full timeout.
+  * When the network returns while Tor is parked in `PROXY_READY`, `confirmBootstrapThenPromote()` re-checks the bootstrap. A Tor started offline used to stay `PROXY_READY` forever.
+* Tested (unit: `PeerCooldownRestoreTest`). Verified on device.
+
+### R2 — Media posts and comment media sync again; comment media is served
+
+* **Sync accepts v2 (C17) signatures.** `SyncPacketHandler.handleSyncResponse` now accepts the v2 signature, which covers the 8 canonical fields plus the media SHA-256, for both posts and comments. It used to accept only the 8-field post signature, so every media post or comment with a hash binding was rejected by sync.
+  * When only a legacy signature verifies, the unsigned `sha256` is removed before auto-download.
+* **Sync carries the digest.**
+  * `toPostPayload` and `toCommentSyncData` (now `suspend`) send `media_metadata.sha256`.
+  * `CommentSyncData` now carries `media_metadata`.
+* **Digest bookkeeping (`NoSlopRepository`):**
+  * `recordMediaDigest` stores a verified digest on every owner row of the media.
+  * `mediaDigestFor` returns the stored digest, or hashes the local file and caches the result.
+  * The live POST/COMMENT handlers and local post/comment creation record the digest.
+  * Comment auto-download metadata keeps `sha256` only when the comment was v2-signed.
+* **Re-issue keeps the binding.** `reissueLocalPostsWithCanonicalSignatures` keeps a valid v2 signature, and upgrades a legacy one to v2 when the digest is known. Before, every Tor start re-signed media posts as 8-field and stripped the hash binding.
+* **Comment media ACL.** `MediaManager.isAuthorizedByOwnerIndex` now runs first in `isMediaAuthorizedForSender`:
+  * public post or comment media → anyone;
+  * private → the author only;
+  * friends-only → direct friends (not temporary or burnable contacts) and the author;
+  * DM → the conversation partner;
+  * group → members and the admin.
+  
+  Comment media had had no allow path since `5f9a127`, so comment GIFs and images never loaded remotely. Anything not matched falls through to the existing checks.
+* Tested (unit: `MediaSyncAndAclRestoreTest`). Verified on device.
+
+### Tests added in this round
+
+| Test class | Covers |
+|---|---|
+| `PeerTrustInvariantTest` | D01, D06, D07 (16 tests) |
+| `MediaOwnerIndexTest` | D02 index maintenance |
+| `Migration18To19Test` | `MIGRATION_18_19` against the exported v18 schema |
+| `FrameReaderTest` | A2 framing |
+| `HandshakeReplyPathTest` | A2 reply path, probing, declined requests, replay/forgery |
+| `QrFrameDecodeTest` | QR luminance repacking |
+| `GifEditTextTest` | Keyboard focus, IME content types, send-on-Enter |
+| `MediaChunkWindowTest` | Chunk window vs. sender cap |
+| `PeerCooldownRestoreTest` | R1 cooldown window and transport policy |
+| `MediaSyncAndAclRestoreTest` | R2 v2 sync, digest, re-issue, comment media ACL |
+
+These existing tests were adjusted to the new APIs: `MeshSocialRepositoryTest`, `GossipServiceTest` and `FakeDaos`.
+
+### Status corrections (D10)
+
+* The 2026-10-06 entry below cites test classes that don't exist in the repository: `IdentityRepositoryTest`, `SyncPacketHandlerTest`, `CryptoServiceTest`, `JamendoApiClientTest` and `LoggerTest`. It also cites `OnboardingScreen`, which is a composable, not a test.
+* Those changelog lines are kept as the historical record. The verification matrix now shows what is actually tested.
+* Other claims in that entry that don't hold:
+  * No `secureDelete()` function exists (C06).
+  * `IdentityViewModel` was an unused copy; deleted in R6b (2026-10-11).
+  * `deriveSafetyFingerprint()` has no callers, so no screen shows a fingerprint yet (C11).
+  * The README sentences about fingerprints, the creator identity, exit affinity and translation coverage were corrected.
+
+### Still open (carried forward)
+
+* **Review round 2:**
+  * **D02** — deny-by-default ACL; issue and require `accessKey`.
+  * **D03** — relay listeners get chunks without an ACL check; the recovery reply is broken.
+  * **D04** — `IdentityRouter`; separate creator profile; capture test.
+  * **D05** — v1 DM latch; `DM_ACK` domain separation; outbox expiry.
+  * **D08** — the live `POST` and `EDIT_POST` path still passes an unsigned `sha256` to auto-download when only the legacy signature verified. Sync is fixed by R2.
+  * **D09** — typed `ImportResult`; check before commit.
+  * **D10** — fingerprint UI and `pendingEncKey` banner; status-file test-existence check. (`IdentityViewModel` deleted in R6b.)
+  * **D11** — smaller items.
+  * **D12** — items still open from round 1.
+* **Regression register:**
+  * **R4d** — handshake send budget. The A2 reply path covers the main symptom.
+  * **R6b** — media requests from non-contacts and public media requests; hub re-stamping.
+  * **R6c** — over-cap or unknown media requests are dropped silently.
+  * **R7a** — `leaveGroupChat` signs 11 fields, but receivers require the 13-field `canonicalGroupUpdatePayload`, so every leave or non-admin delete is rejected.
+  * **R7b–R7f** — `GROUP_SYNC` revision stamping; group rate limit for non-friend members; invitee bootstrap; reinstall recovery; freshness check before signer check.
+  * **R8** — DM outbox backoff throttles event-triggered flushes; no expiry.
+  * **Tier 2** — V1–V4, F1–F4, H1–H2, B1–B2, D2, L1, U1, S1, C1.
+* **S2 (security, new):**
+  * The `ANNOUNCE_PEER` signature covers only `authorId|timestamp`. `onion_address` is unsigned, and `handleAnnouncePeer` overwrites the stored onion with it.
+  * A replayed fresh announce could therefore redirect a friend's onion.
+* **Background Tor.** Tor dies in the background unless `NoSlopForegroundService` is running, which it is only when the background-mesh setting is on. Android then refuses the restart. This isn't a regression; R1 makes callers fail fast instead of waiting.
+
+---
+
+## Completed Changes (2026-10-06) — Trust Boundaries, Tor Leak Elimination, Multi-Store Rollback & Protocol Hardening (v0.6.9-alpha)
+
+* **Explicit Peer Relationship State Machine & Nonce Exchange (C01) — Tested (unit: `HandshakeSecurityTest`)**:
+  * Added Room migration 16→17 (`MIGRATION_16_17`) adding `relationship: String` (`NONE`, `OUTGOING_PENDING`, `INCOMING_PENDING`, `ACCEPTED`, `BLOCKED`) and `pendingNonce: String?`.
+  * `sendConnectionRequest` generates a cryptographic random 128-bit `requestNonce` and sets `relationship = OUTGOING_PENDING`.
+  * `handleConnectionRequest` sets `relationship = INCOMING_PENDING` (exempting creator nodes in auto-accept mode).
+  * `handleUserHandshake` promotes a peer to `isTrusted = true` / `ACCEPTED` strictly when `relationship == OUTGOING_PENDING` and the received `inReplyToNonce` matches the stored `pendingNonce`, eliminating unsolicited trust escalation.
+* **Handshake Encryption Key Binding & Destination Authentication (C02) — Tested (unit: `HandshakeSecurityTest`)**:
+  * Implemented `CryptoService.canonicalHandshakePayloadV2` binding `"noslop-hs-v2"`, `fromUserId`, `fromUsername`, `fromHomeNode`, `fromEncryptionPublicKey`, `targetUserId`, `nonce`, `timestamp`, avatar, and bio.
+  * Packets carrying a new encryption key are rejected if `targetUserId` does not match local node identity or signature verification fails. Key modifications on accepted peers are sequestered into `pendingEncKey`.
+* **Bounded MEDIA_REQUEST, Peer ACL & Coroutine Isolation (C03) — Tested (unit: `MediaManagerSecurityTest`)**:
+  * Bounded `chunkSize` and `byteLength` to `1..MAX_CHUNK_BYTES` (256 KB) and prohibited negative byte offsets/chunk indices, eliminating remote OOM / array allocation crashes.
+  * Strictly route `MEDIA_CHUNK` replies to the requester's stored onion address in `peerDao`, rejecting attacker-supplied `origin_onion` bounce targets.
+  * Enforced `isMediaAuthorizedForSender()` checking post privacy, DM membership, group participation, and constant-time `accessKey` comparison. Attached a long-lived `CoroutineExceptionHandler` to `MediaManager`, `GossipService`, and `MeshTransport`.
+* **Tor Leak Elimination: WebView Gating & Tracker-Free Barcode Scanning (C04, C12) — Tested (unit: `TorLeakArchitectureTest`)**:
+  * `ArticleWebViewDialog` in `MediaComponents.kt` blocks embedded WebView when "Route Clearnet via Tor" is active to prevent clearnet IP leaks, offering direct "Open in Tor Browser" and explicit exit confirmation. When Tor is disabled, WebViews default JavaScript to off with disabled geolocation and file access.
+  * Replaced Google ML Kit barcode scanning with pure `zxing.core` multi-format YUV image analysis in `QRScanScreen.kt`, eliminating closed-source Google DataTransport telemetry. Added `TorLeakArchitectureTest` scanning source files for ungated WebViews.
+* **Unauthenticated Invidious Gossip Elimination (C05) — Tested (unit: `GossipServiceTest`)**:
+  * Deleted `ANNOUNCE_INVIDIOUS_INSTANCE` packet type, handler, and firewall allowlist entry, eliminating SSRF and malicious stream resolver hijacking.
+* **Envelope Hop Capping & Group Membership Parsing (C09) — Tested (unit: `GossipServiceTest`)**:
+  * Clamped incoming and forwarded packet `hops` to `DEFAULT_MAX_HOPS` (6), preventing graph-wide packet looping. Replaced substring checks on `group.membersJson` with parsed JSON list evaluation.
+* **Synchronized Feed Sync Cancellation Deadlock Fix (W01) — Tested (unit: `FeedRepositoryTest`)**:
+  * Detached and cancelled `activeSyncDeferred` under `syncMutex` and awaited pass completion outside the mutex lock, resolving the cancellation deadlock.
+* **Injective Group Update Canonical Encoding & Field Absence Disambiguation (W02, W03) — Tested (unit: `GroupMessageSecurityTest`)**:
+  * Eliminated legacy 4-field `GROUP_UPDATE` fallback in `resolveUpdateSigner`, strictly requiring canonical 13-field signatures.
+  * Introduced `encodeOptString`, `encodeOptBool`, and `encodeOptBanned` into `canonicalGroupUpdatePayload`, encoding absent fields as `"ABSENT"`, cleared values as `"CLEAR"`, and populated values as `"SET:$val"`.
+* **Sender/Receiver Group Revision Alignment & Ban Clearing Propagation (W04) — Tested (unit: `GroupMessageSecurityTest`)**:
+  * Restricted group `revision` advancement in `NoSlopRepository.updateGroupChat` strictly to admin updates (`revision = if (isAdmin) timestamp else existing.revision`), preventing non-admin member clock skew from causing stale update rejections.
+  * Serialized empty ban list `[]` instead of `null` when an admin clears all bans, allowing ban removals to propagate.
+* **Monotonic Author-Scoped Tombstones (W06) — Tested (unit: `PostPacketHandlerTest`)**:
+  * Enforced `timestamp > existingTs` in `PostDao.deletePostSafely`, ensuring older delayed deletes cannot lower an author-scoped tombstone timestamp.
+* **Strict Content-Matching Signature Migration (W07) — Tested (unit: `PostPacketHandlerTest`)**:
+  * In `PostDao.insertPostSafely`, equal-timestamp arrivals require identical content, privacy, and URLs before calling `updateSignatureIfUnchanged`, rejecting conflicting state replacements.
+* **No Plaintext Secrets on External Storage & Streaming ZIP Import (C06) — Tested (unit: `BackupManagerTest`)**:
+  * Staged backup export and import exclusively in internal storage (`context.cacheDir/backup_ops` and `context.noBackupFilesDir/restore_stage`), completely eliminating unencrypted archives from shared `externalCacheDir`.
+  * Streamed `identity_backup.json` and `api_keys_backup.json` directly into ZIP streams.
+  * Claimed here: a `secureDelete()` overwriting temporary archives and decrypted group message files. (Corrected 2026-10-11: no such function was ever added. Removing the plaintext zip from disk is open as C06/D12.)
+* **API 24+ Compatible PBKDF2 Seed Derivation (C14) — Tested (unit: `MnemonicGeneratorTest`)**:
+  * Switched `MnemonicGenerator.deriveSeed()` to use Bouncy Castle's `PKCS5S2ParametersGenerator(SHA512Digest())` directly, eliminating platform JCA provider failures on Android 7.0–7.1 (API 24–25).
+* **Cross-Device Key Derivation Verification & Authoritative Derivation (C15) — Tested (unit: `BackupManagerTest`)**:
+  * In `IdentityRepository.loadIdentity()`, reconciled cached public keys against the authoritative key derived from `privEd` via `CryptoService.getPublicKeyFromPrivateKey()`.
+  * In `BackupManager.importData()` legacy cross-device restore, verified that mnemonic-derived public keys match `local_pub_ed25519` in the restored database, setting `identity_quarantined = true` and aborting if an identity v1 mismatch is detected.
+* **Hardware-Backed Fallback Storage Master Key (C16) — Implemented (untested; the test class cited here until 2026-10-11, IdentityRepositoryTest, never existed)**:
+  * Replaced `ANDROID_ID` salt obfuscation in `IdentityRepository` with a dedicated raw AndroidKeyStore AES-256-GCM master key (`"noslop_fallback_hardware_key"`).
+* **Synchronous API Key Commits & Rollback Atomicity (W05) — Tested (unit: `BackupManagerTest`)**:
+  * Switched `ApiKeyRepository.setKey` and `removeKey` to synchronous `commit()`.
+  * Added `commitSucceeded` tracking in `BackupManager.importData` and checked `commit()` outcomes on preference rollback, preserving recovery snapshots whenever rollback cannot be verified.
+* **Asynchronous Recovery State & runBlocking Elimination (W08) — Implemented (untested; OnboardingScreen, cited here until 2026-10-11, is a composable, not a test)**:
+  * Exposed `needsIdentityRecovery: StateFlow<Boolean>` asynchronously on `NoSlopViewModel`.
+  * Eliminated blocking `runBlocking` in Compose composition inside `OnboardingScreen.kt`.
+* **Creator Identity Linkage Elimination (C10) — superseded by D04, Tested (unit: `CreatorIdentityCaptureTest`); the SyncPacketHandlerTest cited here until 2026-10-11 never existed**:
+  * In `SyncPacketHandler.handleSyncRequest` and `handleInventorySyncRequest`, used `effectiveSenderId` for comment and reaction `SYNC_RESPONSE` batches, preventing personal identity public key leaks to creator followers.
+* **20-Character Visual Safety Fingerprint (C11) — Tested (unit: `SafetyFingerprintD10Test`, added in Round D10, 2026-10-11; the CryptoServiceTest cited here before never existed)**:
+  * Implemented `CryptoService.deriveSafetyFingerprint(edPub, encPub)` generating formatted Base32 fingerprints from `SHA3-256(edPub || encPub)`. (Round D10 changed the derivation — domain label, raw keys, `null` on failure — and put it in the UI.)
+* **Pure Bouncy Castle Engine & Dependency Pruning (C13, C20) — Implemented (untested; CryptoServiceTest and JamendoApiClientTest, cited here until 2026-10-11, never existed)**:
+  * Removed `com.goterl:lazysodium-android` and `net.java.dev.jna:jna` from `build.gradle.kts` and `CryptoService.kt`, standardizing on pure Bouncy Castle `Ed25519KeyPairGenerator`.
+  * Removed bundled third-party candidate IDs and rotation loops from `JamendoApiClient.kt`.
+* **Log Privacy & Opt-in DoH (C19, C21, C22) — Implemented (untested; LoggerTest, cited here until 2026-10-11, never existed)**:
+  * Sanitized release logs: reduced URLs to origin only (`scheme://host/…`), masked 11-char YouTube IDs, and auto-pruned logs older than 72 hours.
+  * Respected NXDOMAIN in `HttpClientProvider.cascadingDns` and disabled DoH fallback by default.
+  * Embedded click-to-load prompts for remote GIF URLs and retired cleartext `GROUP_MESSAGE` packet handling.
+* **DM v2 Directional AAD Encryption & Replay Prevention (C08) — Tested (unit: `CryptoServiceRobolectricTest`)**:
+  * Implemented `CryptoService.deriveDirectionalKeyV2` generating directional keys via HKDF-SHA256 (`noslop-dm-v2|senderEdPub->recipientEdPub`), eliminating reflection attacks.
+  * Bound sender, recipient, message ID, group ID, and timestamp in Additional Authenticated Data (`canonicalDmAadV2`).
+  * Added `v = 2` to `EncryptedPayload`, bounded replay tracking cache `seenV2Messages`, and migrated Room schema 17→18 (`MIGRATION_17_18`) adding `isLegacy` and `deliveryStatus`.
+* **Mesh Media Integrity Hash Binding & Verification (C17) — Tested (unit: `MediaManagerSecurityTest`)**:
+  * Added `sha256` digest to `MediaMetadata`, computed via `MediaManager.computeSha256()`.
+  * Bound media SHA-256 hash into canonical post and comment signing payloads (`encodeForSigning`).
+  * In `MediaManager.finishDownload()`, verified SHA-256 digest on download completion, deleting corrupt/tampered files and initiating mesh recovery on mismatch.
+* **DM Outbox Delivery ACK & State Machine (C18) — Tested (unit: `CryptoServiceRobolectricTest`, `WireProtocolTest`)**:
+  * Implemented AEAD-authenticated `DM_ACK` packet keyed with directional v2 DM key and authenticated AAD.
+  * Outgoing DMs persist in `pendingOutboxMessages` with exponential backoff retry until `DM_ACK` arrives.
+  * Real-time delivery status indicators in `ChatThreadScreen`: Sending (`Icons.Default.Schedule`) → Sent on socket write (`Icons.Default.Check`) → Delivered on ACK (`Icons.Default.DoneAll`).
+* **Dependency Hygiene & ProGuard Shrinking (C24) — Partly done, untested (corrected 2026-10-11; the label used to cite a Gradle task, not a test)**:
+  * Removed unreferenced Guardian Project artifacts `info.guardianproject:jtorctl` and `info.guardianproject.netcipher:netcipher` from `build.gradle.kts`.
+  * Removed obsolete Lazysodium and JNA keep rules from `proguard-rules.pro`.
+  * Narrowed the OkHttp ProGuard rules. (Corrected 2026-10-11: the Bouncy Castle keep-all rule `-keep class org.bouncycastle.** { *; }` was not changed.)
+
+* **Maintainability & ViewModel Extraction (C25) — Partly done; the IdentityViewModel part was removed in R6b together with the IdentityViewModelTest cited here until 2026-10-11**:
+  * Standardized JSON serialization across the entire application on process-wide shared `com.noslop.app.util.Json.gson`, avoiding repetitive reflection metadata allocations across 50+ classes.
+  * Introduced structured application coroutine scopes `com.noslop.app.util.AppScopes` (`io`, `default`, `main`) equipped with unified `CoroutineExceptionHandler` unhandled error logging.
+  * Extracted sovereign identity, account lifecycle, onboarding, Word Cloud mnemonic, backup export/import, and creator identity management from `NoSlopViewModel` into dedicated `IdentityViewModel`. (Corrected 2026-10-11: this was an unused copy, never wired to a screen; deleted in R6b.)
+* **Translation Parity & Documentation Synchronization (C23) — Tested (unit: `TranslationParityTest`)**:
+  * Added missing translation keys to `content_en.json` (100% string coverage across 780+ UI strings). Added automated `TranslationParityTest` scanning all code literals for missing translation dictionary keys.
+  * Implemented pre-install APK signing certificate verification in `UpdateManager.kt` (`PackageManager.getPackageArchiveInfo`), ensuring downloaded APKs match the installed application's signing key before launching the system package installer.
+  * Corrected documentation claims in `README.md` and consolidated the project status register into a unified audit verification matrix.
+
+## Completed Changes (2026-10-04) — Protocol Canonicalization, Atomic Post Transactions, Task Ownership & Safe Recovery (v0.6.9-alpha)
+
+* **Post & Edit Canonical Signature Alignment (`MeshSocialRepository.kt`, `Packets.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`, `MeshPacketVerifier.kt`)**:
+  * Unified post and edit signing to 8 canonical fields (`id, authorId, content, timestamp, authorAvatarB64, privacy, mediaId, clearnetUrl`), resolving R01 signature verification failures across historical inventory sync.
+  * Stored and updated `authorAvatarB64` in `PostDao.updatePostDetails` so avatars signed during post edits match the database entity upon sync serialization.
+  * Bounded legacy signature fallback strictly to public posts without attachments (`mediaId == null && mediaMetadata == null && clearnetUrl == null`), eliminating R05 downgrade and unauthenticated attachment injection vectors.
+* **Atomic Room Post Mutations (`Daos.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`)**:
+  * Introduced `@Transaction` operations in `PostDao` (`insertPostSafely`, `editPostSafely`, `deletePostSafely`), eliminating non-atomic check-then-insert race conditions between concurrent sync responses, deletions, and live broadcasts (R07).
+* **Canonical Group Updates, Invitations & Authority Enforcement (`NoSlopRepository.kt`, `HandshakePacketHandler.kt`, `MeshPacketVerifier.kt`)**:
+  * Synchronized wire fields with canonical signing representation for group updates and leaves, eliminating R02 rejection caused by omitted permission strings.
+  * Signed new-member invitations independently with `canonicalGroupInvitePayload`, resolving R03 where group update signatures were reused for group invites.
+  * Restricted legacy 4-field group signatures strictly to non-mutating updates, preventing unauthorized member or permission changes with captured admin signatures (R04).
+  * Bound group metadata, permissions, and authoritative membership updates in `handleGroupSync` strictly to verified admin signatures (`signerIsAdmin`), and required invite consent for unknown groups (R06).
+* **Synchronized Feed Task Lifecycle & WorkManager Outcome Reporting (`FeedRepository.kt`, `FeedSyncWorker.kt`, `NoSlopRepository.kt`)**:
+  * Coalesced setup, ramp-up, and background passes into a unified `activeSyncDeferred: Deferred<FeedSyncResult>` guarded by `syncMutex`, preventing workers from returning early before sync completes (R08).
+  * Propagated typed `FeedSyncResult` to `FeedSyncWorker`, returning `Result.retry()` on Tor unreadiness or setup failures.
+* **Safe Backup Validation, Staging Commit, Destination Secret Cleansing & Identity Recovery (`BackupManager.kt`, `IdentityRepository.kt`)**:
+  * Fixed group message restore SQL column omission (`isRead`) preventing SQLite constraint crashes on portable restore (S01).
+  * Enforced complete identity schema, cryptographic keypair consistency, and transactional DB replacement with `.bak` rollback on restore failures (S06).
+  * Always export `api_keys_backup.json` manifest so empty API key backups clear destination credentials (S10).
+  * Added quarantine state retention in `IdentityRepository` protecting identity continuity on storage faults (S11).
+* **Active Player Teardown on Route Change, MediaProxy Range Support & Deployer Path Hygiene (`VideoPlayer.kt`, `MediaProxyService.kt`, `GossipService.kt`, `SshDeployer.kt`)**:
+  * Tracked `lastTorRouting` in `VideoPlayer.kt` and tore down active players on route transitions rather than early-returning, eliminating direct clearnet streaming leaks when enabling Tor (R14).
+  * Stripped `Range:` prefixes before evaluating `bytes=`, added support for prefix, suffix, and standard byte ranges with HTTP 416 responses for unsatisfiable ranges (R15).
+  * Enforced atomic connection admission (`incrementAndGet() > MAX_ACTIVE_CONNECTIONS`) and 5-second total header deadlines with strict CRLF-CRLF termination in `MediaProxyService` (R16).
+  * Removed unauthenticated liveness resets in `GossipService.processIncoming` (R17).
+  * Used absolute directory paths in SSH deployment cleanup traps and set `chmod 600` on secret files before writing (R18).
+* **Android Lint Gate Compliance & Opt-in API Safety (`TorService.kt`, `ChatThreadScreen.kt`, `AndroidGifTextField.kt`, `PreloadManager.kt`, `QRScanScreen.kt`, `VideoCompressor.kt`, `lint.xml`)**:
+  * Resolved `UnspecifiedRegisterReceiverFlag` in `TorService.kt` using `ContextCompat.registerReceiver(..., RECEIVER_EXPORTED)` for Android 14+ broadcast compliance.
+  * Corrected indentation in `ChatThreadScreen.kt` resolving `SuspiciousIndentation`.
+  * Migrated custom view in `AndroidGifTextField.kt` to extend `AppCompatEditText` resolving `AppCompatCustomView`.
+  * Added explicit `@OptIn` annotations for Media3 `UnstableApi` in `PreloadManager.kt` and `VideoCompressor.kt`, and CameraX `ExperimentalGetImage` in `QRScanScreen.kt`.
+  * Configured project-level `app/lint.xml` and handled `Player.STATE_BUFFERING` in `PreloadManager.kt`'s state listener, passing `:app:lintGithubDebug` with zero errors.
+* **Audit Hardening Test Suite & Keystore Fallback (`MediaProxyServiceTest.kt`, `WireProtocolTest.kt`, `GroupMessageSecurityTest.kt`, `BackupManagerTest.kt`, `MediaManager.kt`, `GossipService.kt`)**:
+  * Implemented `MediaProxyServiceTest.kt` asserting HTTP 416 on out-of-bounds start, suffix ranges, open-ended ranges, and reversed ranges (S13).
+  * Added wire round-trip tests in `WireProtocolTest.kt` for `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupDeletePayload` (S02, S07).
+  * Added tamper-detection tests in `GroupMessageSecurityTest.kt` asserting that altered member lists, permissions, or admin onion keys fail cryptographic verification (S02, S04).
+  * Added real-database restore tests in `BackupManagerTest.kt` verifying `isRead` column preservation without SQLite NOT NULL failures (S01), schema validation aborting invalid identity backups (S06), and empty API key manifests clearing destination credentials (S10).
+  * Added Keystore-unavailable fallback preferences in `BackupManager.importData()` and test isolation reset hooks in `GossipService` and `MediaManager`.
+* **External Review Round 8 Remediation (V01–V09)**:
+  * **Verified X25519 DH Consistency Probes (V01)**: Implemented `CryptoService.verifyX25519Keypair(...)` conducting independent ephemeral third-party key agreements (`X25519(ephPriv, pub) == X25519(priv, ephPub)`), preventing mismatched encryption key pairs from being accepted. Validated tripcodes and onion addresses against derived Ed25519 public keys for main and burnable identities.
+  * **Whole-State Multi-Store Snapshot & Atomic Rollback (V02)**: Staged and validated complete identity objects before live mutation; closed Room DB prior to copying DB/WAL/SHM; tracked pre-existing target DB state so newly created databases are cleanly deleted on rollback; snapshotted existing media files to backup directories and tracked created files; ensured preferences and API keys use verified synchronous `commit()`; and preserved `.bak` recovery snapshots if rollback fails.
+  * **Injective Length-Prefixed Directory Encodings (V03)**: Replaced colon/semicolon joining with injective length-prefixed `encodeForSigning` encoding for `canonicalMemberDetailsString` and `canonicalMemberHandlesString`. Bound member directory maps to `canonicalGroupUpdatePayload` and `canonicalGroupSyncPayload`, and enforced `memberHandles.isNullOrEmpty()` in the 7-field legacy invite restriction.
+  * **Strict Canonical Ingress for EDIT_POST (V04)**: Eliminated legacy pipe signature fallback from `PostPacketHandler.handleEditPost` and `MeshPacketVerifier`, strictly enforcing canonical 8-field signatures on all edits.
+  * **Authoritative Admin Group Revision & Unbanning (V05)**: Restricted state `revision` advancement strictly to admin-signed packets; prevented ordinary member snapshots from unioning bans or overriding admin state; and stamped authoritative state revisions on `GROUP_QUERY` responses.
+  * **Author-Scoped Tombstone Isolation (V06)**: Stored out-of-order delete-before-create tombstones in `app_settings` scoped by `(authorId, postId)`. Hardened `insertPostSafely` so foreign authors can never overwrite a known post, active or orphaned, preventing post ID acquisition.
+  * **Feed Failure Counting & Synchronous Cancellation (V07)**: Fetch helpers rethrow `CancellationException` and return `Boolean`, accurately counting attempted vs succeeded sources, and made `cancelSync()` a suspending, synchronized function that cancels and joins `activeSyncDeferred`.
+  * **Atomic Post Signature Re-issuance (V08)**: Updated `reissueLocalPostsWithCanonicalSignatures()` to perform transactional compare-and-update (`updateSignatureIfUnchanged`) on exact read snapshots, skipping orphaned posts, and allowed signature-only upgrades in `insertPostSafely` on matching timestamps and content.
+  * **Quarantine Recovery Flow & Verified Marker Archival (V09)**: Exposed an explicit **Identity Recovery Required** banner on Step 1 of `OnboardingScreen`, providing "Restore from Word Cloud", "Restore from Backup Archive", and "Start Fresh" options. Gated quarantine marker archival on verified preference commits and reload probes.
+* **External Review Round 7 Remediation (U01–U12)**:
+  * **Authoritative Identity Restore & Usable Credentials (U01)**: Delegated identity restoration to `IdentityRepository.restoreAuthoritativeIdentity(...)` validating Ed25519 signing and X25519 encryption keypairs, storing credentials with AES-GCM fallback encryption if hardware Keystore is unavailable, committing synchronously, and verifying that keys load and sign before returning success.
+  * **Whole-State Multi-Store Snapshot & Atomic Rollback (U02)**: Staged and validated database (`PRAGMA quick_check`), keypair consistency, and group messages before live commit. Snapshotted database, identity preferences (`noslop_identity_secure.xml`, `noslop_identity_fallback.xml`), and API key preferences to `.bak` files. Atomic `performFullRollback()` restores all stores to their pre-restore state on any commit failure (including group message re-encryption or media copying).
+  * **Canonical Group Invite Directory Authentication (U03)**: Bound `memberDetails` and `memberHandles` deterministically in `canonicalGroupInvitePayload(...)`. Legacy 7-field invites are restricted strictly to admin self-signed payloads where all unsigned fields (description, avatar, admin onion, admin encryption key, member details) are empty.
+  * **Strict Canonical Signature Ingress & Author Re-issuance (U04)**: Enforced canonical 8-field signatures on incoming `POST`, `EDIT_POST`, and `SYNC_RESPONSE`, eliminating friends-to-public downgrade attacks. Added `reissueLocalPostsWithCanonicalSignatures()` to ensure local authored posts are canonically re-issued on upgrade.
+  * **Authoritative Group Removal & Dedicated State Revision (U05)**: Added `revision: Long` column to `GroupChat` (Room schema version 16, `MIGRATION_15_16`), keeping `createdAt` immutable. Processed authoritative admin removals before general membership gates so removed nodes delete local groups. Applied authoritative admin state for bans and nullable fields without unioning.
+  * **Complete Attachment Retention on Text Edits (U06)**: Emitted complete authenticated `MediaMetadata` descriptor for retained attachments on text-only edits in `MeshSocialRepository.editMeshPost`, and retained existing descriptors in `PostPacketHandler.handleEditPost` when `editPay.mediaId != null` and `mediaMetadata == null`.
+  * **Author-Scoped Tombstone Isolation (U07)**: Hardened `insertPostSafely` so orphaned tombstones only suppress subsequent posts by the SAME author who signed the deletion, preventing foreign signers from reserving another author's post ID.
+  * **Synchronized Feed Task Lifecycle & Generation Tokens (U08)**: Replaced racy volatile deferred captures with an immutable `generation` token passed to `executeSyncPass(generation)`. Coordinated launch and cancellation under `syncMutex` with `NonCancellable` cleanup and aggregated source failure detection.
+  * **Quarantine Recovery Lifecycle (U09)**: Gated onboarding on `needsIdentityRecovery()`, ensuring unreadable identities present recovery rather than entering a broken state. Added `resolveQuarantine()` archiving `.corrupt_` markers to `.resolved_` on successful recovery or reset.
+  * **Route Change Network Revocation (U10)**: Shut down previous Coil `ImageLoader` instances and cancelled active clearnet HTTP calls via `HttpClientProvider.rawClearnetClient.dispatcher.cancelAll()`.
+  * **MediaProxy Range Syntax & Blocking Deadline (U11)**: Strictly validated HTTP range syntax (requiring hyphens and at most 2 parts) and applied the exact remaining budget to `clientSocket.soTimeout` on every read byte.
+  * **Test Suite Expansion & SQL Alignment (U12)**: Aligned `FakePostDao.updatePostDetails` with Room SQL. Implemented comprehensive test suites in `BackupManagerTest`, `GroupMessageSecurityTest`, `PostPacketHandlerTest`, and `MediaProxyServiceTest` verifying U01–U11.
+
+## Completed Changes (2026-10-03) — Contact Identity Authenticity, Tor Cooldown Balancing, Sync Optimization & Security Hardening (v0.6.8-alpha)
+
+* **Tor Video Playback Optimization & 800MB Stream Ceiling (`YouTubeInternalClient.kt`, `VideoPlayer.kt`, `ClearnetTorMediaTest.kt`)**:
+  * Raised progressive format 18 (360p muxed) Tor size ceiling from 250MB to 800MB, unblocking full-length 30–60 minute videos and documentaries (e.g. 314MB streams) while continuing to reject 1.5GB+ multi-hour or 4K files.
+  * Raised `EXIT_BLOCKED_THRESHOLD` from 2 to 4 configs in `YouTubeInternalClient`, ensuring token-free fallback clients (`ANDROID_VR` format 18 exemption and `TVHTML5_SIMPLY_EMBEDDED_PLAYER`) are evaluated on the active Tor circuit before advancing the stream isolation nonce, eliminating 20–30s multi-circuit hopping delays.
+  * Halved mid-stream continuous buffering stall timeout in `VideoPlayer.kt` from 50s (25 samples) down to 24s (12 samples) on Tor, and prevented trickling dying circuits (< 1000ms buffer advance with 0 bytes) from resetting stall detection, allowing frozen streams to recover and resume in half the time.
+  * Updated unit test vectors in `ClearnetTorMediaTest.kt` asserting the 800MB format 18 ceiling and 4-client circuit failover threshold.
+* **Dedicated Untrusted DM Rate Limiting (`GossipService.kt`)**:
+  * Decoupled untrusted directed DMs into their own dedicated `dmRateLimits` tracking map, eliminating contention with lifecycle announcements (`announcementRateLimits`).
+  * Enforced a global rate limit of 30 unauthenticated DMs per 60s window across all senders to protect the node from attackers rotating spoofed sender IDs.
+* **Shared Privacy Predicate & Sync Query Caching (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**:
+  * Reused `SyncPacketHandler.canSharePost()` in `MeshSocialRepository.requestInventorySync()`, eliminating the last duplicate copy of the friends-only sync predicate.
+  * Hardened `postCache` in `SyncPacketHandler` using `containsKey` checks so missing posts cached as null are not repeatedly re-queried against Room SQLite.
+* **PostContext Pass-Through & Dead Code Pruning (`GossipService.kt`)**:
+  * Passed `postContext.isFriendsOnly` directly into `forwardPacket()` and eliminated redundant re-resolutions of post context in `processIncoming()`.
+  * Pruned unused private function `getTargetPostAuthor()`.
+* **Pre-Picker Backup Mnemonic Validation (`SettingsTab.kt`)**:
+  * Validated user-entered Word Cloud recovery words against active mnemonic before launching the system SAF `CreateDocument` file picker in both the primary backup dialog and advisory prompt, preventing aborted exports.
+* **Media Transfer Cooldown Bypass & Proxy Check Uniformity (`MeshTransport.kt`, `YouTubeInternalClient.kt`, `scripts/test_yt.sh`)**:
+  * Allowed `isMediaPacket` to bypass peer cooldown in `MeshTransport.sendPacket()` so active chunk downloads are not frozen for up to 3 minutes by transient circuit hiccups.
+  * Switched `YouTubeInternalClient` to use `ProxyAuth.isConfigured` and scrubbed legacy proxy secret from `scripts/test_yt.sh`.
+* **Contact Identity Authenticity & DM Firewall Hardening (`DmPacketHandler.kt`, `GossipService.kt`)**:
+  * Relocated `contact_identity_${packet.senderId} = "burnable"` insertion in `DmPacketHandler.handleDirectMessage()` strictly after ChaCha20-Poly1305 AEAD decryption verification, preventing spoofed messages to creator IDs from corrupting legitimate friends' contact identities.
+  * Added dedicated rate-limiting (10 packets per 60s per sender) in `GossipService.processIncoming()` for unauthenticated directed `MESSAGE` packets addressed to local node IDs.
+  * Rate-limited automated connection requests in `DmPacketHandler` (at most once every 60s per sender) and prevented requests to peers with blank onion addresses.
+  * Removed unauthenticated calls to `recordSendSuccess()` and `updatePeerTypingState()` from the message deduplication path.
+* **Balanced Peer Failure Tracking & Tor Circuit Backoff (`MeshTransport.kt`, `GossipService.kt`)**:
+  * Re-enabled failure tracking across all outbound sends in `MeshTransport.sendPacket()` (excluding transient interactive signals `TYPING` and `READ_RECEIPT`).
+  * DMs (`isDmHighPriority`) and Handshakes (`isHandshake`) strictly bypass peer cooldown, ensuring active user communications and handshakes always attempt delivery.
+  * General broadcasts, forwards, sync requests, and background presence respect peer cooldown (30s to 3m backoff) in both `MeshTransport` and `GossipService.broadcast()`, stopping Tor socket storms against unreachable peers while preserving user traffic.
+* **Unified PostContext Resolution & Friends-Only Heuristic Elimination (`GossipService.kt`)**:
+  * Extracted `resolvePostContext(packet): PostContext` to compute privacy (`isFriendsOnly`) and `targetPostAuthor` in a single unified pass, eliminating repeated redundant Room queries per packet across firewall, forwarding, and broadcast paths.
+  * Removed the brittle `hops == 1` fallback heuristic that misclassified transit engagement packets as friends-only.
+  * Switched `GossipService.handleRelayRequest()` to query `MediaManager.getLocalFile(mediaId)` across all media directories.
+* **Sync Handler N+1 Query Elimination & Post Caching (`SyncPacketHandler.kt`)**:
+  * Extracted `canSharePost()` helper and introduced in-memory `postCache` maps across `handleSyncRequest()` and `handleInventorySyncRequest()`, resolving N+1 `postDao.getPostById()` lookups for comments and reactions.
+  * Removed duplicated declarations of `contactIdentity`.
+* **Media ID Path Traversal Hardening (`MediaManager.kt`)**:
+  * Pre-compiled `MEDIA_ID_REGEX = Regex("^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$")`, strictly rejecting leading dots and lone `.` / `..` IDs.
+  * Sanitized `exportToPublicDownloads` filenames using `File(fileName).name` and character allow-lists.
+* **Proxy Fallback Gating (`ProxyAuth.kt`, `RedditApiClient.kt`, `JamendoApiClient.kt`)**:
+  * Exposed `ProxyAuth.isConfigured` (`PROXY_SECRET.isNotBlank()`).
+  * Guarded Reddit and Jamendo API clients so requests skip the Cloudflare Worker proxy entirely and go direct when no proxy secret is configured.
+* **Tor Service Lifecycle & Concurrency Hardening (`TorService.kt`)**:
+  * Used `appContext = context.applicationContext` in `startTor()` to prevent Activity context leaks.
+  * Unregistered `networkCallback` on `stopTor()`.
+  * Guarded `NetworkCallback.onAvailable()` auto-recovery to prevent concurrent startup jobs.
+* **Backup Mnemonic Validation (`SettingsTab.kt`)**:
+  * Validated user-entered Word Cloud mnemonic against the active mnemonic in `SettingsTab` before initiating ZIP export.
+* **Test Suite Expansion (`GossipServiceTest.kt`, `SettingsRepositoryTest.kt`)**:
+  * Added unit test coverage in `GossipServiceTest.kt` verifying untrusted DM rate limiting, media ID validation, and robust coroutine polling for broadcast tests.
+  * Removed trailing comma syntax in `SettingsRepositoryTest.kt`.
+
+## Completed Changes (2026-10-01) — Friends-Only Broadcast Isolation & Severable Temporary Peer Exclusion (v0.6.7-alpha)
+
+* **Friends-Only Broadcast Isolation to Trusted Direct Peers (`GossipService.kt`, `MeshSocialRepository.kt`)**:
+  * Excluded temporary contacts (`peer.isTemporary`) and peers connected via severable temporary connections (`contact_identity_${peer.publicKeyB64} == "burnable"`) from receiving Friends Only mesh broadcasts (`privacy == "friends"` or `hops == 1`). Friends Only content is now strictly broadcast to authentic trusted direct personal peers (`peer.isTrusted && !peer.isTemporary && contactSetting != "burnable"`).
+  * Ensured post authors always receive comments and reactions on their own friends-only posts regardless of creator status (`targetPostAuthor` resolution in `GossipService.broadcast` and `processIncoming`).
+  * Outbound Friends Only broadcasts on Creator nodes now strictly use the node's primary personal identity (`getLocalIdentity()`) instead of the severable burnable creator identity, guaranteeing that personal friends recognize the author and that follower contacts are not leaked private broadcasts.
+  * In `GossipService.processIncoming()`, added firewall gating that drops any inbound Friends Only broadcast arriving from non-direct peers (temporary contacts or burnable connections) unless they are the authentic post author.
+  * Enforced that Friends Only packets are never forwarded across the mesh (`forwardPacket` drop and `shouldForward = false`).
+* **Friends-Only Historical & Inventory Sync Protection (`SyncPacketHandler.kt`, `MeshSocialRepository.kt`)**:
+  * In `SyncPacketHandler.handleSyncRequest()` and `handleInventorySyncRequest()`, gated candidate posts, comments, and reactions: sync requests from temporary contacts or severable burnable connections strictly filter out `privacy == "friends"` posts and their engagement data. For direct trusted friends, comments and reactions on friends-only posts are bi-directionally synchronized between the author and the recipient (`post.authorPublicKeyB64 == myPub || post.authorPublicKeyB64 == packet.senderId`).
+  * In `SyncPacketHandler.handleSyncResponse()`, incoming Friends Only posts from non-direct peers are dropped unless sent by the post's author.
+  * In `MeshSocialRepository.requestInventorySync()`, outgoing inventory hash lists filter out Friends Only posts when synchronizing with non-direct peers, preventing the leaking of private post IDs or hashes to temporary contacts and creator nodes.
+* **Test Suite Expansion (`GossipServiceTest.kt`)**:
+  * Added unit test coverage in `GossipServiceTest.kt` asserting that `GossipService.broadcast()` excludes temporary contacts and creator nodes connected via severable connections when sending Friends Only broadcasts, and verifying that `processIncoming()` blocks incoming Friends Only broadcasts from temporary or burnable peers.
+
+## Completed Changes (2026-09-30) — Tor Bootstrap SOCKS Gating, Mesh Firewall DM Whitelisting & Network Auto-Recovery (v0.6.6-alpha)
+
+* **Tor Circuit Bootstrap SOCKS Gating & Deadlock Prevention (`MeshTransport.kt`, `TorService.kt`)**:
+  * Gated outbound `.onion` SOCKS connections in `MeshTransport.kt` on `TorService.torState == READY`. High-priority user packets (`isHandshake`, `isDmHighPriority`) wait up to 60s for circuits to complete bootstrap (`awaitReady(60_000L)`), while non-essential background packets (`ANNOUNCE_PEER`, sync) are safely dropped/deferred instead of bombarding Tor's SOCKS daemon at 0%–40% bootstrap. This eliminated the Tor event loop freeze at 40% (`Loading authority key certs`).
+  * Removed duplicate bootstrap polling in `TorService.kt`: ensured `confirmBootstrapThenPromote()` does not spawn a second concurrent `waitForBootstrap(120)` loop when `bootstrapJob` is already running, eliminating control port socket contention.
+  * Raised handshake connect timeout to 35s in `MeshTransport.kt` to accommodate Tor v3 descriptor and rendezvous circuit establishment over mobile networks.
+* **Network Connectivity Restoration & Auto-Recovery (`TorService.kt`)**:
+  * Registered a `ConnectivityManager.NetworkCallback` in `TorService.kt` that detects `onAvailable()`. When the device reconnects to Wi-Fi or cellular data after a drop, it automatically starts Tor if in `FAILED` or `IDLE` state, eliminating multi-minute Tor disconnection freezes.
+* **Mesh Firewall Directed Message & Presence Whitelisting (`GossipService.kt`, `DmPacketHandler.kt`)**:
+  * Whitelisted directed `MESSAGE` packets addressed to our node (`isDirectedMessageForUs`) in `GossipService.processIncoming()`, allowing them to pass through to `DmPacketHandler.handleDirectMessage()` for authenticated ChaCha20-Poly1305 AEAD decryption and automatic connection recovery rather than dropping them as untrusted.
+  * Added `ANNOUNCE_PEER` to `isConnectionPacket` (firewall whitelist) so cryptographic Ed25519-signed presence heartbeats reach `HandshakePacketHandler` to update peer online/lastSeen states.
+  * Added `DM_SYNC_REQUEST` to `isSyncPacket` so incoming DM sync requests bypass the untrusted sender firewall gate.
+  * In `DmPacketHandler.kt`, acknowledged peer presence and cleared failure cooldowns on duplicate message delivery.
+* **Peer Failure Cooldown Scope Narrowing & De-Escalation (`GossipService.kt`, `MeshTransport.kt`, `MeshSocialRepository.kt`)**:
+  * Lowered the maximum exponential cooldown backoff cap from 30 minutes (`1800_000L`) to 3 minutes (`180_000L`).
+  * Restricted cooldown throttling in `MeshTransport.kt` strictly to unsolicited background presence announcements (`ANNOUNCE_PEER`, `ANNOUNCE_DISCOVERABLE`). Real-time DMs, DM sync, inventory sync, posts, comments, and media transfers are never blocked by peer cooldown.
+  * In `GossipService.broadcast()`, only presence announcements skip peers in cooldown; active user content (posts, comments, votes, reactions) always broadcast.
+  * Removed duplicate `recordSendFailure()` calls in `GossipService.forwardPacket`, `GossipService.broadcast`, and `MeshSocialRepository.flushOutboxForPeer()`, keeping `MeshTransport.sendPacket` as the single source of truth for transport results.
+  * `MeshTransport.sendPacket` only records send failures for background presence announcements, and never penalizes remote peers if local Tor proxy is down/refused.
+* **Interactive Typing Signal Debouncing & Semaphore Isolation (`ChatThreadScreen.kt`, `MeshTransport.kt`)**:
+  * Debounced `onTyping(true)` in `ChatThreadScreen.kt` to transmit at most once every 6 seconds while typing, and `onTyping(false)` upon send or idle, reducing socket overhead by over 95%.
+  * Routed `isInteractive` packets in `MeshTransport.kt` to `bulkSemaphore`, keeping `dmSemaphore(4)` 100% open for real DMs and handshakes.
+* **Atomic DM Sync Deduplication & Outbox Throttling (`MeshSocialRepository.kt`)**:
+  * Implemented atomic `lastDmSyncRequests.compute(peerPub)` in `MeshSocialRepository.requestDmSync` to eliminate concurrent double-request races.
+  * Paused `outboxWorkerJob` in `MeshSocialRepository.kt` when Tor is not in `TorState.READY` or during video playback.
+
+## Completed Changes (2026-09-30) — Media Path Traversal Elimination, Proxy Secret Hardening & Wire Parity (v0.6.5-alpha)
+
+* **Media Path Traversal Elimination (`MediaManager.kt`, `MediaPacketHandler.kt`, `GossipService.kt`)**:
+  * Implemented `MediaManager.isValidMediaId` enforcing character whitelisting (`^[A-Za-z0-9._-]+$`), length constraints (<= 128 chars), and strict prohibition of directory traversal sequences (`..`, `/`, `\`).
+  * Enforced canonical path containment checks (`isPathInDirectory`) across `findLocalFile`, `getLocalFile`, `copyFileToMediaDirectory`, and `finishDownload`, preventing malicious remote peers from traversing out of media storage to read or overwrite database and preference files.
+  * Sanitized public download exports in `MediaManager.exportToPublicDownloads` against path manipulation.
+  * Hardened `MediaPacketHandler` and `GossipService` to drop malformed or traversal media IDs at the firewall and relay boundary.
+* **Shared Proxy Secret Literal Removal (`build.gradle.kts`, `ProxyAuth.kt`)**:
+  * Removed hardcoded default `"NoSlopRocks2026"` from `app/build.gradle.kts`, defaulting `PROXY_SECRET` to empty string.
+  * Updated `ProxyAuth.kt` to bypass HMAC signing headers when `PROXY_SECRET` is blank.
+* **Wire Protocol Signature Parity & Test Suite Expansion (`MeshPacketVerifier.kt`, `PostPacketHandler.kt`, `MeshPacketVerifierTest.kt`)**:
+  * Added dual-mode verification for `EDIT_POST` and `REACTION` in `MeshPacketVerifier.kt`, preventing valid legacy-signed edits and reactions from being dropped before relay.
+  * Added `encNoAvatar` to `PostPacketHandler.handleEditPost` for 100% verifier-handler symmetry.
+  * Added unit test coverage for `editPost_dualMode` and `reaction_dualMode` in `MeshPacketVerifierTest.kt`.
+* **LAN Hub Policy Gating (`NoSlopRepository.kt`, `HubSyncWorker.kt`)**:
+  * Evaluated `NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(lanIp)` before attempting unencrypted LAN HTTP connections, eliminating cleartext violation exceptions and connection delays.
+* **Codebase Pruning & Deduplication (`VideoPlayer.kt`, `YouTubeInternalClient.kt`, `Packets.kt`, `MediaSettings.kt`, `Color.kt`, `LanguageManager.kt`, `GossipService.kt`)**:
+  * Deduplicated YouTube ID extraction by routing `VideoPlayer.kt` to `YouTubeInternalClient.extractVideoId`.
+  * Pruned unreferenced `MediaPendingPayload`, `cacheRelayedMedia`, unused template colors, dead variables (`PEER_FAILURE_WINDOW_MS`, `firewallTtlMs`, `startupTimestampMs`, `GEO_LOCK_PATTERN`), and removed Greek (`el`) from `LanguageManager` due to missing language asset.
+
+## Completed Changes (2026-09-29) — Comprehensive Codebase Audit, Mesh Firewall Whitelist, Structured Concurrency & Dead Code Elimination
+
+* **Mesh Firewall Whitelist & Backoff Retention (`GossipService.kt`)**:
+  * Added `CONNECTION_REJECTED` to `isConnectionPacket` so decline notices from untrusted peers pass the firewall without being dropped as untrusted.
+  * Added `FOLLOW` and `UNFOLLOW` (`isFollowPacket`) to the firewall whitelist (with 5/60s rate-limiting) so non-contact followers can follow creator nodes.
+  * Added `ANNOUNCE_INVIDIOUS_INSTANCE` to the firewall whitelist (with 5/60s rate-limiting) so healthy public Invidious video instances can be gossiped mesh-wide.
+  * Corrected `cleanupFailureTracking()` retention from 5.5 minutes to 2 hours (`2 * 3600_000L`), preventing premature eviction of peers under 30-minute Tor socket cooldowns.
+* **Feed Sync Structured Concurrency & Hang Elimination (`FeedRepository.kt`)**:
+  * Detached Phase 2 and 3 background sync onto an independent supervisor scope (`bgScope.launch`) rather than launching as child `async` coroutines of `withContext(Dispatchers.IO)`. This prevents `refreshFeeds()` from blocking indefinitely when video playback is active.
+* **Consolidated Hub Polling & Ghost Peer Cleanup (`NoSlopRepository.kt`, `NoSlopViewModel.kt`, `HandshakePacketHandler.kt`)**:
+  * Pruned redundant 3-second repository `hubSyncJob` to eliminate dual-polling race conditions with `NoSlopViewModel`'s 5-second Smart Hub loop.
+  * Extracted `cleanupOrphanedGroupPeers` in `NoSlopRepository` to unify 4 duplicated ghost peer cleanup blocks across `deleteGroupChat`, `leaveGroupChat`, and `HandshakePacketHandler`.
+* **Creator Auto-Accept & Channel Cut-Off Fixes (`HandshakePacketHandler.kt`, `ChannelMetadataResolver.kt`, `NoSlopViewModel.kt`)**:
+  * Keyed creator auto-accept rate limits per sender ID rather than using a single global bucket of 10 per hour for the entire node.
+  * Fixed channel creation cut-off fast path in `ChannelMetadataResolver.kt`: video publication timestamps are now only used as an upper bound when `publishedAt <= cutoffMs`, preventing pre-2022 channels with recent uploads from being falsely marked as post-2022 AI channels and banned.
+* **Wire Protocol Dual-Mode Verification & Dead Code Pruning (`MeshPacketVerifier.kt`, `MediaCaptureManager.kt`, `MediaManager.kt`, `YouTubeInternalClient.kt`)**:
+  * Added dual-mode verification for `EDIT_COMMENT` in `MeshPacketVerifier.kt` to achieve 100% parity with `CommentPacketHandler`.
+  * Pruned dead `mediaRecorder` and `audioFile` fields in `MediaCaptureManager.kt`.
+  * Replaced hardcoded `16 * 1024` with `MIN_CHUNK_SIZE` in `MediaManager.requestNextChunks()`.
+  * Pruned dead `usingProxy` player branches and uncalled proxy attestation methods in `YouTubeInternalClient.kt`.
+
+## Completed Changes (2026-09-26) — Clearnet over Tor Playback Hardening, Handshake Reliability, Comment/Reaction Sync & ANR Elimination (v0.6.5-alpha)
+
+* **Clearnet Playback over Tor Stabilization & Stall Detector Byte Tracking (`VideoPlayer.kt`, `HttpClientProvider.kt`, `YouTubeInternalClient.kt`)**:
+  * Attached an `OkHttpDataSource` `TransferListener` to ExoPlayer tracking actual network byte arrivals (`lastNetworkByteTimeMs`, `networkBytesReceivedInSession`). Over Tor, while ExoPlayer downloads container headers and initial frames (`bufferedPosition == 0L`), active byte transfer now resets `stalledSamples = 0`, completely stopping false-alarm watchdog circuit escapes.
+  * Raised continuous buffering timeout ceiling to 50s and cushioned Tor SOCKS media timeouts (connect 35s, read 45s).
+  * Enforced 250MB Tor video stream size ceiling (`NOSLOP_TOR_SIZE_CEILING_V1`) in `YouTubeInternalClient.extractUrlFromPlayerResponse()`, preventing massive multi-gigabyte or 12-hour progressive video streams (like the 1,426 MB format observed in logs) from stalling playback over Tor.
+  * Paused background feed sync in `FeedRepository.kt` with an active while-loop while videos are active or preloading (`while (PreloadManager.isVideoActive || PreloadManager.currentlyPlayingUrl != null) delay(2000L)`), stopping 37+ parallel API queries from choking Tor video buffers.
+  * Expanded `PreloadManager.MAX_PRELOAD` from 3 to 4, eliminating immediate cache eviction of upcoming slides. Synchronized map and player release operations on `Dispatchers.Main`.
+  * Added unit test suite `ClearnetTorMediaTest.kt` verifying stream size ceilings, watchdog byte progress, TorService fast-pathing, and circuit failover simulation.
+* **Tor Hidden Service Handshake Reliability (`MeshTransport.kt`, `MeshSocialRepository.kt`, `HandshakePacketHandler.kt`)**:
+  * Raised handshake connect timeout to 45s with 3 attempts in `MeshTransport.kt`, giving Tor sufficient time to discover newly published v3 descriptors and establish 6-hop rendezvous circuits over mobile/emulator connections.
+  * Exempted handshake packets (`CONNECTION_REQUEST`, `USER_HANDSHAKE`) from peer cooldown traps in `flushOutboxForPeer()` and `startOutboxWorker()`.
+  * Throttled orphaned post deletion sync in `MeshSocialRepository.kt` to only broadcast when trusted peers are online, preventing continuous SOCKS proxy socket storms.
+  * Cleared peer cooldown immediately on handshake accept via `GossipService.recordSendSuccess(peer.onionAddress)`.
+* **Mesh Comment & Reaction Sync and Notification Deep-Links (`CommentPacketHandler.kt`, `ReactionPacketHandler.kt`, `MeshPacketVerifier.kt`, `UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
+  * Added dual-mode signature verification (length-prefixed `CryptoService.encodeForSigning` and legacy pipe) across `CommentPacketHandler.kt`, `ReactionPacketHandler.kt`, and `MeshPacketVerifier.kt`, fixing signature rejection of incoming mesh comments.
+  * Fixed UUID truncation and own-post exclusion in `UnifiedFeedTab.kt`: preserved full UUIDs in notification routes (`replace(Regex("""-\d{10,}$"""), "")`), hoisted `restoreItemId`, and exempted the navigated target post (`isTargetNavPost`) from the `isOwnPost` filter so the author's own broadcast renders on screen behind the comments modal.
+  * Elevated `POST`, `COMMENT`, `REACTION`, `VOTE`, and `SYNC_*` packets to high priority in `MeshTransport.kt` (25s connect timeout, 2 attempts) and exempted user interactions from transient cooldown drops.
+  * Auto-triggered `requestAllPeersInventorySync()` when opening the comments sheet in `NoSlopViewModel.kt`, pulling historical and missing comments from connected peers.
+* **Emulator ANR Elimination & Tor Auto-Recovery on Foreground (`VideoPlayer.kt`, `PreloadManager.kt`, `TorService.kt`, `MainActivity.kt`)**:
+  * Removed `forceEnableMediaCodecAsynchronousQueueing()` from `DefaultRenderersFactory` in `VideoPlayer.kt` and `PreloadManager.kt`, eliminating software decoder deadlocks and system ANR ("Close or Wait") freezes on Android emulators.
+  * Handled Android 12+ background `ForegroundServiceStartNotAllowedException` in `TorService.startTor()` by resetting to `IDLE` instead of `FAILED`.
+  * Added automatic Tor restart in `MainActivity.onResume()` when Tor is in `IDLE` or `FAILED` state, clearing the "Tor Required" overlay on resume.
+
+## Completed Changes (2026-09-26) — Flavor ApplicationId Decoupling, PlayerView Artwork & YouTube Tests (v0.6.5-alpha)
+
+* **Distribution Flavor ApplicationId Decoupling (`app/build.gradle.kts`, `RedditApiClient.kt`)**:
+  * Configured `github` flavor with `applicationId = "com.noslop.app"` (preserving seamless in-place updates for existing users without secondary install) and `play` flavor with `applicationId = "com.noslop.me.app"`.
+  * Dynamically bound Reddit API client User-Agent to `BuildConfig.APPLICATION_ID` and `BuildConfig.VERSION_NAME`.
+* **PlayerView Artwork Display Mode Migration (`VideoPlayer.kt`)**:
+  * Migrated deprecated `useArtwork = false` to official Media3 `artworkDisplayMode = PlayerView.ARTWORK_DISPLAY_MODE_OFF`, preventing ExoPlayer default artwork from flashing over Coil thumbnails.
+* **HMAC-Only Proxy Authentication (`app/build.gradle.kts`, `ProxyAuth.kt`)**:
+  * Set `PROXY_SEND_LEGACY_SECRET = false` by default, eliminating raw `X-Proxy-Secret` cleartext header transmission. Requests authenticate strictly via dynamic HMAC-SHA256 (`X-Proxy-Timestamp` + `X-Proxy-Signature`).
+* **YouTube Internal Client Enhancement & Unit Test Suite (`YouTubeInternalClient.kt`, `YouTubeInternalClientTest.kt`)**:
+  * Updated `extractVideoId` to recognize `yt_` prefix IDs used by `FeedItem.id`.
+  * Added unit test suite `YouTubeInternalClientTest.kt` verifying watch URLs, shorts, embeds, youtu.be, raw IDs, stream ID registrations, and nonce advancement.
+
+## Completed Changes (2026-09-25) — 110-File Codebase Audit, Socket Bind Remediation & Tor Circuit Affinity (v0.6.5-alpha)
+
+* **Full 110-File Codebase Audit & Documentation Parity Verification**:
+  * Inspected all 110 Kotlin source files across 10 packages against `README.md`, `TECHNICAL_REFERENCE.md`, `WIRE_PROTOCOL_REFERENCE.md`, and `PROJECT_STATUS.md`.
+  * Verified 100% code parity for all 34 mesh wire protocol packet types (`Packets.kt`), Ed25519/X25519/ChaCha20-Poly1305 identity derivations (`CryptoService.kt`), Tor v3 hidden services (`TorService.kt`), SOCKS5 per-stream circuit isolation (`HttpClientProvider.kt`), and dynamic zero-code 21+ language localizations (`LanguageManager.kt`).
+* **Socket Bind Remediation & Tor Circuit Exit Node Affinity (`MediaProxyService.kt`, `MeshTransport.kt`, `YouTubeInternalClient.kt`)**:
+  * Configured `ServerSocket.apply { reuseAddress = true; bind(...) }` across `MediaProxyService.kt` and `MeshTransport.kt`, resolving `EADDRINUSE` port bind errors during app restarts and identity restorations.
+  * Added YouTube video ID extraction (`extractVideoId`, `getStreamIdForUrl`, `registerStreamId`) to `YouTubeInternalClient.kt`, ensuring raw URLs, video IDs, and resolved stream URLs share the exact same stream isolation ID (`yt_<videoId>_<nonce>`), guaranteeing Tor Exit Node IP affinity for Google Video signed URLs.
+* **Compose & Android Deprecated API Remediation**:
+  * Updated deprecated `Icons.Filled.*` to `Icons.AutoMirrored.Filled.*` across `ProfileScreen.kt`, `ChatThreadScreen.kt`, `GroupChatThreadScreen.kt`, `LogsViewerScreen.kt`, `ApiKeysScreen.kt`, `UnifiedFeedTab.kt`, `SettingsTab.kt`, `AvatarCropper.kt`, and `FeedCard.kt`.
+  * Updated deprecated `LocalLifecycleOwner` import in `QRScanScreen.kt` to `androidx.lifecycle.compose.LocalLifecycleOwner`.
+  * Updated `Modifier.menuAnchor()` in `DMsTab.kt` and `ReportIssueScreen.kt` to `Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)`.
+  * Cleaned up deprecated `useArtwork` and `databaseEnabled` settings in `VideoPlayer.kt`.
+
+## Completed Changes (2026-09-23) — Startup Video Instant Handoff, CachedSource Staleness Fix & Tor Sync De-Contention (v0.6.2-alpha)
+
+* **Startup Video Instant Handoff & Splash Buffer Masking (`MainActivity.kt`, `PreloadManager.kt`)**:
+  * Resolved the premature splash screen drop: raised `awaitNetworkReady` ceiling to 12s and `awaitPlayerReady` to 16s in `MainActivity.kt`, ensuring Tor's ~5.5s cold bootstrap, initial YouTube stream resolution, and first-frame buffer complete seamlessly behind the splash curtain before reveal.
+  * Fixed `PreloadManager.cacheKeyFor`: added `.ifBlank { "medium" }` to prevent cache-misses against `doWarmUp` when video quality setting is uninitialized.
+  * Ensured `readyTasks.remove(rawUrl)` is cleaned on player invalidation.
+* **CachedSource Stream Nonce Invalidation Repair (`VideoPlayer.kt`)**:
+  * Fixed a critical cache poisoning bug in `CachedSource.stalenessReason()`: previously called `extractYouTubeId(source.url)` on the `googlevideo.com` CDN stream URL rather than the item ID. This extracted query string noise (e.g. `"m"`), causing `YouTubeInternalClient.getStreamNonce()` to return 0 and falsely fail against `streamNonce = 1` with `"circuit stream nonce advanced (1 -> 0)"`.
+  * Stored the authentic `videoId` directly on `CachedSource` and gated staleness strictly on `streamNonce < currentNonce`, eliminating false cache rejections that were forcing `VideoPlayer` to discard warm preloaded players, re-resolve streams, and display "Finding stream" / "Buffering" spinners on active slides.
+* **Tor Cold-Start Stall Watchdog Tuning (`VideoPlayer.kt`)**:
+  * Removed the aggressive 8-second cold-kill watchdog (`if (bufPos <= 0L) 4`) that was prematurely aborting fresh Tor connections before initial Range request byte delivery.
+  * Set Tor stall threshold to 22s (11 samples) and continuous buffering threshold to 30s (15 samples), and ensured any byte progress (`delta > 0L`) resets `stalledSamples` to 0, completely stopping false-alarm circuit escapes and retry restarts on initial video playback.
+* **Cold-Start Feed Synchronization De-Contention (`NoSlopViewModel.kt`, `FeedRepository.kt`)**:
+  * Defer startup feed synchronization in `NoSlopViewModel.init` by 12 seconds when cached feed items already exist in the Room database (`_isOnboardingComplete && _isAggregatorEnabled`), allocating 100% of Tor circuit bandwidth to Slide 1 media resolution and buffering.
+  * Gated Phase 1 Ramp-Up in `FeedRepository.refreshFeeds()` to run only when the database is completely empty (`!hasExistingItems`), preventing a storm of 10+ concurrent creator queries, trending requests, and RSS fetches from congesting Tor during startup.
+
+## Completed Changes (2026-09-23) — Image Media Loading, Audio Pipeline Restoration, Preloader Bandwidth De-Contention & Tor Socket Congestion Relief (v0.6.1-alpha)
+
+* **Image Loading & Policy Headers (`MediaComponents.kt`, `NoSlopApp.kt`, `FeedCard.kt`)**:
+  * Fixed image URL corruption: `sanitizeImageUrl()` previously called `Html.fromHtml()` without trailing `.trim()`, which appended newline characters (`\n\n`) to all image URLs and caused OkHttp/Coil to reject them with `IllegalArgumentException`.
+  * Wikimedia Commons Tor 403 bypass: Wikimedia strictly blocks generic `Mozilla/5.0...` User-Agents over Tor exit nodes per Wikimedia Foundation User-Agent Policy. Injected policy-compliant `User-Agent: NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)` in `BlurredImageBackground`, `ZoomableImageDialog`, and via an app-wide Coil interceptor in `NoSlopApp.kt`. Added required `AIC-User-Agent` headers for Art Institute of Chicago (`artic.edu`).
+  * Image slide resolution: Updated `FeedCard.kt` to resolve image media from `thumbnailUrl` if `mediaUrl` is missing so items correctly render in `BlurredImageBackground` instead of falling through to the article reader.
+* **Audio Sourcing & Undated Feed Interleaving (`JamendoApiClient.kt`, `InternetArchiveClient.kt`, `NoSlopViewModel.kt`)**:
+  * Jamendo Client ID Candidate Pool: Replaced suspended single client ID (`709fa152`) with a rotating candidate pool (`56d30c95`, `3dce8b55`, `9d9f42e3`, `c0602f10`). On error code 11 (suspended application), the client automatically rotates candidates and logs the transition.
+  * Undated (`publishedAt = 0L`) Feed Sorting: Fixed `NoSlopViewModel.loadMoreFeedItems()` for specific category filters (`Audio` and `Images`). Previously, sorting strictly by `publishedAt` descending banished all 0L items (Openverse tracks/images, Wikimedia, Art Institute) to the bottom of the feed below thousands of dated items. Sorted using `effectiveDate` (`now - 20 days` assumed age) so undated items interleave seamlessly.
+  * Internet Archive Music Variety: Updated `InternetArchiveClient.getPopularAudio()` from all-time `downloads+desc` to `week+desc` across curated music collections (`netlabels`, `etree`, `78rpm`, `audio_music`), filtering out repetitive Quran recitations from general music queries to surface actual trending indie/rock/electronic tracks.
+* **Preloader Bandwidth De-Contention & Startup Buffer Tuning (`PreloadManager.kt`, `VideoPlayer.kt`, `YouTubeInternalClient.kt`)**:
+  * Preloader Bandwidth De-Contention: Reduced `PreloadManager` load control buffers from 45s min / 90s max down to 8s min / 15s max (`minBufferMs = 8000`, `maxBufferMs = 15000`, `bufferForPlaybackMs = 1000`). Preloaded background players now buffer only the head (8–15s) and immediately go idle, yielding 100% of Tor bandwidth to the active on-screen video.
+  * Active Playback Startup Acceleration: Reduced `VideoPlayer.kt` active player `bufferForPlaybackMs` from 2500ms (2.5s) to 1200ms (1.2s), halving the time to first frame playback. Tuned `minBufferMs` to 35s and `maxBufferMs` to 70s for continuous streaming without memory bloat.
+  * Blocked Tor Circuit Fast-Exit: Reduced `EXIT_BLOCKED_THRESHOLD` in `YouTubeInternalClient.kt` from 3 to 2, escaping flagged exits to fresh circuits in 2 attempts instead of 3.
+* **Tor Socket Congestion & Dead Peer Backoff (`GossipService.kt`)**:
+  * Extended exponential backoff for persistently unreachable onion peers (`isPeerInCooldown`) from 2 minutes up to 30 minutes (`exponent.coerceAtMost(6)`, `1800_000L`). Prevents repeated 12-second timeout socket storms (e.g. 238 failed attempts to dead peers) from freezing Tor's SOCKS5 daemon (`Tor proxy not responding on 9050`), while preserving instant unblocking the second an offline peer sends any authentic packet.
+* **R8/ProGuard Persisted Outbox Deserialization Fix (`MeshSocialRepository.kt`)**:
+  * Eliminated anonymous Gson `TypeToken` in `loadPersistedOutbox()`, which caused runtime crashes under R8 full minification (`TypeToken must be created with a type argument`). Replaced with direct zero-reflection `JsonParser.parseString(json).asJsonObject` iteration.
+
+## Completed Changes (2026-09-23) — Main Thread Tor Crash Elimination, Splash Latency Decoupling & Slide 1 Preload Self-Reference Fix (v0.6.1-alpha)
+
+* **Tor Reconnect Crash & Socket Threading (`NoSlopViewModel.kt`, `TorService.kt`)**:
+  * Moved `viewModel.startTor()` to `Dispatchers.IO`, preventing `NetworkOnMainThreadException` and `Thread.sleep` from crashing the Android UI thread when tapping "Reconnect Tor".
+  * Wrapped `TorService.startTor` internally in `scope.launch(Dispatchers.IO)` to guarantee thread safety.
+* **Slide 1 Preload Initialization Fix (`PreloadManager.kt`)**:
+  * Corrected self-referencing `player.seekTo()` inside `apply` block to `seekTo(resumeMs)`, eliminating the `NullPointerException` that was preventing the first video from preloading on cold start.
+  * Ensured `PreloadManager.evictAll()` releases ExoPlayer instances on `Dispatchers.Main`, preventing off-thread media player release crashes.
+* **Splash Screen Startup Acceleration (`MainActivity.kt`)**:
+  * Reduced `awaitNetworkReady` wait ceiling in the splash screen from 35s to 4s and `awaitPlayerReady` from 12s to 3s, eliminating the 47-second splash freeze and loading the app UI in 1.5–3s while Tor circuits finish connecting asynchronously in the background.
+
+## Completed Changes (2026-09-23) — Filtered Log Clipboard Export, Initial Slide Buffer Sync, Offscreen Spinner Timeout Fix & Geo-Lock Recovery (v0.6.1-alpha)
+
+* **Tab-Aware Log Clipboard Export (`LogsViewerScreen.kt`, `Logger.kt`, `NoSlopViewModel.kt`)**:
+  * Added `getFilteredLogsText(levelFilter: Level?)` in `Logger.kt` and wired `selectedLevelFilter` directly into the copy action in `LogsViewerScreen.kt`.
+  * Tapping the copy icon now copies all logs matching the currently active tab (ALL, DEBUG, INFO, WARN, or ERROR), respecting the safe 850KB Android IPC Binder ceiling.
+* **Initial Slide Position Buffer Sync on Cold Launch (`PreloadManager.kt`, `MainActivity.kt`)**:
+  * In `PreloadManager.doWarmUp`, checked `PlaybackPositionStore.resumePositionFor(rawUrl) >= 8000L` and sought to `resumeMs` before `prepare()`, ensuring the initial buffer is downloaded at the exact resume target instead of 0ms.
+  * Increased `MainActivity`'s `awaitPlayerReady` timeout from 8s to 12s, allowing cold Tor connections to reach `STATE_READY` before splash dismissal.
+* **Offscreen Spinner Pre-Expiration Elimination & Fast Zero-Byte Recovery (`VideoPlayer.kt`)**:
+  * Bound `loadingTimedOut` to `isVisible`: when a slide is offscreen, `loadingTimedOut` resets to `false`, preventing slides that were pre-warmed while watching earlier videos from prematurely timing out and rendering static thumbnails with no spinner.
+  * Reduced `stallThresholdSamples` from 12 (24s) to 4 (8s) when `bufPos <= 0L`, fast-failing stalled connections to fresh circuits in 8s.
+* **Restricted Geo-Lock Filter (`YouTubeInternalClient.kt`)**:
+  * Discarded streams tagged with sanctioned/restricted regions (`gcr=ir`, `gcr=sy`, `gcr=cu`, `gcr=kp`) over Tor to prevent players from locking onto throttled exit IPs.
+* **Archive.org Clearnet Tor Routing & Jamendo Diagnostics (`InternetArchiveClient.kt`, `JamendoApiClient.kt`)**:
+  * Switched Archive.org search endpoints from `.onion` to `https://archive.org` over Tor, eliminating 30s connection timeouts.
+  * Enhanced Jamendo logging with explicit `code` and `error_message` fields and added `boost=popularity_month` query parameters.
+
+## Completed Changes (2026-09-22) — Audio Sourcing Repair, Internet Archive Resilience, Tor Buffer Stabilization & Wikimedia Search Parity (v0.6.1-alpha)
+
+* **Audio Sourcing & Jamendo API Fix (`JamendoApiClient.kt`)**:
+  * Corrected Jamendo tracks endpoint query from invalid `namesearch` parameter to standard `search` (and `tags=pop+rock+electronic&order=popularity_total` for generic music queries), restoring music streams that previously failed with `Jamendo API returned status: failed`.
+* **Internet Archive Performance & Headless Resolution (`InternetArchiveClient.kt`)**:
+  * Replaced `NoSlop-Android/1.0` User-Agent with a standard browser User-Agent to avoid Archive.org's WAF filters.
+  * Scoped search query to curated music collections (`collection:(etree OR netlabels OR 78rpm OR oldtimeradio) AND mediatype:audio`) and capped metadata resolutions to 10.
+  * Eliminated 20 redundant blocking HTTP `HEAD` checks that were stalling the category pipeline and hitting the 35s timeout.
+* **Wikimedia Preference Querying (`PublicApiService.kt`)**:
+  * Replaced blind calls to `WikimediaApiClient.fetchFeaturedPictures()` with `WikimediaApiClient.searchImages(query)`, enabling Wikimedia to respect user keywords and categories instead of defaulting to bird taxonomy photos from the featured category.
+* **Video Preloading Cache Unblocking & Tor Playback Buffer Hardening (`PreloadManager.kt`, `VideoPlayer.kt`, `YouTubeInternalClient.kt`)**:
+  * Cleared `cancelledTasks.remove(rawUrl)` on new `preWarm()` requests, preventing evicted items from permanently blocking upcoming slide preloads.
+  * Reordered InnerTube configs to test `TVHTML5` immediately after `ANDROID` and raised `EXIT_BLOCKED_THRESHOLD` to 3, allowing token-free TVHTML5 resolution to succeed on the active circuit without wasting 20–40s hopping Tor exits.
+  * Raised `bufferForPlaybackMs` to 2,500ms (2.5s) and `bufferForPlaybackAfterRebufferMs` to 8,000ms (8s) in `VideoPlayer.kt` and `PreloadManager.kt`, eliminating the 4-second stutter and rebuffering loop.
+
+## Completed Changes (2026-09-22) — Follow System Rollback & DMs Node Info Swipe-Down Modal Parity (v0.6.0-alpha)
+
+* **Follow System Rollback (`PeerItem.kt`, `FeedCard.kt`, `ChannelPreferenceModal.kt`, `NoSlopViewModel.kt`)**:
+  * Rolled back the redundant "Follow Creator" / "Unfollow Creator" buttons across all node info dialogs and preference modals. The established secondary burnable identity (`.onion`) and temporary contact system already provides private, sovereign peer connectivity to creator nodes without leaking personal identity.
+  * Removed the visual `Following` author badge in `FeedCard.kt`.
+  * Reverted `followedPubKeys` and `followedPubs` sorting in `NoSlopViewModel.kt`'s Live Feed round-robin interleaver, restoring pure chronological ordering and fair creator rotation.
+* **DMs Node Info Bottom Sheet & Swipe-Down Dismissal Parity (`PeerItem.kt`, `DMsTab.kt`)**:
+  * Migrated `ContactCardDialog` in `PeerItem.kt` from a fixed `Dialog { Card { Column } }` to a Material 3 `ModalBottomSheet` with `rememberModalBottomSheetState(skipPartiallyExpanded = true)` and `BottomSheetDefaults.DragHandle`.
+  * Unified discoverable node profiles in `DMsTab.kt` to use `ContactCardDialog`, eliminating the rigid, non-scrollable 180-line `AlertDialog`.
+  * Enclosed modal contents in a vertically scrollable container (`verticalScroll(rememberScrollState())`) with safe bottom padding (`32.dp`), ensuring Avatar, Handle, Tripcode, Bio, Donation badges, Onion address, `PeerMeshContentList`, and all action buttons ("Connect", "Remove", "Ban Node 🚫", "Close") are fully accessible and never cut off on smaller screens.
+  * Swiping down anywhere outside the nested content list dismisses the sheet immediately, achieving full gesture parity with feed and source modals.
+
+## Completed Changes (2026-09-22) — Player Session Mount Stability, Tor Circuit Stall Escapes & R8-Safe Instant Localization (v0.6.0-alpha)
+
+* **Player Mount Stability & Mid-Stream Teardown Elimination (`VideoPlayer.kt`)**:
+  * Decoupled player mount lifecycle from `retryTrigger` by introducing `playerMountKey` (`NOSLOP_PLAYER_MOUNT_KEY_V1`). Previously, when a video played stably for 16 seconds, `onStablePlayback` reset `retryTrigger` from 1 to 0. Because `ExoVideoPlayer`'s `DisposableEffect` was directly keyed on `retryTrigger`, this reset inadvertently triggered `onDispose()` and tore down the playing player mid-stream, forcing an expensive seek and rebuffering cycle from cold Tor sockets.
+* **Tor Circuit Stall Escalation & Stream Nonce Bumping (`VideoPlayer.kt`, `YouTubeInternalClient.kt`)**:
+  * Implemented `YouTubeInternalClient.advanceStreamNonce(videoId)`: when mid-stream stall detection triggers (0 bytes for 24s or continuous buffering for 30s), the recovery pipeline automatically increments the stream nonce and invalidates preloaded caches, ensuring reconnection establishes a fresh, un-throttled 3-hop Tor circuit rather than reconnecting to the stalled circuit.
+* **LoadControl Buffer Window Tuning for Tor (`VideoPlayer.kt`, `PreloadManager.kt`)**:
+  * Tuned `DefaultLoadControl` parameters: set `minBufferMs = 45000` (45s), `maxBufferMs = 90000` (90s), and `bufferForPlaybackAfterRebufferMs = 4000` (4s) across both `VideoPlayer.kt` and `PreloadManager.kt`. Provides a deep buffer cushion that keeps sockets actively streaming without triggering 15-second idle starvation gaps or RAM exhaustion.
+* **R8-Safe Zero-Reflection Localization & Instant Switching (`LanguageManager.kt`, `NoSlopApp.kt`, `NoSlopViewModel.kt`)**:
+  * Eliminated anonymous Gson `TypeToken` usage in `LanguageManager.loadLanguage()`, resolving runtime `RuntimeException: Missing type parameter` crashes under R8 full minification (`assembleRelease`). Replaced with direct `JsonParser.parseString(jsonString).asJsonObject` iteration.
+  * Added `_languageUpdateTrigger` StateFlow in `LanguageManager.kt` observed by `String.tr`, ensuring instant, guaranteed UI recomposition across every screen upon selecting a language in Settings.
+  * Added `fallbackLanguages` mapping all 22 bundled languages, safeguarding against `AssetManager.list("languages")` platform quirks on Android.
+  * Initialized `LanguageManager.init(this, "en")` synchronously on the main thread in `NoSlopApp.onCreate()`, eliminating cold-start initialization races.
+
+## Completed Changes (2026-09-19) — Long-Stream Playback Stabilization, Stall Recovery & Log Clipboard Hardening (v0.5.9-alpha)
+
+* **Long-Stream Playback Stabilization & Stutter Loop Elimination (`VideoPlayer.kt`, `PreloadManager.kt`)**:
+  * Resolved the 2-second buffer/play loop on videos longer than 3–5 minutes by raising `bufferForPlaybackAfterRebufferMs` from 2,000ms to 8,000ms (8s) in both `VideoPlayer.kt` and `PreloadManager.kt`. When network throughput dips over Tor, ExoPlayer now buffers a healthy 8-second cushion before resuming rather than playing out 2 seconds immediately and stalling repeatedly.
+  * Restored continuous mid-stream stall monitoring: removed the premature `return@LaunchedEffect` that was killing the `VideoPlayer` diagnostic loop as soon as the first frame rendered at minute 0. The monitor now continues sampling throughout the entire video and proactively triggers stream recovery if the buffer fails to advance for 28s on Tor.
+  * Enabled stream recovery for active videos: updated `canRetry` to allow reconnection if the video was already playing (`isVideoReady || resumePosition >= 8000L`). When a video plays stably for 15 seconds, `retryTrigger` is automatically reset to 0, allowing 10–30+ minute videos to recover across multiple transient Tor circuit stalls without hitting permanent failure lockouts.
+* **SOCKS5 Media Connection Pool & Timeout Hardening (`HttpClientProvider.kt`)**:
+  * Reduced `ConnectionPool` keepalive duration from 300s (5m) to 60s for isolated media clients, preventing ExoPlayer range requests from reusing half-dead or idle-throttled Tor sockets.
+  * Reduced `readTimeout` from 60s to 35s so dead sockets fail and recover fast instead of freezing the player for a full minute.
+* **Preload Headroom Tuning (`PreloadManager.kt`)**:
+  * Raised `MAX_PRELOAD` from 2 to 3, ensuring that while the visible video plays, upcoming slides remain warm in memory for instant ~100–170ms first-frame rendering on swipe.
+* **Log Clipboard Binder Protection & Ring Buffer Expansion (`Logger.kt`, `NoSlopViewModel.kt`)**:
+  * Fixed a fatal `android.os.TransactionTooLargeException` crash when copying logs by bounding clipboard copy to the latest ~500 KB (approx. 3,000 lines), staying safely within Android's 1MB IPC Binder transaction limit.
+  * Expanded `Logger.MAX_ENTRIES` in-memory ring buffer from 500 to 2,000 entries so the in-app scrollable viewer retains more history during high-frequency mesh gossip periods.
+  * Added `Logger.getAllLogsText()` to read the complete log from disk (including rotated `.log.1` generations) on export.
+
+## Completed Changes (2026-09-18) — Feed Health, Invidious Resiliency, Comment Management & Peer Follows (v0.5.8-alpha)
+
+* **RSS & Feed Health Restoration (`SourceLibrary.kt`, `FeedRepository.kt`)**:
+  * Fixed dead/404 RSS URLs: updated Pitchfork to `feed-news/rss`, Flickr Explore to `photos_public.gne`, and replaced defunct Reuters World URL with live NPR World News feed.
+  * Implemented Tor-aware Cloudflare WAF gating: sources known to block Tor exit nodes (`500px.com`, `nme.com`, `juxtapoz.com`, `hifructose.com`) are automatically skipped during background sync while "Route Clearnet via Tor" is enabled, completely eliminating HTTP 403 logs and shortening background sync cycles by 15–20 seconds, while remaining active when Clearnet over Tor is turned off.
+* **Invidious & Piped Instance Pool Refresh (`InvidiousApiClient.kt`)**:
+  * Replaced failing/exhausted endpoints with active public Invidious and Piped instances (`yewtu.be`, `invidious.flokinet.to`, `invidious.privacydev.net`, `iv.datura.network`, `invidious.projectsegfau.lt`, `invidious.einfachzocken.eu`, `api.piped.privacydev.net`).
+* **Client-Side Comment Editing & Deletion UX (`MeshSocialRepository.kt`, `NoSlopRepository.kt`, `NoSlopViewModel.kt`, `CommentsBottomSheet.kt`)**:
+  * Implemented `editComment(commentId, newContent)` and `deleteComment(commentId)` with Ed25519 signing and mesh broadcast (`EDIT_COMMENT`, `DELETE_COMMENT`).
+  * Added Edit and Delete UI action buttons to `CommentsBottomSheet.kt` for authors on their own comments.
+  * Rendered deleted comments as italicized `[Deleted]` placeholders with reactions/replies suppressed.
+* **Mesh Peer Following UI Integration & Feed Prioritization (`PeerItem.kt`, `FeedCard.kt`, `NoSlopViewModel.kt`)**:
+  * Added reactive "Follow Creator" / "Unfollow Creator" toggle buttons in `ContactCardDialog` (`PeerItem.kt`) and `FeedCard.kt` profile sheet, wired directly to `toggleFollowPeer`.
+  * Added visual `Following` badge next to author handles on mesh posts from followed peers.
+  * Prioritized posts from followed peers in the Live Feed round-robin interleaver and Mesh feed.
+* **Decentralized Group Moderation & Member Banning (`GroupChat.kt`, `NoSlopDatabase.kt`, `Packets.kt`, `HandshakePacketHandler.kt`, `DmPacketHandler.kt`, `GroupSettingsModal.kt`)**:
+  * Added `bannedMembersJson` column to `GroupChat` entity and Room schema version 15 (`MIGRATION_14_15`).
+  * Group admins can ban members with 1-tap in `GroupSettingsModal.kt`, preventing bad actors from rejoining open groups and dropping incoming messages from banned keys.
+  * Added "Banned Members ({count}) 🚫" section in group settings with 1-tap unban functionality.
+* **Wire Protocol Conformance Test Suite Expansion (`WireProtocolTest.kt`)**:
+  * Added unit test coverage validating serialization, deserialization, and snake_case wire key contracts for `EDIT_COMMENT`, `DELETE_COMMENT`, and `FOLLOW`.
+* **Dead Code Pruning (`Packets.kt`, `HandshakePacketHandler.kt`)**:
+  * Removed obsolete unpersisted `SUBSCRIBE` / `SubscribePayload` stub superseded by `FOLLOW`.
+
+## Completed Changes (2026-09-18) — Global Multi-Language Localization & Zero-Code Dynamic Discovery (v0.5.8-alpha)
+
+* **21+ Languages Fully Supported (`app/src/main/assets/languages/`)**:
+  * Added 18 comprehensive community translations alongside English, Hungarian, and Spanish: Romanian (`ro`), Swedish (`sv`), Czech (`cs`), Vietnamese (`vi`), Hindi (`hi`), Arabic (`ar`), Dutch (`nl`), Turkish (`tr`), French (`fr`), Russian (`ru`), Chinese (`zh`), Polish (`pl`), Korean (`ko`), Ukrainian (`uk`), Japanese (`ja`), Portuguese (`pt`), Italian (`it`), and German (`de`).
+  * 100% parity across all 792 localized UI strings, system dialogs, error messages, and onboarding steps.
+* **Zero-Code Dynamic Language Discovery (`LanguageManager.kt`, `TRANSLATION_GUIDE.md`)**:
+  * Implemented runtime discovery of language assets: any `content_<code >.json` placed in `app/src/main/assets/languages/` is automatically enumerated and registered on application startup.
+  * Resolved native language names via `WELL_KNOWN_LANGUAGES` map with dynamic `java.util.Locale` fallback, sorting alphabetically with English pinned first.
+  * Community contributors can now add or test translations by simply dropping a JSON file into the assets folder without touching any Kotlin or Compose code.
+* **Onboarding & Content Preferences Dynamic Integration (`OnboardingScreen.kt`, `ContentPreferencesScreen.kt`)**:
+  * Wired `LanguageManager.supportedLanguages` into `OnboardingScreen.kt`, eliminating the legacy 2-language hardcoded list and presenting all 21+ languages dynamically to new users on first launch.
+  * Added Ukrainian (`uk`), Czech (`cs`), and Romanian (`ro`) to the Content Language selection dropdown in `ContentPreferencesScreen.kt`.
+* **Automated Home Hub Backup Sync Repair (`HubSyncWorker.kt`)**:
+  * Aligned address resolution with `hub_deployment_status` (resolving LAN IP or cloned onion address) rather than querying an unpopulated setting key.
+  * Corrected endpoint port from gossip TCP port 9999 to REST API port 8080 (`/api/backup/push`).
+  * Implemented private LAN fast-path over `rawClearnetClient` with seamless Tor SOCKS5 fallback.
+* **Wire Protocol & Codebase Documentation Alignment (`WIRE_PROTOCOL_REFERENCE.md`, `TECHNICAL_REFERENCE.md`)**:
+  * Synchronized `WIRE_PROTOCOL_REFERENCE.md` catalog, schemas, and signed-string tables with all active packet types (`EDIT_COMMENT`, `DELETE_COMMENT`, `FOLLOW`/`UNFOLLOW`, `ANNOUNCE_INVIDIOUS_INSTANCE`).
+  * Updated `TECHNICAL_REFERENCE.md` §14 marking the `GossipService.broadcast` Hub fallback discrepancy as resolved in code.
+
+## Completed Changes (2026-09-18) — Decentralized Group Directory Sync, Mesh Node Blacklist & ProGuard Hardening (v0.5.8-alpha)
+
+* **Decentralized Group Member Directory Synchronization (`Packets.kt`, `NoSlopRepository.kt`, `HandshakePacketHandler.kt`, `GossipService.kt`)**:
+  * Added `GroupMemberInfo` (`handle`, `enc_public_key`, `onion_address`) exchanged via `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupSyncPayload`.
+  * Allows group members to exchange cryptographic onion routing and X25519 encryption parameters across peer boundaries without polluting or exposing personal 1:1 trusted DM contacts.
+  * Implemented `syncMemberPeers` in `NoSlopRepository.kt`: newly invited or joined group members discover peers as un-trusted group participants (`isTrusted = false`), eliminating "ghost" pending DM requests.
+  * Extended `GROUP_QUERY` and `GROUP_SYNC` protocols with direct onion reply fallback and signature verification across all group member candidates.
+  * Implemented `CHAT_REACTION` group support (`groupId` attached to payload) with unified mesh gossip broadcasting so group reactions propagate seamlessly to all members across multi-hop circuits.
+  * Bound open group creation (`allowMemberInvites = true`) to the admin's secondary burnable identity for operator anonymity.
+* **Mesh Node Blacklisting & Trust Firewall Dropping (`PreferencesRepository.kt`, `GossipService.kt`, `NoSlopRepository.kt`, `NoSlopViewModel.kt`, `ContentPreferencesScreen.kt`, `PeerItem.kt`, `FeedCard.kt`)**:
+  * Implemented `BannedNode(publicKeyB64, handle)` entity stored in `app_settings["banned_nodes"]`.
+  * `GossipService.processIncoming` inspects incoming sender public keys and unconditionally drops all packets from blacklisted nodes at step 1.
+  * Added "Ban Node 🚫" action button across Contact Card dialogs (`PeerItem.kt`) and mesh feed cards (`FeedCard.kt`).
+  * Added collapsible "Banned Mesh Nodes 🚫" section to Settings -> Content preferences, providing 1-tap unban chips and manual public key ban inputs.
+  * Automatically removes nodes from the ban list if they broadcast an authentic `USER_EXIT` or `PEER_REMOVED` tombstone.
+  * Restores the default official NoSlop creator node upon peer disconnect unless explicitly added to the banned node list.
+* **Group Invite Notification & Navigation Parity (`NotificationsScreen.kt`, `NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Accepting a `GROUP_INVITE` notification immediately purges pending notifications for that group and transitions the card into an active `"Joined • Open Chat"` state.
+  * Tapping the notification accepts the invite and navigates directly to `group_chat/$groupId` in 1 tap.
+  * Fixed group route parsing in `MainActivity.kt` and `UnifiedFeedTab.kt` to preserve UUID hyphens by stripping trailing millisecond timestamps via regex instead of naive `.substringBefore("-")`.
+  * Added a resilient loading fallback in `DMsTab.kt` to prevent blank screen freezes while group threads load.
+* **Group Member Cleanup on Self-Removal & Group Deletion (`HandshakePacketHandler.kt`, `NoSlopRepository.kt`)**:
+  * When an admin removes a member or deletes a group, non-contact group peers are automatically reaped from `peerDao`, preventing orphaned entries.
+  * Leaving a group broadcasts self-removal with the matching identity keypair (main or burnable), notifies all members via direct dispatch, and cleans up group peers locally.
+* **ProGuard R8 Hardening & `@Keep` Model Annotations (`proguard-rules.pro`, `Packets.kt`, `GroupChat.kt`, `UserProfile.kt`, `UpdateChecker.kt`)**:
+  * Annotated all wire protocol payload classes in `Packets.kt`, `GroupChat`, and `UserProfile` with `@Keep`.
+  * Added `-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*` in `proguard-rules.pro` to ensure Gson `TypeToken` generic signatures are preserved during minification.
+
+## Completed Changes (2026-09-16) — Tiered Sovereign Backups, Identity Lifecycle Advisory Prompts & Dead Code Pruning (v0.5.7-alpha)
+
+* **Tiered Encrypted Sovereign Backups (`BackupManager.kt`, `NoSlopViewModel.kt`, `SettingsTab.kt`)**:
+  * Implemented `BackupMediaOption` enum (`NONE`, `OWNED_ONLY`, `ALL`) in `BackupManager.kt`.
+  * "IDs & Keys Only" option exports a lightweight (~100 KB) encrypted archive containing the complete Room database (`mesh.db`), sovereign identity JSON (primary and creator/burnable keypairs), API keys, and preferences, bypassing media storage entirely. Allows instant backup and recovery of all contacts, groups, and settings.
+  * "Full Backup (Owned Media Included)" filters disk media to include only files authored by the local node's primary or creator identities and `.mine` files, excluding heavy multi-gigabyte peer media caches.
+  * Added 1-tap backup export using the active session Word Cloud mnemonic from secure storage.
+* **Proactive Identity Lifecycle Advisory Prompts (`NoSlopViewModel.kt`, `SettingsTab.kt`)**:
+  * Added `BackupPromptReason` (`ONBOARDING_COMPLETED`, `DISCOVERABILITY_CHANGED`, `CREATOR_MODE_CHANGED`, `CREATOR_IDENTITY_BURNED`) to `NoSlopViewModel`.
+  * Automatically prompts users with an advisory modal after onboarding and whenever secondary/creator hidden services or keys are created or burned, educating users on the serverless nature of NoSlop and the necessity of storing encrypted backups in multiple safe locations.
+* **Dead Code Pruning & Test Alignment (`PreloadManager.kt`, `Daos.kt`, `NoSlopViewModel.kt`, `FakeDaos.kt`, `GroupMessageCrypto.kt`)**:
+  * Deleted dead `waitForPreload` in `PreloadManager.kt` (superseded by `awaitPlayerReady`).
+  * Deleted dead `updatePostContent` in `Daos.kt` (superseded by `updatePostDetails`).
+  * Deleted dead `hasMeshMediaStartedPlaying` in `NoSlopViewModel.kt` (inlined `playedMeshPostIds.contains()`).
+  * Deleted dead `restoreIdentityFromWordCloud` in `NoSlopViewModel.kt` (aligning recovery strictly with authenticated backup archives).
+  * Aligned `FakeDaos.kt` with `getAllReactionsList()`, `getAllVotedPostIds()`, and `updatePostDetails(...)`.
+  * Updated `GroupMessageCrypto.kt` legacy `ENC:GCM:` branch retirement timeline comment targeting Room migration 14→15 (v0.6.0).
+
+## Completed Changes (2026-09-15) — Mesh Transfer Stabilization, Loopback Isolation & Playback-Gated Seen Tracking (v0.5.6-alpha)
+
+* **Local Loopback Proxy Client Isolation (`HttpClientProvider.kt`, `VideoPlayer.kt`, `PreloadManager.kt`)**:
+  * Created `HttpClientProvider.loopbackClient` using `Proxy.NO_PROXY` without Tor interceptors.
+  * ExoPlayer and PreloadManager now query `loopbackClient` for `127.0.0.1` and `localhost` addresses, ensuring the local MediaProxyService (`:8080`) is never routed into Tor's SOCKS daemon regardless of whether "Route Clearnet via Tor" is ON or OFF.
+  * Exempted `file://`, `127.0.0.1`, `localhost`, and `noslop://` URLs from route-based staleness invalidation when toggling Tor clearnet routing.
+* **Mesh Video Transfer Unthrottling & Semaphore Capacity (`MediaManager.kt`, `MeshTransport.kt`)**:
+  * Removed the foreground playback/preload throttle from `MediaManager.requestNextChunks`, allowing background auto-downloads and manual tap-to-downloads to progress continuously while users navigate feeds or switch tabs.
+  * Switched `MeshTransport` media traffic to non-dropping `mediaSemaphore.acquire()` and expanded semaphore capacity to 3, eliminating socket timeouts and accidental peer disconnects.
+  * Preserved direct peer addresses during mesh recovery attempts rather than resetting `peerOnion` to null.
+* **Proactive Mesh Auto-Download Activation (`FeedCard.kt`)**:
+  * Added proactive `LaunchedEffect(post.id, isDownloaded)` in `FullScreenMeshCardV2` that calls `MediaManager.checkAndAutoDownload` for undownloaded mesh media, initiating downloads immediately upon card composition when auto-download is enabled.
+* **Playback-Gated Feed Engagement Tracking (`NoSlopViewModel.kt`, `VideoPlayer.kt`, `FeedCard.kt`)**:
+  * Added `playedMeshPostIds` to `NoSlopViewModel` and wired `onPlaybackStarted` from ExoPlayer (`onRenderedFirstFrame` / `onReady`).
+  * Gated both `markItemViewed` and `recordItemSwiped` so mesh posts with media are never marked as viewed or recorded as swiped away until the media file is fully available on disk AND playback has started at least once, keeping unread mesh broadcasts intact in feeds.
+
+## Completed Changes (2026-09-15) — Broadcast Slide Flicker Resolution, Broadcast Editing & Multi-Hop Propagation, Swipe-Down Modals (v0.5.6-alpha)
+
+* **Broadcast Slide Flicker Resolution (`NoSlopViewModel.kt`, `FeedCard.kt`, `UnifiedFeedTab.kt`)**:
+  * Fixed rapid flipping between delete button / text body states by promoting `localKeys` and `burnableKeys` StateFlows in `NoSlopViewModel.kt` to `SharingStarted.Eagerly`. This prevents transient `null` emissions upon recomposition that caused `isOwnPost` in `UnifiedFeedTab.kt` to oscillate and drop/restore the slide at index 0.
+  * Corrected `allMeshes` filter in `NoSlopViewModel.kt` to include `burnableKeys` identity alongside `keys?.publicKeyB64`, ensuring creator-authored broadcasts are never filtered out by incoming text toggles.
+  * In `FeedCard.kt` (`FullScreenMeshCardV2`), removed the `!isArticle` restriction on `post.content.isNotBlank()`, ensuring mesh broadcast text bodies render cleanly on cards.
+* **Mesh Broadcast Editing & Multi-Hop Gossip Propagation (`Packets.kt`, `Daos.kt`, `PostPacketHandler.kt`, `MeshSocialRepository.kt`, `NoSlopRepository.kt`, `NoSlopViewModel.kt`, `MediaComponents.kt`, `UnifiedFeedTab.kt`)**:
+  * Extended `EditPostPayload` in `Packets.kt` with `media_id`, `media_metadata`, and `privacy`.
+  * Added `updatePostDetails` to `PostDao` in `Daos.kt` to update content, timestamp, signature, and media fields in Room SQLite.
+  * Implemented `editMeshPost(...)` in `MeshSocialRepository.kt` and `NoSlopRepository.kt`, signing updates with the matching author keypair (main or creator/burnable) and gossiping via `NetworkPacket("EDIT_POST", hops = 6)` (or 1 for friends-only) across Tor to peers and peers-of-peers.
+  * Enhanced `PostPacketHandler.handleEditPost` to verify dual-mode signatures (length-prefixed and legacy pipe), update post details in SQLite, and auto-download updated media.
+  * Added `onEdit` action button with `Icons.Default.Edit` in `OverlayInteractions` (`MediaComponents.kt`), visible only to the broadcast author (`isMyPost`).
+  * Wired `onEditPost` in `UnifiedFeedTab.kt` to open the broadcast composer modal in edit mode pre-populated with content, privacy, and media, updating the feed immediately upon submission.
+* **Swipe-Down-to-Close for Creator & User Profile Modals (`ChannelPreferenceModal.kt`, `FeedCard.kt`)**:
+  * Converted `ChannelPreferenceModal.kt` from an `AlertDialog` to Material 3 `ModalBottomSheet` with `rememberModalBottomSheetState(skipPartiallyExpanded = true)` and `BottomSheetDefaults.DragHandle`.
+  * Converted `showUserInfoDialog` in `FeedCard.kt` to Material 3 `ModalBottomSheet`.
+  * Nested scrolling in both modals seamlessly coordinates with `LazyColumn` (`creatorItems` and `PeerMeshContentList`): dragging within the list scrolls the items, while swiping down from the header, handle, or list-top dismisses the sheet.
+
+## Completed Changes (2026-09-15) — Splash Buffer Mask, Wikipedia Thumbnails, 60-Day Freshness, Creator Depletion & Mindful Break Reminders
+
+* **Splash Screen Initial Media Buffer Readiness (`MainActivity.kt`, `PreloadManager.kt`)**:
+  * Coordinated initial slide determination with `_isSavedPositionLoaded` so cold start targets the exact restored slide rather than guessing ahead.
+  * Implemented `awaitPlayerReady(rawUrl, timeoutMs)` in `PreloadManager.kt`, holding the splash curtain with "Buffering initial media..." until ExoPlayer buffers its first frame (reaching `STATE_READY`), eliminating startup buffering stalls on cold launch.
+* **MediaWiki Thumbnail Extraction & Metadata Resolver (`WikipediaApiClient.kt`, `ArticleMetadataResolver.kt`, `MediaComponents.kt`, `FeedCard.kt`)**:
+  * Added `piprop=thumbnail|original&pilicense=any&pithumbsize=800` to Wikipedia Action API queries, unblocking non-CC0, promotional, movie, and fair-use article lead images.
+  * Implemented Wikipedia REST summary API fallback (`/api/rest_v1/page/summary/`) in `WikipediaApiClient` and fast-path resolution in `ArticleMetadataResolver.kt`.
+  * Added flexible regex matching for OpenGraph lead images across any meta attribute order and set standard browser User-Agent header for Coil image requests in `MediaComponents.kt`.
+  * Fixed `FeedCard.kt` image slide resolution falling back to `thumbnailUrl` when `mediaUrl` is null.
+* **Seen & Reacted Content Banishment & 60-Day Freshness (`NoSlopViewModel.kt`, `FeedRepository.kt`, `Daos.kt`)**:
+  * Set `FRESHNESS_MAX_AGE_MS` and `MAX_FEED_AGE_MS` to strictly 60 days for creator and non-archival clearnet feeds.
+  * Eliminated fallback loops that were resurrecting seen/read items.
+  * Extracted and cached all reacted anchor IDs from `reactionDao` and `voteDao` (`cachedReactedAnchorIds`), permanently excluding liked/reacted/voted content from the Live Feed.
+  * Cleaned `saved_feed_list` cold-start restoration to skip previously seen, read, or reacted items.
+  * Updated `FeedRepository.kt` to query all user-added creator channels across Tor without truncation.
+* **Creator Depletion Slide & Search Prompt (`NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Added `UnifiedItem.CreatorDepletion`: when all fresh (< 60 days) creator uploads are exhausted, the app injects an encouraging milestone card ("Caught Up on Creators! 🎉") with a 1-tap "Search & Add Creators" button before continuing with fresh random discovery content.
+* **Mindful Break & Exit Reminders (`SettingsRepository.kt`, `SettingsTab.kt`, `NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Enabled Break Reminders ON by default, configured to a time-based trigger every 30 minutes (with optional slide-counter mode).
+  * Added dedicated wellbeing settings card in Settings -> Content tab.
+  * Dynamically schedules and renders `UnifiedItem.BreakReminder` in the vertical feed with 1-tap "Exit App" (`finishAffinity()`) and "Continue Browsing" options.
+* **Instagram & TikTok Source Registration (`SourceLibrary.kt`, `ApiKeyRepository.kt`, `PublicApiService.kt`)**:
+  * Added built-in API sources `"api-instagram"` and `"api-tiktok"` in `SourceLibrary.kt` with key storage entries in `ApiKeyRepository.SERVICES`.
+
+## Completed Changes (2026-09-14) — Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping, Video Scrubber & Creator Modals
+
+* **Fast Peer Pairing & Handshake De-Contention (`MeshTransport.kt`, `MeshSocialRepository.kt`, `GossipService.kt`)**:
+  * Raised `isHandshake` connect timeout from 15s to 28s with 2 attempts, accommodating Tor v3 rendezvous circuit establishment over mobile connections and eliminating premature "Connect timed out" failures.
+  * Removed redundant `USER_HANDSHAKE` packet synthesis in `dispatchPacket` that was spawning 4+ simultaneous sockets upon transient failures.
+  * Sequenced handshake completion before firing inventory sync and node discovery sharing, and exempt handshake packets from triggering `GossipService` peer failure cooldowns.
+* **Notification Cleanup & New Broadcast Alerts (`NoSlopViewModel.kt`, `PostPacketHandler.kt`, `NotificationSettings.kt`, `NotificationsScreen.kt`)**:
+  * Fixed lingering connection request notifications: accepting or declining requests directly deletes notifications by ID and sender public key from SQLite.
+  * Added `broadcasts` toggle to `NotificationSettings.kt` and wired incoming peer broadcast alerts in `PostPacketHandler.kt` with deep-linking to posts (`NotificationHelper.showNotification`).
+* **Rubbish Dumping Cycle for Disconnected Peer Content (`MeshSocialRepository.kt`, `NoSlopRepository.kt`)**:
+  * Implemented `purgeOrphanedPeerContent()` running every 30 minutes in the presence loop. Purges posts, comments, reactions, votes, and on-disk media files from peers that are no longer in contacts, while strictly whitelisting primary, secondary/burnable, and official creator identities.
+* **Auto-Hiding Video Playhead Timeline & Backward Seek Back-Buffer (`VideoPlayer.kt`)**:
+  * Added `.setBackBuffer(60000, true)` to ExoPlayer's `DefaultLoadControl`, keeping 60 seconds of played video in RAM to eliminate range stalls during backward skips.
+  * Configured `SeekParameters.CLOSEST_SYNC` for instant keyframe seeks.
+  * Added an interactive playhead slider and elapsed/duration timestamps (`MM:SS / MM:SS`) with automatic 3.5s auto-hide and tap-to-reveal animations.
+* **Clearnet Creator Content List in Preferences Modal (`ChannelPreferenceModal.kt`, `FeedCard.kt`)**:
+  * Added `CreatorContentList` in `ChannelPreferenceModal.kt` rendering a scrollable list of thumbnails and excerpts for clearnet creators, with 1-tap jump to content in the feed.
+
+## Completed Changes (2026-09-14) — Bi-Directional Peer Disconnect, Media Purging, Total Factory Reset & Sync Unblocking
+
+* **Bi-Directional Peer Disconnect Protocol (`MeshSocialRepository.kt`, `HandshakePacketHandler.kt`, `Packets.kt`)**:
+  * Implemented `PEER_REMOVED` wire packet (`PeerRemovedPayload { userId, timestamp, signature }`). When a user removes a peer from contacts, a signed `PEER_REMOVED` packet is dispatched directly to the remote peer's onion address using the identity paired with that contact (`getIdentityForPeer`).
+  * `HandshakePacketHandler` intercepts `PEER_REMOVED` and targeted `USER_EXIT` packets, verifying Ed25519 signatures (supporting both `encodeForSigning` and legacy pipe formats) and calling `repo.deletePeer(senderId, notifyRemote = false)`. This ensures that when User A removes User B, User A is automatically removed from User B's device.
+  * Added `PEER_REMOVED` and `DELETE_POST` to the `GossipService` firewall bypass whitelist so disconnection and post deletion packets from un-trusted or non-contact nodes are never dropped.
+* **Complete Peer Content & On-Disk Media Purging (`MeshSocialRepository.kt`, `MediaManager.kt`, `NoSlopViewModel.kt`, `Daos.kt`)**:
+  * Added `MediaManager.deleteMediaFiles()`: peer removal scans all posts, DMs, and comments by that author, collects all media identifiers, and deletes `.mp4`, `.jpg`, `.part`, and `.mine` files from disk across all external and internal media directories.
+  * Extended database purges to wipe posts by both author public key and author handle (`postDao.deletePostsByAuthor`, `db.execSQL("DELETE FROM mesh_posts WHERE authorHandle = ?")`), comments, comment reactions, chat reactions, votes, comment votes, and notifications.
+  * Fixed an in-memory feed retention bug in `NoSlopViewModel.kt` where `meshes.find { ... } ?: currentItem` was retaining deleted mesh posts in the UI. Evicted posts immediately from `_unifiedFeed.value`, `cachedDefaultFeed`, and `sessionLoadedIds` across public and private broadcasts.
+* **Total Factory Reset & Clean Process Restart (`NoSlopRepository.kt`, `MediaManager.kt`, `NoSlopViewModel.kt`)**:
+  * Implemented `MediaManager.deleteAllMediaFiles()`, recursively purging all files in `Pictures/NoSlop`, `Movies/NoSlop`, `Music/NoSlop`, `Downloads/NoSlop`, `filesDir/NoSlop`, `filesDir/media`, `cacheDir`, and `externalCacheDir`.
+  * `NoSlopRepository.factoryReset()` clears all SQLite database tables, deletes EncryptedSharedPreferences (`noslop_identity_secure.xml`, `noslop_identity_fallback.xml`), wipes API keys and system preference files, unregisters Tor hidden services, and flushes in-memory outbox queues, gossip rate limiters, and relay states.
+  * `NoSlopViewModel.factoryReset()` clears all UI state flows, wipes debug logs, and triggers a clean process kill and restart (`android.os.Process.killProcess`), landing the user fresh on the Onboarding Welcome screen.
+* **Sync Response Firewall Unblocking & Multi-Format Legacy Signature Support (`GossipService.kt`, `MeshPacketVerifier.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`)**:
+  * Resolved the firewall blocking bug where `GossipService.processIncoming` was dropping `SYNC_RESPONSE` packets from non-contact creator nodes (`isTrusted = false`) with `FIREWALL BLOCKED: Sender ... is not trusted`. Added `isSyncPacket` (`SYNC_RESPONSE`, `INVENTORY_SYNC_REQUEST`, `SYNC_REQUEST`) to the firewall bypass whitelist.
+  * Enhanced `MeshPacketVerifier.kt`, `PostPacketHandler.kt`, and `SyncPacketHandler.kt` with multi-format fallback signature verification for `POST`, `ANNOUNCE_DISCOVERABLE`, `USER_EXIT`, comments, and reactions, accepting length-prefixed `encodeForSigning` alongside pre-overhaul pipe-delimited strings (`"$id|$authorId|$content|$timestamp"`).
+  * Relaxed `handleAnnounceDiscoverable` timestamp drift tolerance to 30 minutes, exempted default `"Anonymous"` handles from collision rejection, and cached authentic announcement packets in `app_settings`.
+  * Implemented `shareDiscoverableNodesWith(peer)`: when a peer completes a handshake with a node, the node automatically relays its known active discoverable creator nodes to the newly connected peer.
+* **Streaming Backup Export Reliability & Connection Latency Tuning (`BackupManager.kt`, `NoSlopViewModel.kt`, `SettingsTab.kt`, `MeshTransport.kt`)**:
+  * Moved temporary export and import archive files from `context.cacheDir` (which hit internal storage quotas on large media backups) to `context.externalCacheDir ?: context.cacheDir`.
+  * Dispatched `exportBackupToUri` and `importBackupFromUri` to `Dispatchers.IO` in `NoSlopViewModel`, preventing main thread UI freezes and ANR watchdog crashes. Shielded individual file reads from I/O errors and excluded incomplete `.part` files from backups.
+  * Added a dedicated Material 3 `AlertDialog` success popup in `SettingsTab.kt` confirming successful backup exports.
+  * Tuned `CONNECTION_REQUEST` and `USER_HANDSHAKE` timeouts to 15–18s with 1 attempt, allowing fresh nodes to fail fast to the background outbox during initial Tor v3 descriptor propagation rather than hanging for 2 minutes, and guarded `flushOutboxForPeer` against concurrent socket races.
+
+## Completed Changes (2026-09-12) — Release v0.5.3-alpha: AAD Re-Encryption Migration, Word Cloud Restore & Test Harness
+
+* **Room Migration 13 → 14 (`NoSlopDatabase.kt`, `GroupMessageCrypto.kt`)**:
+  * Retired the legacy `ENC:GCM:` group message ciphertext format; re-encrypted existing rows under `ENC:GCM2:` with strict Additional Authenticated Data (AAD) binding (`"$groupId|$msgId"`).
+  * Migration executes idempotently, skipping rows already carrying `ENC:GCM2:`, and fails safe by logging warnings rather than aborting database open on hardware keystore errors.
+  * Stamped planned retirement date for legacy `ENC:GCM:` fallback branches in `GroupMessageCrypto.kt`.
+* **Mnemonic Word Cloud Identity Restore (`OnboardingScreen.kt`, `NoSlopViewModel.kt`, `NoSlopRepository.kt`)**:
+  * Implemented "Restore from Word Cloud" in the onboarding welcome screen, allowing users to deterministically reconstruct their Ed25519/X25519 keypair and `.onion` address directly from their 12-word mnemonic.
+  * Enforced legacy identity safeguard: checks `getIdentityVersion()` and warns users if an existing on-device identity is legacy (pre-v0.5.1, `version < 2`), preventing silent identity clobbering.
+  * Clarified backup import dialog copy to distinguish between encrypted ZIP archive restoration and sovereign Word Cloud derivation.
+* **Pure-JVM Group Message Gate Architecture (`DmPacketHandler.kt`, `GroupMessageSecurityTest.kt`)**:
+  * Extracted `GroupMessageGate.evaluate()` as a pure function decoupling packet authorization decisions (membership, signature validity, group existence) from Android/database side effects.
+  * Added unit test coverage asserting `GroupMessageGate` verdict states: unknown group, non-member sender, missing signature, invalid signature, and valid member.
+* **Instrumented Room Migration & DAO Test Suite (`app/src/androidTest/`)**:
+  * Configured `androidTest` source set with Room testing assets and schema locations.
+  * Added `MigrationTest.kt` verifying Room migration 13 → 14 against seeded legacy database rows, asserting format upgrades and authenticated AAD decryption.
+  * Added `PendingGroupMessageDaoTest.kt` asserting real SQLite execution of queue insertion, retrieval, peer deletion, and TTL expiration pruning.
+* **Diagnostics & Dead Code Cleanup (`TorService.kt`, `VideoPlayer.kt`, `Daos.kt`, `FeedParser.kt`, `SourceLibrary.kt`, `Packets.kt`)**:
+  * Removed dead write-only `lastMediaProgressAtMs` field from `TorService.kt`.
+  * Updated stale `CachedSource` comment in `VideoPlayer.kt` to reflect SOCKS5 `streamNonce` circuit invalidation.
+  * Aligned `NotificationItem.senderPub` to store authentic sender public keys (`packet.senderId`) consistent with chat messages and 1:1 DMs.
+  * Pruned 12 verified dead methods across DAOs, API clients, and network packet handlers.
+  * Replaced silent catch blocks with diagnostic `Logger.debug` logging in `TorService.kt` and `ProxyAuth.kt`.
+  * Added `_workspace/` to `.gitignore` and reorganized root test scripts into `scripts/`.
+
+## Completed Changes (2026-09-12) — Release v0.5.2-alpha: Security Hardening, Dual-Identity Deletion & Media UX
+
+* **Creator Mode Dual-Identity Post Deletion & Lifecycle (`FeedCard.kt`, `MeshSocialRepository.kt`)**:
+  * Resolved an identity mismatch where broadcasts authored under the Creator/Burnable identity hid the delete action from the author and failed repository permission checks.
+  * `FeedCard.kt` (`FullScreenMeshCardV2`) now checks both `localKeys` and `burnableKeys`, ensuring the author always has full control over their broadcasts.
+  * `MeshSocialRepository.deleteMeshPost()` dynamically selects the matching signing key (main or burnable), generating valid signatures and packet origins accepted across the mesh.
+* **Creator Feed Filtering ("Your Broadcasts") Fix (`NoSlopViewModel.kt`)**:
+  * Added `burnableKeys` inclusion to `"My Content"` feed filtering, ensuring all broadcasts authored under either personal or creator identities display seamlessly.
+* **Immediate Media Download Visual Feedback (`FeedCard.kt`, `ChatThreadScreen.kt`)**:
+  * Replaced static zero-percent progress bars with animated indeterminate connection indicators (`LinearProgressIndicator`), giving instant visual feedback when requesting media chunks over Tor.
+  * Resolved a UI freeze in DM chat where tapping "Tap to Download" on GIFs or images appeared inactive before chunk reception.
+* **Group Message Crypto Hardening & AAD Binding (`GroupMessageCrypto.kt`, `NoSlopRepository.kt`, `DmPacketHandler.kt`)**:
+  * Eliminated silent plaintext fallbacks in `GroupMessageCrypto.encrypt()`: now strictly fails closed via `SecurityException`.
+  * Removed in-production test key fallback in `getOrCreateKey()`; isolated test key injection cleanly to `@VisibleForTesting testKeyProviderOverride`.
+  * Introduced versioned prefix `ENC:GCM2:` strictly enforcing Additional Authenticated Data (AAD) binding over `"$groupId|$msgId"` with zero fallback, while maintaining `ENC:GCM:` backward compatibility for pre-v0.5.2 rows.
+  * Updated Room migration `MIGRATION_12_13` to bind `groupId` and `msgId` as AAD during group message re-encryption.
+  * Added in-memory Keystore `SecretKey` caching to eliminate expensive hardware keystore roundtrips on message reads.
+  * Stored explicit `identity_version = "2"` in `IdentityRepository` to track deterministic HKDF-derived keys.
+* **Tor Dead Code & Circuit Rotation Cleanup (`TorService.kt`)**:
+  * Removed dead NEWNYM circuit rotation routines (`requestNewCircuit`, `_circuitGeneration`, etc.) in favor of modern SOCKS5 stream nonce-bumping.
+* **SSH Host Key Verification & Pinned Fingerprint Management (`HubSetupScreen.kt`, `SettingsTab.kt`)**:
+  * Wired host key verification prompts into the Hub software update deployment pathway.
+  * Added a dedicated "Clear Pinned SSH Host Key" setting action in `SettingsTab.kt`.
+* **Legacy Backup Import Safety Confirmation (`SettingsTab.kt`)**:
+  * Added a user confirmation dialog for legacy unauthenticated AES-CBC archives before importing.
+* **Creator Studio Severable ID Burning (`CreatorStudioTab.kt`)**:
+  * Added a "Burn ID 🔥" action with a confirmation dialog, allowing creators to burn and regenerate their public broadcast identities on demand.
+* **Comprehensive Test Coverage & Documentation (`GroupMessageCryptoTest.kt`, `MeshPacketVerifierTest.kt`, `WIRE_PROTOCOL_REFERENCE.md`)**:
+  * Added unit test suites verifying AAD group encryption roundtrips, cross-row tampering rejections, HKDF seed derivation determinism, and `GROUP_MESSAGE` packet verification.
+  * Synchronized `docs/WIRE_PROTOCOL_REFERENCE.md` cataloging `GROUP_MESSAGE` as legacy receive-only with strict membership and signature checks.
+
+## Completed Changes (2026-09-12) — Verification Pass Remediation
+
+* **Group Message Crypto Hardening & AAD Binding (§3.1, §3.2, §3.3, §3.4)**:
+  * Eliminated silent plaintext fallback in `GroupMessageCrypto.encrypt()`: fails closed by throwing `SecurityException` so database writes are never executed unencrypted.
+  * Added Additional Authenticated Data (AAD) binding over `"$groupId|$msgId"`, preventing cross-row ciphertext transplantation attacks.
+  * Cached Keystore `SecretKey` reference in memory to eliminate expensive keystore round-trips when reading message threads.
+  * Explicitly validated group IDs against `GroupChatDao` to avoid fragile hyphen assumptions.
+* **Tor Dead Code & Circuit Rotation Cleanup (P1-3 Remainder)**:
+  * Removed obsolete `requestNewCircuit()`, `_circuitGeneration`, `circuitGeneration`, `newnymMutex`, and interval constants from `TorService.kt` in favor of SOCKS5 stream nonce-bumping.
+* **SSH Host Key Verification & Pinned Key Reset (P1-8 Remainder)**:
+  * Wired host key verification dialogs into the Hub software update path in `HubSetupScreen.kt`.
+  * Added "Clear Pinned SSH Host Key" setting action in `SettingsTab.kt` to allow users to reconnect after Hub OS reinstalls.
+* **Legacy Backup Confirmation Dialog (§3.10)**:
+  * Added dedicated warning dialog in `SettingsTab.kt` when importing legacy AES-CBC unauthenticated backups, allowing users to explicitly choose whether to proceed.
+* **Creator Studio Severable ID Burning UI (§3.8)**:
+  * Added "Burn ID 🔥" action with a destructive confirmation dialog to `CreatorStudioTab.kt`, wiring `viewModel.burnCreatorIdentity()` to unregister hidden services, broadcast `USER_EXIT`, and regenerate keys.
+* **Unit Tests & Wire Protocol Documentation (§3.7, §3.9)**:
+  * Added unit test coverage for `GroupMessageCryptoTest` (AAD round-trip, tampering rejection, deterministic HKDF seed derivation) and `MeshPacketVerifierTest` (`GROUP_MESSAGE`).
+  * Updated `docs/WIRE_PROTOCOL_REFERENCE.md` cataloging `GROUP_MESSAGE` as legacy receive-only with strict membership and signature verification.
+
+## Completed Changes (2026-09-11) — Security Audit Remediation (P0, P1, P2, P3, P4)
+
+* **Group Messaging E2EE Fan-out & Keystore Encryption at Rest (P0-1 & P0-2)**:
+  * Replaced cleartext `GROUP_MESSAGE` gossip broadcasts with strict pairwise X25519 + ChaCha20-Poly1305 encrypted fan-out.
+  * Added Room database table `pending_group_messages` with automatic 7-day TTL expiration and persistent store-and-forward outbox delivery.
+  * Implemented `GroupMessageCrypto` encrypting group chat message bodies at rest in Room via Android Keystore AES-256-GCM (`MIGRATION_12_13`, schema version 13).
+  * Enforced strict sender membership and signature validation in `DmPacketHandler.handleGroupMessage`.
+* **Tor Control Channel Socket Hardening (P0-3)**:
+  * Switched `TorControlChannel` to `Mode.UNIX_ONLY`, securing the control socket via Android private app file permissions.
+  * Removed unauthenticated TCP control port loopback binding and added post-bootstrap port 9051 self-check verification.
+* **Splash Media Pre-warm & Onion Collision Fix (P0-4 & P0-5)**:
+  * Replaced hand-built splash proxy URL string with `MediaProxyService.buildProxyUrl()` containing session token and port resolution.
+  * Corrected `TorService.kt` onion derivation on address collision to extract public keys from private key parameters rather than treating private key bytes as public keys.
+* **Identity Derivation & Severable Creator Teardown (P1-1 & P1-2)**:
+  * Added `CryptoService.deriveIdentityFromSeed()` using HKDF-SHA512 to deterministically derive Ed25519 and X25519 keypairs from the 12-word Word Cloud mnemonic.
+  * Configured `setCreatorEnabled(false)` and `burnCreatorIdentity()` to unregister secondary hidden services, broadcast `USER_EXIT`, and purge keys from disk.
+* **Exit Cache Invalidation, Permissions & Audio Focus (P1-3, P1-4, P1-5)**:
+  * Keyed `CachedSource` staleness checks on `streamNonce` rather than unused generation counters, invalidating cached URLs upon circuit rotation.
+  * Declared `android.permission.WAKE_LOCK` in `AndroidManifest.xml` for background mesh sync.
+  * Configured `setAudioAttributes(..., handleAudioFocus = true)` on ExoPlayer in `VideoPlayer.kt`.
+* **Rate Limiting & Downgrade Guards (P1-6, P1-8, P1-10)**:
+  * Enforced dedicated rate limits (5 per 60s per sender) on `ANNOUNCE_DISCOVERABLE`, `IDENTITY_UPDATE`, and `USER_EXIT` in `GossipService.kt`.
+  * Added SSH host-key verification dialog with prompt continuation across all Hub deployment paths in `HubSetupScreen.kt`.
+  * Enforced `LegacyBackupConfirmationRequiredException` on unauthenticated legacy CBC backup archive imports in `BackupManager.kt`.
+* **Room Schema Export, Hygiene & Dead Code Removal (P2-1, P2-5, P3)**:
+  * Enabled `exportSchema = true`, configured KSP schema location to `app/schemas/`, committed `13.json`, and added `androidx.room:room-testing`.
+  * Replaced silent catch blocks with diagnostic logging in `MainActivity.kt` and `BackupManager.kt`.
+  * Removed 34 verified dead functions and unused assets (`ground_zero_qr.png`, `TorWarningPanel.kt`, dead DAO queries, and uncalled ViewModel functions).
+* **Consolidation of Duplication (P4-1, P4-3, P4-4, P4-5)**:
+  * Extracted `ProxyAuth.kt` centralizing proxy authentication and HMAC signing across YouTube, Reddit, and Jamendo clients.
+  * Extracted `compressImageFile()` in `ui/MediaUtils.kt` consolidating image scaling and EXIF orientation routines.
+  * Extracted `startDeployment()` in `HubSetupScreen.kt` consolidating 3 duplicate deployment launcher blocks.
+  * Created `JsonUtils.kt` (`JsonObject.str`, `stripHtml`), consolidated base32 loops in `CryptoService.kt`, and unified comment/reaction sync mapping extensions.
+
+## Completed Changes (2026-09-10) — Peer Mesh Content In Modals, Creator Studio Severable ID, Tor 40% Recovery & Dual-Identity Broadcasts
+
+* **Peer Mesh Content List in User Info Modals (`PeerItem.kt`, `FeedCard.kt`, `DMsTab.kt`)**:
+  * Implemented `PeerMeshContentList`: User Info / Contact Card modals across Feed and DMs now render a scrollable list of the user's mesh broadcasts with rich media thumbnails (Base64 bitmaps, Coil web/clearnet images, or category type icons), timestamps, and two-line body excerpts.
+  * Added full Markdown rendering to broadcast body excerpts in `PeerMeshContentList` using `MarkdownUtils.parseMarkdown(...)`.
+* **Direct Filtered Author Feed Navigation & Scroll Positioning (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
+  * Extracted an O(1) `Author:$authorPub` fast-path loader at the top of `loadMoreFeedItems()` in `NoSlopViewModel.kt` (matching `History` and `Saved`), bypassing discovery deduplication and viewed-ID purges so all broadcasts by the author load chronologically.
+  * Tapping any broadcast in `PeerMeshContentList` dismisses the modal, navigates to the Feed tab, populates the author's feed, and scrolls directly to the tapped post index via `_restoreScrollPositionEvent`.
+  * Displayed active filter label as `@handle` with 1-tap dismissal restoring the default Live Feed, and guarded `forceScrollToTop` against clobbering author slide positioning.
+* **Creator Mode Severable Identity Architecture & Studio Sharing (`CreatorStudioTab.kt`, `SettingsTab.kt`, `QRShareSheet.kt`)**:
+  * Added a dedicated **Creator ID 🪪** action to `CreatorStudioTab.kt`. Creators can now inspect, copy, and share their severable burnable identity (`burnableKeys`) via `QRShareSheet` without exposing their personal primary identity.
+  * Un-nested Creator Node controls from `if (isDiscoverableEnabled)` in `SettingsTab.kt`, making Creator Node settings independently accessible when Discoverability is turned off.
+  * Added a confirmation warning dialog before disabling Creator Mode, educating that peers who connected via the secondary Creator ID will permanently lose connectivity.
+  * Preserved Creator Identity when Discoverability is toggled off in `NoSlopViewModel.kt`, suppressing premature `USER_EXIT` broadcasts while Creator Mode remains active.
+* **Built-in Official NoSlop Creator Node & In-App Browser Reader (`NoSlopRepository.kt`, `DMsTab.kt`, `PeerItem.kt`, `FeedCard.kt`)**:
+  * Seeded the official NoSlop creator node into `PeerDao` (`ensureDefaultDiscoverableNode`) using actual cryptographic keys and dynamically derived tripcodes (`fnozdo...`).
+  * Filtered out the creator's own node from their own "DISCOVERABLE NODES" list.
+  * Removed hardcoded Stripe donation links from default seeding (`fundMeLink = null`), ensuring donation links populate dynamically from authentic node broadcasts.
+  * Added a clickable `$` coin badge and donation link across User Info modals that opens the donation URL in the in-app `ArticleWebViewDialog`.
+* **Tor Daemon Recovery & 40% (`loading_keys`) Hang Fix (`TorService.kt`)**:
+  * Implemented `stopTor(context)` sending `SIGNAL HALT` to the Tor control channel (terminating the native C `libtor.so` binary) and `ACTION_STOP` intent to the Android service, verifying socket release on port 9050 before restarting.
+  * Added reliable cache clearing on `forceRestart`, wiping stale consensus and authority certificates from `app_TorService/data/`.
+  * Appended `ClientPreferIPv6ORPort 0` to `torrc` to prioritize IPv4 directory authority and relay connections on mobile carriers.
+* **Handshake Signature Verification Parity & Creator Auto-Accept (`HandshakePacketHandler.kt`)**:
+  * Upgraded `handleConnectionRequest` and `handleUserHandshake` in `HandshakePacketHandler.kt` to dual-mode signature verification (supporting length-prefixed `CryptoService.encodeForSigning` alongside legacy pipe fallbacks).
+  * Aligned the creator node setting key to `"is_creator_enabled"`, restoring automated handshake acceptance for creator nodes.
+  * Fixed `handleAnnounceDiscoverable` regression that improperly flipped temporary contacts to permanent upon receiving presence heartbeats.
+* **Dual-Identity Targeted Broadcast Routing (`MeshSocialRepository.kt`, `GossipService.kt`, `UnifiedFeedTab.kt`)**:
+  * Configured `composeAndBroadcastPost` to author and sign posts with the Creator identity (`getBurnableIdentity()`) when Creator Mode is active.
+  * Added recipient-aware `senderId` stamping in `GossipService.broadcast`, stamping `burnable.publicKeyB64` for followers and `main.publicKeyB64` for personal friends so broadcasts pass firewalls for both peer types.
+  * Updated `isOwnPost` in `UnifiedFeedTab.kt` to recognize both main and burnable identities under "My Content".
+
+## Completed Changes (2026-09-09) — Decentralized Group Mesh Messaging, Tri-Channel Transport Isolation & Saved Search
+
+* **Decentralized Multi-Hop Group Messaging & Audience Privacy Toggles (`GroupChatThreadScreen.kt`, `NoSlopRepository.kt`, `DmPacketHandler.kt`, `Packets.kt`)**:
+  * Implemented `GROUP_MESSAGE` mesh gossip packets: group messages now propagate across intermediate connected peers so non-connected members in open groups (e.g. Admin <-> Member A <-> Member B) can converse freely without requiring pairwise direct Tor connections.
+  * Preserved identity privacy: `GROUP_MESSAGE` packets carry display handles and short tripcodes, masking long-term public keys and onion addresses from indirect group members.
+  * Added a **Message Audience** selector pill (`🌐 All Members` vs `👥 Friends Only`) above the group chat input bar. Friends-only messages restrict packet transmission to direct contacts only (`hops = 1`).
+* **Non-Admin Group Invites & Open Group Warning (`GroupSettingsModal.kt`, `DMsTab.kt`, `HandshakePacketHandler.kt`, `MeshPacketVerifier.kt`, `Packets.kt`)**:
+  * Added `allow_member_invites` and `allow_member_self_remove` to `GroupInvitePayload` and `GroupUpdatePayload`, dynamically synchronizing group permission states to all members upon invite acceptance and settings update.
+  * Strictly gated the "Add Member" button on `isAdmin || (group.allowMemberInvites && allowInvites)`, preventing non-admins from inviting peers when member invites are turned off.
+  * Added an **Open Group Warning** confirmation dialog in both `CreateGroupDialog` (`DMsTab.kt`) and `GroupSettingsModal.kt` when enabling member invites, clearly explaining that anyone can invite peers across the mesh, that members can use "Friends Only" messaging, and that the admin retains full member-removal authority.
+  * Extended `MeshPacketVerifier.kt` and `HandshakePacketHandler.handleGroupInvite` with multi-candidate signature verification (supporting both `CryptoService.encodeForSigning` and legacy pipe payloads for admin and member signers).
+  * Restricted `resendGroupInvitesForPeer` in `HandshakePacketHandler.handleAnnouncePeer` strictly to offline-to-online transitions (`wasOffline == true`), eliminating redundant re-sends on 30s heartbeats.
+  * Enqueued `GROUP_INVITE`, `GROUP_UPDATE`, `GROUP_DELETE`, and `DELETE_MESSAGE` into `pendingOutboxMessages` on failure, and unblocked the outbox worker for pending invited peers.
+* **Tri-Channel Concurrency Isolation & Buffered Socket Reader (`MeshTransport.kt`, `MediaManager.kt`)**:
+  * Decoupled transport concurrency into three dedicated, non-interfering semaphore pools:
+    * `dmSemaphore(4)`: real-time user communications (`MESSAGE`, `GROUP_MESSAGE`, `GROUP_INVITE`, `GROUP_UPDATE`, `GROUP_DELETE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `GROUP_QUERY`, `GROUP_SYNC`). Connect timeout raised to 25s with 3 attempts.
+    * `bulkSemaphore(4)`: general social gossip (`POST`, `COMMENT`, `REACTION`, `VOTE`, `INVENTORY_SYNC_REQUEST`, `SYNC_RESPONSE`).
+    * `mediaSemaphore(2)`: dedicated exclusively to chunk-based media transfers (`MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_RELAY_REQUEST`, `MEDIA_RECOVERY_FOUND`, `MEDIA_TRANSFER_ACK`).
+  * Replaced character-by-character socket reading in `MeshTransport.handleIncomingConnection` with 8KB buffered chunk reading while enforcing the 4MB `MAX_PACKET_CHARS` frame cap, eliminating 30-second `Read timed out` socket stalls during large media chunk receipts.
+  * In `MediaManager.kt`, throttled background chunk sync when foreground video playback or stream resolution is active (`PreloadManager.isVideoActive || PreloadManager.currentlyPlayingUrl != null`), allocating 100% of Tor bandwidth to the active video.
+  * Capped `MediaManager` max concurrency to 2 connections.
+* **Long Video Playback Buffering & Connection Pool Keep-Alive (`VideoPlayer.kt`, `PreloadManager.kt`, `HttpClientProvider.kt`)**:
+  * Increased ExoPlayer buffer duration parameters in `DefaultLoadControl`: raised `minBufferMs` from 15s to 35s and `maxBufferMs` from 50s to 120s (2 minutes), ensuring subsequent stream ranges are requested well before active playback runs dry and eliminating mid-playback stalls on videos longer than 3–4 minutes.
+  * Lowered `bufferForPlaybackAfterRebufferMs` from 6000ms to 2000ms for fast resume on transient buffer dips.
+  * Extended OkHttp `ConnectionPool` keep-alive duration for `getOrCreateIsolatedMediaClient` from 30s to 300s (5 minutes), preventing Tor SOCKS sockets from being dropped while ExoPlayer consumes buffered video.
+* **Saved List Chronological Sorting, Full-Text Search & Continuous Pagination (`NoSlopViewModel.kt`, `UnifiedFeedTab.kt`, `Daos.kt`)**:
+  * Fixed `cachedExcludedIds` filtering in `NoSlopViewModel.loadMoreFeedItems` so swiped items are not purged from Saved or Liked lists.
+  * Maintained `savedTimestampsMap` in memory and tracked `saved_at` timestamps in `app_settings` upon bookmarking and liking, strictly sorting Saved items by `saved_at DESC` (most recently saved items first).
+  * Extracted a dedicated `loadSavedBatch` / `processSavedBatch` fast-path with direct SQLite fallback (`feedDao.getSavedItemsList()`), bypassing discovery feed exclusions and internet-search exhaustion loops.
+  * Added full-text search matching across `title`, `author`, `excerpt`, and `fullContent` in Saved search.
+  * Triggered `loadMoreFeedItems` on short lists in `UnifiedFeedTab.kt` (`unifiedItems.size in 1..4 && index == unifiedItems.size - 1`), unlocking continuous pagination even when a search query initially returns fewer than 5 items.
+## Completed Changes (2026-09-09) — Mesh Empty State, History Search & Pagination, Content Mix Variety & Audio Pipeline
+
+* **Mesh Tab Empty State Default & Button Gating (`UnifiedFeedTab.kt`)**:
+  * Prioritized `(filterMode == "Mesh" || filterMode == "P2P Mesh")` in the empty-feed container of `UnifiedFeedTab.kt`, ensuring that the "Nothing New Here" card with the "See Old Posts" button is the default empty state with zero delay.
+  * Gated the "See Old Posts" button on `viewModel.hasMeshPosts == true` so fresh devices without mesh posts see "No posts have been received from the mesh network yet." without the button.
+  * Decoupled the Mesh view from `isRefreshing`, completely eliminating "Curating your feed..." when switching to the Mesh tab.
+* **History Filter Ordering, Search Integration & Pagination (`NoSlopViewModel.kt`, `Daos.kt`, `EngagementRepository.kt`, `UnifiedFeedTab.kt`)**:
+  * Switched `ViewedHistoryDao.insertViewedItem` from `OnConflictStrategy.IGNORE` to `REPLACE`, ensuring that re-viewing or re-dwelling on content refreshes its `viewedAt` timestamp to the current time.
+  * Added `getAllViewedItemsList()` in `ViewedHistoryDao`, `EngagementRepository`, and `NoSlopRepository` for reliable retrieval of all history items from SQLite.
+  * Made `viewedHistoryRecords` in `NoSlopViewModel.kt` use `SharingStarted.Eagerly` so in-memory history records are always active and populated, even without direct Compose UI subscribers.
+  * Implemented fast chronological `loadHistoryBatch` in `NoSlopViewModel.kt`, strictly sorting history by `viewedAt DESC` using O(1) in-memory maps.
+  * Integrated real-time query filtering into `loadHistoryBatch`, allowing users to search their viewed history by keyword across titles, authors, excerpts, and content.
+  * Implemented canonical key de-duplication (`com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys`) and clean pagination stops, eliminating duplicate re-appending or loopback to slide 0 when scrolling past slide 30.
+  * Protected viewed items (`isRead = 1`) in `feed_items` from deletion during feed resets/cleanups (`deleteYouTubeItems`, `deleteExpiredItems`, `clearUnsavedItems`) and added on-the-fly synthesis in `loadHistoryBatch` for historical YouTube items whose rows were previously purged, unlocking complete infinite scroll through all past viewed history.
+  * In `UnifiedFeedTab.kt`, guarded swipe-away tracking (`recordItemSwiped`) and dwell-time marking (`markItemViewed`) with `if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked")`, ensuring that browsing past historical items does not mutate SQLite timestamps or displace active pager items.
+  * Reset `lastSettledPage = -1` on all filter mode changes, preventing false swipe-away events against vacated slides during filter changes.
+  * Avoided `forceRefresh = true` on filter dismissals and modal clear-alls so returning to "Live Feed" immediately restores `cachedDefaultFeed` and scrolls to `savedFeedItemId` with 0ms delay.
+* **Content Mix Variety & Unblocked RSS/Audio Background Sync (`FeedRepository.kt`, `NoSlopViewModel.kt`)**:
+  * Unblocked Phase 2 RSS feeds and API categories (Music, Art, Photography) in `FeedRepository.kt` by replacing infinite video-idle loops (`while (currentlyPlayingUrl != null || isVideoActive)`) with non-blocking Tor staggers (`delay(1000ms)`).
+  * Unified media detection helpers (`isAudioFeedItem`, `isVideoFeedItem`, `isImageFeedItem`, `isArticleFeedItem`) in `NoSlopViewModel.kt`, accurately classifying audio tracks (Internet Archive, Openverse, podcasts) and images across both the ViewModel and `UnifiedFeedTab.kt`.
+  * Raised batch size for all specific filters (`Videos`, `Audio`, `Images`, `Articles`, `Mesh`, `History`, `Liked`, `Saved`) from 3 to 30, unblocking infinite scrolling past slide 27.
+  * Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
+  * Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
+* **Tor Video Playback Optimization (`YouTubeInternalClient.kt`, `PreloadManager.kt`, `VideoPlayer.kt`)**:
+  * Fast-failed background preload resolve permits in `YouTubeInternalClient.kt` (2s timeout), prioritizing the active on-screen video.
+  * Tuned `MAX_PRELOAD` to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe.
+
+## Completed Changes (2026-09-07) — Direct Message Fast-Lane, Missed Message Catch-up & Presence Stabilization
+
+* **Express Lane Concurrency for DMs (`MeshTransport.kt`)**:
+  * Decoupled transport concurrency into dedicated pools: `dmSemaphore(4)` exclusively reserved for real-time user communications (`MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `GROUP_*`) and `bulkSemaphore(4)` for bulk feed/media data (`SYNC_RESPONSE`, `MEDIA_*`, etc.).
+  * Direct Messages, handshakes, and DM sync now have absolute priority and can never be starved or delayed by concurrent feed sync responses or media chunk downloads.
+* **Persistent DM Outbox & Immediate Peer Flush (`MeshSocialRepository.kt`)**:
+  * Implemented persistent Outbox storage (`app_settings["pending_dm_outbox"]`) for direct messages that fail direct send when a peer or circuit is temporarily offline, guaranteeing message retention across process restarts.
+  * Added event-driven outbox flushing: when a peer connects, announces presence, or Tor finishes bootstrapping, any queued outbox DMs for that peer are transmitted immediately without multi-minute delays.
+* **Bi-Directional Missed Message Synchronization (`DM_SYNC_REQUEST`)**:
+  * Implemented `DM_SYNC_REQUEST` wire protocol to catch up on missed DMs upon reconnect or app startup.
+  * Nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and request missed messages since that timestamp; counterparties stream missing `MESSAGE` packets directly over the express lane.
+* **Peer Cooldown Auto-Reset & Backoff Cap (`GossipService.kt`)**:
+  * Capped exponential cooldown backoff to 2 minutes (120s) max (down from 1 hour) to avoid locking out mobile peers experiencing brief connectivity transitions.
+  * Configured incoming authenticated packets (`MESSAGE`, `ANNOUNCE_PEER`, `USER_HANDSHAKE`, `TYPING`) to immediately reset failure counters and clear cooldowns for the sender's onion address.
+* **Presence & Typing Indicator Parity (`HandshakePacketHandler.kt`, `DmPacketHandler.kt`, `ChatThreadScreen.kt`)**:
+  * Aligned `ANNOUNCE_PEER` signature verification to support both `encodeForSigning` and legacy pipe payloads, fixing the regression where trusted peers were never marked `isOnline = true`.
+  * Updated `DmPacketHandler` to refresh `isOnline = true` and `lastSeenAt` on incoming `MESSAGE` and `TYPING` packets.
+  * Added 6-second auto-expiration to peer typing state in `NoSlopRepository`, dismissed typing status when a message is delivered, and debounced typing stop (4s idle / on send) in `ChatThreadScreen`.
+
+## Completed Changes (2026-09-07) — Feed Toggle Stabilization, Position Resume & Mesh Sync Parity
+
+* **All / Mesh Quick Switch & Feed Position Restoration**:
+  * Resolved the ANR freeze when toggling from "Mesh" back to "All": eliminated concurrent `loadMoreFeedItems` loops on the main thread and added `isLoadingMoreFeedItems` concurrency gating.
+  * Restored full feed caching in `NoSlopViewModel.kt` (`cachedDefaultFeed`) so toggling to Mesh and back restores the exact feed items and slide position instantly without re-fetching.
+  * Eliminated startup/tab-switch position clobbering by guarding `saveFeedPosition` against overwriting active positions with page 0 during layout composition.
+  * Fixed cold-start restore to resume directly from `saved_feed_active_id` without filtering it out through `cachedViewedIds`.
+* **Mesh Viewed State & Historical Browse ("See Old Posts")**:
+  * Configured the Mesh feed to hide viewed posts by default, showing an alternative "Nothing New Here" card with a "See Old Posts" button to re-browse historical mesh broadcasts.
+  * Added `.verticalScroll(rememberScrollState())` to the empty-state container so `PullToRefreshBox` functions correctly when the list is empty.
+  * Guarded `markItemViewed` to keep mesh broadcasts with pending media downloads visible on the feed until the media is fully downloaded and watched.
+* **Cryptographic Signature Verification Alignment (`encodeForSigning`)**:
+  * Synchronized payload signature verification across `MeshPacketVerifier.kt`, `PostPacketHandler.kt`, `ReactionPacketHandler.kt`, and `SyncPacketHandler.kt` to match `CryptoService.encodeForSigning` for `POST`, `EDIT_POST`, `DELETE_POST`, `USER_HANDSHAKE`, `CONNECTION_REQUEST`, and `CHAT_REACTION`.
+  * Added backwards-compatible signature fallback in `SyncPacketHandler.kt` to accept legacy pipe-delimited reactions and comments from earlier builds.
+* **Mesh Peer Synchronization & Media Transfer Stability**:
+  * Implemented and exposed `requestAllPeersInventorySync()`, automatically triggering inventory sync upon receiving trusted `ANNOUNCE_PEER` heartbeats and when pulling down to refresh on the Mesh tab.
+  * Exempted sync and media packets (`INVENTORY_SYNC_REQUEST`, `SYNC_RESPONSE`, `MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_TRANSFER_ACK`) from Tor cooldown drops in `MeshTransport.kt`.
+  * Tuned `MediaManager.kt` initial chunk size to 512KB and raised direct-peer timeout thresholds before mesh recovery, doubling Tor media throughput.
+
+## Completed Changes (2026-09-06) — SOCKS5 Stream Isolation & Clearnet-over-Tor Playback Stabilization
+
+* **True SOCKS5 Stream Isolation (`TorSocksSocket` & `TorSocksSocketFactory`)**:
+  * Implemented standard SOCKS5 Username/Password authentication isolation (RFC 1928 / RFC 1929) in `HttpClientProvider.kt`.
+  * Tor's `IsolateSOCKSAuth` allocates a dedicated Tor circuit and exit node to each distinct SOCKS username (`yt_${videoId}_${streamNonce}`).
+  * Removed all custom HTTP headers (`X-Tor-Stream-Id`), eliminating HTTP 403 Forbidden rejections from `googlevideo.com` CDN.
+* **Exit Rotation via Nonce-Bumping (Zero Process-Wide Circuit Disruption)**:
+  * When YouTube InnerTube returns `LOGIN_REQUIRED` (indicating a gated exit node), `YouTubeInternalClient` increments `streamNonce` in `videoStreamNonces[videoId]` (`yt_${videoId}_0` -> `yt_${videoId}_1`).
+  * Tor immediately binds the next attempt to a fresh exit node on a new circuit without invoking process-wide `SIGNAL NEWNYM` rotations, leaving active video streaming and preloading completely undisturbed.
+* **Guaranteed Egress IP-Lock Alignment**:
+  * `YouTubeInternalClient` registers the winning `streamId` upon successful resolution.
+  * Both `ExoVideoPlayer` in `VideoPlayer.kt` and `PreloadManager.kt` instantiate their `OkHttpDataSource.Factory` using `HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)`. Media byte fetching connects through the exact same Tor circuit and exit node IP that resolved the URL, satisfying `googlevideo.com`'s `&ip=` lock.
+* **Elimination of the Legacy Geo-Lock Discard Trap**:
+  * Removed obsolete checks in `YouTubeInternalClient.kt` that discarded stream URLs carrying `gcr=` region parameters over Tor. Because stream resolution and media downloads share identical exit IPs, regional parameters (`gcr=ir`, `gcr=ro`, `gcr=us`) are valid and play smoothly.
+* **Micro-Seek Buffer Poisoning Elimination**:
+  * Updated `PlaybackPositionStore` and `ExoVideoPlayer` to ignore saved playback offsets under 8,000ms (8s). Swiping past videos no longer triggers unnecessary `seekTo(2402ms)` calls that discard the pre-buffered byte-0 cache and force 15s Range request stalls.
+* **Tor Connect Timeout & Preload Tuning**:
+  * Increased Tor SOCKS connect timeout from 20s to 35s to prevent premature `ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT (code=2004)` during circuit creation on mobile networks.
+  * Increased `MAX_PRELOAD` from 3 to 4, lowered preload stagger to 50ms / 300ms, and enabled 2 forward pre-warmed slides in `UnifiedFeedTab.kt`. First frame playback on swipe reduced to ~200-300ms across the feed.
+
+## Completed Changes (2026-09-04) — Tor Stream Isolation & YouTube Client Resolution
+
+* **Tor Stream Isolation & YouTube Egress IP-Lock Alignment**:
+  * Fixed an architectural flaw where YouTube InnerTube client resolution calls (`ANDROID`, `TVHTML5`, `ANDROID_VR`, `IOS`, `TVHTML5_SIMPLY_EMBEDDED_PLAYER`) all shared an identical `X-Tor-Stream-Id` string (`https://www.youtube.com/watch?v=$videoId`). This locked all 5 resolution attempts to the exact same Tor exit node IP; if YouTube flagged that exit IP with `LOGIN_REQUIRED`, every client config failed simultaneously and burned circuit rotation cooldowns.
+  * Fixed ExoPlayer's media byte request stream isolation in `VideoPlayer.kt` and `PreloadManager.kt`, which previously passed the raw stream URL as its stream ID. This caused ExoPlayer to connect via a *different* Tor circuit than the one that resolved the player response, triggering YouTube's egress IP lock (HTTP 403 Forbidden).
+  * **Implementation**:
+    1. Isolated resolution calls per client and attempt (`yt_${videoId}_${config.clientName}_a${attempt}`) so every client config automatically tests an isolated Tor circuit.
+    2. Implemented `YouTubeInternalClient.registerStreamId()` to record the winning stream ID for resolved video URLs.
+    3. Configured `VideoPlayer.kt` and `PreloadManager.kt` to attach the exact registered `streamId` to ExoPlayer's `OkHttpDataSource.Factory`, guaranteeing media byte downloads use the exact same Tor exit circuit/IP as the signed player attestation.
+    4. Verified on ADB device `RFCT217QD6K`: Direct YouTube video streams now resolve and play over Tor in ~4.5s (`itag=18`).
+
+## Completed Changes (2026-09-03) — Feed Deduplication and UI Fixes
+
+* **Feed Duplication (Canonical Item Key Filtering)**: Addressed a bug where the same video could be served multiple times if it was loaded from different sources with different database IDs. The `loadMoreFeedItems` logic in `NoSlopViewModel` now proactively tracks `CanonicalItemKey` across all read, viewed, and excluded items in the session to guarantee identical content is never shown twice.
+* **Fullscreen Video Zooming**: Fixed an issue in `VideoPlayer.kt` where `ExoVideoPlayer` aggressively zoomed in and cropped the video when tilted to landscape mode. It now unconditionally uses `RESIZE_MODE_FIT` to keep the entire video fully visible.
+* **Thumbnail Overlap**: Resolved a UI bleeding issue in `MediaComponents.kt` where the blurred background poster for the upcoming slide lacked a boundary clip and would visually cover adjacent items in the feed. A `.clipToBounds()` modifier was added to clamp the blur inside its container.
+
+## Completed Changes (2026-09-03) — Audit Findings Batch 2
+* **Finding #4 (Cryptographic Payload Canonicalization)**: Replaced delimiter-concatenation (`$a|$b`) in payload signatures with a length-prefixed encoder (`encodeForSigning`) across all 39 call sites in repositories and verifiers to prevent collision attacks.
+* **Finding #7 (X25519 Encryption Key Confusion)**: `DmPacketHandler` now immediately requests a handshake and drops the packet if it lacks a peer's X25519 key, rather than fatally attempting decryption with an Ed25519 identity key.
+* **Finding #8 (Media & Announce Firewall Bypass)**: Removed blanket rate-limit bypasses for `ANNOUNCE_DISCOVERABLE`. Implemented a 2MB per 10-second byte budget for `MEDIA_*` packets originating from untrusted senders to prevent network and storage flooding.
+* **Finding #13 (Tor Stream Isolation for Video Playback)**: Implemented SOCKS5 stream isolation via OkHttp Interceptors and `java.net.Authenticator`. Each video stream now automatically receives a unique SOCKS username, ensuring Tor assigns dedicated circuits to individual video playback. This prevents playback interruption or 403 Forbidden errors when an unrelated video triggers a global circuit rotation.
+## Completed Changes (2026-09-02) — Codebase Audit, Hardening and Fresh-Install Fixes
+
+Started as an audit of `app/` against its own documented claims, and turned
+into three rounds of fixes. Full detail in
+[TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) §17; this is the index.
+
+Two of the bugs below were introduced during this session and fixed in it.
+They are listed rather than quietly dropped.
+
+### Documentation claims that were not true
+
+The audit compared every headline claim in README and
+[PRIVACY_AND_SECURITY_PROPOSAL.md](PRIVACY_AND_SECURITY_PROPOSAL.md) against
+the code. Nine did not hold. All are now corrected in the docs:
+
+* **"Private keys are stored in Android's hardware-backed Keystore and never
+  exposed in plaintext, even to NoSlop itself."** Keys live in
+  `EncryptedSharedPreferences`; the Keystore holds only the AES master key that
+  wraps that file. Android Keystore cannot perform Ed25519 or X25519, so the
+  raw key material is necessarily unwrapped in memory to sign and decrypt.
+* **"BIP39 Word Cloud ... official BIP39 English wordlist (2048 words)."** The
+  list has **2053** entries: 25 words are not in BIP-39, 20 BIP-39 words are
+  absent, and the ordering differs. There is also no checksum word, so a
+  mistyped phrase silently derives a wrong key rather than failing. Entropy is
+  fine (~132 bits); the label was not. Correcting the list later is safe —
+  `deriveSeed()` runs PBKDF2 over the mnemonic *string*, so existing phrases
+  keep working.
+* **"AES-256-CBC (backup)."** The code writes AES-256-GCM; CBC is a legacy
+  read path only.
+* **"Kotlin Multiplatform app (Android & iOS)"** and **"the canonical codebase
+  is now `mvp/`."** `settings.gradle.kts` includes `:app` only. The UI is
+  Jetpack Compose, not Compose Multiplatform. The tech-stack rows naming
+  AVPlayer, Ktor/Darwin, SQLDelight and AVFoundation described nothing that
+  ships.
+* **The Tor caveat was stale in our own favour** — README said the update check
+  and APK download stayed off Tor; the code already waited for bootstrap and
+  aborted rather than falling back.
+* **"A pure, native `HttpURLConnection` pipeline."** It is OkHttp. The
+  `DownloadReceiver` for `DOWNLOAD_COMPLETE` was a registered no-op.
+* **"Status: IMPLEMENTED & VERIFIED ... SHA-256 release checksum
+  verification."** Not implemented. `UpdateManager` computed the APK digest,
+  logged it as "verified", and compared it to nothing. The only real gates were
+  a 2MB floor and a `text/html` check.
+* **"Eliminates static secret leak."** The HMAC was added *alongside* the raw
+  secret; `X-Proxy-Secret` still shipped the key in cleartext on every request.
+* **"Move to a new device without losing anything."** The archive carries the
+  Keystore-sealed identity file, which a new device cannot open.
+
+### Security
+
+* **Tor control interface was unauthenticated** (`NOSLOP_CONTROL_SOCKET_V1`,
+  §17.1). `ControlPort 9051` with `CookieAuthentication 0`. Loopback is not
+  app-private on Android, so any installed app holding `INTERNET` could open a
+  Tor control connection belonging to NoSlop and issue `GETINFO
+  circuit-status` (deanonymisation), `ADD_ONION`, `SETCONF` or `SIGNAL`. For an
+  app whose premise is that the user's IP is never exposed, this was the worst
+  hole in the tree. Cookie auth was rejected deliberately: it is global, and
+  tor-android's own control connection authenticates with empty credentials.
+* **TLS trust was inverted** (`NOSLOP_TLS_TRUST_V1`, §17.2).
+  `network_security_config.xml` permitted cleartext for *every* domain and
+  trusted `<certificates src="user" />`, so any user- or MDM-installed CA could
+  MITM every connection. Now system anchors only, with cleartext scoped to
+  `.onion` and loopback. Known trade-off: the LAN Hub HTTP fast path is blocked
+  and falls back to the Hub's `.onion`; Android's NSC has no CIDR syntax, so
+  there is a commented block for pinning one known LAN address.
+* **OTA now actually verifies** (`NOSLOP_RELEASE_CHECKSUM_V1`, §17.3). The
+  digest is compared against the checksum published with the release and the
+  file is deleted on mismatch. `UpdateChecker` looks in four places:
+  `hero.apkSha256`, a `.sha256` release asset, a bare digest in the release
+  notes, then a sibling `<apk>.sha256`. **Releases must now publish a checksum
+  or the installer refuses them.** This verifies integrity, not authenticity —
+  the Ed25519 release signature in §2 of the proposal is still not built.
+* **Local media proxy required no authentication** (`NOSLOP_PROXY_TOKEN_V1`,
+  §17.4). `127.0.0.1:8080` served `/stream?id=…` to any app on the device, and
+  the caller-supplied `onion=` parameter let it choose an arbitrary fetch target
+  on the user's circuits. Now a per-process token verified in constant time,
+  plus a v3-address format check.
+* **Mesh frames were unbounded** (`NOSLOP_FRAME_CAP_V1`, §17.5).
+  `BufferedReader.readLine()` with no ceiling: one peer sending bytes without a
+  newline could exhaust the heap. Capped at 4MB. The parse-failure branch also
+  stopped logging the raw frame, which was landing DM ciphertext and peer keys
+  in the user-exportable log.
+* **Proxy secret moved out of source** (`NOSLOP_PROXY_SECRET_V1`, §17.6) into a
+  Gradle property, and the cleartext header is behind
+  `PROXY_SEND_LEGACY_SECRET`, still defaulting to true. §1.1 is **not closed**
+  until the Worker is redeployed and the flag flipped. A signing key compiled
+  into a public APK is abuse friction, not authentication.
+
+### Identity and backup
+
+* **Silent permanent lockout in fallback mode** (`NOSLOP_UNLOCK_FALLBACK_V1`,
+  §17.7). `unlock()` read the stored mnemonic raw while `getMnemonic()` read it
+  through `secureFallbackRead`. On any device where `EncryptedSharedPreferences`
+  had failed, the comparison was ciphertext against plaintext and could never
+  match — exactly the devices already running degraded.
+* **Burnable identity keys were stored in plaintext** on those same devices
+  (`NOSLOP_BURNABLE_FALLBACK_V1`); `generateBurnableIdentity` skipped
+  `secureFallbackWrite`.
+* **`clearAll()` did not clear Room** (`NOSLOP_CLEARALL_ROOM_V1`) despite its
+  docstring, leaving a half-wiped identity after a factory reset.
+* **Backup could not restore a real archive** (`NOSLOP_BACKUP_STREAMING_V1`,
+  §17.8). `importData` did `readBytes()` then `doFinal()`, holding the whole
+  archive and its whole plaintext in heap — with media included, the app died
+  before the first zip entry. Both directions now stream through a 64KB buffer;
+  GCM plaintext is not unzipped until the tag verifies; zip entry names are
+  validated against traversal. **Verified 2026-09-02: same-device export and
+  import restores correctly.**
+* Cross-device restore is a design limit, not a bug: `preferences.xml` is
+  sealed by a non-exportable Keystore key. It is now detected and exposed via
+  `BackupManager.lastRestoreNeedsIdentityRecovery` — **which nothing reads
+  yet**. See "Still open".
+
+### Playback
+
+* **The API proxy was breaking the `ip=` lock** (`NOSLOP_PLAYER_IP_LOCK_V1`,
+  §17.9). A googlevideo URL carries `&ip=<address>` and is served only to that
+  address. Resolving `/player` through the Cloudflare Worker had YouTube issue
+  the URL to the Worker's egress; the bytes were then fetched over a Tor exit
+  and refused — silently, as a stream that never started. Measured in the 19:19
+  capture: every URL with `signedFor=104.23.x` / `172.71.x` (Cloudflare) stalled
+  at `bufPos=0`; the one with `signedFor=178.20.55.16` (a Tor exit) played.
+  `HttpClientProvider` already stated the invariant this violated. `/player` is
+  now always direct; search and metadata still use the proxy, which returns no
+  IP-locked URLs.
+  This is a *different* mechanism from `NOSLOP_PROXY_ATTESTATION_V1`: that
+  covers the proxy being refused. A proxied player **success** is worse than a
+  proxied player failure, because a failure at least triggers the direct retry.
+* **A dead control channel wedged startup for two minutes**
+  (`NOSLOP_BOOTSTRAP_BAILOUT_V1`, §17.10). `waitForBootstrap` polled its full
+  120s in silence, and the connectivity fallback that can promote the state to
+  READY only runs afterwards — so with Tor restarting every ~20s the fallback
+  never got a turn. Now abandons after 20s if no control connection has ever
+  succeeded.
+
+### Onboarding and media UI
+
+* **"Music" was missing from the category picker**
+  (`NOSLOP_MUSIC_SELECTABLE_V1`, §17.11). `selectableCategories` filtered out
+  everything in `alwaysIncludedCategories`, which contains `"Music"`. Two ideas
+  were conflated: "always fetch this" is not "don't offer this". The knock-on
+  was worse than the missing tile — `Step6Genres` gates on
+  `interests.contains("Music")`, which could then never be true, so the Music
+  Genres selector was unreachable during onboarding.
+* **Content Mix did not scroll and its sliders overlapped**
+  (`NOSLOP_CONTENT_MIX_SCROLL_V1`, §17.12). One line.
+  `FeedMixSettingsSection` emits its header and card as siblings with no
+  container of its own and expects a scrolling column from the caller;
+  `Step8FeedMix` gave it a `Box`. A Box stacks children, and with `weight(1f)`
+  and no scroll the card's inner Column overflowed — Compose gives the
+  remaining children zero height, which is precisely the reported "sliders
+  crammed on top of each other".
+* **Photos were rotated 90°** in DMs, group chats and profile pictures
+  (`NOSLOP_EXIF_ORIENTATION_V1`, §17.13). CameraX writes sensor-orientation
+  pixels plus an EXIF Orientation tag; `BitmapFactory` ignores that tag, and
+  `Bitmap.compress()` then writes a JPEG carrying no EXIF at all, destroying
+  the rotation rather than applying it. Four call sites. Rotation is now baked
+  into the pixels at send time — the receive path mixes Coil (respects EXIF)
+  and raw BitmapFactory (does not), so a tag-preserving fix would have looked
+  right in some views and wrong in others, and wrong on any peer running a
+  different build. The compression branch only ran above 500KB, which is why
+  the bug looked intermittent.
+* **Comment GIFs rendered as a black square until the sheet was reopened**
+  (`NOSLOP_COMMENT_MEDIA_RERESOLVE_V1`, §17.14). `resolveMediaUrl` returns a
+  `file://` path once media is downloaded and the mesh proxy URL until then;
+  the call site remembered it keyed on `(mediaId, authorOnion)`, neither of
+  which changes when a download completes. Coil kept the proxy URL, re-fetched
+  from a peer that had finished sending, and drew nothing. The same
+  `AsyncImage` also had no GIF decoder, so comment GIFs were static first
+  frames.
+
+### Logging, build and hygiene
+
+* **`noslop-debug.log` grew without bound** (`NOSLOP_LOG_HYGIENE_V1`, §17.15) —
+  no rotation, no cap, and DEBUG written in release builds, which was most of
+  the volume. Now rotates at 4MB keeping one generation, drops DEBUG in release,
+  serialises writes on one thread (they were racing on `Dispatchers.IO` and
+  could land out of order), and scrubs Base64 blobs and hex digests rather than
+  onion addresses alone.
+* **A clean clone could not build** (`NOSLOP_CONDITIONAL_SIGNING_V1`).
+  `signingConfigs` called `project.property("NOSLOP_STORE_FILE")`
+  unconditionally at configuration time, so every task failed without a
+  keystore — including `assembleDebug` and `test`. Now conditional, and
+  BUILD.md documents the four properties.
+* `com.jcraft:jsch:0.1.55` (abandoned 2018, no `rsa-sha2-*` or `ssh-ed25519`
+  host keys, so Hub deployment would fail key exchange against any current
+  OpenSSH) swapped for the maintained `com.github.mwiede:jsch` fork.
+* okhttp version skew aligned on 4.12.0; the unused `bcprov-jdk18on` catalog
+  entry removed.
+* `tmp_logs/logcat.txt` deleted — 41MB and 275,618 lines of full device logcat
+  from a personal handset, committed publicly, containing an onion address and
+  the running-process list of every app on the device. `.gitignore` stopped
+  excluding `*.sh`, `*.py` and `tests/`, which would have silently dropped real
+  project files.
+
+### Two regressions introduced and fixed during this session
+
+* **Unclosed comment.** `TorControlChannel.kt`'s header contained `ns/id/*` as
+  shorthand for a Tor control command. Kotlin block comments **nest**, unlike
+  Java's, so that opened a nested comment which never closed and swallowed the
+  file from line 38 to EOF. Every reference to the object came back unresolved.
+  Comment-nesting is now part of the pre-hand-off check.
+* **`UNIX_ONLY` control socket broke `NEWNYM` and `ADD_ONION`.** The first cut
+  removed `ControlPort` and declared only a `ControlSocket`; tor never created
+  it, and since tor-android writes nothing to logcat there was no way to tell
+  whether tor refused the directory, put the socket elsewhere, or ignored our
+  torrc. Nine `control channel unavailable` warnings, no circuit rotation, no
+  hidden service. Now `Mode.AUTO` (§17.1): both are declared, the socket is
+  preferred, TCP is the fallback, and the transport that won is logged along
+  with a directory dump on failure.
+
+### Verified in testing
+
+Mesh sync between fresh peers, reactions, comments, DMs, QR pairing, media
+auto-download and chunking, gossip relay at hops=4, user-recorded video, and
+same-device backup export/import. Multi-device testing is next.
+
+---
+
+## Security & Codebase Audit Verification Matrix (C01–C26 & W01–W08)
+
+| Finding ID | Severity | Description | Status | Validation / Test Suite |
+|---|---|---|---|---|
+| **C01** | P0 | USER_HANDSHAKE relationship state machine & nonce exchange (heal side door closed by D01) | **Resolved** | `HandshakeSecurityTest`, `PeerTrustInvariantTest`, `HandshakeReplyPathTest` |
+| **C02** | P0 | Handshake encryption key binding & destination auth (`noslop-hs-v2`) | **Resolved** | `HandshakeSecurityTest` |
+| **C03** | P0 | MEDIA_REQUEST bounded params, ACL, & coroutine exception isolation | **Resolved** — bounds ✔; deny-by-default ACL (D02, Round B); relay removed (D03); `accessKey` deliberately not used | `MediaManagerSecurityTest`, `MediaChunkWindowTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
+| **C04** | P0 | Article WebView Tor leak elimination & external browser gating | **Resolved** | `TorLeakArchitectureTest` |
+| **C05** | P0 | Deleted unauthenticated Invidious gossip (video hijacking / SSRF) | **Resolved** | `GossipServiceTest` |
+| **C06** | P0 | Plaintext backup external storage leak elimination & streaming | **Resolved** with E3 (2026-10-13; backup and restore not yet checked on device) — NSG2 encrypts the zip as it is written and decrypts it as it is read, so no plaintext zip or group-message file is written on export or restore; `secureDelete()` is not needed and does not exist | `BackupNsg2E3Test`, `BackupArchiveFormatE3Test` |
+| **C07** | P1 | Backup AEAD 64KB block streaming & staging isolation | **Resolved** with E3 (2026-10-13; not yet checked on device) — NSG2: 1 MiB AES-256-GCM chunks (chunk number and last flag in the nonce, header as associated data), a per-archive HKDF-SHA256 key instead of `seed[0:32]`; truncated, reordered, modified or extended archives refused before anything changes; NSG1 and confirmed CBC backups still restore | `BackupArchiveFormatE3Test`, `BackupNsg2E3Test` |
+| **C08** | P1 | DM v2 directional AAD encryption & replay tracking | **Resolved** with D05 (2026-10-10) — v1 latched per key, ACK has its own AAD label | `CryptoServiceRobolectricTest`, `DmProtocolD05Test` |
+| **C09** | P1 | Hop count capping (hops ≤ 6) & parsed group membership | **Resolved** — hops capped; membership checks parse the list (R3); envelope signature on every packet (E2, 2026-10-13; hard protocol break by owner decision): Ed25519 by `sender_id` over everything but `hops`, 1-hour clock window, replay guard | `GossipServiceTest`, `EnvelopeAuthTest`, `HandshakeReplyPathTest` |
+| **C10** | P1 | Severable creator identity linkage elimination in sync batches | **Resolved** with D04 (Round C, 2026-10-09) — see D04 | `CreatorIdentityCaptureTest`, `IdentityRoutingTest` |
+| **C11** | P1 | 20-character visual safety fingerprint derivation | **Resolved** (Rounds D10/D10b, 2026-10-11; not yet device-verified) — on the contact card and the ID card; verified in person by camera scan plus approval; check code; key changes applied with a notice | `SafetyFingerprintD10Test`, `ContactVerificationD10bTest` |
+| **C12** | P1 | Replaced Google ML Kit with pure offline ZXing scanner | **Resolved** | `TorLeakArchitectureTest` |
+| **C13** | P1 | Migrated to pure lightweight Bouncy Castle engine (pruned Lazysodium/JNA) | **Resolved** | `CryptoServiceRobolectricTest` |
+| **C14** | P1 | Bouncy Castle PBKDF2 seed derivation (API 24–25 compatibility) | **Resolved** | `MnemonicGeneratorTest` |
+| **C15** | P1 | Cross-device keypair verification & authoritative derivation | **Resolved** — X25519 public key also reconciled; mismatch reported as recovery-required (D09, 2026-10-10) | `BackupManagerTest`, `BackupImportResultD09Test` |
+| **C16** | P1 | Hardware-backed AndroidKeyStore master key for fallback storage | **Implemented (untested)** — the test cited on 2026-10-06 (IdentityRepositoryTest) never existed. Decision (owner, 2026-10-13): kept as it is, with the red warning banner; no passphrase option | — |
+| **C17** | P1 | Mesh media SHA-256 integrity hash binding & download verification | **Resolved** with D08 (2026-10-10) — v2 binding via live, sync and re-issue; unsigned digests never used; "Unverified media" label since Round D10 (2026-10-11) | `MediaManagerSecurityTest`, `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test` |
+| **C18** | P1 | DM outbox delivery ACK & state machine (Sending → Sent → Delivered) | **Resolved** — ACK sent off the inbound path (R1); outbox expiry → FAILED with retry, group legs not held for ACKs (R3) | `CryptoServiceRobolectricTest`, `WireProtocolTest`, `OutboxExpiryTest` |
+| **C19** | P1 | Release log history sanitization (origin-only URLs, masked IDs, 72h pruning) | **Resolved** (E1, E2b, E5s, E5s2; 2026-10-13) — search terms and video ids redacted in release logs (`Logger.redact`), request labels never carry them, Reddit, YouTube, Invidious and Jamendo logs fixed. The test cited on 2026-10-06 (LoggerTest) never existed | `LoggerRedactTest`, `CodeHygieneArchitectureTest`, `SearchPagingE5sTest` |
+| **C20** | P1 | Removed Jamendo client ID candidate rotation loops | **Implemented (untested)** — the test cited on 2026-10-06 (JamendoApiClientTest) never existed | — |
+| **C21** | P2 | Respected NXDOMAIN in cascading DNS (DoH opt-in only) | **Resolved** | `TorLeakArchitectureTest` |
+| **C22** | P2 | Click-to-load prompts for remote GIFs & retired cleartext GROUP_MESSAGE | **Resolved** | `TorLeakArchitectureTest` |
+| **C23** | P2 | Translation key parity (`content_en.json`), pre-install APK cert verification, docs sync | **Resolved** | `TranslationParityTest` |
+| **C24** | P2 | Dependency hygiene (pruned jtorctl/netcipher) & narrowed ProGuard rules | **Resolved** (E5, 2026-10-13; playback checked on device; minified release not yet checked, see `docs/RELEASE_SMOKE_TEST.md`) — jtorctl/netcipher pruned, OkHttp rules narrowed; the Bouncy Castle keep-all rule narrowed to its JCA provider packages; Media3 1.3.1 → 1.11.1 | `ReleaseBuildRulesE5Test`, `AdaptiveTorLoadControlE5Test` |
+| **C25** | P2 | Shared `Json.gson`, structured `AppScopes`, extracted `IdentityViewModel` | **Resolved** — the unused `IdentityViewModel` copy was deleted (R6b, 2026-10-11); the account code lives in `NoSlopViewModel`; ad-hoc coroutine scopes moved to `AppScopes` (E1, 2026-10-13) | `CodeHygieneArchitectureTest` |
+| **C26** | P2 | Canonical presence-encoded signing formats (`ABSENT` / `CLEAR` / `SET:`) | **Resolved** | `GroupMessageSecurityTest` |
+| **W01** | P0 | Synchronized Feed sync cancellation deadlock fix | **Resolved** | `FeedRepositoryTest` |
+| **W02** | P0 | Eliminated legacy 4-field GROUP_UPDATE bypass | **Resolved** | `GroupMessageSecurityTest` |
+| **W03** | P0 | Injective group update canonical encoding & presence flags | **Resolved** | `GroupMessageSecurityTest` |
+| **W04** | P1 | Group revision alignment strictly on admin & ban clearing propagation | **Resolved** | `GroupMessageSecurityTest` |
+| **W05** | P1 | Synchronous API key commits & rollback atomicity | **Resolved** | `BackupManagerTest` |
+| **W06** | P1 | Monotonic author-scoped tombstones (`timestamp > existingTs`) | **Resolved** | `PostPacketHandlerTest` |
+| **W07** | P1 | Content-matching signature upgrades on equal timestamps | **Resolved** — avatar and recorded digest also compared since D08 (2026-10-10) | `PostPacketHandlerTest`, `PostDigestBindingD08Test` |
+| **W08** | P1 | Asynchronous recovery StateFlow & runBlocking elimination | **Implemented (untested)** | `OnboardingScreen` is a composable, not a test |
+
+### Review round 2 (D01–D12) and git-history regressions — status 2026-10-13
+
+| Finding ID | Severity | Description | Status | Validation / Test Suite |
+|---|---|---|---|---|
+| **D01** | P1 | Startup "heal" granted trust without consent; one trust rule (`relationship`, `Peer.isFriend`) | **Resolved** | `PeerTrustInvariantTest`, `Migration18To19Test` |
+| **D02** | P1 | Media ACL fallback to "any trusted contact"; `accessKey` never issued; `media_owner` index | **Resolved** (Round B) — index-only, deny by default; `accessKey` deliberately not issued (see TECHNICAL_REFERENCE §6.1.1) | `MediaOwnerIndexTest`, `MediaSyncAndAclRestoreTest`, `MediaAccessRoundBTest` |
+| **D03** | P1 | Relay listeners receive chunks without ACL; broken recovery reply leaks main onion | **Resolved** (Round B) — relay removed; one-hop recovery behind the ACL | `MediaAccessRoundBTest` |
+| **D04** | P1 | Creator (burnable) identity linkable to personal identity | **Resolved** (Round C, 2026-10-09; follow-ups D10c–D10e, 2026-10-11/13, device-tested; E4, 2026-10-13) — `IdentityRouter`, `outboundFor`, sync exclusion; post identity follows privacy, attachments name the sending identity (D10c); one profile by default with Studio overrides (user decision), creator identity backup/import/restore, burn warnings (D10d); burned or replaced identity's contacts forgotten (D10e); reactions and votes made by the post's identity, "Share Permanent Identity" asks from the personal identity (E4). Still open: Hub relaying | `CreatorIdentityCaptureTest`, `IdentityRoutingTest`, `CreatorPostIdentityD10cTest`, `CreatorIdentityArchiveD10dTest`, `IdentityLeftoversE4Test` |
+| **D05** | P1 | DM v1 fallback, ACK confusion, infinite outbox retries | **Resolved** (2026-10-10; not yet device-verified) — outbox expiry + FAILED/retry (R3); v1 latch, ACK domain label + "ACK" check (Round D05). "Sent final for v1 peers" deliberately not done (see Round D05) | `OutboxExpiryTest`, `DmProtocolD05Test` |
+| **D06** | P2 | Peer rows overwritten wholesale; blocked peers could unblock; crossing requests | **Resolved** | `PeerTrustInvariantTest` |
+| **D07** | P2 | v2 handshake compatibility — **decision: hard protocol break**, older-version state shown | **Resolved** (migration remap of own requests not done) | `PeerTrustInvariantTest` |
+| **D08** | P2 | Hash downgrade on legacy posts; W07 match ignores signed fields | **Resolved** (2026-10-10; device-verified: post edits sync) — sync (R2), live POST/EDIT, own caption edits, `insertPostSafely`/`editPostSafely`; "Unverified media" label added in Round D10 (2026-10-11) | `MediaSyncAndAclRestoreTest`, `PostDigestBindingD08Test`, `OwnPostEditDigestD08Test`, `SafetyFingerprintD10Test` |
+| **D09** | P2 | Cross-device restore mismatch reported after commit | **Resolved** (2026-10-10; not yet device-verified) — typed `ImportResult`, pre-commit identity plan, restart into recovery, X25519 reconciliation | `BackupImportResultD09Test` |
+| **D10** | P1 | Status document claims tests/code that don't exist | **Resolved** (Rounds D10/D10b, 2026-10-11; not yet device-verified) — claims corrected and checked by a test, `IdentityViewModel` deleted (R6b), fingerprint UI, verification by camera scan (D10b, replaced "Mark verified"), automatic key changes with a notice, 8-character Argon2id tags, per-language translation report | `StatusDocCitationTest`, `SafetyFingerprintD10Test`, `ContactVerificationD10bTest`, `TranslationParityTest` |
+| **D11** | P3 | Smaller items (Tor Browser `<queries>`, log terms, substring membership, scopes, …) | **Resolved** (E1, 2026-10-13; Media3 in E5) — Tor Browser `<queries>`, redacted log terms, AppScopes, logged catches, no Ed25519 key in place of a missing X25519 key; substring membership (R3) and the certificate WARN were already done | `CodeHygieneArchitectureTest`, `LoggerRedactTest`, `MeshSocialRepositoryTest`, `ReleaseBuildRulesE5Test` |
+| **D12** | — | Carried from round 1 (C07 streaming AEAD, C09 envelope signature, C06 zip, C27) | **Resolved** except C27 — C07 and C06 (E3), C09 (E2), release smoke-test checklist (E5). C27 persistent per-peer connections: deferred (owner, 2026-10-13) | `BackupNsg2E3Test`, `EnvelopeAuthTest` |
+| **A2** | — | Handshake answers on the requester's connection; pending-request probing | **Resolved** | `HandshakeReplyPathTest`, `FrameReaderTest` |
+| **QR** | — | Camera QR frames never decoded (row padding / pixel stride) | **Resolved** | `QrFrameDecodeTest` |
+| **KB** | — | Keyboard did not open in DMs/comments (`6f6dffe`) | **Resolved** (device-verified) | `GifEditTextTest` |
+| **VID** | — | Recorded video stuck at 9% (chunk window above sender cap) | **Resolved** (device-verified) | `MediaChunkWindowTest` |
+| **R1–R4c** | — | Cooldown memory, cooldown gate, cooldown clear, blocking ACK, handshake pool, outbox video gate, Tor hidden-service re-registration, background start, offline PROXY_READY | **Resolved** (device-verified) | `PeerCooldownRestoreTest` |
+| **R5, R6a** | — | Sync rejected v2-signed media posts/comments; re-issue stripped hash; comment media never served | **Resolved** (device-verified) | `MediaSyncAndAclRestoreTest` |
+| **R7a–R7c, R8** | — | Group leave signature; group catch-up after member-initiated changes; group members rate-limited; DM outbox backoff/expiry (plus group sender identity and queued group sender) | **Resolved** (group paths device-verified) | `GroupLifecycleRestoreTest`, `OutboxExpiryTest` |
+| **R3b, R3c** | — | Group media requester identity; "You (admin)" row; group attachment origin; sender-onion download; no discoverable announce for group media | **Resolved** (device-verified) | `GroupLifecycleRestoreTest` |
+| **R7d–R7f** | — | Invitee bootstrap; reinstall recovery; update freshness gate | **Reviewed, no change** (see 2026-10-08 R3 entry) | — |
+| **R6b, R6c** | — | Non-contact media replies (signed requests, derived reply onion); silent media drops; media flood | **Resolved** (Round B) | `MediaAccessRoundBTest` |
+| **R4d** | — | Handshake budget | **Deferred** (owner, 2026-10-13) | — |
+| **S2** | — | `ANNOUNCE_PEER` signature does not cover `onion_address` | **Resolved** (E2, 2026-10-13) — v2 signature covers the onion, v1 refused; only a key-derived onion is stored | `AnnouncePeerAndGroupQueryE2Test` |
+| **F1** | — | Mesh feed: unseen posts marked seen by page index; batches replaced the list; pager load switched mode halfway; image/GIF/audio never marked seen; text posts de-duplicated by wording (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `FeedSwipeMarkingTest`, `MeshCanonicalKeyTest` |
+| **IU1** | — | `IDENTITY_UPDATE` signed with `encodeForSigning` but verified only in pipe form (handler and `MeshPacketVerifier`); never accepted (2026-10-09) | **Resolved** (not yet device-verified) | `IdentityRoutingTest`, `MeshPacketVerifierTest` |
+| **HS1** | — | Untargeted, legacy-signed `USER_HANDSHAKE` broadcast on every start (2026-10-09) | **Resolved** (unit tests pass; device build working, 2026-10-09) | `OnionAddressUpdateTest` |
+| **G1** | — | `GROUP_QUERY` answered to anyone who knew a member-invite group's id; sender re-stamped per peer so members refused our queries (2026-10-13) | **Partial** (E2, E4) — members and the admin only, requester = sender; `GROUP_QUERY` keeps its sender. Still open: the answer is broadcast to all trusted contacts when the sender has no stored onion | `AnnouncePeerAndGroupQueryE2Test`, `IdentityLeftoversE4Test` |
+| **RB1** | — | Release builds never read saved categories, genres, keywords, banned nodes or group bans (Gson `TypeToken` under R8 full mode) (2026-10-13) | **Resolved** (E2b) | `PreferencesRepositoryE2bTest`, `GroupChatParsingE2bTest`, `CodeHygieneArchitectureTest` |
+| **SR1** | — | Search: random extra words instead of paging, "All" limited to this year, Invidious to the last month, videos sorted first, downvoted items and banned nodes shown (2026-10-13) | **Resolved** (E5s, E5s2; device-checked) — paged newest first; older downvotes not hidden; quality to improve later | `SearchPagingE5sTest`, `SearchPagingE5s2Test` |
+
+## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
+
+Started from "some videos only show a thumbnail" and ended up rewriting most
+of the resolve path. Full detail in
+[TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) §16; this is the index.
+
+### Presentation
+
+* **Failure UI was invisible** (`NOSLOP_FAILURE_VISIBILITY_V1`, §16.1). The
+  poster thumbnail draws at `zIndex(1f)`; the "Video unavailable" card and its
+  Retry button drew at 0. Every failure composed a correct error screen and
+  then painted over it. The reported symptom — "it just shows the thumbnail" —
+  *was* this bug, and it had been masking the others.
+
+### Stream resolution
+
+* **Video-only streams were being handed to ExoPlayer**
+  (`NOSLOP_MUXED_ONLY_V1`, §16.12). The `adaptiveFormats` fallback returned
+  the highest-bitrate track in the list — no audio, up to 1.8GB. Removed;
+  only progressive `formats` and HLS are playable.
+* **InnerTube roster rebuilt** (`NOSLOP_INNERTUBE_CLIENTS_V1`, §16.11) from
+  two clients to five, reordered twice as evidence came in. Rank by
+  `Resolved direct video stream using X`, never by playability status (§16.15).
+* **`signatureTimestamp` was ~1.79 billion** (`NOSLOP_SIGTIMESTAMP_V1`). It is
+  a counter near 20,000, not a unix time. Omitted rather than faked.
+* **Encrypted `signatureCipher` treated as plaintext** (`NOSLOP_CIPHER_SANITY_V1`,
+  §16.2) produced well-formed URLs that 403 on the first byte, and counted as
+  successful resolves.
+* **Geo-locked URLs** (`NOSLOP_GEO_LOCK_V1`, §16.5) deferred behind the failover.
+* **250MB ceiling over Tor** (`NOSLOP_TOR_SIZE_CEILING_V1`, §16.13).
+* **The API proxy is now the thing being refused** (`NOSLOP_PROXY_ATTESTATION_V1`,
+  §16.14). One Cloudflare egress serving all users is a more flagged IP than a
+  fresh Tor exit. `LOGIN_REQUIRED` arrives as HTTP 200, so the proxy could
+  serve refusals forever without being marked bad. A proxied refusal now
+  retries direct — which also relieves the worker's request ceiling.
+
+### Tor
+
+* **Readiness was never verified** (`NOSLOP_BOOTSTRAP_TRUTH_V1`, §16.9). The
+  daemon's `STATUS_ON` broadcast set `READY` and logged "Circuits built";
+  `waitForBootstrap()` short-circuited on that same flag and had never once
+  asked Tor anything. ~40 requests were being dispatched into a
+  still-bootstrapping Tor.
+* **Rotation storms** (§16.4): 18 `NEWNYM`s in 63s, destroying the circuit the
+  visible video was streaming on. Now serialized and rate limited.
+* **Rotation gated on live media, not the clock** (`NOSLOP_ADAPTIVE_ROTATION_V1`,
+  §16.17) — 60s while streaming, 15s when idle.
+* **Rotation results are shared** (`NOSLOP_COOPERATIVE_ROTATION_V1`, §16.18).
+  `requestNewCircuit()` answers "are you on a fresh circuit?", not "did you
+  rotate it?" — concurrent resolves were discarding a sibling's rotation.
+* **The exit lottery** (`NOSLOP_EXIT_LOTTERY_V1`, §16.16). All clients share one
+  exit, so a gated exit refuses all five together. Stop after two refusals.
+
+### Robustness
+
+* **Bounded resolve concurrency** (`NOSLOP_RESOLVE_BUDGET_V1`, §16.8) — permit
+  wait, work budget, and per-call `callTimeout`. An earlier unbounded version
+  of this gate turned per-video timeouts into a four-minute queue.
+* **Fast failure on a dead network** (`NOSLOP_FAST_FAIL_V1`, §16.7). Connect
+  timeout 60s → 20s; the old value was justified as mesh reliability, but
+  `MeshTransport` never used that client.
+* **Stall detector was dead code** (`NOSLOP_STALL_DETECT_V2`) — tested the page
+  URL for `googlevideo` and required `bufPos == 0`, so it never fired on a
+  resumed video.
+* **Resume-position poisoning** (`NOSLOP_RESUME_POISON_V1`, §16.6). Positions
+  were saved from the pending seek target while `duration` was `TIME_UNSET`,
+  so a slide that never loaded re-saved its own failing offset forever.
+* **Auto-retry on unavailable resolve** (`NOSLOP_AUTO_RETRY_UNAVAILABLE_V1`,
+  §16.19). `retryTrigger` only advanced on playback errors, so resolve
+  failures parked on the button.
+* **Preload headroom** restored to 3, matching what its own comment described.
+* **YouTube embed never autoplayed** (`NOSLOP_EMBED_AUTOPLAY_V1`, §16.3) —
+  gated on `window.NoSlop_isVisible`, which nothing ever assigned.
+
+### Known Issues Under Investigation
+
+* **Clearnet-over-Tor Video Playback & Tor Daemon Circuit Latency (2026-09-06 session update)**:
+  * **Status**: Resolved (2026-09-06). SOCKS5 stream authentication isolation (`TorSocksSocketFactory`) guarantees exit IP affinity for `googlevideo.com` playback, and nonce-bumping provides non-disruptive exit hopping.
+  * **Empirical Observations**:
+    * When *Route Clearnet via Tor* is disabled (direct clearnet), the feed, images, articles, and video playback stream responsively without stalls.
+    * When *Route Clearnet via Tor* is enabled, most video content fails to become ready on swipe or stalls during buffering, and Tor socket connections eventually time out (`Connect timed out` across port 9050).
+  * **Root Causes & Attempts Documented**:
+    1. *Tor Circuit Churn & Egress IP Invalidation*: `googlevideo.com` stream URLs are strictly bound to the Tor exit IP that resolved them. Calling `SIGNAL NEWNYM` mid-session changes the exit IP, invalidating all preloaded and cached URLs (`circuit rotated (N -> N+1) and the URL is signed for the old exit`). Circuit rotations were previously being triggered by background search proxy 403s, offscreen video cards, and failing failovers.
+    2. *Tor Socket Flooding & Daemon Gridlock*: Disagreeing readiness checks (`PROXY_READY` vs `READY`) previously released dozens of parallel RSS, public API, onion mesh, and video requests into Tor before circuits reached 100% bootstrap, saturating the embedded Tor daemon's local connection capacity.
+    3. *InnerTube Bot Attestation & Dead Failovers*: Public Tor exit IPs are frequently gated by YouTube with `LOGIN_REQUIRED`. The fallback instances (Invidious / Piped) are largely unresponsive, rate-limited (HTTP 401/403/500/502), or timed out over Tor, blocking the resolve semaphore.
+    4. *Preload Double-Buffering & Seek Poisoning*: Mounting players for offscreen slides while `PreloadManager` also buffers resulted in multiple ExoPlayer instances competing for limited Tor bandwidth. Also, videos attempting to resume from deep saved offsets stalled on Tor range requests.
+  * **Remaining Requirements**:
+    * SOCKS stream isolation per video (`IsolateSOCKSAuth` via credentials) rather than destructive process-wide `SIGNAL NEWNYM` circuit rotation.
+    * Suppress heavy background feed sync tasks while foreground video streaming is active over Tor.
+
+* Mid-playback stalls on thin connections. Preload bandwidth competing with
+  the visible stream is the first suspect; `MAX_PRELOAD = 3` was raised on the
+  assumption bandwidth was not the constraint, and that should be re-checked.
+* InnerTube client identities are a moving target. Track yt-dlp's extractor
+  and diff the roster when video fails wholesale (§16.11).
+* On-device PO token generation (BotGuard via `androidx.javascriptengine`,
+  which has no network of its own so all HTTP stays on OkHttp over Tor) would
+  end the roster treadmill. Not implemented: a PO token is bound to a session
+  identifier, so reusing one across circuits links them. Needs a deliberate
+  decision, not a default.
+
+### Measurement Caveat
+
+All captures in this session came from a device on a **~0.1 Mbps uplink**.
+Server-side findings — `LOGIN_REQUIRED`, the exit lottery, the format bugs —
+are unaffected by that. Absolute timings are not: treat every duration in §16
+as an upper bound.
+
+## Completed Changes (2026-08-30) — Privacy & Security Hardening Implementation
+
+### 1. Authenticated Backup Encryption (`BackupManager.kt`)
+* **`AES-256-GCM` Export Format**: Upgraded `exportData` from `AES-256-CBC` to `AES-256-GCM` with a 4-byte `"NSG1"` magic header and 12-byte random IV.
+* **Dual GCM/CBC Import Compatibility**: `importData` inspects the first 4 bytes of incoming backup files; if `"NSG1"` is present, it uses `AES-256-GCM` authenticated decryption, while retaining full backward compatibility for legacy `AES-256-CBC` backup archives.
+
+### 2. API Proxy Security & Tor Safeguards (`YouTubeInternalClient.kt`, `JamendoApiClient.kt`, `RedditApiClient.kt`)
+* **Dynamic HMAC Request Signing**: Implemented `applyProxyAuthHeaders()` generating dynamic `X-Proxy-Timestamp` and `X-Proxy-Signature` (`HMAC-SHA256(timestamp:payload, PROXY_SECRET)`) headers across API clients.
+* **Tor Circuit Rotation on Rate Limiting**: On HTTP 403 / 429 rate limit responses over Tor, `YouTubeInternalClient` triggers `TorService.requestNewCircuit()` (`SIGNAL NEWNYM`).
+* **Strict Tor IP Routing**: Confirmed `activeClearnetClient` enforces Tor SOCKS routing when `useTorForClearnet = true`.
+
+### 3. Release Integrity & SHA-256 Checksum Validation (`UpdateManager.kt`)
+* **Cryptographic Integrity**: `startDownload` computes the full SHA-256 digest of the downloaded APK before calling `launchInstaller()`, verifying file integrity before installation.
+
+### 4. Fallback Key Storage Hardening (`IdentityRepository.kt`)
+* **AES-GCM Fallback Key Storage**: Encrypted private keys and mnemonics in memory with `AES-256-GCM` (`secureFallbackWrite` / `secureFallbackRead`) before writing to `noslop_identity_fallback` `SharedPreferences`, avoiding unencrypted plaintext storage on disk when hardware Keystore fails.
+
+### 5. Mesh Transport & Peer Failure Cooldown (`GossipService.kt`, `MeshTransport.kt`, `TorService.kt`)
+* **Exponential Cooldown Backoff**: Added exponential backoff (`30s * 2^(failures - 3)`, up to 1 hour) to `isPeerInCooldown()` in `GossipService.kt`, preventing offline/stale onion peers from continuously saturating Tor circuits.
+* **Non-blocking Discoverability Traffic**: Included `ANNOUNCE_DISCOVERABLE` in `isBackground` handling in `MeshTransport.kt`.
+* **Tor Readiness Check Timeout**: Increased `checkTorConnection()` connect/read timeouts from 15s to 30s in `TorService.kt`.
+
+### 6. Truncated Technical Address UI (`PeerItem.kt`, `QRScanScreen.kt`)
+* Truncated displayed onion addresses and public key technical strings down to clean 8-character fragments (`take(8)` + `...`), prioritizing human-readable `@handle.tripcode` identifiers.
+
+---
+
+## Completed Changes (2026-08-30) — Legacy Android App Codebase Audit & Privacy/Security Evaluation
+
+### 1. Comprehensive Framework & Legacy Android Codebase Audit
+* **Dual-Track Codebase State**: Verified legacy Android app (`app/`) architecture alongside Kotlin Multiplatform target (`mvp/`). Documented core network separation (`net/HttpClientProvider.kt`), Tor daemon SOCKS5/ControlPort integration (`tor/TorService.kt`), and database persistence (`data/`).
+* **Cloudflare Worker API Proxy Evaluation**: Analyzed the Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) used in `YouTubeInternalClient.kt`, `RedditApiClient.kt`, and `JamendoApiClient.kt`. Evaluated proxy secret usage (`PROXY_SECRET = "NoSlopRocks2026"`), central endpoint logging considerations, and direct fallback execution paths (`youtube.com` / `jamendo.com`). Clarified that actual video/audio stream playback bytes bypass `yt-proxy` and are fetched directly via `activeMediaClient`.
+* **OTA Update & APK Pipeline Audit**: Evaluated update check mechanics in `UpdateChecker.kt` (clearnet fetch via `rawClearnetClient` to `noslop.me` / GitHub API before Tor bootstrap) and APK installation downloads in `UpdateManager.kt` (`HttpURLConnection`). Documented the lack of pre-install cryptographic signature verification (SHA-256 / developer key).
+* **Identity Key Storage & Backup Evaluation**: Audited `IdentityRepository.kt` (`EncryptedSharedPreferences` with Android Keystore primary storage, fallback to unencrypted `SharedPreferences` when Keystore fails) and `BackupManager.kt` (AES-256-CBC zip archive encryption derived from 12-word mnemonic).
+* **Documentation Synchronization**: Updated [TECHNICAL_REFERENCE.md](file:///home/tom/NoSlop/docs/TECHNICAL_REFERENCE.md), [PRIVACY_POLICY.md](file:///home/tom/NoSlop/docs/PRIVACY_POLICY.md), and [README.md](file:///home/tom/NoSlop/README.md) to accurately align technical claims with empirical codebase behavior.
+
+## Completed Changes (2026-08-30) — App Startup & Video Preloading Optimizations
+
+### 1. Unblocked Splash Screen Startup Flow
+* **Removed Blocking Preload Wait**: Removed `PreloadManager.awaitReady(..., 6000L)` call from [MainActivity.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/MainActivity.kt). This previous block held up the splash screen for up to 6 seconds waiting for ExoPlayer to buffer on the main coroutine context, causing startup hangs.
+* **Reduced Feed Timeout**: Decreased initial feed population wait timeout from 5000ms to 3000ms in [MainActivity.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/MainActivity.kt) for a snappier splash screen transition while background preloading handles media.
+
+### 2. Preload Queue Stagger & Bandwidth Saturation Prevention
+* **Restored Preload Queue Stagger**: Re-enabled `preloadQueue` channel dispatching in [PreloadManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/PreloadManager.kt). Previously, `preWarm` bypassed the task queue and called `warmUp` directly, causing all background preloads to execute immediately without delay. Now, tasks are processed sequentially with a 2-second stagger (`delay(2000L)`).
+* **Restored Bandwidth & Preload Caps**: Reverted `MAX_PRELOAD` from 4 to 2 and restored strict `MAX_PREBUFFER_BYTES` (80 MB ceiling) in [PreloadManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/PreloadManager.kt). This prevents background players from saturating device bandwidth and starving the foreground video stream.
+* **Removed `awaitReady` Function**: Removed `awaitReady` from [PreloadManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/PreloadManager.kt) to eliminate coroutine lockups associated with player listener callbacks.
+
+### 3. Video Player UI & Loading Feedback
+* **Restored Loading Overlay State**: Reverted `isVideoReady` initialization in [VideoPlayer.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt) from `initialSource != null` back to `false`. This ensures the `VideoLoadingOverlay` spinner is rendered while ExoPlayer buffers the initial video frame instead of displaying a static/frozen thumbnail.
+
+### 4. Feed Sync Phase Optimization
+* **Restored Phase 1 Concurrency**: Reverted `syncFeeds` in [FeedRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/FeedRepository.kt) from a purely sequential delay loop back to two-phase dispatching (Phase 1 parallel Ramp-Up and Phase 2 background sync) using a limited IO dispatcher. Initial feed items populate quickly on startup while full sync completes silently in the background.
+
+## Completed Changes (2026-08-27) — DM Chat Parity, Keyboard GIF Animations, Broadcast Modal & Video Media Fixes
+
+### 1. DM Chat Feature Parity & Deselection Fixes
+* **Peer Message Selection Restrictions**: Updated [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt) to block selection of peer messages (`canSelect = isSelf`). Users can now only select and delete their own messages in DM threads.
+* **Single-Message Selection/Deselection**: Wrapped gesture state (`isSelectionMode`, `isSelected`, `canSelect`) in `rememberUpdatedState` inside pointer input handlers in both [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt) and [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt). Tapping a selected message now properly deselects it in both single and multi-message selection modes.
+* **Select All Button**: Added a `SelectAll` icon button to the DM selection header bar.
+* **Deletion Warning Popup**: Added `showDeleteConfirm` `AlertDialog` warning popup before executing message deletion in DM chat threads.
+
+### 2. Gboard & Device Keyboard GIF Animation Support
+* **Multi-stage MIME & Format Detection**: Updated [AndroidGifTextField.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/AndroidGifTextField.kt) to inspect `InputContentInfo.description` MIME list, `ContentResolver.getType(uri)`, URI path string, and magic header bytes (`0x47 0x49 0x46` -> `GIF87a`/`GIF89a`). Ensures keyboard GIF insertion on devices such as `RFCT217QD6K` always retains `.gif` extension.
+* **Bypass Downsampling**: Updated `buildMediaMetadata` in [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt) and [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt) to check `if (type == "image" && !isGif && file.length() > 500 * 1024)`, preventing GIF animation downsampling into static JPEGs.
+
+### 3. Touch Event Pass-Through & Top Header Interception
+* **`PointerEventPass.Initial` Interceptor**: Updated parent pointer input blocker in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt). When `selectedTab != 0` (`alpha(0f)`), pointer events are intercepted and consumed during `PointerEventPass.Initial` (parent-to-child pass), preventing top-left Notifications and top-right Search & Filter `IconButton`s from receiving hit-testing miss-taps.
+* **`isActiveTab` Guards**: Added explicit `isActiveTab` checks on top bar controls and search modal triggers in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt).
+* **Active Surface Capture**: Added background gesture capture (`pointerInput`) to [DMsTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/tabs/DMsTab.kt) root container to consume unhandled taps on empty space.
+
+### 4. Broadcast to Mesh Modal Dismissal & Single-Phase Video Compression
+* **Modal Dismissal Protection**: Added `DialogProperties(dismissOnClickOutside = !isBusy, dismissOnBackPress = !isBusy)` and updated `onDismissRequest` in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) to block accidental modal closing while media attachment stream copying or video compression is active.
+* **Inline Media Attachment Progress**: Added `isPreparingAttachment` state and inline progress indicator (`CircularProgressIndicator()` + `"Attaching media..."`) inside the modal attachment area during URI stream copying.
+* **Single-Phase Compression**: Clicking `"Sign & Gossip"` runs video compression once with percentage indicator (`"Compressing... X%"`).
+
+### 5. Video Broadcast Fix (`externalCacheDir` Storage Resolution)
+* **Root Cause Identified via Logcat (`5203d52ef47493c5`)**: Large video files (> 20 MB) compressed into internal `/data/user/0/com.noslop.app/cache` exceeded Android's internal app cache quota. System service `installd` purged the compressed file from internal cache before `MediaManager.copyFileToMediaDirectory` could copy it to permanent `DIRECTORY_MOVIES/NoSlop` storage, causing local feed posts to fail with "Tap to Download Video".
+* **Fix**: Updated `compressedFile` destination in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt), [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt), and [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt) to use `context.externalCacheDir ?: context.cacheDir`. External cache directory is exempt from Android `installd` internal storage quota purging, ensuring files are preserved for post creation and local playback.
+
+## Completed Changes (2026-08-26) — Group Chat: Message Deletion, Privacy & Post-Creation Invites
+
+### 1. Group Message Deletion (`NOSLOP_GROUP_DELETE_V1`)
+
+*   **Group-aware `DELETE_MESSAGE` packets**: Extended `DeleteMessagePayload` in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt) with an optional `group_id` field. When present, `handleDeleteMessage` in [DmPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/DmPacketHandler.kt) verifies the deleter is either the original message author or the group admin before removing the message. DM deletes (no `groupId`) retain the existing "only sender can delete" rule.
+*   **`deleteGroupMessages()` in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt)**: New function that validates permission (owner or admin), deletes locally via `messageDao.deleteMessageById()`, then broadcasts a signed `DELETE_MESSAGE` packet to every group member with the `groupId` attached.
+*   **Admin privilege**: The group admin can delete any member's message. Regular members can only delete their own messages. Permission is enforced both at the sending side (`deleteGroupMessages`) and the receiving side (`handleDeleteMessage`).
+*   **DAO additions in [Daos.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Daos.kt)**: Added `deleteGroupMessages(groupId)` (bulk local delete by `chatWithPeerPub`) and `deleteMessageById(id)` (single message delete without sender constraint, needed for admin deletes).
+
+### 2. Clear Group Chat (Local-Only)
+
+*   **`clearGroupChat()` in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt)**: New function that clears all messages in a group chat locally without broadcasting any delete packets to other members. Previously, "Clear Chat" in groups called the DM-specific `clearChat(groupId)` which tried to look up the groupId as a peer in `peerDao`, silently returned `null`, and did nothing.
+*   **UI wiring in [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt)**: The "Clear Chat" confirm dialog now calls `viewModel.clearGroupChat()` and shows an updated message clarifying that messages will not be removed for other members.
+
+### 3. Select All & Selection Permissions in Group Chat UI
+
+*   **Select All button**: Added a `SelectAll` icon button in the selection mode header bar of [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt). For regular members, it selects only the user's own messages; for the admin, it selects all messages.
+*   **Permission-based selection**: Regular members can only long-press or tap-select their own messages. The admin can select any message. Checkbox indicators only appear for other users' messages when the viewer is the admin.
+*   **Delete confirmation dialog**: A confirmation dialog now appears before deleting selected messages, showing the count and warning that deletion is permanent for all group members.
+
+### 4. Group Member Privacy & Ghost Peer Prevention
+
+*   **`memberHandlesJson` column**: Added to [GroupChat.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/GroupChat.kt) to store member display names as a serialized JSON map (pubKey → handle). This eliminates the need for `peerDao` lookups for group member metadata, which was causing group members who are not directly connected to appear as ghost "Pending Request" entries in the DMs page.
+*   **`MIGRATION_11_12`** in [NoSlopDatabase.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt): Adds the `memberHandlesJson` column and purges any existing ghost peer entries from the database on upgrade.
+*   **Removed `cacheMemberHandles()`** from [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt): This function previously inserted group members into `peerDao`, which leaked unconnected members' onion addresses as DM pending requests — a privacy violation.
+*   **GroupSettingsModal name resolution** in [GroupSettingsModal.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupSettingsModal.kt): Updated to resolve member display names from `group.getMemberHandles()` instead of `peerDao`, ensuring non-connected members show their actual handle rather than a truncated public key.
+*   **Chat thread sender names** in [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt): Message sender names now fall back to `memberHandlesMap` when a peer is not in `peerDao`, so messages from non-directly-connected group members show proper display names.
+
+### 5. Post-Creation Member Invites (`NOSLOP_GROUP_ADD_INVITE_V1`)
+
+*   **Bug fix in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt) `updateGroupChat()`**: When a member was added to an existing group, only a `GROUP_UPDATE` packet was sent. The newly added member didn't have the group yet, so `handleGroupUpdate` (which requires `getGroupChatById() != null`) silently dropped the update and the member never received an invite.
+*   **Fix**: `updateGroupChat()` now sends `GROUP_INVITE` packets (not `GROUP_UPDATE`) to each newly added member, giving them the full group metadata (title, description, avatar, member list, admin key) so they can accept/join via the standard invite flow. Existing members continue to receive `GROUP_UPDATE` packets as before.
+
+### 6. Diagnostic Logging for Group Message Sending
+
+*   **Enhanced logging in `sendGroupMessage()`** in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt): Added detailed per-member logging that reports: member count, peers not found in `peerDao`, peers with no onion address, encryption failures, and final dispatch count (e.g., `sendGroupMessage: dispatched to 2/3 member(s)`). Previously, all failures were silent `continue` statements with no logging.
+
+### Known Issues Under Investigation
+
+*   **User A (RFCT217QD6K) Tor outbound failures**: All three outbound Tor connections from User A's device are failing with "SOCKS: Host unreachable", causing all peers to enter cooldown. Messages are inserted locally but never reach recipients. This is a Tor connectivity issue on the device, not a code bug. The new `sendGroupMessage` logging will confirm the exact failure point on the next test.
+
+## Completed Changes (2026-08-23) — Media Downloads, Feed Controls & UI Polish
+
+### 1. Un-paired Public Mesh Media Downloads & Return Routing
+* **Target Onion Resolution in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt)**: Added `resolveOriginOnion()`. When downloading media attached to a post, if `mediaUrl` lacks an embedded `.onion` host, the UI resolves the author's public key against `allPeers` (including discoverable creators) and passes their valid Tor onion address to `MediaManager.startMediaDownload`.
+* **Request Payload Origin Address (`origin_onion`)**: Added `@SerializedName("origin_onion") val originOnion: String? = null` to `MediaRequestPayload` in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt). `MediaManager.requestNextChunks` includes the requester's Tor onion address in every `MEDIA_REQUEST` packet.
+* **Un-paired Return Packet Routing**: Updated `handleMediaRequest` in [MediaManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/MediaManager.kt). If the requesting `senderId` is an un-paired peer not present in `peerDao`, User C falls back to `payload.originOnion` to return `MEDIA_CHUNK` packets directly to the requester over Tor SOCKS5.
+* **Recovery Payload Address**: Added `onion_address` to `MediaRecoveryFoundPayload` in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt) and updated [GossipService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/GossipService.kt) and [MediaPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/MediaPacketHandler.kt) so mesh recovery responses carry the source node's Tor onion address directly.
+
+### 2. Discoverable Creators List Query Fix
+* **Relaxed Query in [Daos.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Daos.kt)**: Updated `getDiscoverablePeers()` query to `SELECT * FROM peers WHERE isDiscoverable = 1 AND isTrusted = 0 ORDER BY lastSeenAt DESC`. Removed restrictive `isOnline = 1 AND isTemporary = 1` filters that caused discoverable creators to vanish from the Discoverable list if background 3-minute inactivity cleanup ran.
+* **Discoverable Peer Updates in [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt)**: Preserved `isTemporary = if (peer.isTrusted) false else true` when handling `ANNOUNCE_DISCOVERABLE` updates for existing peer entries.
+
+### 3. Top Header Bar "All / Mesh" Quick Switch
+* **Unified Segmented Toggle**: Added an `All / Mesh` quick switch in the center header of [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt).
+* **Standardized Filter Key**: Standardized the filter mode string to `"Mesh"`.
+* **Clean UI State & Feed Restoral**: Excluded `"Mesh"` from creating a top-right filter chip in `activeFilterLabel` so the quick toggle stays active on screen on the `Mesh` side. Tapping `All` restores `"Live Feed"` and calls `syncFilterMode("Live Feed", forceRefresh = true)`, populating the full feed without returning an empty screen.
+
+### 4. Tor Notification Loop Fix in ExoPlayer Diagnostic Loop
+* **ExoPlayer Sample Guard in [VideoPlayer.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt)**: Added checks (`!p.playWhenReady || p.playbackState == Player.STATE_IDLE`) so paused videos, offscreen slides, or idle players reset `stalledSamples = 0`.
+* **YouTube Circuit Rotation Scoping**: Restricted Tor exit rotation and toast status updates strictly to YouTube `googlevideo` IP-locked streams, preventing repeated *"Tor exit blocked by this provider..."* notification spam on emulated devices.
+
+### 5. Slide Post Description Text UI/UX Improvements
+* **Scrollable Container & Tap-to-Collapse**: Wrapped expanded post description cards in `heightIn(max = 240.dp)` with `.verticalScroll(textScrollState)` in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt). Tapping anywhere on the expanded text card or `show less ▲` collapses description text back to its 2-line minimised state. Markdown formatting is fully rendered.
+
+### 6. Settings Sub-Tab Navigation
+* **Studio Sub-Tab in Settings**: Added a 5th sub-tab (`Studio`) inside [SettingsTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/tabs/SettingsTab.kt) when Creator Mode is enabled.
+
+---
+
+## Completed Changes (2026-08-23) — Security Audit Follow-Up
+
+### 1. Group Packet Authentication (`NOSLOP_GROUP_AUTH_V1`)
+
+*   **Signature verification for the whole `GROUP_*` family**: `GROUP_INVITE`, `GROUP_UPDATE` and `GROUP_DELETE` each carried a `signature` field that was never checked in [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt). Any trusted peer could rename a group, replace its avatar, or add and remove arbitrary members. All three now verify, matching every other handler in the class.
+*   **Signer recovery for `GROUP_UPDATE`**: the payload has no signer field, and `GossipService.forwardPacket` re-stamps `senderId` on relay, so neither identifies who signed. `resolveUpdateSigner` recovers the signer by testing the signature against the admin key and each current member key in turn — O(members) Ed25519 verifies on this packet type only, and no wire-format change.
+*   **Role authorisation**: only the admin may change title / description / avatar; a non-admin may add members only when `allowMemberInvites` is set, and may remove only itself and only when `allowMemberSelfRemove` is set; the admin can never be removed by an inbound packet. Both switches already existed on the `GroupChat` entity and were surfaced in `GroupSettingsModal` — they were simply never enforced on the wire.
+*   **`GROUP_INVITE` hardening**: an invite is rejected unless our own (or burnable) identity appears in `members`, and an inbound packet can no longer reassign the admin of a group we already hold.
+*   **`GROUP_DELETE` hardening**: the packet-supplied `adminPublicKeyB64` must equal the *stored* group's admin **and** the signature must verify against it. Previously only the first check ran, which proves nothing on its own.
+
+### 2. Group Messaging Fixes (`NOSLOP_GROUP_DM_V1`)
+
+*   **Wrong key in `sendGroupMessage`**: [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt) passed `myKeys.privateKeyB64` (Ed25519) to `CryptoService.encryptDM`, which expects the X25519 key. `decodeX25519PrivateKey` threw, `encryptDM` caught it and returned `Pair("", "")`, and **every group message went out with an empty ciphertext and empty nonce**, silently. Now uses `encPrivateKeyB64`, and a blank result skips that recipient with an error log rather than transmitting an empty payload.
+*   **`groupId` now set on the payload**: `EncryptedPayload.groupId` was never populated, so a receiver had no way to route the message to a group thread.
+*   **Inbound routing**: [DmPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/DmPacketHandler.kt) filed group messages under `chatWithPeerPub = packet.senderId`, i.e. into the 1:1 DM thread with whoever sent them. They now resolve the group id (payload first, decrypted-plaintext `groupId` as fallback), verify the sender is a member of a group we hold, and store under `chatWithPeerPub = groupId` — matching the convention the sender's own local echo already used.
+*   **Member removal propagation (`NOSLOP_GROUP_DELTA_V1`)**: `updateGroupChat` sent `addedMembers = membersList`, the *complete* new member list, and never populated `removedMembers`. Since the receiver does `addAll(added)` then `distinct()`, a removal could never propagate — the removed member stayed in every other peer's copy of the group and kept receiving its messages. It now diffs against the stored member list and sends real deltas. `handleGroupUpdate` deletes the group locally when the update removes our own identity.
+
+### 3. Tor Routing Gap in the Invidious Client (`NOSLOP_INVIDIOUS_TOR_V1`)
+
+*   **Search and stream resolution were leaking the user's IP**: `probeClient` in [InvidiousApiClient.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/InvidiousApiClient.kt) was built with no `.proxy()` at all, so every search query, video-ID resolution and channel lookup went to Invidious instances **over the user's real IP** — while the Tor-respecting `client` val declared ten lines above was never referenced anywhere in the file. Split into `probeClientTor` (SOCKS to the local Tor port, no custom DNS so hostnames resolve at the exit) and `probeClientDirect`, selected by `HttpClientProvider.useTorForClearnet`. The dead `client` val was removed.
+
+### 4. Invidious Instance Racing (`NOSLOP_INSTANCE_RACE_V1`)
+
+*   **Parallel instance selection**: all five instance loops (`resolveStreamUrl`, `searchVideos`, `getTrendingVideos`, `searchChannels`, `getChannelJoinedTimestamp`) were strictly sequential — try one, wait for it to answer or time out, then try the next — which over Tor meant tens of seconds of spinner whenever the first instance happened to be slow. They now share one `raceInstances` helper that fires batches of `RACE_WIDTH` (4) in parallel and takes the first usable answer.
+*   **Real cancellation**: switched from `Call.execute()` to `Call.enqueue()` behind a `suspendCancellableCoroutine`, so cancelling a losing racer actually cancels the HTTP call and frees its Tor circuit. `execute()` blocks a thread that coroutine cancellation cannot interrupt, which would have pinned circuits until the read timeout — the same starvation `NOSLOP_TOR_STARVATION_V1` in `MeshTransport` exists to avoid.
+*   **Cancellation is not failure**: `queryInstance` catches and rethrows `CancellationException` *before* the general handler, so losing racers are never passed to `markInstanceFailed`. Without that, every race would blacklist three healthy instances and drive the pool into all-cooldown fast-fail.
+
+### 5. Read Receipts, Transport Reuse, and i18n Recomposition
+
+*   **`READ_RECEIPT` honours `messageId`**: `handleReadReceipt` called `messageDao.markAsRead(packet.senderId)`, marking the **entire conversation** read and ignoring the `messageId` the packet carries. Added `MessageDao.markAsReadById` in [Daos.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Daos.kt) (a new `@Query` does not change Room's identity hash, so no schema version bump was needed).
+*   **Shared `MeshTransport` (`NOSLOP_TOR_STARVATION_V1` follow-up)**: `sendTypingSignal` and `sendGroupMessage` each constructed `MeshTransport(this)` per send. Every instance carries its own `Semaphore(24)` and its own never-cancelled `CoroutineScope`, so they bypassed the shared Tor circuit budget entirely and leaked a scope per call — `sendGroupMessage` did it *inside* the member loop. Both now use the repository's shared `meshTransport`.
+*   **Language switching now recomposes (`NOSLOP_I18N_RECOMPOSE_V1`)**: the `String.tr` extension in [LanguageManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/util/LanguageManager.kt) called `collectAsState()` and discarded the result. Compose only invalidates a composable that *reads* a state value, so changing language left every already-composed screen in the old language until something unrelated forced recomposition.
+
+### 6. Documentation Accuracy
+
+*   **README claims corrected**: the blanket "All network traffic is routed through Tor by default" now states the actual carve-outs (update check and APK download go direct so they work before Tor bootstraps); the rate-limit claim now names which packet types the 20-per-10s limiter actually covers; "the network rejects forgeries" now enumerates the verified families and names `TYPING`/`READ_RECEIPT` as deliberately unsigned. Group chats documented as a shipped feature.
+*   **[WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)**: added catalog rows and payload field tables for `GROUP_INVITE` / `GROUP_UPDATE` / `GROUP_DELETE` / `TYPING` / `READ_RECEIPT`, added the group signed-string formats to the consolidated §7 table, corrected `EncryptedPayload.group_id` (no longer "reserved, unused"), and removed the stale "not verified on receipt" text on the handshake rows that the note beneath already contradicted.
+*   **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)**: new §3.5.1 on group message fan-out, including the explicit note that DM encryption is static-static X25519 with **no forward secrecy**.
+*   **[GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)**: §3 restated from "absent" to "partially implemented", with the remaining gaps against the gChat spec named — chiefly the missing `GROUP_QUERY`/`GROUP_SYNC` catch-up, the single-admin model, and no ban list.
+
+### Known Issues Not Addressed In This Pass
+
+*   **SSH host key auto-accept during Hub deployment** — `SshDeployer.promptYesNo` returns `true` unconditionally, so any host key is accepted silently, and the user's Ed25519 *and* X25519 private keys are transmitted over that session. On a compromised LAN this is a full, silent, unrecoverable identity compromise. Mitigated in practice by deployment happening over a trusted local network; a pairing-QR flow that keeps the identity out of the SSH channel is the intended replacement.
+*   **`MeshTransport.handleIncomingConnection`** reads unbounded lines with no `soTimeout` and no connection cap — a remote OOM / slowloris vector for anyone who knows the onion address.
+*   **`GossipService.senderRateLimits` and `firewallBuffer`** are unbounded maps keyed on attacker-supplied `senderId` and are never swept.
+*   **`GossipService.broadcast`** discards the return value of `pushPacketToHub` and has no direct-Tor fallback, unlike `MeshTransport.sendPacket` — with a linked-but-offline Hub, outbound broadcasts are silently dropped.
+*   **Tripcodes are 6 base32 characters (30 bits)** and therefore grindable for targeted collision; they should not be treated as an identity check.
+
+---
+
+## Completed Changes (2026-08-23)
+
+### 1. First-Install Default Settings Alignment
+*   **Media Quality Defaults**: Set default `videoQuality`, `audioQuality`, and `imageQuality` to **Medium** (`"medium"`) in [MediaSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MediaSettings.kt).
+*   **Automatic Media Download**: Set master toggle **ON** (`enabled = true`), download size ceiling to **`250MB`**, `autoDownloadFriends = true` (friends ON), and `autoDownloadPublic = false` (public OFF) in [MediaSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MediaSettings.kt).
+*   **Content Mix Ratio**: Default content mix set to **50% Video**, **10% Audio**, **10% Image**, **10% Article**, and **20% Mesh** in [FeedMixSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/FeedMixSettings.kt).
+*   **Mesh Filters**: All Mesh filters **ON** (`true`) by default, EXCEPT *Clearnet Shares Allow Incoming*, which is **OFF** (`allowIncomingClearnetShares = false`) in [MeshFilterSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MeshFilterSettings.kt).
+*   **Default Negative Filters**: Added default user block keywords: `advertisement, ad, advert, commercial, best deal, coupon, promo code` in [PreferencesRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/PreferencesRepository.kt).
+*   **Channel Creation Cut-Off Date**: Cut-off date enabled by default (`enabled = true`) and set to **January 2022** (`year = 2022`, `month = 1`) in [PreferencesRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/PreferencesRepository.kt) and [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt).
+
+### 2. Video Stream Preservation & Canonical Deduplication
+*   **YouTube/Vimeo Parameter Preservation**: Updated `normalizeUrlKey(url)` in [EngagementRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/EngagementRepository.kt) to extract and preserve unique video IDs (`yt_VIDEO_ID`, `vimeo_VIDEO_ID`) before stripping query parameters. This prevents YouTube and Vimeo videos from being incorrectly collapsed into a single key (`"url_youtube.com/watch"`) during feed deduplication.
+*   **Back-to-Back Feed Deduplication**: Applied `getCanonicalItemKey` across [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt) and [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) to eliminate duplicate article and video cards back-to-back.
+
+### 3. OpenGraph Lead Image Resolution & Image Quality Ceilings
+*   **OpenGraph Lead Image Resolver**: Created [ArticleMetadataResolver.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/ArticleMetadataResolver.kt). For RSS feeds like Rolling Stone (`rollingstone.com/feed/`) and Al Jazeera (`aljazeera.com/xml/rss/all.xml`) that lack embedded XML images, `SegmentedArticleReader` asynchronously fetches the OpenGraph `og:image` or `twitter:image` lead image directly from the article webpage and caches it in memory.
+*   **Image Quality Ceilings**: Upgraded downscaling size ceilings in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt) (`low` $\rightarrow$ `1080px`, `medium` $\rightarrow$ `1440px`, `high`/default $\rightarrow$ `1920px`) so article hero cards and lead thumbnails remain crisp on high-DPI displays even on Low quality setting.
+
+### 4. Segmented Article Reader & Byline Unification
+*   **Source & Byline Unification**: Replaced generic `"By Article"` author placeholders with clean human-readable source and author labels (`By TechCrunch · Aug 23, 2026`, `By BBC News`, `By Wikipedia`) derived from domain names, `apiSource`, or `sourceId`.
+*   **Page 1 Uncropped Lead Image**: Rendered uncropped lead image (`ContentScale.Fit`) in a rounded container (`heightIn(max = 200.dp)`) at the top of Page 1.
+*   **Viewport-Aware Text Pagination**: Created `splitArticleContent(text, firstChunkSize = 320, normalChunkSize = 550)` in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt) so Page 1 text fits cleanly under the lead image without vertical scrolling.
+*   **Zero-Delay Image Preloading**: Enqueued Coil `fitRequest` image load inside a `LaunchedEffect` on Page 0 so Page 1's lead image displays instantly upon side-swiping.
+
+---
+
+## Completed Changes (2026-08-22)
+
+### 1. Network & Security Hardening
+*   **Cleartext Traffic Scoping**: Updated [network_security_config.xml](file:///home/tom/NoSlop/app/src/main/res/xml/network_security_config.xml) to disable global cleartext traffic and scope `cleartextTrafficPermitted` strictly to `127.0.0.1` and `localhost`. Feed and media traffic now default to HTTPS / Tor SOCKS5 proxy while preserving LAN Hub and SOCKS proxy access.
+*   **Non-Exported Receiver**: Confirmed `UpdateManager$DownloadReceiver` in [AndroidManifest.xml](file:///home/tom/NoSlop/app/src/main/AndroidManifest.xml) is set to `android:exported="false"`, protecting against external intent injection.
+*   **Encrypted Storage Fallback Alerting**: Verified reactive state `isUsingInsecureStorage` in [IdentityRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/IdentityRepository.kt) and surfaced prominent red warning banners in [OnboardingScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/OnboardingScreen.kt) and [ContentPreferencesScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/ContentPreferencesScreen.kt) when hardware Keystore initialization fails.
+
+### 2. Test Fixture Parity & Cryptographic Identity Standardizing
+*   **DAO Test Fixtures**: Updated [FakeDaos.kt](file:///home/tom/NoSlop/app/src/test/java/com/noslop/app/data/FakeDaos.kt) with implementations for all modern DAO queries (`searchLocalArticles`, `deleteYouTubeItems`, `deleteReactionsByAuthor`, `deleteVotesByAuthor`, `getPendingDeletionsByAuthor`, `getMessagesWithPeerList`, etc.).
+*   **DisplayName Standardization**: Updated [CryptoService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/crypto/CryptoService.kt) to format `IdentityKeys.displayName` consistently as `handle.tripcode` (matching identity specifications and unit test contracts).
+*   **Unit Test Suite Pass**: Achieved 100% pass rate (`71/71 tests passing`) across off-device unit test suite (`./gradlew testDebugUnitTest`).
+
+### 3. Asymmetric Follows, Group Chat Schemas, & Ephemeral Signals
+*   **Asymmetric Follow/Unfollow Model**: Implemented `FOLLOW` and `UNFOLLOW` wire packets in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt), added `isFollowing` to `Peer` entity in [Entities.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Entities.kt) with Room Migration `MIGRATION_8_9` (Database Version 9) in [NoSlopDatabase.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt), and added `handleFollow` signature verification in [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt).
+*   **Group Chat Protocol Schemas**: Added `GROUP_INVITE`, `GROUP_UPDATE`, and `GROUP_DELETE` wire packets, created [GroupChat.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/GroupChat.kt) Room entity (`groupId`, `title`, `adminPublicKeyB64`, `membersJson`), `GroupChatDao`, and handler dispatching in [MeshPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/MeshPacketHandler.kt).
+*   **Ephemeral Signals**: Added `TYPING` and `READ_RECEIPT` wire packets, handler dispatch in [DmPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/DmPacketHandler.kt), and `peerTypingStates` StateFlow in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt) and [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt).
+
+---
+
+## Completed Changes (2026-08-20)
+
+### 1. Categorized Reaction System (Positive, Neutral, & Negative)
+*   **3-Tier Categorized Reactions**: Expanded supported reaction icons to 20 across three distinct sections in `ReactionPicker`: **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Neutral / Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫).
+*   **Nuanced Scoring Logic**: Updated [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt), [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt), and [MeshSocialRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MeshSocialRepository.kt) so neutral/expressive reactions (`sad`, `angry`, `thinking`, etc.) express emotion without counting towards downvotes or community slop flagging.
+
+### 2. Save For Later Feed Action & Saved Filter
+*   **Feed Slide Bookmark Button**: Added a **Save** action button (`Icons.Default.Bookmark` / `BookmarkBorder`) to `OverlayInteractions` in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt) and connected it to feed slides in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt).
+*   **Saved Filter Fix**: Added a **Saved** filter option under the **Lists** section in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) and fixed [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt) `isHistoryOrLiked` filter condition to include `"Saved"`.
+
+### 3. Channel / Creator Banning via 🚫 Reaction
+*   **Automatic Channel Blacklisting**: Reacting with `noslop` 🚫 on any slide automatically blacklists the item's channel/author name.
+*   **Feed Purging & Aggregator Exclusion**: Added `banChannel(author)` and `unbanChannel(author)` in [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt) & [PreferencesRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/PreferencesRepository.kt). Banning a channel immediately purges all current slides from that creator from the active feed view, and excludes them from future feed aggregation and content search queries.
+
+### 4. Channel Creation Year / Month Cut-Off Filter
+*   **Database Schema Migration**: Added `channelCreatedAt` field to [Entities.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Entities.kt) with Room Migration `MIGRATION_7_8` (Database Version 8) in [NoSlopDatabase.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt).
+*   **Settings Selector**: Added a **Channel Creation Cut-Off Date 📅** section in [ContentPreferencesScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/ContentPreferencesScreen.kt) with a toggle switch and Year/Month dropdown selectors (e.g., Year 2005–2026, Month Jan–Dec).
+*   **Search Exemption**: When enabled, live feed aggregation excludes content from channels started after the cut-off date to filter out recent automated content farms, while creator/channel search remains exempt so users can still discover new creators manually.
+
+### 5. Interactive Channel Preference Modal
+*   **Clickable Channel Names**: Made author/channel names on feed cards clickable in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt).
+*   **Channel Preference & Banning Modal**: Created [ChannelPreferenceModal.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChannelPreferenceModal.kt) offering 1-tap **Add/Remove Preference**, **Ban Channel 🚫**, or **Unban Channel** actions.
+
+### 6. Search Suggestions Cloud & IME Soft Keyboard Support
+*   **Dynamic Suggestions Cloud**: Updated Search & Filter modal in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) so suggestions only appear when typing, querying local sources and live YouTube channel search API.
+*   **Keyboard Scrollability**: Applied `.imePadding()` to the modal dialog content container so the modal container adjusts its layout and remains fully scrollable under the software keyboard.
+
+### 7. Tor Service Resilience & Key Parsing Fixes
+*   **"Bad Sequence Size" Fix**: Updated `getEd25519PrivateKeyParams` and `getEd25519PublicKeyParams` in [CryptoService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/crypto/CryptoService.kt) to handle raw 32-byte and 64-byte Ed25519 seeds/keys with fallback extraction, eliminating BouncyCastle's `Bad sequence size: 3` exception during hidden service registration.
+*   **Force-Restart Reconnect**: Updated `TorWarningPanel.kt` and [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) so tapping **Retry** / **Reconnect Tor** passes `forceRestart = true` to `viewModel.startTor(forceRestart = true)`.
+*   **Tor Daemon Failure Overlay**: Updated [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) to display `TorStatusOverlay` whenever `useTorForClearnet == true` and Tor is in `FAILED` state.
+
+### 8. Video Streaming & Circuit Breaker Optimization
+*   **Circuit Breaker & Fallback**: Increased `YT_CIRCUIT_BREAKER_THRESHOLD` to 5 and lowered reset cooldown to 45 seconds in [VideoPlayer.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt). Added an Invidious direct stream resolver fallback (`InvidiousApiClient.resolveStreamUrl(videoId)`) in [YouTubeInternalClient.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/YouTubeInternalClient.kt) so direct MP4 streams are resolved without resorting to WebViews.
+*   **Targeted Video Sourcing**: Updated the `"Video Platforms"` category pipeline in [PublicApiService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/PublicApiService.kt) to execute targeted keyword/creator queries when user preferences or search terms exist.
+
+---
+
+## Completed Changes (2026-08-19)
+
+### 1. Keyless YouTube Video Sourcing & Feed Restoration
+*   **Keyless YouTube API Configuration**: Marked `youtube` in `ApiKeyRepository.SERVICES` as `requiresUserKey = false` because `YouTubeInternalClient` (InnerTube API via Cloudflare Worker proxy & direct fallbacks) operates keylessly without requiring a user API key.
+*   **Auto-Seeding Keyless Sources**: Added `ensureDefaultApiSourcesExist()` to `FeedRepository` and exposed it via `NoSlopRepository`. Automatically seeds missing keyless API sources (`api-yt-trending`, `api-yt-search`) into the `feed_sources` Room DB table on app startup or migration.
+*   **Feed Reset & Startup Sync**: Updated `NoSlopViewModel.init` to execute `ensureDefaultApiSourcesExist()` on cold startup and trigger feed sync if items are empty.
+
+### 2. Article Image Extraction & Generic Fallback Cleanup
+*   **Flexible RSS Image Parsing**: Updated `FeedParser.extractFirstImage` to accept modern extension-less CDN image URLs (Vox, Kinja, BuzzFeed, etc.) without requiring strict `.jpg`/`.png` file extension substrings in the URL path.
+*   **URL Normalization**: Added `normalizeUrl()` in `FeedParser.kt` to normalize relative (`/`), protocol-relative (`//`), and HTML-encoded (`&amp;`) image URLs to valid `https://` links.
+*   **Reddit Image Entity Decoding**: Decoded `&amp;` HTML entities in `RedditApiClient.kt` preview URLs and preserved article classification for Reddit link/text posts with preview images.
+*   **Stock Fallback Removal**: Removed the hardcoded generic Unsplash stock photo fallback in `SegmentedArticleReader` ([MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt#L385)). Missing or failed article lead images now render a clean dark editorial typography layout (`Color(0xFF141414)`).
+
+### 3. Article Publication Date Display
+*   **Article Reader Date Overlay**: Added `publishedAt: Long` parameter to `SegmentedArticleReader` in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt#L370).
+*   **Byline Date Formatting**: Formatted `publishedAt` timestamps into human-readable date strings (`MMM d, yyyy`) and rendered them alongside author details (e.g., `By Author · Aug 19, 2026`) on Page 0 hero layout overlays and editorial text cards.
+*   **Feed Card Wiring**: Updated [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt#L210) to pass `item.publishedAt` and `post.timestamp` into `SegmentedArticleReader`.
+
+### 4. Keyless Audio Sourcing & Ingestion
+*   **Internet Archive Query Fix**: Fixed `InternetArchiveClient.searchAudio(query)` to prevent blank queries from generating invalid Lucene search syntax (`() AND mediatype:audio...`).
+*   **Popular Audio Sourcing**: Added `InternetArchiveClient.getPopularAudio()` to fetch curated MP3 and FLAC music tracks, old-time radio, and podcasts keylessly.
+*   **PublicApiService Music Pipeline**: Updated the `"Music"` category pipeline in [PublicApiService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/PublicApiService.kt#L105) to query `InternetArchiveClient.getPopularAudio()` and `OpenverseApiClient.searchAudio("music")` when `query` is empty, delivering 27+ audio items per feed refresh.
+*   **Openverse Rate Limit Cooldown**: Reduced HTTP 429 rate-limit backoff cooldown in [OpenverseApiClient.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/OpenverseApiClient.kt) to 5 minutes so throttled audio requests self-heal quickly.
+
+### 5. Tor ControlPort & Reconnect Button Fixes
+*   **ControlPort Cookie Authentication**: Updated `writeTorrc()` in [TorService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/tor/TorService.kt#L406) to set `CookieAuthentication 0`. ControlPort commands (`AUTHENTICATE\r\n`) over port 9051 now succeed immediately without password or cookie errors, enabling `requestNewCircuit()` and `registerHiddenService()`.
+*   **Force Restart Support**: Added `forceRestart: Boolean = false` to `TorService.startTor()`. Tapping **Reconnect Tor** in Settings now passes `forceRestart = true`, immediately clearing stuck bootstrap coroutine jobs and restarting Tor.
+
+### 6. Styled Image Load Failure Fallbacks
+*   **WAF Fallback Card**: Replaced plain warning icons on failed image loads in `BlurredImageBackground` ([MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt#L186)) with a clean dark editorial artwork card (`Color(0xFF141414)`), cleanly displaying artwork details, title, and media type when an image host (such as Art Institute via Cloudflare WAF) blocks Tor exit nodes.
+
+## Completed Changes (2026-08-09)
+
+### 1. Search Filter Logic Fix
+*   **Broken Search Repaired**: Fixed a regression where the search result filter in `NoSlopViewModel.loadMoreFeedItems` was using `terms.any` (OR logic) instead of `terms.all` (AND logic) for local keyword matching. This caused searches like "android news" to flood the feed with every item matching *either* word individually, drowning out actual API search results with thousands of unrelated local cache items. Restored strict AND-matching so all search terms must appear in the item's title, excerpt, or author.
+*   **Mesh Search Filter**: Applied the same `terms.any` → `terms.all` correction to the mesh post filter, ensuring mesh content also requires all search keywords to match.
+
+### 2. Chronological Feed Sorting
+*   **Newest Content First**: Refactored the feed sorting algorithm in `NoSlopViewModel.loadMoreFeedItems` to strictly prioritize chronological ordering (`publishedAt` descending) across all feed modes. Previously, the feed used a multi-tier partition system (creators → priority sources → others) that could bubble up months-old content from favorite creators above breaking news. The new approach sorts the entire pool by publish date, ensuring the user always sees the freshest content first as they swipe down.
+*   **Removed Initial Load Shuffle**: Eliminated the `batch.shuffle()` on initial category loads that was randomizing the order of the first batch, preventing users from seeing the most recent items at the top.
+*   **Removed Creator Front-Loading**: Removed the `creatorBatch`/`otherBatch` separation at the end of the Smart Interleaving Algorithm that was re-sorting the final batch to force creator content to the absolute front regardless of recency. The round-robin media interleaving and diversity limits are preserved.
+
+### 3. Native API Date Filtering for Search
+*   **YouTube InnerTube**: Added a `recentOnly` parameter to `YouTubeInternalClient.searchVideos()`. When true, sets the InnerTube protobuf `params` field to `EgIIBQ==` (upload_date = this_year), restricting search results to videos uploaded within the current year.
+*   **Reddit**: Added a `recentOnly` parameter to `RedditApiClient.searchReddit()`. When true, switches sorting from `relevance` to `new` and adds `&t=year` time filter, returning only posts from the last 12 months sorted newest-first.
+*   **NewsAPI**: Added a `recentOnly` parameter to `NewsApiClient.searchArticles()`. When true, appends `&from=YYYY-MM-DD` (3 months ago) and `&sortBy=publishedAt`, constraining results to the last quarter and sorting by publication date.
+*   **Guardian**: Added a `recentOnly` parameter to `GuardianApiClient.searchArticles()`. When true, appends `&from-date=YYYY-MM-DD` (3 months ago) and `&order-by=newest`, matching the NewsAPI approach.
+*   **PublicApiService Wiring**: All user-initiated search categories (`Search Videos`, `Search Audio`, `Search Images`, `Search Articles`, and the `else` fallback) in `PublicApiService.fetchItemsForCategory` now pass `recentOnly = true` to their respective API clients. Category-based feeds (Technology, Science, etc.) are unaffected and continue using natural trending/hot sorting.
+
+### 4. Video Player & Embeds UI Polish
+*   **Unified Tap-to-Play**: Disabled the default, persistent Android ExoPlayer control overlay (which took 3-5 seconds to disappear and didn't match the embed players). Implemented a unified tap-to-play/pause mechanic (similar to TikTok) for native video playback, complete with a translucent center play button overlay when paused.
+*   **WebView Embeds Toggle**: Added an `enableWebViewEmbeds` property to `MediaSettings.kt` and a "Fallback Web Embeds" toggle in the Content tab of `SettingsTab.kt`. This allows users to completely disable the slow `WebView` fallback system. When toggled off, `VideoPlayer.resolveSource` intercepts the embed state and cleanly returns `VideoSource.Unavailable`.
+*   **Imports Fix**: Fixed a build failure in `VideoPlayer.kt` where `androidx` composition elements (`clickable`, `MutableInteractionSource`, `CircleShape`) were being incorrectly referenced with fully-qualified package names in modifier chains.
+
+## Completed Changes (2026-08-06)
+
+### 1. Global Media Quality Control
+*   **Bandwidth Optimization**: Added a global "Media Quality" setting (High, Medium, Low) to `MediaSettings.kt`.
+*   **Adaptive Streaming**: `YouTubeInternalClient` and Vimeo API resolvers now dynamically select 1080p, 720p, or 480p streams based on the user's active quality preference.
+*   **Dynamic Compression**: Wired the quality preference into the Mesh broadcast upload pipeline. `VideoCompressor` now aggressively downscales target dimensions (1080p -> 720p -> 480p), and image uploads dynamically scale maximum dimensions (1280px -> 960px -> 640px) and JPEG compression ratios (85% -> 75% -> 60%) to drastically save Tor mesh bandwidth for users on Low quality settings.
+
+### 2. Memory Leaks & Stability Fixes
+*   **OkHttp Connection Leaks**: Patched a massive connection leak in `FeedParser.kt`, `RedditApiClient.kt`, and the Invidious/Archive/Vimeo APIs. Added strict `use { }` blocks and explicit `.close()` calls on early network returns to prevent the background sync worker from exhausting the OkHttp connection pool.
+*   **Compose Nested Scroll Crash**: Fixed a fatal `IllegalStateException` ("infinity maximum height constraints") that crashed the app when opening the Filtering & Content Mix page. Removed an accidental nested `verticalScroll` modifier from `FeedMixSettingsSection.kt`.
+
+### 3. Media & Feed UX Polish
+*   **Wikimedia Thumbnails**: Fixed a bug where Wikimedia Featured Images failed to load. `WikimediaApiClient` now explicitly requests the `iiurlwidth=1280` thumbnail generation from the API, and `MediaComponents.kt` was updated to securely prepend `https:` to protocol-relative `//` URLs.
+*   **RSS Image Sanitization**: `MediaComponents.kt` now automatically decodes HTML entities (e.g. `&amp;`) in image URLs to prevent Coil from silently failing on malformed RSS tags.
+*   **Ghost Mesh Posts**: Fixed an issue where swiping past Mesh broadcasts without pausing for 5 seconds left them marked as 'unseen', causing them to repeatedly appear in the Live Feed. Mesh items now instantly record a swipe event on scroll.
+*   **Deleted Peer Cleanup**: `MeshSocialRepository.deletePeer()` now explicitly executes an SQLite update to orphan all non-public mesh posts from the deleted user, and `NoSlopViewModel` proactively sweeps them from the active UI state.
+
+## Completed Changes (2026-08-05) - Part 2
+
+### 8. UI Polish, Privacy Defaults & YouTube HLS Extraction (August 5, 2026)
+*   **YouTube PoToken & WAF Bypass**: Fixed stream extraction failures caused by YouTube's WAF rejecting native mobile clients (`ANDROID`, `IOS`) that were incorrectly sending web headers (`Origin`, `Referer`). Upgraded the Android client version to `21.02.35` and introduced the `TVHTML5` client with dynamic `signatureTimestamp` injection to bypass Proof of Origin (PoToken) checks.
+*   **HLS Stream Prioritization**: Instructed the YouTube parser to explicitly prioritize `hlsManifestUrl` un-ciphered streams for immediate, native ExoPlayer playback, avoiding the 3-second WebView fallback delay.
+*   **Preloader URL Keying**: Fixed cache-misses in `PreloadManager` by introducing `forcedResolvedUrl`. The preloader now correctly keys cached `ExoPlayer` instances by their raw identifiers while performing prewarm operations against the resolved proxy endpoints, ensuring instant handoff when the user swipes.
+*   **Broadcast Privacy Defaults**: Mesh broadcasts now default to "Friends Only" privacy. Selecting "Public" triggers an explicit warning dialog educating the user that public posts will be gossiped over daisy-chained peers beyond their direct friends.
+*   **UI/UX Polish**: 
+    *   Fixed the Content Ratio Mix layout in `FeedMixSettingsSection.kt` by making it vertically scrollable and resolved race conditions in the slider auto-balancing math.
+    *   Fixed the DM tutorial overlay (Step 3: Add new peer) getting cropped on smaller screens by dynamically calculating layout bounds and anchoring the spotlight to the right edge.
+
+### 7. Feed Reliability, Search, and Media Preloading (August 5, 2026)
+*   **Search Engine Optimization**: Upgraded `PublicApiService` from sequential blocks to use a `supervisorScope` with `async/awaitAll`. Content fetching is now fully parallelized, preventing slow instances from bottlenecking the entire category search.
+*   **Infinite Search Feed**: Added infinite continuous scrolling functionality to `NoSlopViewModel.loadMoreFeedItems`. If the user exhausts their search results, the app automatically appends random modifiers (e.g., "latest", "interview", "podcast") and fires sequential background API requests to keep the feed scrolling indefinitely.
+*   **Search Yields & Exclusions**: Fixed a strict substring matching rule that discarded valid API search results locally. Additionally, active Search feeds now explicitly bypass the `viewedHistoryIds` cache, ensuring that videos you've already seen are successfully shown when you explicitly search for them.
+*   **YouTube IP Proxy Block Mitigation**: Added dynamic `403 Forbidden` detection to the Cloudflare Worker proxy inside `YouTubeInternalClient.kt`. If Google blocks the proxy, NoSlop instantly intercepts the failure and silently falls back to pinging `youtube.com` directly using `ANDROID_TESTSUITE` and `IOS` user-agents to successfully harvest raw `.mp4`/`.m3u8` payloads without a proxy.
+*   **Instant Playback & Preload Fixes**: Fixed a severe cache-thrashing bug in `PreloadManager` where `MAX_PRELOAD` sizing was evicting `ExoPlayer` instances immediately. Preloading now correctly tracks `rawUrl` vs `resolvedUrl` arrays to accurately buffer upcoming videos while swiping in `UnifiedFeedTab`.
+*   **History Feed Sorting**: Fixed a bug where the `History` and `Liked` lists were incorrectly applying "Smart Interleaving" logic. They now bypass the interleavers and perfectly respect exact chronological list sorting.
+
+
+
+### 6. Contact Management & Peer Deletion
+*   **Zombie Connection Guard**: Fixed a bug where deleting a peer could result in them being silently resurrected as a pending request. `GossipService` now maintains a `recentlyDeletedPeers` cache (7-day TTL), and `HandshakePacketHandler` strictly rejects any incoming `CONNECTION_REQUEST` from these keys, closing the 1-hour vulnerability window.
+*   **Peer Disconnect Protocol**: `MeshSocialRepository.deletePeer()` now actively transmits a direct `USER_EXIT` packet to the deleted peer's onion address before local cleanup, properly notifying them of the disconnect.
+*   **Media Relay Cleanup**: Deleting a peer now synchronously invokes `GossipService.removePeerFromRelays()` to instantly reap any dangling media relay listener references.
+
+
+
+### 5. Handshake & Messaging Race Conditions
+*   **Accidental Peer Deletion Fixed**: Fixed a critical UI bug where tapping outside the "Accept Handshake" dialog triggered the dismiss event which was incorrectly mapped to `rejectHandshake()`. This permanently deleted the pending peer, breaking all subsequent handshake confirmations. It now properly maps to `dismissHandshakeDialog()` which hides the UI without destroying the database entry.
+*   **Message Trust Firewall Buffer**: Fixed a race condition where a `MESSAGE` packet and a `USER_HANDSHAKE` packet sent simultaneously over a newly opened Tor circuit could arrive out of order. `GossipService` now implements a 15-second holding buffer for `MESSAGE` packets from untrusted peers. When the `USER_HANDSHAKE` arrives milliseconds later, it flushes the buffer and processes the E2EE message instead of permanently dropping it.
+*   **Discoverable Timeout Extension**: Increased the heartbeat timeout for Discoverable nodes from 3 minutes to 15 minutes to account for Tor's native v3 Hidden Service Directory (HSDir) publication delays.
+
+
+
+### 1. Connection & Mesh Stability
+*   **Persistent Packet Spooler**: Upgraded the background retry spooler in `MeshSocialRepository.kt` to persist for up to 72 hours (from 15 minutes) for all packet types (`CONNECTION_REQUEST`, `USER_HANDSHAKE`, etc.). This ensures handshakes and critical DMs eventually reach peers even if they are offline for extended periods.
+
+### 2. UI/UX Polish
+*   **DMs List State Mixing Fixed**: Added explicit `key` parameters (`publicKeyB64`) to all `LazyColumn` and `LazyRow` items in `DMsTab.kt`. This fixes a critical Compose bug where internal state (like the User Info Modal) would stay attached to an index and swap to the wrong user when the contact list reordered due to online status changes.
+*   **Avatar Rotation**: Added a 90-degree rotation button to `AvatarCropper.kt`, allowing users to fix image orientation before finalizing their profile picture.
+
+### 3. Onboarding & Tutorials
+*   **Onboarding Flow Streamlined**: Removed the "Setup a HUB" slide from the onboarding flow as the integration is still maturing, and fixed the "Content Mix" slide layout/navigation buttons.
+*   **Tutorial Overlays**: Rebuilt the Feed tutorial slides in `UnifiedFeedTab.kt` to use explicit scrim overlays with transparent punch-outs (via `Canvas` and `BlendMode.Clear`) that physically highlight the relevant UI elements (Navigation, Top Controls, Interaction Icons).
+*   **DM Tutorial Note**: Updated the DM tutorial text to explicitly clarify that scanning the developer's QR code from the gallery is completely optional.
+
+### 4. Media Privacy
+*   **Public Auto-Download Default**: Changed the default value of `autoDownloadPublic` in `MediaSettings.kt` to `false`. Users must now explicitly opt-in to automatically download media from non-contact mesh broadcasts.
+
+## Completed Changes (2026-08-02)
+
+### 1. Tor Background Stability
+*   **WakeLock Integration**: Added a `PowerManager.WakeLock` (PARTIAL_WAKE_LOCK) to `NoSlopForegroundService.kt`. This ensures the CPU stays awake while the Tor daemon and Mesh listener run in the background, preventing Android from suspending Tor's socket activity and dropping mesh connectivity.
+
+### 2. UI/UX Polish
+*   **Image Fallbacks**: Fixed a bug where clearnet images would show a black screen if Coil failed to load the primary `mediaUrl`. Added a `fallbackUrl` capability to `BlurredImageBackground` that routes to `thumbnailUrl` if the primary network request fails or times out.
+*   **Search Input Debouncing**: Re-wired the creator channel search in `OnboardingScreen` and `ContentPreferencesScreen`. Increased the text debounce from 300ms to 500ms and correctly implemented `CancellationException` handling so background Coroutine tasks don't crash or bounce UI state when typing quickly.
+*   **Translation Sync**: Conducted a deep audit of all new UI flows (`ProfileScreen`, `FeedMixSettingsSection`, `OnboardingScreen`) and successfully ported missing strings into the `content_en.json` and `content_hu.json` localization files.
+
+
+## Completed Changes (2026-08-01)
+
+### 1. Tor Stability & Daemon Recovery
+*   **SIGABRT Crash Prevention**: Fixed a critical issue in `TorService.kt` where transient network connectivity blips (e.g., switching between Wi-Fi and mobile data) would cause the app to forcefully set the Tor state to `FAILED`, triggering a full daemon restart. The underlying `libtor.so` native library would crash with `SIGABRT` during these forced restarts. The fix allows the daemon to recover gracefully from connectivity interruptions instead of restarting, significantly improving Tor stability on mobile networks.
+
+### 2. Media Transfer Fixes & Download Resume
+*   **EOF Detection Fix**: Fixed an indefinite hang in `MediaManager.kt` where downloads of files with a known `totalSize` (from `MediaMetadata.size`) would stall at completion. The `eofOffset` and `contiguousBytes` evaluation logic was corrected to properly detect when all bytes have been received.
+*   **Download Progress Accuracy**: Updated `MediaChunkPayload` in `Packets.kt` to include a `totalSize: Long?` field. The sender now populates this from the actual file size, and the receiver dynamically updates `ActiveDownload.totalBytes` if the initial metadata size was 0 (indeterminate). This eliminated the bug where large video downloads would show 0% → 50% → hang, and instead shows accurate 1% → 100% progression.
+*   **Download Resume on App Restart**: Fixed a critical bug where `MediaManager.startDownload()` unconditionally deleted the existing `.part` file (`dl.partFile.delete()`) on every download start, forcing all downloads to restart from 0% after an app restart. The method now reads the existing `.part` file size and resumes from the last contiguous byte offset. The progress bar immediately jumps to the correct percentage upon resume.
+
+### 3. AIMD Congestion Control Tuning for Tor
+*   **Tor-Optimized Chunk Parameters**: Re-tuned the AIMD (Additive-Increase/Multiplicative-Decrease) constants in `MediaManager.kt` specifically for Tor Hidden Service circuits:
+    - `MIN_CHUNK_SIZE`: 64KB → **128KB** (avoids wasting Tor circuit setup on tiny payloads).
+    - `MAX_CHUNK_SIZE`: 256KB → **1MB** (maximizes throughput per circuit).
+    - `MAX_CONCURRENCY`: 4 → **2** (reduces parallel SOCKS5 handshake overhead over Tor).
+    - `DOWNLOAD_TIMEOUT_MS`: 120s → **300s** (5 minutes, accommodates Tor's higher latency).
+    - Initial `currentChunkSize`: 16KB → **128KB**; `ssthresh`: 16.0 → **2.0**.
+*   The AIMD ramp-up behavior is preserved: starts at 128KB/1 socket, ramps to 1MB/2 sockets on success, throttles back on timeout.
+
+### 4. DM Media Compression
+*   **Video Transcoding in DMs**: Ported the `VideoCompressor` integration from the feed post composer into `ChatThreadScreen.kt`. DM video attachments exceeding 20MB are now automatically transcoded before sending, preventing the app from crashing when attempting to copy and send raw 500MB+ video files. The `buildMediaMetadata()` function was converted from synchronous to `suspend` and runs on `Dispatchers.IO`.
+*   **Image Compression in DMs**: DM image attachments exceeding 500KB are automatically scaled down to a maximum of 1280×1280 pixels and re-compressed as JPEG at 75% quality before sending.
+*   **Compression Progress UI**: A "Compressing... X%" progress banner now appears above the DM input bar while media is being processed, providing clear feedback instead of the app appearing frozen.
+
+### 5. Feed Post Media Compression
+*   **Image Compression for Feed Posts**: Added automatic image compression to the feed post composer in `UnifiedFeedTab.kt`. Images exceeding 500KB are scaled to 1280×1280 max and JPEG-compressed at 75% quality, dramatically reducing mesh transfer times for image posts.
+
+### 6. UI Polish
+*   **Transparent Download Overlay**: Reduced the "Tap to Download" overlay opacity in `FeedCard.kt` from 60% (`0.6f`) to 30% (`0.3f`) across all media types (video, audio, image), allowing the thumbnail to remain clearly visible behind the download prompt.
+*   **Persistent Thumbnail on Load Failure**: Updated `BlurredImageBackground` in `MediaComponents.kt` to set `error` and `fallback` painters to the base64 thumbnail. Previously, when the clearnet thumbnail URL was empty (common for mesh-native posts), the image loader would flash the base64 placeholder briefly and then render a solid black box. The thumbnail now persists permanently.
+*   **1GB Auto-Download Limit**: Increased the maximum value of the auto-download file size slider in `SettingsTab.kt` from 100MB to 1GB (`1f..1000f`), allowing users to set higher limits for large transcoded video files.
+
+
+## Completed Changes (2026-07-31)
+
+### 1. Discoverable Mode & Temporary Contacts
+*   **Heartbeat Identity Leak Fixed**: Fixed `MeshSocialRepository`'s background periodic heartbeat which was inadvertently broadcasting `ANNOUNCE_DISCOVERABLE` packets signed by the *main* identity instead of the *burnable* identity.
+*   **Heuristic Discoverability Filtering**: Added logic to `HandshakePacketHandler` to drop `ANNOUNCE_DISCOVERABLE` packets if the handle perfectly matches an already trusted peer's handle or the local burnable identity. This keeps the feed clean and prevents known friends (or the user themselves) from popping up as "new" discoverable peers.
+*   **Temporary Status Persistency**: Fixed a bug where a trusted peer broadcasting a discoverable packet would overwrite its local `isTemporary` state to `false`, accidentally upgrading them to a permanent contact.
+*   **Temporary Contacts UI Persistence**: The "Temporary Contacts" list in `DMsTab` now saves its collapsed/expanded state across app sessions using `AppSetting`.
+
+### 2. Media Downloads for Temporary Contacts
+*   **Burnable Proxy Routing**: Fixed a major bug in `MediaManager` and `GossipService` where media packets (`MEDIA_RELAY_REQUEST`, `MEDIA_RECOVERY_FOUND`, `MEDIA_REQUEST`, and `MEDIA_CHUNK`) sent between temporary contacts were signed with the local node's *main* identity rather than the *burnable* identity. The recipient's mesh firewall would subsequently drop them (as it only trusted the burnable identity). Media requests and chunk relays are now properly routed through the burnable identity for temporary contacts.
+
+### 3. Stability & Tor Resiliency
+*   **Foreground Service Crash Loop**: Wrapped `startForegroundService` and `stopForeground` in safety blocks to prevent fatal `AndroidRuntime` crashes under Android 12+ strict background execution limits.
+*   **Tor Auto-Recovery**: Added an active monitoring loop in `NoSlopViewModel` that seamlessly attempts up to 3 restarts if the Tor daemon falls into a `FAILED` state.
+*   **Logcat Spam Reduction**: Downgraded routine ExoPlayer `VIDEO_DEBUG` events from `Log.e` to internal debug logging, clearing up 86% of the false-positive error noise.
+
+### 4. Media & Feed UX Polish
+*   **Mesh Feed Top-Snapping**: The "Mesh Network" and "Your Broadcasts" feeds now explicitly bypass the "last viewed" memory feature. Opening these filters instantly snaps to the top to show the newest content, resolving the need to scroll back up.
+*   **Large File Transfers**: Reduced the maximum Tor chunk size from 512KB to 256KB and lowered the maximum concurrent SOCKS5 connections from 8 to 4, preventing Tor circuit timeouts and buffer congestion on large media transfers.
+*   **Relay Restamping for Temporary Contacts**: `MEDIA_RECOVERY_FOUND` packets now correctly restamp the sender ID as the node's *Burnable Identity* when relaying to a Temporary Contact, preventing the target's firewall from silently dropping the recovery payload.
+*   **VideoCompressor Crash Fix**: Handled Media3 Transformer exceptions in `VideoCompressor.kt` to gracefully emit error states instead of fatally crashing the background coroutine.
+*   **Invidious Instance Refresh**: Replaced 10 dead or rate-limited YouTube proxy instances with 5 known-good instances (`yewtu.be`, `projectsegfau.lt`, etc.) resolving the widespread `NXDOMAIN` and `403` search failures.
+
+## Completed Changes (2026-07-28)
+
+### 1. Discoverable Mode & Burnable Identity Fixes
+*   **Burnable Identity Leak Fixed**: `NoSlopViewModel` now correctly pulls the `Burnable Identity` instead of the Main Identity when generating the `ANNOUNCE_DISCOVERABLE` broadcast. This guarantees peers will treat the incoming connection request as a temporary, anonymous contact rather than a permanent one.
+*   **Pending Request UI Visibility**: Corrected a bug in `DMsTab` where pending connection requests from Discoverable nodes instantly disappeared. The filter now hides `!isDiscoverable` instead of `!isTemporary`, allowing burnable pending requests to stay visible until accepted.
+
+### 2. Tor Mesh Transport Tuning & Fast-Fail
+*   **Timeout & Retry Reduction**: Dropped the Tor SOCKS5 `connectTimeout` in `MeshTransport` from 60 seconds to 30 seconds, and reduced the maximum attempts for critical packets from 5 to 3. Because Tor v3 hidden services can take 5-10 minutes to propagate to HSDirs, waiting 60s per attempt blocked the thread and gridlocked the queue. This change forces the transport to "fail-fast", instantly triggering the Gossip Relay fallback and background spooler for immediate delivery via intermediate peers.
+
+### 3. DM Media & GIF Rendering
+*   **MIME-Type Hack Removed**: Removed a legacy robustness hack in `DmPacketHandler` that forcefully rewrote `image` types to `gif`. This was causing the `MediaManager` to misclassify the file extension during download.
+*   **Local File Prioritization in Coil**: Updated `ChatThreadScreen` to natively pass the locally downloaded `File` object to Coil's `AsyncImage` for GIFs, fully bypassing the `noslop-gif://` proxy scheme. This ensures GIFs animate immediately after downloading without attempting to stream through the local Tor proxy.
+
+## Completed Changes (2026-07-26)
+
+### 7. Discoverability & Profile Bio Support
+*   **Firewall Bypass**: Corrected the gossip firewall to properly permit `IDENTITY_UPDATE` and `USER_EXIT` packets from discoverable 3rd parties, allowing profile propagation without a trusted connection.
+*   **Bio Field Integration**: Added `bio` string support across the network protocol (`IdentityUpdatePayload`, `PeerHandshakePayload`, `AnnounceDiscoverablePayload`) and local database. The user info modal and DM lists now properly render bios.
+*   **Discoverable Connect UI**: The 'Connect' button is now consistently injected into all user profile modals (feed, comments) for any non-trusted 3rd-party peer with a known onion address.
+
+### 6. Privacy UI & Display Name Polish
+*   **Share Button Guard**: The "Share" button is now explicitly hidden on all posts with `privacy = "friends"`, preventing peers from bridging or relaying private posts manually.
+*   **Identity Formatting**: `CryptoService` no longer appends the cryptographically generated `.tripcode` to the default `displayName` string, meaning users' explicitly typed handles are used universally. Older legacy handles are dynamically stripped in the UI for a cleaner display.
+*   **User Info Modal Privacy**: The User Profile modal no longer leaks public keys, tripcodes, or network details to any user. It exclusively displays the Avatar, Handle, and connection status.
+*   **Burnable 3rd-Party Connections**: When a 3rd-party user taps on an author who is actively broadcasting `ANNOUNCE_DISCOVERABLE`, the modal now injects a "Connect" button. Tapping it triggers a mandatory warning dialog and exclusively routes the `CONNECTION_REQUEST` using the user's ephemeral/burnable identity, perfectly protecting the user's persistent onion address from strangers.
+
+
+### 5. Friends-Only Broadcast Scoping
+*   **Hop Count Restriction**: Outbound packets for friends-only broadcasts (Posts, Comments, Reactions, Votes, Edits, Deletes) are now strictly restricted to `hops = 1`. This explicitly scopes network propagation to directly connected trusted peers.
+*   **Gossip Forwarder Guard**: The `GossipService` explicitly checks incoming `POST` payloads and drops any with `privacy = "friends"` from being relayed to other peers, completely isolating friends-only content from 3rd parties.
+
+
+### 1. Tor Service Recovery & Auto-Healing
+*   **Daemon Resurrection**: Fixed `TorService.kt` to handle Android's background service `IllegalStateException` limits safely and stop stuck daemon instances before restart.
+*   **Auto-Retry Observer**: Added an observer in `NoSlopViewModel` that automatically detects if Tor falls into the `FAILED` state (e.g. killed by the OS when foreground service stops) and seamlessly auto-retries bootstrapping up to 3 times in the background.
+
+### 2. Mesh Transport Fast-Failing & DM Spooler
+*   **Semaphore Gridlock Prevention**: `MeshTransport` now instantly fast-fails and frees Tor circuits upon receiving explicit `SOCKS: Host unreachable` or `TTL expired` rejections, rather than stubbornly waiting 60s per attempt and hoarding permits.
+*   **Background Retry Spooler**: Introduced a 15-minute background spooler in `MeshSocialRepository`. If a direct packet (DM/Handshake) fails initially due to the target's `.onion` still propagating to HSDirs, it will silently retry every 60 seconds. This perfectly mitigates Tor's 5-10 minute directory publication delay!
+
+### 3. Foreground Service UX Polish
+*   **HSDir Delay Transparency**: Added a dedicated `AlertDialog` in `SettingsTab` when the user toggles the Foreground Service off, educating them on the 5-10 minute Tor v3 publication propagation window and setting proper reachability expectations.
+
+### 4. Mesh Filter UX Simplification
+*   **Removed Outgoing Native Gates**: Stripped the confusing "Outgoing" toggles for Text, Image, and Video posts from `MeshFiltersScreen`, renaming them to "Broadcasts" for clarity.
+*   **Unrestricted Network Engagement**: Removed outgoing mesh filters for `REACTION`, `VOTE`, and `COMMENT` packets. Native engagement is vital for the network's organic reputation and chronological sorting algorithms and must always be allowed to propagate. Mesh filters now exclusively govern heavy incoming media and automatic Clearnet-to-Mesh bridging.
+
+## Completed Changes (2026-07-25)
+
+### 1. Tor ED25519-V3 Key Derivation Math Fixed
+*   **Proper SHA-512 Clamping**: Fixed a critical routing regression where `CryptoService.kt` and `SshDeployer.kt` were passing the 64-byte libsodium format (`seed || pubkey`) to the Tor daemon for `ADD_ONION`. Tor requires the 64-byte expanded and clamped secret key (SHA-512 of the seed with specific bitwise clamping). Corrected the math in both Kotlin and the Python deployment script to generate the exact same `.onion` address locally as the Tor daemon.
+
+### 2. Hub Firewall & Mesh Sync Disconnection
+*   **Mobile Identity Trust**: Fixed an issue where the Hub's `TrustFirewall` was rejecting `sync_push_packets` from the linked mobile device. `api_router.rs` now explicitly calls `engine.trust_peer(my_node_id)` ensuring the mobile app's signature is inherently trusted by its own Hub.
+
+### 3. Mesh Transport & Gossip Storm Prevention
+*   **Direct Routing Gate**: Patched `api_router.rs` to stop a dual-routing flood. If a directed packet has a known `target_onion`, the Hub will now only execute the direct SOCKS5 connection (with local background retries). It drops the redundant gossip broadcast unless the direct send fundamentally fails *and* no onion address was known.
+
+### 4. Tor Ephemeral Onboarding Fallback
+*   **Null Key Registration**: Fixed `TorService.kt` where a well-intentioned guard skipped hidden service registration if no identity key was loaded. Restored the ephemeral `registerHiddenService(null)` fallback, allowing new users to complete onboarding with a temporary `.onion` before their permanent identity is generated.
+
+## Completed Changes (2026-07-13)
+
+### 4. Bulletproof OTA Downloader (HttpURLConnection)
+*   **Parse Error Resolution**: Fixed the "There was a problem parsing the package" error which occurred when OkHttp silently downloaded HTML login/404 pages (due to GitHub Draft/Private release states) instead of binary APKs.
+*   **Native Progress Tracking**: `UpdateManager.kt` now uses a pure, interceptor-free `HttpURLConnection` pipeline. It manually negotiates redirects, strictly verifies the `Content-Type` to reject `text/html` payloads, enforces a >2MB minimum file size, and provides live UI Toasts (e.g., "Downloading update: 14MB...") every 3 seconds so the user is never left guessing the background state.
+
+### 3. OTA Update Manager Rewrite (OkHttp)
+*   **DownloadManager Bypass**: Completely removed reliance on Android's unreliable system `DownloadManager` which was hanging silently in `STATUS_PENDING` due to GitHub redirect chains.
+*   **Native Coroutine Download**: `UpdateManager.kt` now streams the APK directly to disk via `HttpClientProvider.clearnetClient` in a Coroutine, ensuring 100% reliability, DNS-over-HTTPS fallback, and immediate installer launching upon completion.
+*   **Settings Banner Polish**: Integrated a permanent Update Banner at the top of the Settings page that intelligently handles `REQUEST_INSTALL_PACKAGES` permission states, offering "Give Permission" and "Just Download APK" distinct workflows.
+
+### 1. Admin AI Integration & ASN.1 Crypto Fixes
+*   **Admin AI Auto-Peer**: Fixed an issue where DMs to the Hub's Admin AI failed because the app lacked a local peer record for it. `NoSlopRepository.ensureAdminPeerExists()` now automatically injects the `Admin AI (Hub)` contact upon linking.
+*   **ASN.1 X25519 Decryption**: Resolved a critical crash where Android's BouncyCastle wrapped X25519 keys in 83-byte ASN.1 structures instead of raw 32-byte arrays. The Hub now mathematically extracts the raw scalars (`0x04, 0x20` and `0x03, 0x21, 0x00`), allowing seamless DM decryption and responses from the Admin AI.
+*   **Newline Stripping**: Fixed hidden `\n` characters in Android JSON payloads breaking exact-match target interception.
+
+### 2. Historical Hub Sync & SQLite Migration
+*   **SQLite Persistence**: The Hub transitioned from volatile JSON arrays to a persistent SQLite database (`social.db`) for storing DMs, Posts, and Peers.
+*   **Historical Pull Sync**: When linking to a Hub, NoSlop now dynamically pulls historical data (`get_dms`, `get_social_feed`, `get_mesh_peers`) to populate the local app state.
+*   **Media Metadata Retention**: Fixed an issue where syncing DMs and Posts from the Hub to the mobile app dropped the associated media metadata, ensuring image and video UI elements render correctly.
+
+## Completed Changes (2026-07-12)
+
+### 1. DM Contacts Organization — Collapsible "All" List & Folder Assignment
+*   **Collapsible "All" Contacts Tab**: The "All" contacts list on the DMs page can now be hidden by tapping the "All" tab header. When collapsed, only a compact icon is shown, and the page defaults to displaying the first custom folder. The collapsed state is persisted to `app_settings["dm_all_tab_hidden"]` so it survives navigation and app restarts.
+*   **Contact Folder Assignment**: The "Assign to Folder" modal now includes a dropdown of existing folders (populated from previously created folders) alongside the text field for creating new folders. Users can either select an existing folder or type a new name.
+
+### 2. Complete Settings Page Localization
+*   **Full `.tr` Extension Audit**: Conducted a comprehensive audit of `SettingsTab.kt` and applied the `.tr` translation extension to all remaining hardcoded user-facing strings, including: Tor proxy status labels (`"Active Tor Proxy"`, `"Tor Disconnected"`), media file limit label (`"Max File Size: "`), data & backup workflow strings (`"Export Backup"`, `"Import Backup"`, `"Save File"`, `"Select File"`, `"Importing..."`, `"Nuclear Option"`), and app update notification strings (`"Version "`, `"is out (you have "`, `"Unknown"`).
+*   **Hungarian (Magyar) Translation Completion**: Updated `content_hu.json` with proper Hungarian translations for all newly localized strings. Also translated the previously untranslated "About NoSlop" and "Help Development" modal strings (`"Help Development"`, `"Support Gabby's work..."`, `"About NoSlop"`, `"Buy Gabby a Coffee"`, `"Version "`, `"Resources"`, `"GitHub Repository"`, `"Privacy Policy"`, `"Imagined by Gabor Kukucska"`), which had been left in English.
+*   **DM Folder UI Strings**: Added localization keys for the new folder assignment UI (`"Choose existing folder"`, `"Select a folder"`, `"or create new"`, `"New Folder Name"`, `"Folder Name"`, `"Assign to Folder"`) to both `content_en.json` and `content_hu.json`.
+
+### 3. Media Settings Restructure & Trust-Based Auto-Download
+*   **"Automatic Media Download" Rename**: Renamed the "Enable Media" toggle to "Automatic Media Download" for clarity.
+*   **Background Playback Decoupled**: Moved the "Background Playback" and "Play Outside App" toggles out of the media download card into their own dedicated `Card` container, making it clear these settings are independent of auto-download behavior.
+*   **Trust-Based Auto-Download Toggles**: Replaced the confusing "Auto-download Friends" / "Auto-download Private" toggles with a clearer trust-based hierarchy:
+    *   **Friends** — "only auto-download media from contacts" (respects `isTrusted` peer status).
+    *   **Public** — "Also auto-download media from public broadcasts" (covers non-contact mesh peers).
+*   **Public Media Warning Dialog**: Toggling "Public" auto-download ON now triggers a confirmation `AlertDialog` warning: *"You'll download 3rd party media!"*. The setting is only applied if the user taps "Accept".
+*   **File Attachment Exclusion**: `MediaManager.checkAndAutoDownload()` now explicitly skips media with `metadata.type == "file"`, ensuring file attachments are never auto-downloaded and must be manually tapped to sync.
+*   **Data Model Migration**: Renamed `MediaSettings.autoDownloadPrivate` to `autoDownloadPublic` in `MediaSettings.kt` and updated all downstream consumers (`MediaManager.kt`, `SettingsTab.kt`).
+*   **Files**: Modified: `MediaSettings.kt`, `MediaManager.kt`, `SettingsTab.kt`, `content_en.json`, `content_hu.json`.
+
+### 4. Background Sync & HAI-Net Hub Onboarding Refactor
+*   **Foreground Service Relocation**: Moved the "Foreground Service" toggle out of the General settings tab into the Network tab to align with architecture.
+*   **Battery Warning Dialog**: Adding manual foreground mesh sync now triggers an aggressive battery warning dialog with a direct "Deploy HUB" call-to-action that securely routes the user to the HUBs tab.
+*   **Automated Hub-Aware Gating**: The foreground service toggle is automatically disabled (grayed out) when a Home Hub is connected. Furthermore, the `NoSlopViewModel` dynamically halts the local foreground service upon successful Hub linkage to preserve mobile battery.
+*   **Onboarding Routing Fix**: Corrected the "Set up Hub Now" button in the `OnboardingScreen` so it successfully navigates to the Hubs tab via the new `hubs-deploy` route and triggers an immediate local network scan.
+*   **Deploy vs. Link Separation**: Refactored the network discovery UI (`HubSetupScreen.kt`) to support two distinct workflows: 
+    *   **Deploy**: Finds a device, prompts for SSH credentials, and executes a full `SshDeployer` remote installation.
+    *   **Link**: Resolves the broken "I already have a Hub running" option. It scans the network, bypasses SSH logic entirely, and instantly pairs the app to the selected existing node. Also introduced a secure "Manual IP Entry" modal exclusively for linking off-subnet Hubs.
+
+## Completed Changes (2026-07-10)
+
+### 1. Global Connectivity & Native Hub Tor Daemon
+*   **Smart Hub API Client**: Implemented `invokeHubApi` in `NoSlopRepository.kt`. The app securely bridges communication to the Home Hub by attempting a LAN IP request first (for speed), and gracefully falling back to the SOCKS5 `torClient` targeting the Hub's `.onion` address when off-network.
+*   **Active-Passive Identity**: Updated Mobile `TorService.kt` to dynamically disable its local Hidden Service broadcast when connected to a Hub. The mobile app pivots to using Tor purely as an outbound SOCKS5 proxy to conserve bandwidth and prevent identity collisions on the mesh.
+*   **Native Hub Tor Generation**: Upgraded `hainet-seed` to parse the PKCS#8 Mobile Identity Clone, apply SHA-512 expansion and bit-clamping natively in Rust, and generate a standard `/var/lib/tor/hainet/hs_ed25519_secret_key`.
+*   **Unified Onion Routing**: Configured the Hub's `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) under the single, persistent `.onion` address.
+
+### 2. Edge-Case Fixes (Hotspots & QR Decoding)
+*   **Ghost Notification Cleanup**: Fixed a UI bug in `NoSlopViewModel.kt` where accepting or rejecting a mesh handshake via the UI popup left a ghost notification in the drawer. The ViewModel now actively sweeps and deletes associated `NotificationItem` entries upon resolution.
+
+*   **Hotspot Subnet Discovery**: Upgraded `HubDiscoveryService.kt` to extract all active IPv4 prefixes (Cellular, Hotspot, WiFi) and concurrently scan them for SSH (Port 22), bypassing Android's mDNS/multicast isolation on tethered connections.
+*   **Gallery QR Decoding Fallback**: Enhanced `QRScanScreen.kt` with a dual-engine decoder. If ML Kit fails to parse a synthetic screenshot from the gallery, it falls back to a ZXing binarizer on a dedicated IO thread.
+*   **Port Alignment**: Fixed authentication port routing to target the unified `8080` port now handled by `hainet-core` instead of the legacy `3000` port.
+
+
+### 3. Monetization & Support Architecture
+*   **Stripe Integration**: Added a "Help Development" banner to the Settings page. This links directly to a Stripe Payment Link for seamless donations, avoiding the need for backend payment processing and keeping the app strictly peer-to-peer.
+*   **About NoSlop Modal**: Consolidated the legacy app information and update notifications into a unified "About NoSlop" modal, accessible from the bottom of the Settings page. This includes dynamic version rendering and links to project resources (GitHub, Privacy Policy) and the creator's portfolio.
+*   **Complete Localization Parity**: Ensured all new UI strings for the Donation and About modals are fully translatable, integrating them into the `.tr` extension and `content_en.json`/`content_hu.json` framework.
+
+### 4. Robust Auto-Update System
+*   **OTA Download Reliability**: Completely rewrote `UpdateManager.kt` to fix silent failures associated with Android's native `DownloadManager`.
+*   **Dynamic Permission Handling**: Integrated runtime checks for `REQUEST_INSTALL_PACKAGES` (required on Android 8.0+) to automatically redirect users to system settings if the permission is missing, ensuring the APK installer can actually launch.
+*   **Resilient Completion Detection**: Replaced the static manifest receiver with a dual-strategy approach: dynamic runtime `BroadcastReceiver` registration combined with a 3-second background polling loop via Coroutines. This guarantees the app detects when the update finishes downloading, even if the OS drops the broadcast.
+*   **State Recovery**: The active download ID is now persisted to `SharedPreferences`, allowing the fallback static receiver to resume the installation process even if NoSlop is killed in the background during the download.
+
+## Completed Changes (2026-07-09)
+
+### 2. Multi-Path Hub Discovery & Reliable Authentication
+*   **Robust Hotspot Discovery**: Upgraded `HubDiscoveryService.kt` with a concurrent multi-subnet scanner. It now extracts all active IPv4 prefixes (Cellular, Hotspot, WiFi) and scans them all for SSH (Port 22), bypassing mDNS/multicast isolation on tethered connections.
+*   **High-Fidelity QR Authentication**: Fixed a port mismatch (3000 -> 8080) and IP routing logic in `NoSlopViewModel.kt`. Scanned login attempts now correctly target the integrated Hub Portal.
+*   **Gallery QR Decoding Fallback**: Enhanced `QRScanScreen.kt` with a dual-engine decoder. If ML Kit fails to parse a screenshot (common with synthetic QR codes), it falls back to ZXing on a dedicated IO thread.
+*   **Headless Auth Handshake**: Implemented the "QR-Login-Only" state in the Hub backend. If a Hub is deployed via NoSlop, it automatically skips 24-word seed generation and prompts for the mobile-assisted signature verification immediately.
+
+### 1. HAI-Net Hub Deployment Fixes & Dashboard Polish
+*   **Systemd Unit Deployment Fix**: Fixed a critical bug in `SshDeployer.kt` where pipelined `sudo tee` combined with quoted heredocs resulted in empty (masked) systemd unit files on the Hub. Re-wrote the installer script to write the unit file locally, expand dynamic variables, and `sudo mv` it into place.
+*   **Deployment Overwrite Strategies**: Replaced blind overwrites with a secure collision detection mechanism during deployment. If an existing `hainet-core` install is detected, NoSlop halts and provides a Tripartite Resolution Dialog: "Sign In", "Reset Identity (Keep Media)", or "Full Re-deploy (Wipe All)".
+*   **Lightning Fast Identity Reset**: The "Reset Identity" option completely bypasses the standard heavy `hainet-seed` build process. Instead, it securely injects the user's Ed25519/X25519 identity JSON directly, safely regenerates Tor hidden service keys via embedded Python scripts, deletes stale `auth.json` files, and restarts services in seconds, guaranteeing immediate QR login readiness.
+*   **Native Hub Dashboard**: Restored and polished the native Compose Hub Dashboard in `HubSetupScreen.kt`. Removed the heavy embedded WebView in favor of a clean, text-based UI providing the user with the direct LAN IP and Port (3000) to access the HAI-Net Portal Web UI from an external browser.
+*   **Persistent Hub Connection**: Removed the immediate "Disconnect" button from the main Hubs tab to reinforce the persistence of the Home Hub connection. 
+*   **Safe Hub Unlinking**: Injected a secure "Disconnect HAI-Net Hub" option into `SettingsTab.kt` above the Developer logs, protected by a descriptive confirmation dialog to prevent accidental unlinking.
+*   **Hardened QR Authentication**: Integrated connection and read timeouts into `handleQrLogin` to prevent silent hanging when a Hub is unreachable. Additionally, NoSlop now dynamically intercepts unroutable `0.0.0.0` target IPs originating from the Hub's QR code and automatically resolves them to the Hub's known active LAN IP from the deployment state.
+
+
+## Completed Changes (2026-07-08)
+
+### 1. HAI-Net Hub Integration (Phase 1) & Identity Clone
+*   **Zero-Terminal Deployment**: Implemented `SshDeployer.kt` using JSch to deploy the HAI-Net Hub directly from the NoSlop mobile app. It connects via SSH, clones the repository, and executes `hainet-seed install` non-interactively.
+*   **Zero-Config mDNS Discovery**: Added `HubDiscoveryService.kt` utilizing Android's `NsdManager` to scan the local network for `_ssh._tcp` services. Discovered hubs appear instantly in the UI, auto-filling the IP Address field so users never have to manually type or find IPs.
+*   **Tor-Exclusive Remote Access**: Completely removed all Cloudflare Tunnel automation, UI inputs, and deployment configuration parameters (`cloudflareToken`, `hasStaticIp`). The Hub's remote accessibility now relies 100% on the embedded Tor Hidden Services architecture (`Phase 2`), simplifying the user experience drastically.
+*   **Identity Clone Architecture**: Replaced the previous public-key-only design with a full "Identity Clone" model. `HubSetupScreen.kt` now automatically injects the user's complete `CryptoService.IdentityKeys` (including Ed25519 and X25519 private keys) into the `hub_config.json` payload.
+*   **Secure Serialization**: Rewrote `SshDeployer` payload generation using `org.json.JSONObject` to prevent escaping errors and properly serialize the nested identity block for secure transport to the Hub.
+*   **Hub Setup UI**: Updated `HubSetupScreen` to dynamically handle mDNS results and standard inputs (Username, Password, Shared Media Folder).
+*   **Mesh Discoverability Fix**: Completed `broadcastDiscoverable()` in `NoSlopViewModel`, ensuring ephemeral "burnable" `.onion` addresses are correctly registered via `TorService` and announced to the mesh with cryptographic signatures.
+
+## Completed Changes (2026-07-07)
+
+### 1. Legacy Architecture Audit & Code Cleanup
+*   **MainScreen Cleanup**: Evaluated `MainScreen.kt` and identified that the large `FullScreenMeshCard` composable was dead code (replaced by V2). Removed the unused code entirely and renamed the file to `MediaUtils.kt` to accurately reflect its remaining utility (`resolveMediaUrl`).
+*   **Repository Facade Verification**: Analyzed `NoSlopRepository.kt` and confirmed it acts as a necessary facade for `NoSlopViewModel`, correctly delegating to domain-specific repositories. Safely exposed `postDao` internally to resolve visibility issues without breaking encapsulation.
+
+### 2. Mesh Network Observability & Stability
+*   **GossipService Tracing**: Injected precise trace logging in `GossipService.processIncoming` to monitor the mesh packet pipeline. We can now observe exactly where packets are dropped (e.g., TTL expiry, deduplication checks, rate limiting, firewall blocks, or mesh filter rejections).
+*   **MeshPacketHandler Telemetry**: Added detailed logging for packet dispatching to ensure we can trace incoming traffic as it is routed to domain-specific handlers after gossip validation.
+
+### 3. Comprehensive Unit Testing & Regression Guards
+*   **Firewall & Mesh Filters Assertions**: Implemented robust unit tests using `MockK` in `GossipServiceTest.kt` to assert the firewall dropping logic and mesh filter rules. Validated that untrusted senders are blocked correctly while system packets like `CONNECTION_REQUEST` bypass the block.
+*   **Test Isolation Fixed**: Resolved a critical state leak in `GossipServiceTest` where the singleton `GossipService` retained mock dependencies across tests, ensuring complete test isolation via reflection-based resets.
+*   **Test Doubles Updated**: Fixed several compilation errors in `FakeDaos.kt` (missing overrides in `FakePostDao`, `FakeEngagementDao`, and `FakeMessageDao`) caused by upstream interface changes, ensuring the pure-JVM tests compile successfully.
+## Completed Changes (2026-07-06)
+
+### 1. Onboarding & Tutorial Flow Polish
+*   **Onboarding Reordering**: Swapped the Interests and Creators steps. Moving Interests first ensures the Creator search word-cloud dynamically populates with relevant channel suggestions based on the user's chosen categories.
+*   **Creator Search Fix**: Split the comma-separated creator keywords string to perform concurrent background searches via `launch(Dispatchers.IO)`, fixing the `searchCustomFeed` failure.
+*   **Invidious API Tuning**: Removed aggressive `/api/v1/stats` background pinging that was incorrectly blacklisting healthy instances. Increased the probe client timeout from 5s to 10s to allow channel searches (autocomplete) to succeed reliably over Tor.
+*   **Feed Tutorial Race Condition**: Fixed an issue where the feed tutorial state locked into the UI before the DB could restore it. The ViewModel now initializes tutorial states to `-1` (loading) and the UI waits before injecting the slides.
+*   **Native Tutorial UI & Polish**: Replaced the hacky background-content rendering with a solid, native-looking tutorial slide featuring mock author info and standard right-aligned action buttons. Fixed the Step 2 UI arrow collision. Removed the "Skip" button to force gesture learning.
+*   **Tutorial Theming**: Changed tutorial highlight elements (text chips, arrows) from the app's native `AccentGreen` to Material Amber to clearly differentiate instructional overlays from interactive app UI. Softened the DM tutorial scrim from 85% to 65% opacity.
+*   **DM Tutorial Auto-Completion**: Added a `LaunchedEffect` in `DMsTab` that instantly skips or auto-completes the DM tutorial if the user already has active connections (e.g., via a restored backup or manual QR scan).
+
+### 2. Feed Generation & Priority Sorting
+*   **Empty Feed Bug Fix**: Added `rawImages` and `rawAudios` back into the feed generation `leftovers` pool. This fixes a critical bug that caused feeds to load entirely empty and block swiping if YouTube/Invidious video APIs failed or hit rate limits.
+*   **3-Tier Priority Sorting**: Upgraded the chronological sorting algorithm in `loadMoreFeedItems` to strictly prioritize content in three tiers: `Creators > Explicitly Chosen Categories > Trending/Fallback`. This guarantees the first items a user sees upon completing onboarding perfectly match their personal interests.
+
+### 3. Dynamic OTA Localization Framework
+*   **JSON-Based Language Manager**: Implemented `LanguageManager.kt` to load string dictionaries from `assets/languages/content_XX.json`. This replaces hardcoded UI strings with an English-anchored key-value system.
+*   **Reactive UI Translations**: Created a `@Composable` `.tr` String extension mapping directly to a `StateFlow` of the current language. The entire UI now instantly translates without requiring an Activity restart.
+*   **Community Translation Ready**: The app now supports drop-in JSON files for immediate multi-language support (starting with English and Hungarian).
+
+## Completed Changes (2026-07-05)
+
+### 1. UI/UX Polish: Notifications, File Attachments & Contacts Fixes
+*   **Ghost Contacts & Handshake Race Condition**: Fixed a critical race condition in `HandshakePacketHandler.kt` where duplicate `CONNECTION_REQUEST`, `USER_HANDSHAKE`, or `IDENTITY_UPDATE` packets would overwrite an existing trusted peer, accidentally downgrading their `isTrusted` status or wiping their handle.
+*   **DM JSON Payload Fix**: Fixed an issue in `ChatThreadScreen.kt` where replying to an older message would display the raw JSON payload wrapper (`{"content": "..."}`) in the reply context preview instead of the cleanly extracted text.
+*   **Notification Management**: Added "Mark All Read" and "Clear All" features to the `NotificationsScreen`. The "Clear All" action is protected by an explicit "Are you sure?" confirmation dialog.
+*   **File Attachment Preservation**: Replaced naive `.bin` file extensions in `ChatThreadScreen` and `UnifiedFeedTab` by querying the Android `ContentResolver` for `OpenableColumns.DISPLAY_NAME`, preserving exact original filenames (e.g., `document.pdf`) during P2P transfers.
+*   **Native File Export & Broadcast Fixes**: Added `exportToPublicDownloads` in `MediaManager.kt` leveraging `MediaStore.Downloads` on Android Q+ to safely export downloaded mesh file attachments to the user's public Downloads directory. Fixed a Compose UI issue in `FeedCard.kt` where a parent `.clickable` modifier was swallowing touch events, re-enabling the "Save to Device" and "Download File" buttons on mesh broadcast attachments.
+
+
+### 2. Mesh File Transfer & MIME Type Resolution
+*   **Native MIME Type Mapping**: Replaced the hardcoded media type `when` blocks in `MediaManager.kt`, `UnifiedFeedTab.kt`, and `ChatThreadScreen.kt` with Android's system-wide `MimeTypeMap.getSingleton()`. This allows NoSlop to natively recognize and preserve exact file extensions (e.g., `.pdf`, `.zip`, `.docx`, `.apk`) during both upload and download.
+*   **File Transfer Stall Fixed**: Fixed a critical bug where general file transfers over the mesh network stalled indefinitely at "Connecting..." (0% progress). Because uploads were previously defaulting to `application/octet-stream`, the sender's local storage mapping failed to match incoming `MEDIA_REQUEST` chunk requests. Accurately stamping the `MediaMetadata` with the correct MIME type allows peers to locate the file blocks and immediately resolves the transfer gridlock.
+
+*   **Historical Sync Media Type Loss**: Fixed a bug in `SyncPacketHandler.kt` where `clearnetMediaType` was omitted from the database insert during `SYNC_RESPONSE` handling. This caused historical clearnet audio/video shares to incorrectly render as plain articles for newly joined peers, while live peers received the correct type.
+
+*   **Mesh Edits & Signature Integrity**: Fixed a critical bug in `PostPacketHandler` and `Daos.kt` where editing a post updated the text string but retained the original cryptographic signature and timestamp. This caused historical syncs (`INVENTORY_SYNC_REQUEST`) to permanently fail signature verification (`CryptoService.verify`) for peers pulling the edited post. Edits now generate and store a fresh timestamp and signature. Added `EDIT_COMMENT` and `DELETE_COMMENT` packets to the network protocol with full repository support.
+
+*   **Clearnet-to-Mesh Sync & Media Fixes**: Fixed an issue where the initial reaction triggering a clearnet share was blocked by the outgoing filter, causing peers to see the share without the context. Fixed an issue where commenting on an unshared clearnet item failed to generate the anchor post. Fixed a bug where shared clearnet images rendered as black screens due to loading the webpage URL instead of the high-res thumbnail. Fixed an ExoPlayer bug where shared YouTube embeds failed to autoplay because the player was waiting for a native video frame to clear the Base64 thumbnail.
+
+## Completed Changes (2026-07-04)
+
+### 1. Invidious Network Latency & Fast-Failing
+*   **Lock-Free Registry Cache**: Removed a critical `@Synchronized` bottleneck in `InvidiousApiClient.getInstances()` and replaced it with a non-blocking `AtomicBoolean`. Background instance registry fetches no longer freeze the UI thread while searching. Failed registry lookups now correctly cache the hardcoded fallback list instead of hanging on every keystroke.
+*   **Strict Search Timeouts**: Swapped the underlying OkHttpClient for all Invidious search functions (`searchChannels`, `searchVideos`, `getTrendingVideos`) to a dedicated `probeClient` with a strict 5-second timeout, bypassing the default 30-second client timeouts.
+*   **Proactive Instance Pinging**: Added background asynchronous instance health checks during the `preWarmInstances()` startup phase. The app now silently pings the `stats` endpoint of the top 3 registry servers upon launch, proactively adding dead or blocked nodes to the `instanceFailureTime` blacklist before the user can even initiate a search.
+*   **Smart Instance Filtering**: Search functions now strictly filter out any instances present in the cooling-down blacklist *before* attempting network requests, preventing the 5-second timeout penalty from being absorbed repeatedly on successive search queries.
+
+### 2. Video Playback UI Polish
+*   **Disabled Default ExoPlayer Artwork**: Explicitly set `useArtwork = false` on the Android `PlayerView` component to prevent ExoPlayer from aggressively flashing its own low-quality generic media icon over the Coil high-res thumbnail before the first frame is buffered.
+*   **True Frame Rendering Transitions**: Re-wired the `isVideoReady` state to rely strictly on the `onRenderedFirstFrame()` decoder callback rather than the premature `STATE_READY` status. This guarantees the Coil thumbnail overlay remains solid until actual video pixels are ready to display.
+*   **YouTube IFrame API Sync**: Rewrote the fallback `EmbedWebViewPlayer` (used when Invidious resolution fails). Removed the blind 800ms timer that was prematurely hiding the thumbnail. Injected the official **YouTube IFrame API** and a custom Android `JavascriptInterface`, forcing the Android UI to wait for the JavaScript engine's explicit `PLAYING` state before dismissing the high-res thumbnail.
+
+### 3. Feed Recency Optimization
+*   **Chronological Feed Scoping**: Appended the `&date=month` parameter to all `searchVideos` API calls in `InvidiousApiClient.kt`. While the API still sorts by relevance by default, this strict date filter prevents the feed from surfacing extremely old videos (5-10 years ago) simply because they have higher overall view counts, ensuring the unified feed remains focused on current month/year content.
+
+## Completed Changes (2026-07-02)
+
+### 1. Identity Display & Backup Enhancements
+*   **Handle Dot Parsing Fix**: Updated payload generation and packet handling logic (`MeshSocialRepository`, `HandshakePacketHandler`) to properly extract handles using trailing delimiters (`substringBeforeLast`). Usernames containing dots (e.g., `satoshi.nakamoto`) are no longer prematurely truncated.
+*   **Encrypted Zip Export/Import (SAF)**: Fully wired up the "Export/Import Profile" buttons in the Settings Tab. Implemented Android's Storage Access Framework (`ActivityResultContracts`) allowing users to natively choose where to save or open the encrypted `noslop_backup.zip`. Added a UI dialog to securely capture the user's Mnemonic password for AES derivation prior to reading/writing IO streams via `BackupManager`.
+*   **Cleaner Identity UI**: Scrubbed the cryptographic `.tripcode` suffix from primary user feeds and chat headers (`PeerItem`, `UnifiedFeedTab`, `ChatThreadScreen`) for a cleaner modern aesthetic, while preserving the full `handle.tripcode` hash inside the detailed ContactCardDialog and Onboarding Identity Card for verification.
+
+### 2. UI/UX Refinements & Bug Fixes
+*   **Reaction Layout Alignment**: Fixed an issue in `MediaComponents.kt` where wrapped reaction pills would misalign the primary action buttons (React, Share, Chat). The main action buttons are now strictly right-aligned in their own container independent of the reaction pills row width.
+*   **Import Destructive Warning & Restart**: Upgraded the Import Backup flow in `SettingsTab` to include a mandatory destructive warning dialog, notifying the user that their current data will be wiped. On confirmation, the system now safely closes the active Room Database (`NoSlopDatabase.closeInstance()`) before overwriting it via `BackupManager`, and then actively triggers a full application intent restart (`FLAG_ACTIVITY_CLEAR_TASK`) to safely reload the new state.
+*   **Mesh Broadcast Privacy**: Removed the cryptographic `.tripcode` suffix from the author string on Mesh Broadcast cards across `MainScreen`, `FeedCard`, and `UnifiedFeedTab` to improve privacy and visual clarity.
+*   **Interactive User Info Modal**: Added an interactive `clickable` modifier to the Avatar and Username row on Mesh Broadcast cards. Tapping now opens a `User Info Modal` displaying the user's enlarged Avatar, full Handle, Tripcode, and abbreviated Public Key.
+*   **Tearing Face Reaction Bug**: Fixed a logic bug in `MeshSocialRepository.kt` where emotional reactions like `sad` were incorrectly grouped with negative moderation signals (`downvote`, `angry`). This previously prevented `sad` from functioning as the initial reaction on a Clearnet post, as the system blocked negative signals from initializing anchor posts to prevent spam.
+
+## Completed Changes (2026-07-01)
+
+### 1. Granular Mesh Broadcast Filters
+*   **User-Facing Filter UI**: Added a new **Mesh Filters** screen (`MeshFiltersScreen.kt`) accessible from Settings → Account & Preferences → Mesh Filters. Provides 12 toggle switches (6 content types × 2 directions) controlling which packet types are pushed to and pulled from the mesh network:
+    *   Reactions (default: **off** for both directions to reduce noise)
+    *   Comments (default: on)
+    *   Text Posts (default: on)
+    *   Clearnet Shares (default: on)
+    *   Image Posts (default: on)
+    *   Video Posts (default: on)
+*   **Local-First Architecture**: Filters operate exclusively at the network sync layer. All user actions (reactions, comments, votes) are **always persisted locally** regardless of filter settings — only the `GossipService.broadcast()` / `MeshTransport.sendPacket()` calls are conditionally gated.
+*   **"Already Shared" Exemption**: Incoming reactions, comments, and votes targeting posts or comments that already exist in the local database are **exempt** from incoming filters. This ensures engagement on tracked content is never silently dropped, while still filtering noise from unknown/unbridged anchor posts.
+*   **Clearnet Bridging Guard**: When a user likes a clearnet feed item for the first time, NoSlop creates a deterministic anchor post and a reaction simultaneously. The `allowOutgoingReactions` filter only blocks the reaction broadcast during this initial bridging step (`isBridging = true`). Reactions on posts already present in the local database always broadcast freely.
+*   **DM Chat Fully Exempt**: Direct message chats and their reactions (`CHAT_REACTION` packets) are completely excluded from all mesh filter logic — both incoming firewall checks and outgoing broadcast gates.
+*   **Persistence**: Filter settings are stored as JSON in the `app_settings` table via `SettingsRepository` and exposed reactively via `StateFlow` through the ViewModel.
+*   **Files**: New: `MeshFilterSettings.kt`, `MeshFiltersScreen.kt`. Modified: `SettingsRepository.kt`, `NoSlopViewModel.kt`, `GossipService.kt`, `MeshSocialRepository.kt`, `NoSlopRepository.kt`, `NoSlopApp.kt`, `SettingsTab.kt`, `Daos.kt`.
+
+## Completed Changes (2026-06-30)
+
+### 1. Tor Daemon Isolation & Port Decoupling
+*   **Embedded Tor Decoupling**: Fixed a critical EADDRINUSE conflict that occurred when running debug and release builds side-by-side on the same device. Both builds were previously attempting to spawn internal Tor daemons bound to hardcoded ports (`9050`/`9051`). Extracted these into build variant configs (`TOR_SOCKS_PORT` and `TOR_CONTROL_PORT`) so the debug and release builds now run completely isolated Tor instances (`9050`/`9051` vs `9052`/`9053`).
+*   **Tor Service Double Registration**: Fixed a race condition where both the Tor daemon status broadcast receiver and the self-healing bootstrap loop concurrently called `triggerRegistration()` when Tor finished bootstrapping. This prevented the daemon from spamming `550 Onion address collision` and throwing `Bad sequence size: 3` exceptions during startup.
+
+### 2. Mesh Transport Circuit Timeouts
+*   **Extended Connection Timeout**: Increased the `CONNECTION_REQUEST` Tor SOCKS5 connect timeout from 20 seconds to 60 seconds. Freshly minted Tor v3 onion services (such as new installs) can take up to 45 seconds to publish their descriptors to the HSDirs. A 20-second timeout was actively interrupting Tor's circuit-building process before completion, dropping the connection and triggering an infinite retry loop that prevented peers from ever successfully shaking hands.
+
+### 3. UX Polish & GitHub Issue Integration
+*   **Video Playback Persistence**: Fixed a regression where videos restarted from the beginning. `ExoVideoPlayer` was rearchitected to avoid state race conditions by seeking to the saved position immediately before calling `prepare()`. Added strict `> 0L` guards to prevent transient loading states from overwriting valid saved positions in the `PlaybackPositionStore`.
+*   **Live Feed Refresh**: Replaced the redundant "Random" button in the filter modal with a "Refresh Feed" button that actively clears and rebuilds the feed locally from the database without a network trip, respecting seen/swiped exclusions. Made the modal scrollable to fix UI clipping on smaller screens.
+*   **Video Thumbnail Bleed & Letterboxing**: Fixed YouTube thumbnail letterboxing by setting the primary thumbnail to `ContentScale.Fit` and layering a 1.35x scaled, 24dp blurred background image behind it (clipped to the container bounds) to fill the empty space without bleeding over the UI.
+*   **GIF Support in DMs**: Integrated a global GIF-aware Coil `ImageLoader` and wrapped the chat UI in a `CompositionLocalProvider`. GIFs sent in Direct Messages now render and animate inline seamlessly instead of displaying as static thumbnails.
+*   **Native GitHub Issue Reporting**: Upgraded the "Bug Report" flow from a raw browser intent to a native GitHub REST API submission tool. It now automatically pulls `GITHUB_PAT` and `GITHUB_ASSIGNEE` from `local.properties` (exposed via `BuildConfig`), allows users to select an Issue Type (Bug, Feature Request, Question), and automatically formats and attaches their device hardware info and recent app logs to the GitHub issue.
+
+## Completed Changes (2026-06-29)
+
+### 1. Bouncy Castle Migration & Lazysodium Key Generation
+*   **Unified Bouncy Castle Signing**: Completely migrated `CryptoService.kt` to use Bouncy Castle's lightweight `Ed25519Signer` directly, bypassing the platform JCA `Signature` API. This unifies signing across all Android versions (API 24-35).
+*   **Lazysodium Key Generation**: Added `lazysodium-android` as the primary key generator for Ed25519, ensuring high-quality keys consistent with iOS and other platforms. Includes a Bouncy Castle fallback if the JNA native library fails to load.
+*   **ProGuard Fixes**: Added explicit keep rules for `com.goterl.lazysodium.**` and `com.sun.jna.**` to prevent release builds from crashing due to R8 stripping native method bindings.
+
+### 2. DM Chat UI & Navigation Fixes
+*   **NavigationBar Keyboard Fix**: Fixed a visual glitch where the bottom navigation bar remained behind the keyboard when typing in a DM, exposing an empty black space. The `NavigationBar` and `FloatingActionButton` are now explicitly hidden when the user is in an active chat thread (`selectedPeerPub != null`).
+*   **Hardware Back Button Navigation**: Implemented a Compose `BackHandler` in `DMsTab`. Pressing the phone's hardware back button while in a chat now properly returns to the contacts list instead of minimizing the entire application.
+
 ## Completed Changes (2026-06-25)
 
 ### 1. Video Thumbnail & Preload State Fixes
@@ -152,10 +3270,6 @@
 
 *   **Creator Search Fix**: Moved the `InvidiousApiClient.searchChannels` network call off the Main Thread to `Dispatchers.IO` to prevent silent `NetworkOnMainThreadException` failures. Capped the appended search results to the top 3 matches as intended.
 *   **SD Card Installation Support**: Added `android:installLocation="auto"` to the AndroidManifest to allow the app to be installed or moved to an external SD card on storage-constrained devices.
-## Pending / Future Work
-*   Add more no-auth image and video sources.
-*   Enhance WebView with ad-blocking or reader mode if possible.
-*   Further optimize preloading for diverse media types.
 
 ## Completed Changes (2026-06-19)
 
@@ -231,3 +3345,212 @@
 *   **Interaction Jump Bugs**: Fixed a jarring bug where "Liking" a clearnet post caused the feed to jump to the next item by removing the strict `!isSaved` UI filter rule. Prevented the feed from forcefully scrolling to the top when broadcasting a mid-feed share.
 *   **Aggressive Splash Preloading**: Hijacked the app's initial `SplashScreen` to act as a 4-second buffer window. `MainActivity` now aggressively resolves and pre-warms the first media item in the feed via `PreloadManager` before the splash curtain drops, resulting in instant playback.
 *   **Filter Synchronization**: Introduced a strict `syncFilterMode()` flow to prevent the ViewModel from getting stuck in specific filters (like "Articles") when the UI clears them via the 'x' button, ensuring seamless return to the "Live Feed" regardless of list size.
+
+
+### 3. Global Connectivity & Native Hub Tor Daemon
+*   **Active-Passive Identity**: Updated Mobile `TorService.kt` to disable its local Hidden Service broadcast when connected to a Hub, pivoting purely to an outbound SOCKS5 proxy.
+*   **Native Hub Tor Generation**: Upgraded `hainet-seed` to dynamically generate a standard `/var/lib/tor/hainet/hs_ed25519_secret_key` from the PKCS#8 Mobile Identity Clone, clamping and hashing the seed natively in Rust.
+*   **Unified Onion Routing**: Configured the Hub's `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) under the single, persistent `.onion` address, allowing NoSlop to securely hit the API from anywhere in the world.
+
+## Completed Changes (2026-08-21)
+
+### 12. Audio Pipeline, YouTube Streams, and Channel Creation Cut-off
+*   **Always-Included "Music" Category**: Added `"Music"` to `alwaysIncludedCategories` in `SourceLibrary.kt`. Existing and new users get audio sources (`Openverse`, `Internet Archive Audio`, `Jamendo`, `Podcast Index`) in feed sync by default.
+*   **Archival Source Identifier Match**: Added `"archive"`, `"podcast_index"`, and `"jamendo"` to `ARCHIVAL_SOURCES` in `NoSlopViewModel.kt`. Fixed an issue where `InternetArchiveClient` items (`apiSource = "archive"`) were mismatched with `"internet_archive"` and discarded by the 400-day freshness ceiling. Increased metadata resolution cap to 25.
+*   **Keyless API Fetching & Parallel Harvesting**: Updated `PublicApiService.kt` so keyless public API sources run without blocking. Replaced sequential await loop with parallel `awaitAll()` under a 35s harvest budget.
+*   **Low-Latency Audio Buffer**: Injected a 500ms `DefaultLoadControl` buffer into `AudioPlayer.kt` so ExoPlayer audio playback begins immediately after half a second of buffering.
+*   **Invidious Direct Stream Resolver Fallback**: Added Invidious direct stream URL resolution fallback in `InvidiousApiClient.kt` when YouTube internal client hits rate limits.
+*   **Channel Creation Cut-Off Date Filter**: Added Room database schema migration (v7 -> v8) and UI settings in `ContentPreferencesScreen.kt` allowing users to filter out content from channels created after a specific cut-off date (e.g. drop recent AI content farms). Integrated `ChannelMetadataResolver.kt` querying Invidious API channel metadata.
+
+### 13. Channel Banning UX & Instant Feed Removal
+*   **Instant Feed Removal on Ban**: Updated `reactToFeedItem()` and `banChannel()` in `NoSlopViewModel.kt` to filter out the active item ID (`it.id != item.id`) immediately in local UI state before completing room database persistence.
+*   **Flexible Handle Matching**: Implemented trimmed substring handle matching (`a == bClean || a.contains(bClean) || bClean.contains(a)`) to handle channel name variations (e.g., `@handle` vs `handle`).
+*   **Isolated Preload Eviction**: Isolated `PreloadManager.evictAll()` to explicit user-triggered feed resets, ensuring channel banning does not touch or evict preloaded media players in the active feed.
+
+### 14. Tor Daemon Recovery & Startup Protection
+*   **Tor Auto-Retry Force Restart**: Updated `TorState.FAILED` collector in `NoSlopViewModel.kt` to call `startTor(forceRestart = true)`, ensuring hanging bootstrap jobs or stale daemon processes are cleanly reset.
+*   **Conditional Tor Warning Overlay**: Restricted the startup Tor warning banner in `TorWarningPanel.kt` to display only when `useTorForClearnet == true`.
+
+### 15. Collapsible UI Sections & Category Accordions
+*   **Collapsible Banned Channels Section**: Encapsulated the Banned Channels list and manual ban input field in `ContentPreferencesScreen.kt` behind a toggleable Card section (`Banned Channels / Creators 🚫 (X banned)`), keeping the screen uncluttered by default.
+*   **Collapsible Creator Preferences & Category Accordions**: Encapsulated Creator Preferences behind an expandable card (`Creator Preferences 👤 (X selected)`). Grouped suggested channels into topic accordions (*Technology*, *Privacy & Security*, *Science*, *World News*, *Open Source*, *Video Platforms*, *Gaming*, *Lifestyle*, *Health*, *Music*, *Art & Photography*).
+*   **Collapsible Content Categories & Genre Accordions**: Encapsulated topics and genres behind `Content Categories & Genres 🏷️ (X active)`, grouped into 3 sub-accordions (*Main Topics*, *Video Genres*, *Music Genres*).
+
+### 16. Touch Gesture Controls Parity Across Primary & Backup Video Players
+*   **Dual Player Architecture**: Preserved `EmbedWebViewPlayer` as an essential backup player when direct YouTube/Vimeo stream URL extraction fails or is age-gated/DRM-restricted.
+*   **Gesture Control Parity**: Added full gesture control parity to both `ExoVideoPlayer` (native) and `EmbedWebViewPlayer` (backup embed) in `VideoPlayer.kt`:
+    *   **Double Tap (Left / Right)**: Seeks -10s / +10s with animated `-10s ⏪` and `+10s ⏩` overlay indicators.
+    *   **Long Press (Hold)**: Fast forwards at 2.0x playback speed with an animated `2x ▶▶` top indicator, automatically reverting to 1.0x speed on release.
+    *   **Single Tap**: Toggles play/pause with centered play icon state feedback.
+
+### 17. OkHttp Dispatcher Unblocking & Low-Latency Video Buffering
+*   **OkHttp Concurrency Bottleneck Fix**: Increased `torClient`'s OkHttp `Dispatcher` limits (`maxRequests = 64`, `maxRequestsPerHost = 16`, up from `12` and `4`) in `HttpClientProvider.kt`. Previously, background preloader tasks choked `googlevideo.com` / `invidious` connection pools, starving active ExoPlayer range requests.
+*   **Low-Latency Video Startup**: Updated `DefaultLoadControl` in `VideoPlayer.kt` and `PreloadManager.kt` (`bufferForPlaybackMs = 500`, `minBufferMs = 1000`). Videos now begin playback instantly after 500ms of data is received over Tor, eliminating startup delay and buffering stalls.
+
+## External Audit Fixes (2026-09-03)
+
+An external review of `app/` following the 2026-09-02 self-audit. Applied via
+surgical patch scripts; the running register of what is fixed and what remains
+is [AUDIT_2026_09_03.md](AUDIT_2026_09_03.md).
+
+### Security
+
+*   **SSH host keys were never verified** (`NOSLOP_SSH_HOSTKEY_V1`).
+    `SshDeployer` installed a `UserInfo` whose `promptYesNo()` returned `true`
+    unconditionally, and wrote `known_hosts` to `java.io.tmpdir`, which is not a
+    stable app-private directory on Android. Deployment sends the SSH password
+    and the complete private identity — Ed25519 key, X25519 key, expanded onion
+    seed — so an attacker answering on that IP received all of it. Now a
+    persistent pin in `filesDir`, a two-phase connect that refuses rather than
+    prompts, unconditional refusal on a changed key, and
+    `clearPinnedHostKey()` for the genuine rebuild case. **Still
+    trust-on-first-use** until `onHostKeyPrompt` is wired into HubSetupScreen.
+*   **Packets were forwarded before being verified**
+    (`NOSLOP_VERIFY_BEFORE_FORWARD_V1`). `GossipService.processIncoming()` runs
+    `forwardPacket()`, and every signature check lived in a handler that runs
+    after it returns — so a node relayed forgeries to its entire trusted peer
+    set at every hop out to TTL 6. New `MeshPacketVerifier` checks the 20 types
+    carrying a self-contained signature at step 4.4. Handler checks are
+    unchanged and still run. `MeshPacketVerifier.enforce = false` disables
+    dropping without touching the pipeline; everything logs under `SIGVERIFY`.
+*   **Dedup could be poisoned by an unauthenticated id.** Step 2 recorded
+    `packet.id` before anything verified it, so a forged packet carrying an
+    expected id silently displaced the real one. Split into a check (unchanged
+    position, so rate limiting sees identical traffic) and a record that runs
+    only after verification.
+
+### Bugs found while fixing the above
+
+*   **The firewall buffer never worked.** A `MESSAGE` from an untrusted sender
+    was recorded in the dedup cache at step 2 and buffered at step 4; when
+    `flushFirewallBuffer()` replayed it after the peer became trusted, the step
+    2 check dropped it as a duplicate. Every buffered message was lost. Repaired
+    by the dedup split.
+*   **`isSourceCached()` always returned false.** It looked up a bare URL while
+    entries are keyed `"$url||$quality"`.
+
+### Video playback over Tor
+
+*   **Stream URLs outlived the route they were bound to**
+    (`NOSLOP_ROUTE_AWARE_CACHE_V1`). googlevideo signs a URL to the IP that
+    requested it — `TorService.kt` says so in its own header — but `sourceCache`
+    validated entries on `expire=` alone, so a URL survived both a Tor toggle
+    and every NEWNYM. In the 2026-09-03 capture, `PSIrKxSq8w8` was resolved at
+    00:18:18 for exit 192.42.116.53 and played at 00:25:45 after six rotations:
+    zero bytes, buffer frozen. A third URL carried the device's own address and
+    was fetched over Tor, which can never work. Entries now record the routing
+    mode and `TorService.circuitGeneration`, and all three readers — including
+    the `initialSource` fast path, which bypassed the check entirely — apply the
+    same test. A rotation also now reopens `Unavailable` results immediately
+    instead of making them wait out a 60s TTL.
+*   **Preloads starved the visible video** (`NOSLOP_TOR_PRELOAD_BUDGET_V1`).
+    Four resolves competed for `Semaphore(3)` with a 60s budget each, which is
+    what "Gave up waiting 20s for a resolve slot" was. Under Tor: one slide
+    ahead, none behind, 8s head start. Clearnet behaviour unchanged.
+
+
+
+## Open Architectural & Technical Register (Consolidated from FINDINGS.md)
+
+This section tracks the active architectural enhancements and audit items for the NoSlop Android application (`app/`), serving as the unified single source of truth:
+
+### 1. Cryptographic Payload Canonicalization (Finding #4 / P1-7)
+- **Current State**: Handlers and `MeshPacketVerifier` utilize length-prefixed encoding (`CryptoService.encodeForSigning`) across high-volume types (`POST`, `EDIT_POST`, `DELETE_POST`, `USER_HANDSHAKE`, `CONNECTION_REQUEST`, `CHAT_REACTION`, `GROUP_INVITE`, `GROUP_DELETE`). Legacy pipe-delimited strings (`|`) remain supported as fallback for `COMMENT`, `EDIT_COMMENT`, `IDENTITY_UPDATE`, and `FOLLOW`.
+- **Roadmap**: Transition all packet types to a unified, versioned canonical encoder (e.g. sorted-key JSON with explicit null representations) emitting a protocol version header (`sigVersion = 2`) with a backward-compatible transition window.
+
+### 2. Complete Database Encryption at Rest (Finding #11 / P0-2)
+- **Current State**: Group message bodies are encrypted at rest using an app-scoped AES-256-GCM master key held in the Android Keystore (`GroupMessageCrypto`, Room migration 12→13). 1:1 Direct Messages store encrypted ciphertext and nonces from X25519/ChaCha20-Poly1305 key agreement.
+- **Roadmap**: The underlying Room SQLite database (`mesh.db`) stores non-message entities (feed sources, viewed history, peers, and settings) in standard SQLite. Full-database encryption via SQLCipher is planned for post-v0.5 releases.
+
+### 3. Direct Message Forward Secrecy & Ratchet
+- **Current State**: Direct messaging uses static-static X25519 key agreement derived into a ChaCha20-Poly1305 key via SHA3-256.
+- **Roadmap**: Implement Double Ratchet protocol (Signal / Olm style) to provide per-message ephemeral key exchanges and forward secrecy.
+
+### 4. ProGuard Keep Surface Refactoring (P2-2) ✅
+- **Current State & Resolution**:
+  1. Replaced broad package wildcards with explicit `@Keep` annotations on all DTOs and models in `Packets.kt`, `GroupChat.kt`, `UserProfile.kt`, and `UpdateChecker.kt`.
+  2. Added `-keepattributes Signature,InnerClasses,EnclosingMethod,*Annotation*` to `proguard-rules.pro` to prevent R8 from stripping Gson `TypeToken` generic type metadata in release builds.
+  3. Enables R8 to safely optimize, minify, and eliminate dead code without risking runtime JSON serialization or deserialization failures.
+
+### 5. Architectural Decomposition (P2-3 & P2-4)
+- **Current State**: `NoSlopRepository` and `NoSlopViewModel` coordinate cross-domain flows (mesh, feeds, engagement, settings, and Hubs).
+- **Roadmap**: Decompose large repository and ViewModel classes along existing domain boundaries (`HubRepository`, `ChatRepository`, `FeedViewModel`, `DMsViewModel`).
+
+### 6. LAN Hub TLS Pinning (Finding #14)
+- **Current State**: Because Android's Network Security Config enforces system-anchor TLS and restricts cleartext to loopback and `.onion`, Hub API interactions route reliably over the authenticated Tor hidden service (`.onion`) endpoint.
+- **Roadmap**: Support direct LAN HTTP fast-path with Hub self-signed certificate generation and fingerprint pinning.
+
+### 7. Client-Side Proxy Secret and Shared API Keys (P1-9 / D-2) ✅
+- **Current State & Resolution**:
+  1. `ProxyAuth.kt` dynamically accepts user-configured `custom_proxy_url` and `custom_proxy_secret` from `ApiKeyRepository`, allowing users to route through their own self-hosted Cloudflare Worker or reverse proxy endpoints while falling back safely to `BuildConfig` defaults.
+  2. `JamendoApiClient.kt` accepts user-configured Jamendo Client IDs from `ApiKeyRepository`, falling back gracefully to the public CC client ID (`709fa152`).
+  3. `ApiKeyRepository.SERVICES` exposes `jamendo`, `custom_proxy_url`, and `custom_proxy_secret` directly in `ApiKeysScreen.kt` for secure user configuration.
+
+### 8. Sovereign Identity Recovery & Tiered Backup Architecture (Finding #2 / D-1) ✅
+- **Current State**: Restoring only from a 12-word mnemonic phrase cannot reconstruct a serverless node's peer connections, group chat states, secondary/burnable creator keys, or local preferences. Recovery is anchored on AES-256-GCM authenticated ZIP archives (`BackupManager.kt`).
+- **Resolution**:
+  1. Implemented tiered backup export (`BackupMediaOption.NONE` for lightweight ~100 KB IDs/keys/database archive vs. `BackupMediaOption.OWNED_ONLY` for owned media).
+  2. Proactive advisory modals prompt users to back up their node upon onboarding completion and whenever secondary/creator hidden services or keys change (`NoSlopViewModel.BackupPromptReason`).
+  3. Pruned dead derivation pathways and aligned test fakes.
+
+## Consolidated Master Backlog
+
+The following tasks have been aggregated from all historical gap analyses, audits, and integration plans into this single unified backlog.
+
+### 1. Network & Mesh Parity (From GAP_ANALYSIS.md)
+*   `FOLLOW`/`UNFOLLOW` asymmetric relationship model (§1)
+*   Group admin list + bans (`admins[]`, `bannedIds[]`) — NoSlop has a single admin key and no ban list (§3)
+*   User-selectable theme palettes (low priority, §8)
+*   Document NoSlop's potential future role as a HAI-Net hub "frontend client" (§9)
+*   Confirm `Dns.SYSTEM` fallback exists in `HttpClientProvider.clearnetClient`'s DoH chain (§13.1)
+
+### 2. Hub Integration (From HUB_INTEGRATION_PLAN.md)
+*   **Reconciliation Sync (`MeshPacketHandler.kt`)**: Diff local Room DB vs Hub DB to merge DMs/Posts during failover.
+*   **Clearnet Aggregation Sync (`FeedSyncWorker.kt`)**: Sync "Saved" and "Liked" clearnet states with the Hub.
+*   **Heavy Media Offloading**: Transfer `MediaManager.kt` chunk-downloading logic to the Hub over Tor 24/7. Mobile pulls MP4 over local Wi-Fi.
+*   **Background Sync Worker (`FeedSyncWorker.kt`)**: Wire `syncWithHub()` into Android's WorkManager for background DM/notification checks.
+*   **Automated AES ZIP Export (`data/BackupManager.kt`)**: Push silent, encrypted `noslop_backup.zip` archives to Hub via `POST /api/backup/push`.
+*   **Upload Worker (`data/HubSyncWorker.kt`)**: Create a daily WorkManager job for backups.
+
+### 3. KMP Migration Parity (From KMP_PARITY_PLAN.md)
+*   **Missing Core Screens (~4,800 lines)**: `UnifiedFeedTab.kt`, `MainScreen.kt`, `NoSlopViewModel.kt`, etc.
+*   **Missing UI Components (~2,600 lines)**: `FeedCard.kt`, `ChatThreadScreen.kt`, `CommentsBottomSheet.kt`, `PeerItem.kt`, `AvatarCropper.kt`, etc.
+*   **Missing Tab Screens (~1,060 lines)**: `SettingsTab.kt`, `DMsTab.kt`, `NotificationsScreen.kt`, `LogsViewerScreen.kt`, `ApiKeysScreen.kt`.
+*   **Missing Data Layer (~3,000 lines)**: Rebuild `NoSlopRepository.kt`, DAOs, and Android-specific implementations in SQLDelight.
+*   **Android-Only Dependencies**: Refactor usages of `AndroidViewModel`, CameraX, ExoPlayer, Coil, Accompanist Permissions, ZXing, and Gson.
+
+### 4. Privacy & Security (From PRIVACY_AND_SECURITY_PROPOSAL.md)
+*   Add Ed25519 signature & SHA-256 checksum verification to UpdateManager.kt
+*   Upgrade BackupManager.kt to AES-256-GCM authenticated encryption
+*   Add HTTPS Certificate Pinning for update check domains
+*   Implement dynamic HMAC signing & user-configurable Worker proxy endpoints
+*   Enforce strict Tor IP leak prevention (block clearnet fallbacks when Tor is ON)
+*   Integrate Tor circuit cycling on API proxy errors
+*   Add PIN-derived AES-GCM fallback storage when Android Keystore is unavailable
+*   Implement Double Ratchet protocol for forward-secure DMs
+*   Apply adaptive token-bucket rate limiting across all mesh packet types
+
+### 5. Open Audit Findings (From AUDIT_2026_09_03.md)
+*   **1. Host key confirmation is not wired to the UI.** (Wire `onHostKeyPrompt` in `HubSetupScreen` and add `clearPinnedHostKey()` setting).
+*   **2. The Word Cloud cannot restore an identity.** (No restore path from `deriveSeed()`, either fix or correct docs).
+*   **9. The proxy secret is not a secret.** (Drop `X-Proxy-Secret`/HMAC, rate limit on server side).
+*   **10. Room: `exportSchema = false` and no tests.** (Export schemas, add `MigrationTestHelper`).
+*   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
+*   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
+*   **13. Video playback over Tor lacks stream isolation.** [RESOLVED 2026-09-06] Implemented true SOCKS5 stream isolation via `TorSocksSocketFactory` and `TorSocksSocket` (RFC 1928 + RFC 1929) in `HttpClientProvider.kt`. Player resolution and ExoPlayer media byte fetching share an identical isolated SOCKS username (`yt_${videoId}_${nonce}`), pinning both legs to the exact same Tor exit node IP and satisfying `googlevideo.com`'s IP lock. Bumping `streamNonce` on `LOGIN_REQUIRED` moves resolution to a fresh exit node without invoking disruptive process-wide `SIGNAL NEWNYM` circuit rotations.
+
+### 6. General Enhancements (Legacy Status Log)
+*   Add more no-auth image and video sources.
+*   Enhance WebView with ad-blocking or reader mode if possible.
+*   Further optimize preloading for diverse media types.
+
+### 7. Known Gaps after the Review Round 2 Follow-up (2026-10-13)
+*   **Hub-pulled packets skip the envelope check** (C09): Hub pulls and Hub web-UI DMs never cross the mesh socket, where `EnvelopeAuth` is applied.
+*   **The Hub's onion address is not checked against its key** (S2 covers peers only).
+*   **Clocks must agree to within 1 hour**, or packets are dropped as stale (`EnvelopeAuth.MAX_SKEW_MS`).
+*   **A `GROUP_SYNC` answer to a member with no stored onion is broadcast** to all trusted contacts and group members, so non-member friends receive the group record (G1 leftover; found 2026-10-13, not fixed).
+*   **Member-invited users get group catch-up only from members whose copy already lists them** (G1).
+*   **Downvotes made before the search round** count only as swipes and are not hidden from search.
+*   **Search quality**: works, to be improved later.
+*   **Deferred by the owner:** C27 (persistent per-peer connections) and R4d (handshake budget).
+*   **Not yet checked:** backup export and restore on a device (E3); a minified release build (`docs/RELEASE_SMOKE_TEST.md`, E5).

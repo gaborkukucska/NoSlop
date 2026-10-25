@@ -1,41 +1,50 @@
-# NoSlop Cross-Platform Migration — Project Hub
+# NoSlop Cross-Platform Migration — Master Guide
 
-This folder is the **single source of truth** for the migration of NoSlop from a native-Android app to a cross-platform app (iOS-first, then desktop, then Android parity), built on **Kotlin Multiplatform + Compose Multiplatform** and optimized for **long-term AI-assisted maintainability**.
+**Status:** 🟡 Phase 1 / iOS MVP in progress · **Branch:** `feat/cross-platform-migration` · **Target Codebase:** `mvp/`
 
-> **If you are picking this up cold (human or AI): start here, then read `PROGRESS_LOG.md` for the latest state.**
+---
 
-## Documents in this folder
+## 1. Vision & Architecture Strategy
 
-| Document | Purpose | Read when |
-|---|---|---|
-| [`MIGRATION_PLAN.md`](MIGRATION_PLAN.md) | Master plan: vision, the 6 phases, and the live status board | First — the map of the whole project |
-| [`STRATEGY.md`](STRATEGY.md) | *Why* KMP, why iOS-first, the iOS constraints, options we rejected | When you need the rationale behind a decision |
-| [`PHASE_0.md`](PHASE_0.md) | Detailed stages + todo checklist for the current phase | When doing the work |
-| [`DECOMPOSITION_MAP.md`](DECOMPOSITION_MAP.md) | Concrete plan for splitting the monolith files | During Phase 0 refactoring |
-| [`DECISIONS.md`](DECISIONS.md) | Architecture Decision Records (ADRs) — every binding choice + its reasoning | Before re-litigating a decision |
-| [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) | Execution runway for the owner's iOS MVP goal (identity + feed reader; CMP) | When building the iOS MVP |
-| [`PROGRESS_LOG.md`](PROGRESS_LOG.md) | Reverse-chronological journal of what was done each session | **Every time you resume** |
+> **Goal:** Maintain one unified NoSlop core codebase that runs seamlessly across iOS, Android, and Desktop (Windows/macOS/Linux), preserving our serverless privacy-first mesh — built so that **AI tooling can safely maintain and extend it** long-term.
 
-## How to use this hub (the working loop)
+### Stack & Seams (ADR-001)
+- **Language & Framework:** Kotlin Multiplatform (KMP) + Compose Multiplatform (CMP) for shared business logic and UI.
+- **Portable Core (`commonMain`):** Crypto schemes, JSON wire protocol, packet handling, gossip logic, feed parsing, presentation ViewModels.
+- **Platform Seams (`expect`/`actual`):** Secure key storage (Keystore / Keychain), Tor lifecycle, media engines (ExoPlayer / AVPlayer), camera / QR scanning.
 
-1. **Resume:** read the top of `PROGRESS_LOG.md` (latest entry) and the status board in `MIGRATION_PLAN.md`.
-2. **Pick work:** take the next unchecked `[ ]` todo in the active phase doc (e.g. `PHASE_0.md`).
-3. **Do it:** implement, keeping the documentation standard (see below). Check the box when done.
-4. **Record:** add a dated entry to `PROGRESS_LOG.md` describing what changed and what's next. Update the status board if a stage completed.
-5. **Decide:** if you made a binding architectural choice, add an ADR to `DECISIONS.md`.
-6. **Commit:** small, focused commits on the `feat/cross-platform-migration` branch.
+---
 
-## Code documentation standard (non-negotiable, for resumability + AI-maintainability)
+## 2. Phase Status & Roadmap
 
-Every new or refactored file must have:
-- A **file-level KDoc** header: what this file is, its responsibility, and how it fits the architecture.
-- **KDoc on every public symbol** (class, function, property): purpose, params, return, and any non-obvious behavior.
-- **`// WHY:` comments** for any non-obvious decision (security, protocol, platform quirk). Future maintainers — and AI — must understand *why*, not just *what*.
-- **No file over ~300 lines** and **one responsibility per file** (see `DECOMPOSITION_MAP.md` for the rationale).
+| Phase | Goal | Status | Key Deliverable |
+|---|---|---|---|
+| **Phase 0** | **Decompose & Test Core** | 🟢 **Complete** | Golden-vector unit tests for SHA3-256 derivations, tripcodes, onion addresses, and wire packets. |
+| **Phase 0.5** | **iOS MVP (Identity + Feed)** | 🟡 **In Progress** | CMP app: generate Ed25519 identity + clearnet feed reader on iOS (`iosArm64` / `iosSimulatorArm64`). |
+| **Phase 1** | **KMP-ify Shared Core** | 🟡 **In Progress** | Move wire protocol & crypto derivations to `commonMain`; SQLDelight persistence; Ktor HTTP. |
+| **Phase 2** | **iOS Leaf Node Client** | ⚪ **Planned** | Compose MP UI on iOS; native Tor.framework / iCepa SOCKS5 proxy integration; AVPlayer media. |
+| **Phase 3** | **Desktop Home HUB** | ⚪ **Planned** | JVM Desktop app (Win/macOS/Linux) acting as an always-on relay HUB & identity backup server. |
 
-## Branch & repo facts
+---
 
-- **Working clone:** `~/Documents/NoSlop-xplatform`
-- **Branch:** `feat/cross-platform-migration` (off `main`)
-- **Remotes:** `origin` = `kufton/NoSlop` (your fork — push here) · `upstream` = `gaborkukucska/NoSlop` (Gabor's repo — fetch to stay current)
-- **Merge path:** push to the fork → when Gabor approves, open a PR `kufton:<branch>` → `gaborkukucska:main`; Gabor merges. Prefer small phase-scoped PRs (ADR-006). Sync regularly: `git fetch upstream && git rebase upstream/main`.
+## 3. Architecture Decision Records (ADRs Summary)
+
+1. **ADR-001 (KMP + Compose MP):** Selected KMP and Compose Multiplatform to maximize single-language maintainability across logic and UI.
+2. **ADR-002 (iOS Leaf + Home HUB Relay):** Due to iOS background socket suspension, iOS operates as a leaf node connecting outbound to an always-on Home HUB.
+3. **ADR-003 (Fork & PR Workflow):** Forked to `kufton/NoSlop`, merging upstream to `gaborkukucska/NoSlop` via small PRs.
+4. **ADR-005 (Immutable Wire Protocol):** The JSON wire protocol and Ed25519/X25519/ChaCha20-Poly1305 scheme remain the exact interop contract across all platform nodes.
+5. **ADR-007 (Golden-Vector Testing):** Independent reference vectors (Python `hashlib` baseline) pin tripcodes, onion addresses, and packet roundtrips in `commonTest`.
+6. **ADR-008 (Scoped iOS MVP):** First iOS deliverable is identity generation + clearnet feed reader (no mesh/Tor initially) via free personal Apple ID sideloading.
+7. **ADR-009 (Tor SOCKS5 Seam):** Tor integration uses a decoupled SOCKS5 proxy seam; desktop HUB bundles `tor` binary; iOS uses `Tor.framework`.
+
+---
+
+## 4. Code Structure & Sub-Documents
+
+Sub-documents detailing historical phases and architectural decision records are archived for reference in [`docs/archived/migration/`](../archived/migration/):
+- `MIGRATION_PLAN.md` — Historical 6-phase master plan.
+- `STRATEGY.md` — Strategic options evaluation and rationale.
+- `PHASE_0.md` & `DECOMPOSITION_MAP.md` — Code decomposition specifications.
+- `DECISIONS.md` — Detailed ADR catalog.
+- `IOS_MVP_PLAN.md` — Detailed execution plan for iOS MVP sideload.
+- `PROGRESS_LOG.md` — Session journal log.

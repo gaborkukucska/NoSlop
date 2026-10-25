@@ -9,13 +9,18 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.content.pm.ServiceInfo
+import androidx.core.app.ServiceCompat
 import androidx.core.app.NotificationCompat
 import com.noslop.app.MainActivity
 import com.noslop.app.NoSlopApp
 import com.noslop.app.debug.Logger
 import com.noslop.app.tor.TorService
 
+import android.os.PowerManager
+
 class NoSlopForegroundService : Service() {
+    private var wakeLock: PowerManager.WakeLock? = null
 
     companion object {
         private const val TAG = "FOREGROUND_SERVICE"
@@ -24,10 +29,14 @@ class NoSlopForegroundService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, NoSlopForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to start foreground service: ${e.message}")
             }
         }
 
@@ -41,13 +50,35 @@ class NoSlopForegroundService : Service() {
         super.onCreate()
         Logger.info(TAG, "NoSlopForegroundService created")
         createNotificationChannel()
+        
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NoSlop::MeshSyncWakeLock")
+            wakeLock?.acquire()
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to acquire WakeLock: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Logger.info(TAG, "NoSlopForegroundService started")
         
         val notification = createNotification("Mesh network sync active")
-        startForeground(NOTIFICATION_ID, notification)
+        
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to call startForeground: ${e.message}")
+        }
 
         // Starting this foreground service elevates the process priority,
         // which prevents Android from killing TorService and GossipService 
@@ -61,6 +92,14 @@ class NoSlopForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to release WakeLock or stop foreground: ${e.message}")
+        }
         super.onDestroy()
         Logger.info(TAG, "NoSlopForegroundService destroyed")
 

@@ -32,17 +32,59 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             private set
     }
 
-    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val repositoryScope = com.noslop.app.util.AppScopes.io
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            .okHttpClient { HttpClientProvider.clearnetClient }
+            // --- NOSLOP_TOR_GATE_UI_V1 ---
+            // Obey the Content-over-Tor toggle like everything else. The old
+            // comment argued these are public CDN links revealing no identity;
+            // the URLs are public but the REQUESTS are not. i.ytimg.com receives
+            // this device's IP together with the id of every video scrolled
+            // past, rebuilding a viewing history as precisely as the stream
+            // fetches we already route through Tor.
+            //
+            // The slow loads that motivated the bypass are addressed below: on
+            // 'low' the app now asks the SOURCE for small images instead of
+            // downloading full-size ones and shrinking them after the bytes
+            // have already crossed the wire.
+            .okHttpClient {
+                val baseClient = HttpClientProvider.activeClearnetClient
+                baseClient.newBuilder()
+                    .addInterceptor { chain ->
+                        val req = chain.request()
+                        val host = req.url.host
+                        val builder = req.newBuilder()
+                        if (host.contains("wikimedia.org") || host.contains("wikipedia.org")) {
+                            builder.header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                        } else if (host.contains("artic.edu")) {
+                            builder.header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                            builder.header("AIC-User-Agent", "NoSlop-Android/1.0")
+                        }
+                        chain.proceed(builder.build())
+                    }
+                    .build()
+            }
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     add(coil.decode.ImageDecoderDecoder.Factory())
                 } else {
                     add(coil.decode.GifDecoder.Factory())
                 }
+                add(object : coil.intercept.Interceptor {
+                    override suspend fun intercept(chain: coil.intercept.Interceptor.Chain): coil.request.ImageResult {
+                        val request = chain.request
+                        val url = request.data.toString()
+                        if (url.startsWith("noslop://")) {
+                            val resolved = com.noslop.app.ui.resolveMediaUrl(url, this@NoSlopApp)
+                            if (resolved != null) {
+                                val newData = if (resolved.startsWith("file://")) java.io.File(resolved.removePrefix("file://")) else resolved
+                                return chain.proceed(request.newBuilder().data(newData).build())
+                            }
+                        }
+                        return chain.proceed(request)
+                    }
+                })
             }
             .build()
     }
@@ -74,14 +116,53 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // so that file copies and auto-downloads don't fail with "not initialized" errors.
         com.noslop.app.mesh.MediaManager.initialize(repository)
 
+        // Hydrate the playback-position store from disk so videos resume where
+        // the user left off, even after a cold start.
+        com.noslop.app.ui.components.PlaybackPositionStore.init(this)
+
+        // Initialize LanguageManager immediately on the main thread so appContext and languages are ready before any UI composes
+        com.noslop.app.util.LanguageManager.init(this, "en")
+        repositoryScope.launch {
+            val appLang = repository.getAppLanguage()
+            if (appLang != "en") {
+                com.noslop.app.util.LanguageManager.loadLanguage(appLang)
+            }
+        }
+
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()
+
+        // Start embedded Tor daemon early on app start for existing onboarded users
+        repositoryScope.launch {
+            if (repository.isOnboardingComplete()) {
+                val identity = repository.getLocalIdentity()
+                val burnableIdentity = repository.getBurnableIdentity()
+                val hubStatus = repository.getAppSetting("hub_deployment_status")
+                com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+                val fgEnabled = repository.getAppSetting("foreground_service_enabled") == "true"
+                if (fgEnabled && hubStatus.isNullOrBlank()) {
+                    com.noslop.app.mesh.NoSlopForegroundService.start(this@NoSlopApp)
+                }
+                com.noslop.app.tor.TorService.startTor(
+                    this@NoSlopApp,
+                    identity?.privateKeyB64,
+                    burnableIdentity?.privateKeyB64
+                )
+            }
+        }
 
         repository.meshTransport.startListening()
         repositoryScope.launch {
             val identity = repository.getLocalIdentity()
             if (identity != null) {
-                GossipService.initialize(repository.peerDao, repository.meshTransport, identity.publicKeyB64)
+                GossipService.initialize(
+                    repository.peerDao, 
+                    repository.meshTransport, 
+                    identity.publicKeyB64,
+                    getMeshFilterSettings = { repository.getMeshFilterSettings() },
+                    checkEntityExists = { type, id -> repository.checkEntityExistsLocally(type, id) },
+                    checkIsLocalUser = { pub -> repository.isLocalUser(pub) }
+                )
                 repository.startPresenceHeartbeat()
             }
         }
@@ -125,6 +206,25 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             Logger.info("APP", "WorkManager Periodic update check registered successfully")
         } catch (e: Exception) {
             Logger.error("APP", "Failed to register WorkManager update check: ${e.message}")
+        }
+
+        // Daily automated encrypted identity & DB backup push to Home Hub
+        try {
+            val hubSyncRequest = PeriodicWorkRequestBuilder<com.noslop.app.data.HubSyncWorker>(1, TimeUnit.DAYS)
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "hub_backup_sync_daily",
+                ExistingPeriodicWorkPolicy.KEEP,
+                hubSyncRequest
+            )
+            Logger.info("APP", "WorkManager Periodic Hub sync registered successfully")
+        } catch (e: Exception) {
+            Logger.error("APP", "Failed to register WorkManager Hub sync: ${e.message}")
         }
     }
 }

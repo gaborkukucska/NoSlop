@@ -6,6 +6,14 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
+import org.json.JSONObject
+import java.io.File
+
+sealed class IdentityRestoreResult {
+    object Success : IdentityRestoreResult()
+    object RecoveryRequired : IdentityRestoreResult()
+    data class Failure(val reason: String) : IdentityRestoreResult()
+}
 
 /**
  * Stores and retrieves cryptographic identity keys.
@@ -17,38 +25,225 @@ import com.noslop.app.debug.Logger
  *     via AppSettingDao for display purposes.
  *   - Private keys are NEVER written to Room, logs, or any unencrypted store.
  */
-class IdentityRepository(context: Context, private val appSettingDao: AppSettingDao) {
+class IdentityRepository(private val context: Context, private val appSettingDao: AppSettingDao) {
 
     private val TAG = "IDENTITY_REPO"
 
     val isUsingInsecureStorage = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isQuarantined = kotlinx.coroutines.flow.MutableStateFlow(false)
 
-    // EncryptedSharedPreferences backed by Android Keystore master key
-    // Falls back to plaintext SharedPreferences if hardware Keystore is unavailable
-    private val prefs: android.content.SharedPreferences = try {
-        EncryptedSharedPreferences.create(
-            context,
+    fun hasQuarantinedIdentity(): Boolean {
+        if (isQuarantined.value) return true
+        val prefsDir = File(context.filesDir.parentFile, "shared_prefs")
+        return prefsDir.listFiles()?.any { it.name.startsWith("noslop_identity_secure.xml.corrupt_") } == true
+    }
+
+    suspend fun needsIdentityRecovery(): Boolean {
+        if (isQuarantined.value || hasQuarantinedIdentity() || appSettingDao.getSetting("identity_quarantined") == "true") {
+            return loadIdentity() == null
+        }
+        return false
+    }
+
+    suspend fun resolveQuarantine(): Boolean {
+        var allRenamed = true
+        try {
+            val prefsDir = File(context.filesDir.parentFile, "shared_prefs")
+            prefsDir.listFiles()?.filter { it.name.startsWith("noslop_identity_secure.xml.corrupt_") }?.forEach { corruptFile ->
+                val resolvedName = corruptFile.name.replace(".corrupt_", ".resolved_")
+                val target = File(corruptFile.parentFile, resolvedName)
+                if (!corruptFile.renameTo(target)) {
+                    allRenamed = false
+                    Logger.warn(TAG, "Failed archiving quarantine marker ${corruptFile.name} -> ${target.name}")
+                } else {
+                    Logger.info(TAG, "Archived quarantine marker ${corruptFile.name} -> ${target.name}")
+                }
+            }
+        } catch (e: Exception) {
+            allRenamed = false
+            Logger.warn(TAG, "Failed archiving quarantine file: ${e.message}")
+        }
+        if (allRenamed) {
+            isQuarantined.value = false
+            try {
+                appSettingDao.removeSetting("identity_quarantined")
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Could not clear the identity quarantine flag: ${e.message}")
+            }
+        }
+        return allRenamed
+    }
+
+    private fun buildMasterKey(ctx: Context): MasterKey {
+        return MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+    }
+
+    private fun createEncryptedPrefs(ctx: Context): android.content.SharedPreferences {
+        return EncryptedSharedPreferences.create(
+            ctx,
             "noslop_identity_secure",
-            MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build(),
+            buildMasterKey(ctx),
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        ).also {
+        )
+    }
+
+    // EncryptedSharedPreferences backed by Android Keystore master key
+    // Falls back to plaintext SharedPreferences ONLY if hardware Keystore is genuinely unavailable
+    private val prefs: android.content.SharedPreferences = try {
+        createEncryptedPrefs(context).also {
             Logger.info(TAG, "EncryptedSharedPreferences initialized with hardware-backed keystore")
         }
     } catch (e: Exception) {
-        Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to plaintext: ${e.message}")
-        isUsingInsecureStorage.value = true
-        context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+        val secureFile = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml")
+        var recovered: android.content.SharedPreferences? = null
+        if (secureFile.exists()) {
+            Logger.error(TAG, "EncryptedSharedPreferences failed on existing file (${e.message}). Quarantining unopenable file without destroying key material...")
+            try {
+                val quarantine = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml.corrupt_${System.currentTimeMillis()}")
+                val renamed = secureFile.renameTo(quarantine)
+                if (renamed) {
+                    Logger.warn(TAG, "Secure file quarantined to ${quarantine.name}. Storing quarantine recovery state...")
+                    isQuarantined.value = true
+                    kotlinx.coroutines.runBlocking {
+                        try {
+                            appSettingDao.insertSetting(AppSetting("identity_quarantined", "true"))
+                        } catch (e: Exception) {
+                            Logger.warn(TAG, "Could not store the identity quarantine flag: ${e.message}")
+                        }
+                    }
+                    recovered = try {
+                        createEncryptedPrefs(context).also {
+                            Logger.info(TAG, "Successfully re-initialized hardware Keystore preferences after quarantine")
+                        }
+                    } catch (e2: Exception) {
+                        Logger.error(TAG, "Hardware Keystore is genuinely unavailable even after quarantine: ${e2.message}")
+                        null
+                    }
+                }
+            } catch (renEx: Exception) {
+                Logger.error(TAG, "Failed to quarantine secure preference file: ${renEx.message}")
+            }
+        }
+        if (recovered != null) {
+            recovered
+        } else {
+            Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to AES-GCM encrypted SharedPreferences: ${e.message}")
+            isUsingInsecureStorage.value = true
+            context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+        }
     }
 
+    // C16: Hardware-backed raw AES-256-GCM master key from AndroidKeyStore without Tink
+    private fun getOrCreateFallbackKeystoreKey(): javax.crypto.SecretKey? {
+        return try {
+            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val alias = "noslop_fallback_hardware_key"
+            if (!keyStore.containsAlias(alias)) {
+                val keyGen = javax.crypto.KeyGenerator.getInstance(
+                    android.security.keystore.KeyProperties.KEY_ALGORITHM_AES,
+                    "AndroidKeyStore"
+                )
+                val spec = android.security.keystore.KeyGenParameterSpec.Builder(
+                    alias,
+                    android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
+                keyGen.init(spec)
+                keyGen.generateKey()
+            }
+            (keyStore.getEntry(alias, null) as? java.security.KeyStore.SecretKeyEntry)?.secretKey
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private val fallbackObfuscationKey: javax.crypto.SecretKey by lazy {
+        val deviceId = try {
+            android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "noslop_fallback_salt"
+        } catch (_: Exception) { "noslop_fallback_salt" }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val keyBytes = digest.digest(("NoSlopSecureSalt_$deviceId").toByteArray(Charsets.UTF_8))
+        javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+    }
+
+    private fun secureFallbackWrite(value: String): String {
+        return if (isUsingInsecureStorage.value) {
+            val ksKey = getOrCreateFallbackKeystoreKey()
+            if (ksKey != null) {
+                try {
+                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, ksKey)
+                    val iv = cipher.iv
+                    val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                    "ENC_KS:" + android.util.Base64.encodeToString(iv + encrypted, android.util.Base64.NO_WRAP)
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Fallback Keystore encryption failed: ${e.message}")
+                    throw SecurityException("Failed to encrypt secret into fallback storage", e)
+                }
+            } else {
+                try {
+                    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                    val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+                    cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, fallbackObfuscationKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+                    val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                    "ENC_GCM:" + android.util.Base64.encodeToString(iv + encrypted, android.util.Base64.NO_WRAP)
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Fallback encryption failed: ${e.message}")
+                    throw SecurityException("Failed to encrypt secret into fallback storage", e)
+                }
+            }
+        } else {
+            value
+        }
+    }
+
+    private fun secureFallbackRead(stored: String?): String? {
+        if (stored == null) return null
+        if (stored.startsWith("ENC_KS:")) {
+            return try {
+                val ksKey = getOrCreateFallbackKeystoreKey() ?: return null
+                val payload = android.util.Base64.decode(stored.removePrefix("ENC_KS:"), android.util.Base64.DEFAULT)
+                val iv = payload.copyOfRange(0, 12)
+                val ciphertext = payload.copyOfRange(12, payload.size)
+                val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(javax.crypto.Cipher.DECRYPT_MODE, ksKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+                String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+            } catch (e: Exception) {
+                Logger.error(TAG, "Fallback Keystore decryption failed: ${e.message}")
+                null
+            }
+        }
+        if (!stored.startsWith("ENC_GCM:")) return stored
+        return try {
+            val payload = android.util.Base64.decode(stored.removePrefix("ENC_GCM:"), android.util.Base64.DEFAULT)
+            val iv = payload.copyOfRange(0, 12)
+            val ciphertext = payload.copyOfRange(12, payload.size)
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, fallbackObfuscationKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+            val decrypted = cipher.doFinal(ciphertext)
+            String(decrypted, Charsets.UTF_8)
+        } catch (e: Exception) {
+            Logger.error(TAG, "Fallback decryption failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Creates the account. R6: the only place a Word Cloud is first written; called only from onboarding
+     * (NoSlopRepository.saveLocalIdentity <- NoSlopViewModel.completeOnboarding), see WordCloudGuard.
+     */
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
-        // Private keys -> SharedPreferences
-        prefs.edit()
-            .putString("ed25519_private_key", keys.privateKeyB64)
-            .putString("enc_private_key", keys.encPrivateKeyB64)
-            .putString("mnemonic", mnemonic)
+        // Private keys -> SharedPreferences (encrypted via ESP or fallback AES-GCM)
+        val commitSuccess = prefs.edit()
+            .putString("ed25519_private_key", secureFallbackWrite(keys.privateKeyB64))
+            .putString("enc_private_key", secureFallbackWrite(keys.encPrivateKeyB64))
+            .putString("mnemonic", secureFallbackWrite(mnemonic))
             // Also persist public identity data in ESP so it survives DB resets
             .putString("pub_ed25519", keys.publicKeyB64)
             .putString("pub_enc", keys.encPublicKeyB64)
@@ -57,7 +252,23 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             .putString("onion", keys.onionAddress)
             .putString("display_name", keys.displayName)
             .putString("onboarding_complete", "true")
-            .apply()
+            // Clean up any stale burnable identity from previous account
+            .remove("burnable_ed25519_private_key")
+            .remove("burnable_enc_private_key")
+            .remove("burnable_pub_ed25519")
+            .remove("burnable_pub_enc")
+            .remove("burnable_tripcode")
+            .remove("burnable_onion")
+            .remove("burnable_display_name")
+            .commit()
+
+        if (!commitSuccess) {
+            throw IllegalStateException("Failed to commit saved identity to preferences")
+        }
+
+        // Identity version 2 indicates deterministic HKDF derivation from Word Cloud mnemonic
+        appSettingDao.insertSetting(AppSetting("identity_version", "2"))
+        prefs.edit().putString("identity_version", "2").commit()
 
         // Public data -> Room (safe to query, display, share)
         appSettingDao.insertSetting(AppSetting("local_handle", handle))
@@ -67,73 +278,290 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         appSettingDao.insertSetting(AppSetting("local_onion", keys.onionAddress))
         appSettingDao.insertSetting(AppSetting("local_display_name", keys.displayName))
 
+        val reloaded = loadIdentity()
+        if (reloaded == null || reloaded.publicKeyB64 != keys.publicKeyB64) {
+            throw IllegalStateException("Saved identity failed reload verification probe")
+        }
+        resolveQuarantine()
+
         Logger.info(
             TAG, "Identity saved",
             "handle=$handle | tripcode=${keys.tripcode} | onion_prefix=${keys.onionAddress.take(16)}..."
         )
-        // Private key bytes intentionally NOT logged
+    }
+
+    fun validateIdentityObject(identityObj: JSONObject, fallbackMnemonic: String): IdentityRestoreResult {
+        return try {
+            val requiredFields = listOf(
+                "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+                "handle", "tripcode", "onionAddress", "displayName"
+            )
+            for (rf in requiredFields) {
+                if (!identityObj.has(rf) || identityObj.getString(rf).isBlank()) {
+                    return IdentityRestoreResult.Failure("Missing required identity field: $rf")
+                }
+            }
+
+            val pubEd = identityObj.getString("publicKeyB64")
+            val privEd = identityObj.getString("privateKeyB64")
+            val pubEnc = identityObj.getString("encPublicKeyB64")
+            val privEnc = identityObj.getString("encPrivateKeyB64")
+            val tripcode = identityObj.getString("tripcode")
+            val onion = identityObj.getString("onionAddress")
+
+            val probePayload = "noslop_probe_${System.currentTimeMillis()}"
+            val probeSig = CryptoService.sign(probePayload, privEd)
+            if (!CryptoService.verify(probePayload, probeSig, pubEd)) {
+                return IdentityRestoreResult.Failure("Main Ed25519 keypair consistency check failed")
+            }
+            if (!CryptoService.verifyX25519Keypair(pubEnc, privEnc)) {
+                return IdentityRestoreResult.Failure("Main X25519 keypair consistency check failed")
+            }
+            val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            if (pubBytes == null || !CryptoService.isTripcodeOf(pubBytes, tripcode)) {
+                return IdentityRestoreResult.Failure("Main identity tripcode does not match public key")
+            }
+            if (CryptoService.deriveOnionAddress(pubBytes) != onion) {
+                return IdentityRestoreResult.Failure("Main identity onion address does not match public key")
+            }
+
+            if (identityObj.has("burnable")) {
+                val bObj = identityObj.getJSONObject("burnable")
+                // D10d: the same checks as a creator identity restore (burnableIdentityProblem).
+                burnableIdentityProblem(bObj, probePayload)?.let { return IdentityRestoreResult.Failure(it) }
+            }
+            IdentityRestoreResult.Success
+        } catch (e: Exception) {
+            IdentityRestoreResult.Failure(e.message ?: "Unknown validation error")
+        }
+    }
+
+    /**
+     * U01 / U02: Atomically restore identity credentials with strict validation and verified persistence.
+     * R6: [fallbackMnemonic] is the phrase typed to open the backup. It is stored only when the archive
+     * carries no Word Cloud and it derives the restored keys (WordCloudGuard).
+     */
+    suspend fun restoreAuthoritativeIdentity(identityObj: JSONObject, fallbackMnemonic: String): IdentityRestoreResult {
+        try {
+            val requiredFields = listOf(
+                "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+                "handle", "tripcode", "onionAddress", "displayName"
+            )
+            for (rf in requiredFields) {
+                if (!identityObj.has(rf) || identityObj.getString(rf).isBlank()) {
+                    return IdentityRestoreResult.Failure("Missing required identity field: $rf")
+                }
+            }
+
+            val pubEd = identityObj.getString("publicKeyB64")
+            val privEd = identityObj.getString("privateKeyB64")
+            val pubEnc = identityObj.getString("encPublicKeyB64")
+            val privEnc = identityObj.getString("encPrivateKeyB64")
+            val tripcode = identityObj.getString("tripcode")
+            val onion = identityObj.getString("onionAddress")
+
+            // Validate main Ed25519 signing keypair consistency
+            val probePayload = "noslop_probe_${System.currentTimeMillis()}"
+            val probeSig = CryptoService.sign(probePayload, privEd)
+            if (!CryptoService.verify(probePayload, probeSig, pubEd)) {
+                return IdentityRestoreResult.Failure("Main Ed25519 keypair consistency check failed")
+            }
+
+            // V01: Validate main X25519 encryption keypair consistency with independent ephemeral key agreement
+            if (!CryptoService.verifyX25519Keypair(pubEnc, privEnc)) {
+                return IdentityRestoreResult.Failure("Main X25519 keypair consistency check failed")
+            }
+
+            // V01: Validate tripcode and onion address match public key
+            val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            if (pubBytes == null || !CryptoService.isTripcodeOf(pubBytes, tripcode)) {
+                return IdentityRestoreResult.Failure("Main identity tripcode does not match public key")
+            }
+            if (CryptoService.deriveOnionAddress(pubBytes) != onion) {
+                return IdentityRestoreResult.Failure("Main identity onion address does not match public key")
+            }
+
+            // Validate burnable identity if present
+            var hasBurnable = false
+            if (identityObj.has("burnable")) {
+                val bObj = identityObj.getJSONObject("burnable")
+                // D10d: the same checks as a creator identity restore (burnableIdentityProblem).
+                burnableIdentityProblem(bObj, probePayload)?.let { return IdentityRestoreResult.Failure(it) }
+                hasBurnable = true
+            }
+
+            val handle = identityObj.getString("handle")
+            val displayName = identityObj.getString("displayName")
+            val idVersion = identityObj.optString("identity_version", "2")
+            // R6: the restored account keeps its own Word Cloud; the typed words never replace it.
+            val archivePhrase = if (identityObj.has("mnemonic") && !identityObj.isNull("mnemonic")) identityObj.getString("mnemonic") else null
+            val wordCloud = WordCloudGuard.decideRestored(archivePhrase, fallbackMnemonic, pubEd)
+            when (wordCloud) {
+                is WordCloudGuard.Decision.Keep -> if (!wordCloud.derivesKeys && idVersion == "2") {
+                    Logger.warn(TAG, "The backup's Word Cloud does not derive this version 2 account's keys; kept unchanged")
+                } else {
+                    Logger.info(TAG, "Restored account keeps its Word Cloud", "source=${wordCloud.source} | derivesKeys=${wordCloud.derivesKeys} | identityVersion=$idVersion")
+                }
+                is WordCloudGuard.Decision.StoreNothing ->
+                    Logger.warn(TAG, "No Word Cloud stored for the restored account: ${wordCloud.reason}", "identityVersion=$idVersion")
+            }
+
+            val edit = prefs.edit().clear()
+            edit.putString("ed25519_private_key", secureFallbackWrite(privEd))
+                .putString("enc_private_key", secureFallbackWrite(privEnc))
+            if (wordCloud is WordCloudGuard.Decision.Keep) {
+                edit.putString("mnemonic", secureFallbackWrite(wordCloud.phrase))
+            }
+            edit.putString("pub_ed25519", pubEd)
+                .putString("pub_enc", pubEnc)
+                .putString("handle", handle)
+                .putString("tripcode", tripcode)
+                .putString("onion", onion)
+                .putString("display_name", displayName)
+                .putString("onboarding_complete", "true")
+                .putString("identity_version", idVersion)
+
+            if (hasBurnable) {
+                val bObj = identityObj.getJSONObject("burnable")
+                edit.putString("burnable_ed25519_private_key", secureFallbackWrite(bObj.getString("privateKeyB64")))
+                    .putString("burnable_enc_private_key", secureFallbackWrite(bObj.getString("encPrivateKeyB64")))
+                    .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
+                    .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
+                    .putString("burnable_tripcode", bObj.getString("tripcode"))
+                    .putString("burnable_onion", bObj.getString("onionAddress"))
+                    .putString("burnable_display_name", bObj.getString("displayName"))
+            }
+
+            val committed = edit.commit()
+            if (!committed) {
+                return IdentityRestoreResult.Failure("Synchronous preference commit failed")
+            }
+
+            // Sync Room settings mirror
+            appSettingDao.insertSetting(AppSetting("local_handle", handle))
+            appSettingDao.insertSetting(AppSetting("local_pub_ed25519", pubEd))
+            appSettingDao.insertSetting(AppSetting("local_pub_enc", pubEnc))
+            appSettingDao.insertSetting(AppSetting("local_tripcode", tripcode))
+            appSettingDao.insertSetting(AppSetting("local_onion", onion))
+            appSettingDao.insertSetting(AppSetting("local_display_name", displayName))
+            appSettingDao.insertSetting(AppSetting("onboarding_complete", "true"))
+            appSettingDao.insertSetting(AppSetting("identity_version", idVersion))
+
+            // Verify identity can be loaded back and private keys are intact
+            val reloadedMain = loadIdentity()
+            if (reloadedMain == null) {
+                return IdentityRestoreResult.Failure("Restored main identity failed reload probe")
+            }
+            if (hasBurnable) {
+                val reloadedBurnable = getBurnableIdentity()
+                if (reloadedBurnable == null) {
+                    return IdentityRestoreResult.Failure("Restored burnable identity failed reload probe")
+                }
+            }
+
+            resolveQuarantine()
+            Logger.info(TAG, "Authoritative sovereign identity restored successfully")
+            return IdentityRestoreResult.Success
+        } catch (e: Exception) {
+            Logger.error(TAG, "Exception during identity restoration: ${e.message}")
+            return IdentityRestoreResult.Failure(e.message ?: "Unknown restoration error")
+        }
     }
 
     suspend fun loadIdentity(): CryptoService.IdentityKeys? {
-        // Try Room first
-        val pubEd = appSettingDao.getSetting("local_pub_ed25519")
-        val pubEnc = appSettingDao.getSetting("local_pub_enc")
-        val tripcode = appSettingDao.getSetting("local_tripcode")
-        val onion = appSettingDao.getSetting("local_onion")
-        val displayName = appSettingDao.getSetting("local_display_name")
+        val pubEd = appSettingDao.getSetting("local_pub_ed25519") ?: prefs.getString("pub_ed25519", null)
+        val pubEnc = appSettingDao.getSetting("local_pub_enc") ?: prefs.getString("pub_enc", null)
+        val tripcode = appSettingDao.getSetting("local_tripcode") ?: prefs.getString("tripcode", null)
+        val onion = appSettingDao.getSetting("local_onion") ?: prefs.getString("onion", null)
+        val displayName = appSettingDao.getSetting("local_display_name") ?: prefs.getString("display_name", null)
 
-        val privEd = prefs.getString("ed25519_private_key", null) ?: return null
-        val privEnc = prefs.getString("enc_private_key", null) ?: return null
+        val rawPrivEd = prefs.getString("ed25519_private_key", null) ?: return null
+        val rawPrivEnc = prefs.getString("enc_private_key", null) ?: return null
 
-        // If Room data was wiped by a destructive migration but ESP has identity, recover
+        val privEd = secureFallbackRead(rawPrivEd) ?: return null
+        val privEnc = secureFallbackRead(rawPrivEnc) ?: return null
+
         if (pubEd == null || pubEnc == null || tripcode == null || onion == null || displayName == null) {
-            val espPub = prefs.getString("pub_ed25519", null)
-            val espEncPub = prefs.getString("pub_enc", null)
-            val espHandle = prefs.getString("handle", null)
-            val espTrip = prefs.getString("tripcode", null)
-            val espOnion = prefs.getString("onion", null)
-            val espDisplay = prefs.getString("display_name", null)
-
-            if (espPub != null && espEncPub != null && espHandle != null && espTrip != null && espOnion != null) {
-                Logger.info(TAG, "Room identity wiped — recovering from EncryptedSharedPreferences")
-                val finalDisplay = espDisplay ?: espHandle
-                // Re-seed Room
-                appSettingDao.insertSetting(AppSetting("local_handle", espHandle))
-                appSettingDao.insertSetting(AppSetting("local_pub_ed25519", espPub))
-                appSettingDao.insertSetting(AppSetting("local_pub_enc", espEncPub))
-                appSettingDao.insertSetting(AppSetting("local_tripcode", espTrip))
-                appSettingDao.insertSetting(AppSetting("local_onion", espOnion))
-                appSettingDao.insertSetting(AppSetting("local_display_name", finalDisplay))
-                appSettingDao.insertSetting(AppSetting("onboarding_complete", "true"))
-
-                return CryptoService.IdentityKeys(
-                    publicKeyB64 = espPub,
-                    privateKeyB64 = privEd,
-                    tripcode = espTrip,
-                    onionAddress = espOnion,
-                    displayName = finalDisplay,
-                    encPublicKeyB64 = espEncPub,
-                    encPrivateKeyB64 = privEnc
-                )
-            }
             return null
         }
 
+        // C15: Reconcile public key with private key to detect and repair cache desync
+        val rawFromPriv = try { CryptoService.getPublicKeyFromPrivateKey(privEd) } catch (_: Exception) { null }
+        val pubBytes = try { android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+        val rawStored = if (pubBytes != null && pubBytes.size == 44) pubBytes.copyOfRange(12, 44) else pubBytes
+
+        val isKeyMatch = rawFromPriv != null && rawStored != null && java.util.Arrays.equals(rawStored, rawFromPriv)
+
+        val finalPubEd = if (rawFromPriv != null && !isKeyMatch) {
+            // Reconstruct standard 44-byte X.509 SubjectPublicKeyInfo from authentic private key
+            val x509Header = byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+            val full44 = x509Header + rawFromPriv
+            val recovered = android.util.Base64.encodeToString(full44, android.util.Base64.NO_WRAP)
+            Logger.warn(TAG, "Cached public identity diverged from private key. Reconciling caches with derived key...")
+            appSettingDao.insertSetting(AppSetting("local_pub_ed25519", recovered))
+            prefs.edit().putString("pub_ed25519", recovered).apply()
+            recovered
+        } else {
+            pubEd
+        }
+
+        // D09: the same reconciliation for the X25519 encryption key. A diverged cached public key was
+        // advertised in handshakes while DMs were decrypted with the private key, so peers encrypted to a
+        // key we couldn't use.
+        val finalPubEnc = reconcileEncPublicKey(pubEnc, privEnc) { repaired ->
+            appSettingDao.insertSetting(AppSetting("local_pub_enc", repaired))
+            prefs.edit().putString("pub_enc", repaired).apply()
+        }
+
+        val rawForTripcode = if (isKeyMatch) rawStored else (rawFromPriv ?: rawStored ?: ByteArray(0))
+        val derivedTripcode = CryptoService.deriveTripcode(rawForTripcode)
+        val derivedOnion = CryptoService.deriveOnionAddress(rawForTripcode)
+
+        // D10b: the tag is now 8 characters (Argon2id). A display name that still ends in the stored
+        // tag or the legacy 6-character one gets the new tag, once, together with the caches.
+        val staleTag = listOf(tripcode, CryptoService.deriveLegacyTripcode(rawForTripcode))
+            .firstOrNull { it.isNotBlank() && it != derivedTripcode && displayName.endsWith(".$it") }
+        val finalDisplayName = if (staleTag != null) displayName.removeSuffix(".$staleTag") + ".$derivedTripcode" else displayName
+
+        if (tripcode != derivedTripcode || onion != derivedOnion || finalDisplayName != displayName) {
+            appSettingDao.insertSetting(AppSetting("local_tripcode", derivedTripcode))
+            appSettingDao.insertSetting(AppSetting("local_onion", derivedOnion))
+            appSettingDao.insertSetting(AppSetting("local_display_name", finalDisplayName))
+            prefs.edit()
+                .putString("tripcode", derivedTripcode)
+                .putString("onion", derivedOnion)
+                .putString("display_name", finalDisplayName)
+                .apply()
+            if (tripcode != derivedTripcode) Logger.info(TAG, "Identity tag rewritten in the ${CryptoService.TRIPCODE_LENGTH}-character form")
+        }
+
         return CryptoService.IdentityKeys(
-            publicKeyB64 = pubEd,
+            publicKeyB64 = finalPubEd,
             privateKeyB64 = privEd,
-            tripcode = tripcode,
-            onionAddress = onion,
-            displayName = displayName,
-            encPublicKeyB64 = pubEnc,
+            tripcode = derivedTripcode,
+            onionAddress = derivedOnion,
+            displayName = finalDisplayName,
+            encPublicKeyB64 = finalPubEnc,
             encPrivateKeyB64 = privEnc
         )
     }
 
-    suspend fun getMnemonic(): String? = prefs.getString("mnemonic", null)
+    /**
+     * D09: returns the X25519 public key that belongs to [privEnc]. When the cached [pubEnc] is a different
+     * key, [repair] stores the derived one and the derived one is returned. If the private key can't be
+     * read, the cached key is returned unchanged (the identity is unusable for DMs either way).
+     */
+    private suspend fun reconcileEncPublicKey(pubEnc: String, privEnc: String, repair: suspend (String) -> Unit): String {
+        val derived = CryptoService.x25519PublicKeyFromPrivate(privEnc) ?: return pubEnc
+        if (CryptoService.sameX25519PublicKey(pubEnc, derived)) return pubEnc
+        Logger.warn(TAG, "Cached X25519 public key diverged from the private key. Reconciling caches with the derived key...")
+        repair(derived)
+        return derived
+    }
+
+    suspend fun getMnemonic(): String? = secureFallbackRead(prefs.getString("mnemonic", null))
 
     suspend fun logout() {
-        // We don't necessarily clear the prefs, but we can set a flag that the session is locked
         appSettingDao.insertSetting(AppSetting("session_locked", "true"))
         Logger.info(TAG, "User logged out / Session locked")
     }
@@ -141,8 +569,10 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
     suspend fun isLocked(): Boolean = appSettingDao.getSetting("session_locked") == "true"
 
     suspend fun unlock(mnemonic: String): Boolean {
-        val savedMnemonic = prefs.getString("mnemonic", null)
-        return if (savedMnemonic == mnemonic) {
+        val savedMnemonic = secureFallbackRead(prefs.getString("mnemonic", null))
+        val normalised = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+        val savedNormalised = savedMnemonic?.trim()?.lowercase()?.split(Regex("\\s+"))?.joinToString(" ")
+        return if (savedNormalised != null && savedNormalised == normalised) {
             appSettingDao.insertSetting(AppSetting("session_locked", "false"))
             Logger.info(TAG, "Session unlocked")
             true
@@ -152,20 +582,28 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         }
     }
 
+    suspend fun getIdentityVersion(): Int {
+        val verStr = appSettingDao.getSetting("identity_version") ?: prefs.getString("identity_version", null)
+        return verStr?.toIntOrNull() ?: 1
+    }
+
     suspend fun getHandle(): String = appSettingDao.getSetting("local_handle") ?: "Anonymous"
+
     suspend fun isOnboardingComplete(): Boolean {
-        // Check Room first, then fall back to ESP (survives destructive DB migration)
+        if (needsIdentityRecovery()) {
+            return false
+        }
         val roomVal = appSettingDao.getSetting("onboarding_complete")
         if (roomVal == "true") return true
         
         val espVal = prefs.getString("onboarding_complete", null)
         if (espVal == "true") {
-            // Re-seed Room so subsequent checks are fast
             appSettingDao.insertSetting(AppSetting("onboarding_complete", "true"))
             return true
         }
         return false
     }
+
     suspend fun setOnboardingComplete(complete: Boolean) {
         appSettingDao.insertSetting(AppSetting("onboarding_complete", complete.toString()))
         prefs.edit().putString("onboarding_complete", complete.toString()).apply()
@@ -177,18 +615,171 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         Logger.info(TAG, "Onion address dynamically updated in Room: $address")
     }
 
-    /**
-     * Wipe all identity data from both ESP and Room. Used by factory reset.
-     */
     suspend fun clearAll() {
         prefs.edit().clear().apply()
-        Logger.info(TAG, "All identity data cleared from EncryptedSharedPreferences")
+        val secureFile = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml")
+        if (secureFile.exists()) secureFile.delete()
+        val fallbackFile = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml")
+        if (fallbackFile.exists()) fallbackFile.delete()
+        resolveQuarantine()
+        isUsingInsecureStorage.value = false
+        listOf(
+            "local_handle", "local_pub_ed25519", "local_pub_enc",
+            "local_tripcode", "local_onion", "local_display_name",
+            "onboarding_complete", "session_locked", "identity_version"
+        ).forEach { appSettingDao.removeSetting(it) }
+        Logger.info(TAG, "All identity data cleared from encrypted prefs, files, and Room")
     }
 
     /**
-     * Checks if encryption is active.
-     * Returns true if using EncryptedSharedPreferences, false if using fallback plaintext SharedPreferences.
+     * D10d: the handle the secondary identity goes by ([resolveSecondaryProfile]): the Studio name on a
+     * creator node when one is set, otherwise the personal handle. The handle does not depend on the
+     * personal bio or picture, so the empty profile stands in for the personal one here.
      */
+    private suspend fun secondaryHandle(): String = resolveSecondaryProfile(
+        isCreatorNode = appSettingDao.getSetting(CREATOR_MODE_KEY) == "true",
+        creatorProfile = parseCreatorProfile(appSettingDao.getSetting(CREATOR_PROFILE_KEY)),
+        personalProfile = UserProfile(),
+        personalHandle = getHandle()
+    ).handle
+
+    suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {
+        val burnableHandle = secondaryHandle()
+        val burnableIdentity = CryptoService.generateIdentity(burnableHandle)
+        
+        prefs.edit()
+            .putString("burnable_ed25519_private_key", secureFallbackWrite(burnableIdentity.privateKeyB64))
+            .putString("burnable_enc_private_key", secureFallbackWrite(burnableIdentity.encPrivateKeyB64))
+            .putString("burnable_pub_ed25519", burnableIdentity.publicKeyB64)
+            .putString("burnable_pub_enc", burnableIdentity.encPublicKeyB64)
+            .putString("burnable_tripcode", burnableIdentity.tripcode)
+            .putString("burnable_onion", burnableIdentity.onionAddress)
+            .putString("burnable_display_name", burnableIdentity.displayName)
+            .apply()
+            
+        Logger.info(TAG, "Burnable identity generated: ${burnableIdentity.tripcode}")
+        return burnableIdentity
+    }
+
+    suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? {
+        val pubEd = prefs.getString("burnable_pub_ed25519", null) ?: return null
+        val pubEnc = prefs.getString("burnable_pub_enc", null) ?: return null
+        val tripcode = prefs.getString("burnable_tripcode", null) ?: return null
+        val onion = prefs.getString("burnable_onion", null) ?: return null
+        val displayName = secondaryHandle()
+        val privEd = secureFallbackRead(prefs.getString("burnable_ed25519_private_key", null)) ?: return null
+        val privEnc = secureFallbackRead(prefs.getString("burnable_enc_private_key", null)) ?: return null
+        // D09: as for the personal identity.
+        val finalPubEnc = reconcileEncPublicKey(pubEnc, privEnc) { repaired ->
+            prefs.edit().putString("burnable_pub_enc", repaired).apply()
+        }
+        // D10b: a creator identity made before D10b still has the 6-character tag stored.
+        val derivedTripcode = try {
+            CryptoService.deriveTripcode(android.util.Base64.decode(pubEd, android.util.Base64.DEFAULT))
+        } catch (_: Exception) {
+            tripcode
+        }
+        if (derivedTripcode != tripcode) {
+            prefs.edit().putString("burnable_tripcode", derivedTripcode).apply()
+            Logger.info(TAG, "Creator identity tag rewritten in the ${CryptoService.TRIPCODE_LENGTH}-character form")
+        }
+        
+        return CryptoService.IdentityKeys(
+            publicKeyB64 = pubEd,
+            privateKeyB64 = privEd,
+            tripcode = derivedTripcode,
+            onionAddress = onion,
+            displayName = displayName,
+            encPublicKeyB64 = finalPubEnc,
+            encPrivateKeyB64 = privEnc
+        )
+    }
+
+    /**
+     * D10d: why a burnable (creator) identity object cannot be used, or null when it can: every field
+     * present, both keypairs consistent, and the tag and onion address belonging to the public key. The
+     * checks (and messages) a full backup restore always made, shared with the creator identity
+     * restore. [probePayload] is signed and verified with the Ed25519 pair. Throws on malformed keys,
+     * as before; callers treat that as a failure.
+     */
+    internal fun burnableIdentityProblem(bObj: JSONObject, probePayload: String): String? {
+        val burnableRequired = listOf(
+            "publicKeyB64", "privateKeyB64", "encPublicKeyB64", "encPrivateKeyB64",
+            "tripcode", "onionAddress", "displayName"
+        )
+        for (brf in burnableRequired) {
+            if (!bObj.has(brf) || bObj.getString(brf).isBlank()) {
+                return "Burnable identity missing required field: $brf"
+            }
+        }
+        val bPubEd = bObj.getString("publicKeyB64")
+        val bPrivEd = bObj.getString("privateKeyB64")
+        val bPubEnc = bObj.getString("encPublicKeyB64")
+        val bPrivEnc = bObj.getString("encPrivateKeyB64")
+
+        val bSig = CryptoService.sign(probePayload, bPrivEd)
+        if (!CryptoService.verify(probePayload, bSig, bPubEd)) {
+            return "Burnable Ed25519 keypair consistency check failed"
+        }
+        // V01: Validate burnable X25519 encryption keypair consistency
+        if (!CryptoService.verifyX25519Keypair(bPubEnc, bPrivEnc)) {
+            return "Burnable X25519 keypair consistency check failed"
+        }
+        val bPubBytes = try { android.util.Base64.decode(bPubEd, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+        if (bPubBytes == null || !CryptoService.isTripcodeOf(bPubBytes, bObj.getString("tripcode"))) {
+            return "Burnable identity tripcode does not match public key"
+        }
+        if (CryptoService.deriveOnionAddress(bPubBytes) != bObj.getString("onionAddress")) {
+            return "Burnable identity onion address does not match public key"
+        }
+        return null
+    }
+
+    /**
+     * D10d: installs a creator identity from a creator identity file (CreatorIdentityArchive), after
+     * the checks a full backup restore makes. Replaces any secondary identity stored here; the caller
+     * asks the user first. The stored display name is informational; the handle always comes from
+     * [secondaryHandle].
+     */
+    suspend fun restoreBurnableIdentity(bObj: JSONObject): IdentityRestoreResult {
+        return try {
+            burnableIdentityProblem(bObj, "noslop_probe_${System.currentTimeMillis()}")?.let {
+                return IdentityRestoreResult.Failure(it)
+            }
+            val committed = prefs.edit()
+                .putString("burnable_ed25519_private_key", secureFallbackWrite(bObj.getString("privateKeyB64")))
+                .putString("burnable_enc_private_key", secureFallbackWrite(bObj.getString("encPrivateKeyB64")))
+                .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
+                .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
+                .putString("burnable_tripcode", bObj.getString("tripcode"))
+                .putString("burnable_onion", bObj.getString("onionAddress"))
+                .putString("burnable_display_name", bObj.getString("displayName"))
+                .commit()
+            if (!committed) return IdentityRestoreResult.Failure("Synchronous preference commit failed")
+            val reloaded = getBurnableIdentity()
+            if (reloaded == null || reloaded.publicKeyB64 != bObj.getString("publicKeyB64")) {
+                return IdentityRestoreResult.Failure("Restored creator identity failed reload probe")
+            }
+            Logger.info(TAG, "Creator identity restored: ${reloaded.tripcode}")
+            IdentityRestoreResult.Success
+        } catch (e: Exception) {
+            IdentityRestoreResult.Failure(e.message ?: "Unknown restoration error")
+        }
+    }
+
+    suspend fun clearBurnableIdentity() {
+        prefs.edit()
+            .remove("burnable_ed25519_private_key")
+            .remove("burnable_enc_private_key")
+            .remove("burnable_pub_ed25519")
+            .remove("burnable_pub_enc")
+            .remove("burnable_tripcode")
+            .remove("burnable_onion")
+            .remove("burnable_display_name")
+            .apply()
+        Logger.info(TAG, "Burnable identity cleared")
+    }
+
     fun isEncryptionActive(): Boolean {
         return prefs.javaClass.name.contains("EncryptedSharedPreferences")
     }

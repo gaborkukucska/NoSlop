@@ -22,9 +22,14 @@ class ReactionPacketHandler(
     suspend fun handleReaction(packet: NetworkPacket): Boolean {
         val payload = packet.getReactionPayload() ?: return false
         
-        // Verify signature
-        val payloadToVerify = "${payload.postId}|${payload.reactionType}|${payload.authorId}|${payload.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
+        // Verify signature (dual-mode: length-prefixed and pipe)
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            payload.postId, payload.reactionType, payload.authorId, payload.timestamp.toString()
+        )
+        val pipePayload = "${payload.postId}|${payload.reactionType}|${payload.authorId}|${payload.timestamp}"
+        val isValid = CryptoService.verify(encPayload, payload.signature, payload.authorId) ||
+            CryptoService.verify(pipePayload, payload.signature, payload.authorId)
+        if (!isValid) {
             Logger.warn(TAG, "Reaction signature verification failed for post ${payload.postId} from ${payload.authorId}")
             return false
         }
@@ -45,6 +50,42 @@ class ReactionPacketHandler(
             )
             reactionDao.insertReaction(localReaction)
             Logger.info(TAG, "Received and saved mesh reaction: ${payload.reactionType} on ${payload.postId}")
+            
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.reactions) {
+                val post = db.postDao().getPostById(payload.postId)
+                val localKeys = repo.getLocalIdentity()
+                if (post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && payload.authorId != localKeys?.publicKeyB64) {
+                    val peer = repo.peerDao.getPeerByPublicKey(payload.authorId)
+                    val authorName = peer?.handle ?: "Someone"
+                    val emojiMap = mapOf(
+                        "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+                        "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+                        "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+                        "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
+                    )
+                    val displayEmoji = emojiMap[payload.reactionType] ?: payload.reactionType
+                    
+                    val title = com.noslop.app.util.LanguageManager.translate("New Reaction")
+                    val msg = com.noslop.app.util.LanguageManager.translate("{author} reacted {emoji} to your post.")
+                        .replace("{author}", authorName)
+                        .replace("{emoji}", displayEmoji)
+                    val route = "post/${payload.postId}"
+                    
+                    db.notificationDao().insertNotification(
+                        com.noslop.app.data.NotificationItem(
+                            id = java.util.UUID.randomUUID().toString(),
+                            type = "REACTION",
+                            title = title,
+                            body = msg,
+                            targetRoute = route,
+                            iconType = "reaction",
+                            senderPub = payload.authorId
+                        )
+                    )
+                    com.noslop.app.util.NotificationHelper.showNotification(repo.context, title, msg, route)
+                }
+            }
         }
         return true
     }
@@ -53,7 +94,9 @@ class ReactionPacketHandler(
         val payload = packet.getVotePayload() ?: return false
         
         // Verify signature
-        val payloadToVerify = "${payload.postId}|${payload.voteType}|${payload.authorId}|${payload.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            payload.postId, payload.voteType, payload.authorId, payload.timestamp.toString()
+        )
         if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
             Logger.warn(TAG, "Vote signature verification failed for post ${payload.postId} from ${payload.authorId}")
             return false
@@ -84,7 +127,9 @@ class ReactionPacketHandler(
         val payload = packet.getCommentVotePayload() ?: return false
         
         // Verify signature
-        val payloadToVerify = "${payload.commentId}|${payload.voteType}|${payload.authorId}|${payload.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            payload.commentId, payload.voteType, payload.authorId, payload.timestamp.toString()
+        )
         if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
             Logger.warn(TAG, "Comment Vote signature verification failed for comment ${payload.commentId} from ${payload.authorId}")
             return false
@@ -111,7 +156,9 @@ class ReactionPacketHandler(
 
     suspend fun handleChatReaction(packet: NetworkPacket): Boolean {
         val reactionPay = packet.getChatReactionPayload() ?: return false
-        val payloadToVerify = "${reactionPay.messageId}|${reactionPay.reactionType}|${reactionPay.authorId}|${reactionPay.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            reactionPay.messageId, reactionPay.reactionType, reactionPay.authorId, reactionPay.timestamp.toString()
+        )
         val isValid = CryptoService.verify(payloadToVerify, reactionPay.signature, reactionPay.authorId)
         if (!isValid) return false
 
@@ -131,12 +178,15 @@ class ReactionPacketHandler(
             )
             reactionDao.insertReaction(localReaction)
         }
+        repo.triggerDmSync()
         return true
     }
 
     suspend fun handleCommentReaction(packet: NetworkPacket): Boolean {
         val reactionPay = packet.getCommentReactionPayload() ?: return false
-        val payloadToVerify = "${reactionPay.commentId}|${reactionPay.reactionType}|${reactionPay.authorId}|${reactionPay.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            reactionPay.commentId, reactionPay.reactionType, reactionPay.authorId, reactionPay.timestamp.toString()
+        )
         val isValid = CryptoService.verify(payloadToVerify, reactionPay.signature, reactionPay.authorId)
         if (!isValid) return false
 
@@ -155,6 +205,42 @@ class ReactionPacketHandler(
                 signature = reactionPay.signature
             )
             reactionDao.insertReaction(localReaction)
+
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.reactions) {
+                val comment = db.commentDao().getCommentById(reactionPay.commentId)
+                val localKeys = repo.getLocalIdentity()
+                if (comment?.authorPublicKeyB64 == localKeys?.publicKeyB64 && reactionPay.authorId != localKeys?.publicKeyB64) {
+                    val peer = repo.peerDao.getPeerByPublicKey(reactionPay.authorId)
+                    val authorName = peer?.handle ?: "Someone"
+                    val emojiMap = mapOf(
+                        "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+                        "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+                        "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+                        "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
+                    )
+                    val displayEmoji = emojiMap[reactionPay.reactionType] ?: reactionPay.reactionType
+                    
+                    val title = com.noslop.app.util.LanguageManager.translate("New Reaction")
+                    val msg = com.noslop.app.util.LanguageManager.translate("{author} reacted {emoji} to your comment.")
+                        .replace("{author}", authorName)
+                        .replace("{emoji}", displayEmoji)
+                    val route = "post/${comment?.postId}/comment/${comment?.id}"
+                    
+                    db.notificationDao().insertNotification(
+                        com.noslop.app.data.NotificationItem(
+                            id = java.util.UUID.randomUUID().toString(),
+                            type = "REACTION",
+                            title = title,
+                            body = msg,
+                            targetRoute = route,
+                            iconType = "reaction",
+                            senderPub = reactionPay.authorId
+                        )
+                    )
+                    com.noslop.app.util.NotificationHelper.showNotification(repo.context, title, msg, route)
+                }
+            }
         }
         return true
     }

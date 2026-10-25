@@ -19,6 +19,102 @@ import kotlinx.coroutines.withContext
  *
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
+fun normalizeFeedItemId(rawId: String, link: String = ""): String {
+    val cleanUrl = (if (link.isNotBlank()) link else rawId).trim()
+    if (cleanUrl.contains("youtube.com/watch")) {
+        val videoId = cleanUrl.substringAfter("v=").substringBefore("&").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("youtu.be/")) {
+        val videoId = cleanUrl.substringAfter("youtu.be/").substringBefore("?").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("youtube.com/shorts/")) {
+        val videoId = cleanUrl.substringAfter("youtube.com/shorts/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("youtube.com/embed/")) {
+        val videoId = cleanUrl.substringAfter("youtube.com/embed/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (rawId.startsWith("yt:") || rawId.startsWith("yt_")) {
+        val videoId = rawId.removePrefix("yt:video:").removePrefix("yt:").removePrefix("yt_")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("reddit.com/r/")) {
+        val postPath = cleanUrl.substringAfter("reddit.com/r/").substringBefore("?").trimEnd('/')
+        if (postPath.isNotBlank()) return "reddit_$postPath"
+    }
+    return rawId.ifBlank { cleanUrl }
+}
+
+fun normalizeUrlKey(url: String?): String {
+    if (url.isNullOrBlank()) return ""
+    var clean = url.trim().lowercase(java.util.Locale.US)
+    clean = clean.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+    
+    // YouTube / Invidious video ID preservation
+    if (clean.contains("youtube.com/watch") || clean.contains("invidious") || clean.contains("yewtu.be")) {
+        val videoId = clean.substringAfter("v=").substringBefore("&").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (clean.contains("youtu.be/")) {
+        val videoId = clean.substringAfter("youtu.be/").substringBefore("?").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (clean.contains("youtube.com/shorts/")) {
+        val videoId = clean.substringAfter("youtube.com/shorts/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (clean.contains("youtube.com/embed/")) {
+        val videoId = clean.substringAfter("youtube.com/embed/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    
+    // Vimeo video ID preservation
+    if (clean.contains("vimeo.com/")) {
+        val videoId = clean.substringAfter("vimeo.com/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "vimeo_$videoId"
+    }
+
+    clean = clean.substringBefore("?").substringBefore("#").trimEnd('/')
+    return clean
+}
+
+fun getCanonicalItemKey(item: com.noslop.app.ui.UnifiedItem): String {
+    return when (item) {
+        is com.noslop.app.ui.UnifiedItem.Feed -> {
+            val feedItem = item.item
+            val rawUrl = feedItem.url ?: feedItem.mediaUrl ?: ""
+            val normUrl = normalizeUrlKey(rawUrl)
+            if (normUrl.isNotBlank()) {
+                "url_$normUrl"
+            } else {
+                val titleKey = feedItem.title.trim().lowercase(java.util.Locale.US).replace(Regex("[^a-z0-9]"), "")
+                if (titleKey.length > 10) "title_$titleKey"
+                else normalizeFeedItemId(item.id, rawUrl)
+            }
+        }
+        is com.noslop.app.ui.UnifiedItem.Mesh -> {
+            // A clearnet share is keyed by its URL, so the same link shared by several peers shows once;
+            // a post with mesh media by its media URL. Any other mesh post (text) is its own item and is
+            // keyed by its id. It used to be keyed by its first 80 characters, so two text posts that
+            // began alike hid each other, and seeing one marked the other as seen too.
+            val post = item.post
+            val rawUrl = post.clearnetUrl ?: post.mediaUrl ?: ""
+            val normUrl = normalizeUrlKey(rawUrl)
+            if (normUrl.isNotBlank()) {
+                "mesh_url_$normUrl"
+            } else {
+                item.id
+            }
+        }
+        is com.noslop.app.ui.UnifiedItem.Tutorial -> item.id
+        is com.noslop.app.ui.UnifiedItem.CreatorDepletion -> item.id
+        is com.noslop.app.ui.UnifiedItem.BreakReminder -> item.id
+    }
+}
+
 class EngagementRepository(
     private val viewedHistoryDao: ViewedHistoryDao,
     private val swipeTrackerDao: SwipeTrackerDao,
@@ -36,10 +132,22 @@ class EngagementRepository(
      * Record that a content item has been viewed for >5 seconds.
      * History items are never removed (except when the cap is reached, oldest are pruned).
      */
-    suspend fun markAsViewed(itemId: String, itemType: String) = withContext(Dispatchers.IO) {
+    suspend fun markAsViewed(itemId: String, itemType: String, url: String? = null, canonicalKey: String? = null) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val normId = normalizeFeedItemId(itemId, url ?: "")
         viewedHistoryDao.insertViewedItem(
-            ViewedHistoryItem(itemId = itemId, itemType = itemType)
+            ViewedHistoryItem(itemId = itemId, itemType = itemType, viewedAt = now)
         )
+        if (normId.isNotBlank() && normId != itemId) {
+            viewedHistoryDao.insertViewedItem(
+                ViewedHistoryItem(itemId = normId, itemType = itemType, viewedAt = now)
+            )
+        }
+        if (!canonicalKey.isNullOrBlank() && canonicalKey != itemId && canonicalKey != normId) {
+            viewedHistoryDao.insertViewedItem(
+                ViewedHistoryItem(itemId = canonicalKey, itemType = itemType, viewedAt = now)
+            )
+        }
         // Prune oldest items if we exceed the history limit
         val count = viewedHistoryDao.getCount()
         if (count > HISTORY_LIMIT) {
@@ -56,26 +164,37 @@ class EngagementRepository(
     /** Reactive flow of all viewed history items (for the History filter UI). */
     val allViewedHistory: Flow<List<ViewedHistoryItem>> = viewedHistoryDao.getAllViewedItems()
 
+    suspend fun getAllViewedHistoryList(): List<ViewedHistoryItem> = withContext(Dispatchers.IO) {
+        viewedHistoryDao.getAllViewedItemsList()
+    }
+
     // --- Swipe Tracking ---
 
     /**
      * Record that the user swiped away a content item.
-     * If the item has been swiped away twice, it is excluded from future aggregations.
-     * Swiping does NOT remove items from the viewed history.
+     * Item is immediately excluded from future aggregations across all of its canonical IDs.
      */
-    suspend fun recordSwipe(itemId: String) = withContext(Dispatchers.IO) {
-        val existing = swipeTrackerDao.getSwipeForItem(itemId)
-        val newCount = (existing?.swipeCount ?: 0) + 1
-        swipeTrackerDao.upsertSwipe(
-            SwipeTracker(
-                itemId = itemId,
-                swipeCount = newCount,
-                lastSwipedAt = System.currentTimeMillis()
+    suspend fun recordSwipe(itemId: String, url: String? = null, canonicalKey: String? = null) = withContext(Dispatchers.IO) {
+        suspend fun recordSingle(id: String) {
+            val existing = swipeTrackerDao.getSwipeForItem(id)
+            val newCount = (existing?.swipeCount ?: 0) + 1
+            swipeTrackerDao.upsertSwipe(
+                SwipeTracker(
+                    itemId = id,
+                    swipeCount = newCount,
+                    lastSwipedAt = System.currentTimeMillis()
+                )
             )
-        )
-        if (newCount >= 1) {
-            Logger.info(TAG, "Item $itemId swiped away $newCount times — excluded from future feeds")
         }
+        recordSingle(itemId)
+        val normId = normalizeFeedItemId(itemId, url ?: "")
+        if (normId.isNotBlank() && normId != itemId) {
+            recordSingle(normId)
+        }
+        if (!canonicalKey.isNullOrBlank() && canonicalKey != itemId && canonicalKey != normId) {
+            recordSingle(canonicalKey)
+        }
+        Logger.info(TAG, "Item $itemId (normId=$normId, cKey=$canonicalKey) swiped away — excluded from future feeds")
     }
 
     /** Get item IDs that have been swiped away >= 2 times. */
@@ -88,5 +207,10 @@ class EngagementRepository(
         val ninetyDaysAgo = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000L
         viewedHistoryDao.deleteOlderThan(ninetyDaysAgo)
         swipeTrackerDao.deleteOldSwipes(ninetyDaysAgo)
+    }
+
+    suspend fun clearAllHistory() = withContext(Dispatchers.IO) {
+        viewedHistoryDao.clearAllViewedHistory()
+        swipeTrackerDao.clearAllSwipeHistory()
     }
 }

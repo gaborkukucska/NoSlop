@@ -20,9 +20,9 @@ object NasaApiClient {
 
     private const val TAG = "NASA_API"
     private const val DEMO_KEY = "DEMO_KEY"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
 
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
      * Astronomy Picture of the Day — returns random entries.
@@ -100,10 +100,30 @@ object NasaApiClient {
     suspend fun searchImageLibrary(
         query: String,
         sourceId: String = "api-nasa-library",
-        pageSize: Int = 20
-    ): List<FeedItem> {
+        pageSize: Int = 20,
+        includeVideo: Boolean = true
+    ): List<FeedItem> = searchImageLibraryPage(query, 1, sourceId, pageSize, includeVideo).items
+
+    /** E5s2: one page of [searchImageLibrary] (pages numbered from 1). */
+    suspend fun searchImageLibraryPage(
+        query: String,
+        page: Int,
+        sourceId: String = "api-nasa-library",
+        pageSize: Int = 20,
+        includeVideo: Boolean = true
+    ): SourcePage {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val url = "https://images-api.nasa.gov/search?q=$encodedQuery&media_type=image,video&page_size=$pageSize"
+        // --- NOSLOP_IMAGE_SEARCH_V1 ---
+        // Each video result costs a separate, sequential asset-manifest fetch
+        // (~1.3s). Your log shows sixteen of them running 00:25:33 -> 00:25:52
+        // during an IMAGE search, blowing the 20s category budget so the whole
+        // category returned nothing. Image searches now ask for images only.
+        val mediaTypes = if (includeVideo) "image,video" else "image"
+        val url = "https://images-api.nasa.gov/search?q=$encodedQuery&media_type=$mediaTypes&page_size=$pageSize" + pageParam(page)
+        // Declared here, not beside the item list: this must live inside
+        // searchImageLibrary, and several functions in this file open with
+        // an identically-worded `val items = mutableListOf<FeedItem>()`.
+        var videoResolutions = 0
 
         return try {
             val request = Request.Builder()
@@ -114,13 +134,13 @@ object NasaApiClient {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "NASA Image Library returned ${response.code}")
-                return emptyList()
+                return SourcePage.failed()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
-            val collection = root.getAsJsonObject("collection") ?: return emptyList()
-            val itemsArray = collection.getAsJsonArray("items") ?: return emptyList()
+            val collection = root.getAsJsonObject("collection") ?: return SourcePage.END
+            val itemsArray = collection.getAsJsonArray("items") ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             for (element in itemsArray) {
@@ -146,6 +166,15 @@ object NasaApiClient {
 
                     // For videos, resolve the actual .mp4 from the asset manifest
                     val actualMediaUrl = if (nasaMediaType == "video") {
+                        // --- NOSLOP_IMAGE_SEARCH_V1 --- bound the sequential cost.
+                        // Skip the whole item past the cap rather than emitting a
+                        // video card with a null mediaUrl, which would render as a
+                        // slide that can never play.
+                        if (videoResolutions >= MAX_VIDEO_RESOLUTIONS) {
+                            Logger.debug(TAG, "Video resolution cap reached; skipping $nasaId")
+                            continue
+                        }
+                        videoResolutions++
                         resolveNasaVideoUrl(nasaId) ?: thumbnailUrl
                     } else {
                         thumbnailUrl
@@ -169,11 +198,15 @@ object NasaApiClient {
                 }
             }
 
-            Logger.info(TAG, "NASA Image Library: fetched ${items.size} items for '$query'")
-            items
+            Logger.info(TAG, "NASA Image Library: fetched ${items.size} items for '${Logger.redact(query)}'" + pageSuffix(page))
+            // The collection links to its next page while there is one.
+            val hasNext = collection.getAsJsonArray("links")?.any { link ->
+                (link as? JsonObject)?.get("rel")?.takeIf { it.isJsonPrimitive }?.asString == "next"
+            } == true
+            SourcePage(items, hasMore = itemsArray.size() > 0 && hasNext)
         } catch (e: Exception) {
             Logger.error(TAG, "NASA Image Library request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 
@@ -181,6 +214,11 @@ object NasaApiClient {
      * Resolve the actual playable .mp4 URL for a NASA video by querying the asset manifest.
      * NASA's Image Library API requires a second request to /asset/{nasa_id} to get file URLs.
      */
+    // --- NOSLOP_IMAGE_SEARCH_V1 ---
+    // Resolving a video URL is a blocking round trip per item. Even outside
+    // image search, twenty of them in a row will outlive any sane deadline.
+    private const val MAX_VIDEO_RESOLUTIONS = 6
+
     private fun resolveNasaVideoUrl(nasaId: String): String? {
         return try {
             val url = "https://images-api.nasa.gov/asset/$nasaId"
@@ -201,10 +239,34 @@ object NasaApiClient {
                 }
             }
 
-            // Prefer ~orig.mp4 (highest quality), then ~mobile.mp4 (most compatible), then any .mp4
-            var best = mp4Urls.firstOrNull { it.contains("~orig.mp4") }
-                ?: mp4Urls.firstOrNull { it.contains("~mobile.mp4") }
-                ?: mp4Urls.firstOrNull()
+            // --- NOSLOP_FEED_VARIETY_V1 ---
+            // ~orig.mp4 is NASA's broadcast master: frequently 4K at a bitrate
+            // no phone connection sustains, which produced the play-a-few-
+            // seconds-then-stall behaviour. Pick a variant that matches the
+            // user's quality setting and treat ~orig as the last resort.
+            val quality = try {
+                com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+            } catch (_: Exception) { "high" }
+
+            val preference = when (quality) {
+                "low" -> listOf("~mobile.mp4", "~small.mp4", "~medium.mp4", "~large.mp4")
+                "medium" -> listOf("~small.mp4", "~medium.mp4", "~mobile.mp4", "~large.mp4")
+                else -> listOf("~medium.mp4", "~large.mp4", "~small.mp4", "~mobile.mp4")
+            }
+
+            var best: String? = null
+            for (variant in preference) {
+                best = mp4Urls.firstOrNull { it.contains(variant) }
+                if (best != null) break
+            }
+            if (best == null) {
+                // Nothing but the master (or an unrecognised naming scheme).
+                best = mp4Urls.firstOrNull { !it.contains("~orig.mp4") }
+                    ?: mp4Urls.firstOrNull()
+                if (best != null && best.contains("~orig.mp4")) {
+                    Logger.warn(TAG, "Only ~orig.mp4 available for $nasaId — playback may buffer")
+                }
+            }
 
             if (best != null) {
                 best = best.replace("http://", "https://")

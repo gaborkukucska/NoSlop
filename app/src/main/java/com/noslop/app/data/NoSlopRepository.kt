@@ -7,16 +7,84 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.mesh.MeshPacketHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.withLock
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
-    private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
+
+    /**
+     * NOSLOP_LOCAL_SEARCH_V1
+     *
+     * Search items already in the database. RSS sync keeps feed_items stocked,
+     * so this is the RSS-backed article search — and unlike every network
+     * source it needs no key, works offline, and returns instantly.
+     *
+     * @param mediaType "" for any, "" plus articlesOnly for untyped items, or
+     *   "video" / "audio" / "image" to match a media type.
+     */
+    suspend fun searchLocalLibrary(
+        query: String,
+        mediaType: String = "",
+        articlesOnly: Boolean = false,
+        limit: Int = 25
+    ): List<FeedItem> {
+        val q = query.trim()
+        if (q.length < 2) return emptyList()
+        return try {
+            when {
+                articlesOnly -> feedDao.searchLocalArticles(q, limit)
+                mediaType.isNotBlank() -> feedDao.searchLocalByType(q, mediaType, limit)
+                else -> feedDao.searchLocalAny(q, limit)
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("REPOSITORY", "Local search failed: ${e.message}")
+            emptyList()
+        }
+    }
     val peerDao = db.peerDao()
-    private val postDao = db.postDao()
+    internal val mediaOwnerDao = db.mediaOwnerDao()
+    internal suspend fun getGroupChatById(groupId: String): GroupChat? = db.groupChatDao().getGroupChatById(groupId)
+
+    /**
+     * R2: remembers the signed SHA-256 of a media item on its owner rows (never overwrites).
+     * Only call with a digest that a verified signature covered (C17 v2 post/comment signature).
+     */
+    suspend fun recordMediaDigest(mediaId: String?, sha256: String?) {
+        if (mediaId.isNullOrBlank() || sha256.isNullOrBlank()) return
+        for (owner in mediaOwnerDao.getOwners(mediaId)) {
+            mediaOwnerDao.attachSecrets(mediaId, owner.ownerType, owner.ownerId, null, sha256)
+        }
+    }
+
+    /**
+     * R2: the SHA-256 to send along with a synced post/comment so receivers can check its v2 (C17)
+     * signature: the stored digest, else the hash of our local copy (cached on the owner rows). A wrong
+     * digest can only make the receiver reject the item, never accept a forged one.
+     */
+    suspend fun mediaDigestFor(mediaId: String?): String? {
+        if (mediaId.isNullOrBlank()) return null
+        mediaOwnerDao.getOwners(mediaId).firstNotNullOfOrNull { it.sha256 }?.let { return it }
+        val file = com.noslop.app.mesh.MediaManager.getLocalFile(mediaId) ?: return null
+        val digest = com.noslop.app.mesh.MediaManager.computeSha256(file) ?: return null
+        recordMediaDigest(mediaId, digest)
+        return digest
+    }
+    internal val postDao = db.postDao()
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
     private val commentDao = db.commentDao()
@@ -48,36 +116,1566 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val mediaSettingsFlow = settingsRepository.mediaSettingsFlow
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
+    val useTorForClearnet: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.useTorForClearnet
+    val isAutoUpdateEnabled: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.isAutoUpdateEnabled
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
+    val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
+    val feedMixSettingsFlow = settingsRepository.feedMixSettingsFlow
+    val breakReminderEnabled: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.breakReminderEnabled
+    val breakReminderMode: kotlinx.coroutines.flow.StateFlow<String> = settingsRepository.breakReminderMode
+    val breakReminderIntervalSlides: kotlinx.coroutines.flow.StateFlow<Int> = settingsRepository.breakReminderIntervalSlides
+    val breakReminderIntervalMinutes: kotlinx.coroutines.flow.StateFlow<Int> = settingsRepository.breakReminderIntervalMinutes
+
+    init {
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
+        // R5: re-fetch a peer's onion descriptor when sends to it keep failing (see GossipService).
+        com.noslop.app.mesh.GossipService.onionDescriptorRefresher = { onion ->
+            com.noslop.app.tor.TorService.refreshOnionDescriptor(onion)
+        }
+    }
+
+    @Volatile
+    var shouldSyncDms = true
+
+    fun triggerDmSync() {
+        shouldSyncDms = true
+    }
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
     // WHY: all social/mesh write+broadcast actions and the presence heartbeat live in
     // MeshSocialRepository (Stage 0.3, final repository split). Identity/profile are injected as
     // suspend accessors so it stays decoupled; the facade's lifecycle methods trigger its broadcasts.
-    private val meshSocialRepository = MeshSocialRepository(
-        db, meshTransport, repositoryScope,
+    /** D04: which of our identities (and which profile) a packet for a given peer is built from. */
+    val identityRouter = IdentityRouter(
+        db,
         getLocalIdentity = { getLocalIdentity() },
+        getBurnableIdentity = { getBurnableIdentity() },
         getLocalHandle = { getLocalHandle() },
         getUserProfile = { getUserProfile() },
+        getCreatorProfile = { getCreatorProfile() }
+    )
+
+    internal val meshSocialRepository = MeshSocialRepository(
+        db, meshTransport, repositoryScope,
+        getLocalIdentity = { getLocalIdentity() },
+        getBurnableIdentity = { getBurnableIdentity() },
+        getLocalHandle = { getLocalHandle() },
+        getUserProfile = { getUserProfile() },
+        getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
+        identityRouter = identityRouter
     )
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
+
+    fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
+        meshSocialRepository.dispatchPacket(onionAddress, packet)
+    }
+
+        // --- Hub API Client ---
+
+    suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val jsonStr = packet.toJson()
+            val jsonObj = org.json.JSONObject(jsonStr)
+            val arr = org.json.JSONArray().put(jsonObj)
+            val args = org.json.JSONObject().put("packets", arr)
+            val res = invokeHubApi("sync_push_packets", args)
+            if (res != null) {
+                com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
+                return@withContext true
+            } else {
+                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to push packet ${packet.id} to Hub (API returned null).")
+                return@withContext false
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to push packet to Hub: ${e.message}")
+            return@withContext false
+        }
+    }
+
+    suspend fun invokeHubApi(cmd: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+        val hubStatus = getAppSetting("hub_deployment_status") ?: return@withContext null
+        val isLegacy = hubStatus == "Active (Legacy Connection)"
+        val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
+        val isPrivateLan = isPrivateLanAddress(lanIp)
+        val canCleartextLan = isPrivateLan && lanIp != null && try {
+            android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(lanIp)
+        } catch (_: Throwable) { false }
+        
+        if (canCleartextLan && lanIp != null) {
+            try {
+                val url = "http://$lanIp:8080/api/invoke"
+                val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
+                val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
+                val client = com.noslop.app.net.HttpClientProvider.rawClearnetClient.newBuilder()
+                    .connectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val respBody = response.body?.string() ?: "{}"
+                    if (response.isSuccessful) {
+                        return@withContext JSONObject(respBody)
+                    } else {
+                        com.noslop.app.debug.Logger.warn("HUB_API", "LAN request failed with code ${response.code} for cmd $cmd: $respBody")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.warn("HUB_API", "LAN request failed: ${e.message}. Falling back to Tor...")
+            }
+        }
+        
+        val identity = getLocalIdentity() ?: return@withContext null
+        val onionAddress = identity.onionAddress
+        try {
+            val url = "http://$onionAddress:8080/api/invoke"
+            val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
+            val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
+            com.noslop.app.net.HttpClientProvider.torClient.newCall(request).execute().use { response ->
+                val respBody = response.body?.string() ?: "{}"
+                if (response.isSuccessful) {
+                    return@withContext JSONObject(respBody)
+                } else {
+                    com.noslop.app.debug.Logger.warn("HUB_API", "Tor request failed with code ${response.code} for cmd $cmd: $respBody")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error("HUB_API", "Tor fallback request failed: ${e.message}")
+        }
+        return@withContext null
+    }
+
+    
+    suspend fun syncPostsWithHub() = withContext(Dispatchers.IO) {
+        val posts = postDao.getPostsSince(0).take(50)
+        val packetArray = JSONArray()
+        val gson = com.noslop.app.util.Json.gson
+        posts.forEach { post ->
+            val meta = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
+                id = post.mediaUrl,
+                type = post.mediaType ?: "file",
+                mimeType = "application/octet-stream", 
+                size = 0,
+                chunkCount = 999,
+                thumbnailB64 = post.thumbnailB64
+            ) else null
+
+            val payload = com.noslop.app.mesh.PostPayload(
+                id = post.id,
+                authorId = post.authorPublicKeyB64,
+                authorName = post.authorHandle,
+                authorPublicKey = post.authorPublicKeyB64,
+                authorAvatarB64 = post.authorAvatarB64,
+                originNode = "",
+                content = post.content,
+                timestamp = post.timestamp,
+                signature = post.signature,
+                privacy = post.privacy,
+                mediaId = post.mediaUrl,
+                mediaMetadata = meta,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = post.authorPublicKeyB64,
+                type = "POST",
+                payload = gson.toJsonTree(payload),
+                signature = post.signature
+            )
+            packetArray.put(JSONObject(packet.toJson()))
+        }
+        if (packetArray.length() > 0) {
+            val args = JSONObject().put("packets", packetArray)
+            val res = invokeHubApi("sync_push_packets", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${packetArray.length()} local posts to Hub.")
+        }
+    }
+
+    suspend fun syncPeersWithHub() = withContext(Dispatchers.IO) {
+        val peers = peerDao.getAllPeersList()
+        val peerArray = JSONArray()
+        peers.forEach { peer ->
+            val obj = JSONObject()
+            obj.put("public_key", peer.publicKeyB64)
+            obj.put("is_trusted", peer.isTrusted)
+            obj.put("handle", peer.handle)
+            obj.put("onion_address", peer.onionAddress)
+            obj.put("enc_public_key", peer.encPublicKeyB64)
+            peerArray.put(obj)
+        }
+        val args = JSONObject().put("peers", peerArray)
+        val res = invokeHubApi("sync_push_peers", args)
+        if (res != null) Logger.info("HUB_SYNC", "Pushed ${peers.size} contacts to Hub Firewall.")
+    }
+
+        suspend fun syncDmsWithHub() = withContext(Dispatchers.IO) {
+        if (!shouldSyncDms) return@withContext
+        shouldSyncDms = false
+        val identity = getLocalIdentity() ?: return@withContext
+        val peers = peerDao.getAllPeersList()
+        val dmArray = JSONArray()
+        
+        peers.forEach { peer ->
+            try {
+                // Room flows emit the initial list immediately, so we can grab the first snapshot
+                // Take only the last 30 messages to save battery on decryption overhead!
+                val messages = kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                    messageDao.getMessagesWithPeer(peer.publicKeyB64).first()
+                }?.takeLast(30) ?: emptyList()
+                messages.forEach { msg ->
+                    val plaintext = com.noslop.app.crypto.CryptoService.decryptDMForDisplay(
+                        ciphertextB64 = msg.ciphertext,
+                        nonceB64 = msg.nonce,
+                        theirEncPubB64 = peer.encPublicKeyB64,
+                        myEncPrivB64 = identity.encPrivateKeyB64,
+                        myEdPub = identity.publicKeyB64,
+                        senderEdPub = msg.senderPub,
+                        peerEdPub = peer.publicKeyB64,
+                        msgId = msg.id,
+                        timestamp = msg.timestamp
+                    )
+                    var contentStr = plaintext ?: "..."
+                    val obj = JSONObject()
+                    var hasMedia = false
+                    try {
+                        val json = JSONObject(contentStr)
+                        if (json.has("content")) {
+                            contentStr = json.getString("content")
+                        }
+                        if (json.has("media")) {
+                            val mediaJson = json.getJSONObject("media")
+                            obj.put("mediaId", mediaJson.optString("id"))
+                            obj.put("mediaType", mediaJson.optString("type"))
+                            obj.put("media", mediaJson)
+                            hasMedia = true
+                        }
+                    } catch (e: Exception) {}
+                    
+                    obj.put("id", msg.id)
+                    obj.put("peer", peer.publicKeyB64)
+                    obj.put("sender", msg.senderPub)
+                    obj.put("content", contentStr)
+                    obj.put("timestamp", msg.timestamp)
+                    
+                    if (!hasMedia && msg.mediaId != null) {
+                        obj.put("mediaId", msg.mediaId)
+                        obj.put("mediaType", msg.mediaType)
+                    }
+                    
+                    dmArray.put(obj)
+                }
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to sync DMs for ${peer.handle}: ${e.message}")
+            }
+        }
+        if (dmArray.length() > 0) {
+            val args = JSONObject().put("dms", dmArray)
+            val res = invokeHubApi("sync_push_dms", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${dmArray.length()} DMs to Hub.")
+        }
+    }
+
+    suspend fun ensureAdminPeerExists() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val adminPubKey = "admin_${myKeys.publicKeyB64}"
+        val existing = peerDao.getPeerByPublicKey(adminPubKey)
+        // D01 (explicit decision): the Hub's Admin AI is the user's OWN node, so it is ACCEPTED.
+        if (existing == null || existing.relationship != PeerRelationship.ACCEPTED) {
+            peerDao.insertPeer((existing ?: com.noslop.app.data.Peer(
+                publicKeyB64 = adminPubKey,
+                handle = "Admin AI (Hub)",
+                tripcode = "admin",
+                onionAddress = myKeys.onionAddress,
+                encPublicKeyB64 = myKeys.encPublicKeyB64,
+                lastSeenAt = System.currentTimeMillis()
+            )).copy(relationship = PeerRelationship.ACCEPTED))
+        }
+    }
+
+    @Volatile
+    private var hasPulledHistoricalData = false
+
+    suspend fun syncPullHistoricalDataFromHub() = withContext(Dispatchers.IO) {
+        val hubStatus = getAppSetting("hub_deployment_status")
+        if (hubStatus.isNullOrBlank()) return@withContext
+        if (hasPulledHistoricalData) return@withContext
+
+        ensureAdminPeerExists()
+
+        val myKeys = getLocalIdentity() ?: return@withContext
+
+        // 1. Pull DMs
+        val resDms = invokeHubApi("get_dms", JSONObject())
+        if (resDms != null && resDms.has("dms")) {
+            val dmsArray = resDms.getJSONArray("dms")
+            for (i in 0 until dmsArray.length()) {
+                val dm = dmsArray.getJSONObject(i)
+                val id = dm.optString("id")
+                if (!checkEntityExistsLocally("MESSAGE", id)) {
+                    val contentStr = dm.optString("content")
+                    val sender = dm.optString("sender")
+                    val peerPub = dm.optString("peer")
+                    
+                    val peer = peerDao.getPeerByPublicKey(peerPub)
+                    val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
+                    
+                    val map = mutableMapOf<String, Any>("content" to contentStr)
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    if (mediaId != null) {
+                        val metadata = com.noslop.app.mesh.MediaMetadata(
+                            id = mediaId,
+                            type = mediaType ?: "file",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 999,
+                            thumbnailB64 = null
+                        )
+                        map["media"] = metadata
+                    }
+                    val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
+                    val dmTimestamp = dm.optLong("timestamp", System.currentTimeMillis())
+                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, myKeys, dmTimestamp)
+                    
+                    if (ciphertext != null && nonce != null) {
+                        val localMsg = com.noslop.app.data.ChatMessage(
+                            id = id,
+                            chatWithPeerPub = peerPub,
+                            senderPub = sender,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            timestamp = dmTimestamp,
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            replyToMessageId = null
+                        )
+                        messageDao.insertMessage(localMsg)
+                    }
+                }
+            }
+        }
+        
+        // 2. Pull Posts
+        val resPosts = invokeHubApi("get_social_feed", JSONObject())
+        if (resPosts != null && resPosts.has("posts")) {
+            val postsArray = resPosts.getJSONArray("posts")
+            for (i in 0 until postsArray.length()) {
+                val postObj = postsArray.getJSONObject(i)
+                val id = postObj.optString("id")
+                if (!checkEntityExistsLocally("POST", id)) {
+                    val author = postObj.optString("author")
+                    val content = postObj.optString("content")
+                    val timestampStr = postObj.optString("timestamp")
+                    val timestamp = try {
+                        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(timestampStr)?.time ?: System.currentTimeMillis()
+                    } catch (e: Exception) { System.currentTimeMillis() }
+                    
+                    val mediaId = postObj.optString("media_id").takeIf { it.isNotBlank() }
+                    val mediaType = postObj.optString("media_type").takeIf { it.isNotBlank() }
+                    
+                    val localPost = com.noslop.app.data.MeshPost(
+                        id = id,
+                        authorPublicKeyB64 = "unknown",
+                        authorHandle = author,
+                        authorTripcode = "hub",
+                        authorAvatarB64 = null,
+                        content = content,
+                        timestamp = timestamp,
+                        signature = "synced_from_hub",
+                        mediaUrl = mediaId?.let { "noslop://${myKeys.onionAddress}/$it" },
+                        mediaType = mediaType,
+                        privacy = "public",
+                        thumbnailB64 = null,
+                        clearnetUrl = null,
+                        clearnetTitle = null,
+                        clearnetThumbnailUrl = null,
+                        clearnetMediaType = null
+                    )
+                    postDao.insertPost(localPost)
+                }
+            }
+        }
+        
+        // 3. Pull Peers
+        val resPeers = invokeHubApi("get_mesh_peers", JSONObject())
+        if (resDms != null || resPosts != null || resPeers != null) {
+            hasPulledHistoricalData = true
+        }
+        if (resPeers != null && resPeers.has("peers")) {
+            val peersArray = resPeers.getJSONArray("peers")
+            for (i in 0 until peersArray.length()) {
+                val peerObj = peersArray.getJSONObject(i)
+                val pubKey = peerObj.optString("public_key")
+                val myKeys = getLocalIdentity()
+                if (pubKey.isNotBlank() && pubKey != myKeys?.publicKeyB64 && peerDao.getPeerByPublicKey(pubKey) == null) {
+                    val encPubKey = peerObj.optString("enc_public_key").takeIf { it.isNotBlank() } ?: ""
+                    peerDao.insertPeer(com.noslop.app.data.Peer(
+                        publicKeyB64 = pubKey,
+                        handle = peerObj.optString("handle"),
+                        tripcode = "sync",
+                        onionAddress = peerObj.optString("onion_address", ""),
+                        encPublicKeyB64 = encPubKey,
+                        // D01 (explicit decision): the Hub is the user's own mirror of this device's
+                        // contact list, so its "trusted" flag restores an ACCEPTED relationship.
+                        relationship = if (peerObj.optBoolean("is_trusted", false)) PeerRelationship.ACCEPTED else PeerRelationship.NONE,
+                        lastSeenAt = System.currentTimeMillis()
+                    ))
+                }
+            }
+        }
+    }
+
+    private var lastDmSyncTimestamp: Long = 0
+
+    /**
+     * D05: seals a DM pulled from the Hub for local storage. Our own messages are sealed as v2
+     * (us -> peer, bound to the message id and timestamp), exactly as a mesh send would, because they
+     * may be pushed back over Tor or re-sent by DM sync, and a v2 peer refuses v1. Messages from the
+     * peer keep the v1 at-rest form they always had; they are only ever read locally.
+     */
+    private fun sealHubDm(
+        content: String,
+        msgId: String,
+        senderPub: String,
+        peerPub: String,
+        peerEncPub: String,
+        myKeys: CryptoService.IdentityKeys,
+        timestamp: Long
+    ): Pair<String, String> = if (senderPub == myKeys.publicKeyB64) {
+        CryptoService.encryptDMV2(
+            plaintext = content,
+            theirEncPubB64 = peerEncPub,
+            myEncPrivB64 = myKeys.encPrivateKeyB64,
+            senderEdPub = myKeys.publicKeyB64,
+            recipientEdPub = peerPub,
+            msgId = msgId,
+            groupId = null,
+            timestamp = timestamp
+        )
+    } else {
+        CryptoService.encryptDM(content, peerEncPub, myKeys.encPrivateKeyB64)
+    }
+
+    private suspend fun syncPullIncrementalDMsFromHub() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val args = JSONObject().put("since", lastDmSyncTimestamp)
+        val resDms = invokeHubApi("sync_pull_dms", args)
+        
+        if (resDms != null && resDms.has("dms")) {
+            val dmsArray = resDms.getJSONArray("dms")
+            var latestTimestamp = lastDmSyncTimestamp
+            
+            for (i in 0 until dmsArray.length()) {
+                val dm = dmsArray.getJSONObject(i)
+                val id = dm.optString("id")
+                val timestamp = dm.optLong("timestamp", 0)
+                if (timestamp > latestTimestamp) {
+                    latestTimestamp = timestamp
+                }
+                
+                if (!checkEntityExistsLocally("MESSAGE", id)) {
+                    val contentStr = dm.optString("content")
+                    val sender = dm.optString("sender")
+                    val peerPub = dm.optString("peer")
+                    
+                    val peer = peerDao.getPeerByPublicKey(peerPub)
+                    val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
+                    
+                    val map = mutableMapOf<String, Any>("content" to contentStr)
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    if (mediaId != null) {
+                        map["media"] = com.noslop.app.mesh.MediaMetadata(
+                            id = mediaId,
+                            type = mediaType ?: "file",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 999,
+                            thumbnailB64 = null
+                        )
+                    }
+                    val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
+                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, myKeys, timestamp)
+                    
+                    if (ciphertext != null && nonce != null) {
+                        val localMsg = com.noslop.app.data.ChatMessage(
+                            id = id,
+                            chatWithPeerPub = peerPub,
+                            senderPub = sender,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            timestamp = timestamp,
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            replyToMessageId = null
+                        )
+                        messageDao.insertMessage(localMsg)
+                        
+                        // If WE sent this DM (via Hub Web UI), we must push it back to the Hub so it routes over Tor!
+                        if (sender == myKeys.publicKeyB64) {
+                            // D05: sealed as v2 by sealHubDm; it used to go out as v1, which a v2 peer refuses.
+                            val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
+                                com.noslop.app.mesh.EncryptedPayload(
+                                    id = id,
+                                    nonce = nonce,
+                                    ciphertext = ciphertext,
+                                    timestamp = timestamp,
+                                    v = 2
+                                )
+                            )
+                            val packet = com.noslop.app.mesh.NetworkPacket(
+                                id = java.util.UUID.randomUUID().toString(),
+                                hops = 3,
+                                senderId = myKeys.publicKeyB64,
+                                targetUserId = peerPub,
+                                type = "MESSAGE",
+                                payload = payloadJson
+                            )
+                            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+                        } else {
+                            // If we received this DM from a peer, we must process it locally to update the UI
+                            val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
+                                com.noslop.app.mesh.EncryptedPayload(
+                                    id = id,
+                                    nonce = nonce,
+                                    ciphertext = ciphertext,
+                                    timestamp = timestamp
+                                )
+                            )
+                            val packet = com.noslop.app.mesh.NetworkPacket(
+                                id = id,
+                                senderId = sender,
+                                targetUserId = myKeys.publicKeyB64,
+                                type = "MESSAGE",
+                                payload = payloadJson
+                            )
+                            handleIncomingPacket(packet)
+                        }
+                    }
+                }
+            }
+            lastDmSyncTimestamp = latestTimestamp
+        }
+    }
+
+    suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
+        // 0. Ensure our onion address matches the Hub's true native onion address to fix asymmetric routing
+        try {
+            val resInfo = invokeHubApi("get_node_info", org.json.JSONObject())
+            if (resInfo != null && resInfo.has("onion_address")) {
+                val hubOnion = resInfo.getString("onion_address")
+                if (hubOnion.isNotBlank() && hubOnion.endsWith(".onion")) {
+                    val myKeys = getLocalIdentity()
+                    if (myKeys != null && myKeys.onionAddress != hubOnion) {
+                        com.noslop.app.debug.Logger.info("HUB_SYNC", "Healing asymmetric routing: Updating local onion from ${myKeys.onionAddress} to Hub's true onion $hubOnion")
+                        updateOnionAddress(hubOnion)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to fetch Hub node info: ${e.message}")
+        }
+
+        syncPullHistoricalDataFromHub()
+        syncPullIncrementalDMsFromHub()
+        
+        val res = invokeHubApi("sync_pull_packets", JSONObject())
+        if (res != null && res.has("packets")) {
+            val packetsArray = res.optJSONArray("packets")
+            if (packetsArray != null && packetsArray.length() > 0) {
+                Logger.info("HUB_SYNC", "Pulled ${packetsArray.length()} valid mesh packets from Hub")
+                val gson = com.noslop.app.util.Json.gson
+                for (i in 0 until packetsArray.length()) {
+                    try {
+                        val packetJson = packetsArray.getJSONObject(i).toString()
+                        val packet = gson.fromJson(packetJson, com.noslop.app.mesh.NetworkPacket::class.java)
+                        handleIncomingPacket(packet)
+                    } catch (e: Exception) {
+                        Logger.error("HUB_SYNC", "Failed to parse synced packet: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun isLocalUser(pubKey: String): Boolean {
+        val main = getLocalIdentity()?.publicKeyB64
+        val burnable = getBurnableIdentity()?.publicKeyB64
+        return pubKey == main || pubKey == burnable
+    }
+
+    suspend fun checkEntityExistsLocally(type: String, id: String): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        when(type) {
+            "POST" -> db.postDao().hasPost(id) > 0
+            "COMMENT" -> db.commentDao().hasComment(id) > 0
+            "MESSAGE" -> db.messageDao().hasMessage(id) > 0
+            else -> false
+        }
+    }
 
     // --- State Observables ---
     // Feed observables re-exposed from FeedRepository (Stage 0.3) so UI subscribers are unchanged.
     val allSources: Flow<List<FeedSource>> = feedRepository.allSources
     val allFeedItems: Flow<List<FeedItem>> = feedRepository.allFeedItems
     val savedFeedItems: Flow<List<FeedItem>> = feedRepository.savedFeedItems
+    val feedBuildStatus: Flow<String> = feedRepository.feedBuildStatus
     val allPeers: Flow<List<Peer>> = peerDao.getAllPeers()
     val trustedPeers: Flow<List<Peer>> = peerDao.getTrustedPeers()
+    val discoverablePeers: Flow<List<Peer>> = peerDao.getDiscoverablePeers()
+    val temporaryPeers: Flow<List<Peer>> = peerDao.getTemporaryPeers()
+    val followedPeers: Flow<List<Peer>> = peerDao.getFollowedPeers()
+    val groupChats: Flow<List<GroupChat>> = db.groupChatDao().getAllGroupChats()
+    
+    private val _peerTypingStates = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val peerTypingStates: kotlinx.coroutines.flow.StateFlow<Map<String, Boolean>> = _peerTypingStates.asStateFlow()
+    private val typingTimeoutJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+    fun updatePeerTypingState(peerPub: String, isTyping: Boolean) {
+        typingTimeoutJobs[peerPub]?.cancel()
+        val current = _peerTypingStates.value.toMutableMap()
+        current[peerPub] = isTyping
+        _peerTypingStates.value = current
+
+        // If typing is true, auto-expire after 6s in case the false signal was dropped
+        if (isTyping) {
+            typingTimeoutJobs[peerPub] = repositoryScope.launch {
+                kotlinx.coroutines.delay(6000L)
+                val map = _peerTypingStates.value.toMutableMap()
+                if (map[peerPub] == true) {
+                    map[peerPub] = false
+                    _peerTypingStates.value = map
+                }
+            }
+        }
+    }
+
+    suspend fun toggleFollowPeer(peerPub: String, follow: Boolean) {
+        peerDao.updateFollowState(peerPub, follow)
+        val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
+        // D04: follow a creator as the identity they know us by.
+        val myKeys = identityRouter.forPeer(peerPub, peer)?.keys ?: return
+        if (peer.onionAddress.isNotBlank()) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(peerPub, myKeys.publicKeyB64, timestamp.toString())
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            val followPayload = com.noslop.app.mesh.FollowPayload(
+                followedPublicKeyB64 = peerPub,
+                followerPublicKeyB64 = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature,
+                action = if (follow) "follow" else "unfollow"
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                type = if (follow) "FOLLOW" else "UNFOLLOW",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(followPayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
+    }
+
+    suspend fun createGroupChat(
+        title: String,
+        memberPubs: List<String>,
+        avatarB64: String? = null,
+        description: String? = null,
+        allowMemberInvites: Boolean = true,
+        allowMemberSelfRemove: Boolean = true
+    ) {
+        val myMain = getLocalIdentity() ?: return
+        // Open groups (members can invite) always use the admin's secondary burnable identity for safety
+        val adminKeys = if (allowMemberInvites) {
+            meshTransport.repository.getBurnableIdentity() ?: generateBurnableIdentity().also { newBurnable ->
+                com.noslop.app.tor.TorService.updateKeyAndRegister(myMain.privateKeyB64, newBurnable.privateKeyB64)
+            }
+        } else {
+            myMain
+        }
+        val groupId = java.util.UUID.randomUUID().toString()
+        val allMembers = (memberPubs + adminKeys.publicKeyB64).distinct()
+        val membersJson = com.noslop.app.util.Json.gson.toJson(allMembers)
+        val timestamp = System.currentTimeMillis()
+        
+        val myHandle = getLocalHandle() ?: "Me"
+        // D04: the admin key's own handle (the creator handle when an open group uses the creator key).
+        val adminHandle = ownHandleFor(adminKeys.publicKeyB64)
+        val memberHandlesMap = allMembers.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) pub to peer.handle
+            else if (pub == adminKeys.publicKeyB64) pub to adminHandle
+            else if (pub == myMain.publicKeyB64) pub to myHandle
+            else null
+        }.toMap()
+
+        val group = GroupChat(
+            groupId = groupId,
+            title = title,
+            adminPublicKeyB64 = adminKeys.publicKeyB64,
+            membersJson = membersJson,
+            createdAt = timestamp,
+            description = description,
+            allowMemberInvites = allowMemberInvites,
+            allowMemberSelfRemove = allowMemberSelfRemove,
+            avatarB64 = avatarB64,
+            memberHandlesJson = com.noslop.app.util.Json.gson.toJson(memberHandlesMap),
+            revision = timestamp
+        )
+        db.groupChatDao().insertGroupChat(group)
+
+        val sortedMembers = allMembers.sorted().joinToString(",")
+        val memberDetailsMap = allMembers.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = peer.handle,
+                    encPublicKey = peer.encPublicKeyB64,
+                    onionAddress = peer.onionAddress
+                )
+            } else if (pub == adminKeys.publicKeyB64 || pub == myMain.publicKeyB64) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = adminHandle,
+                    encPublicKey = adminKeys.encPublicKeyB64,
+                    onionAddress = adminKeys.onionAddress
+                )
+            } else null
+        }.toMap()
+
+        val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+        val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+            groupId, title, adminKeys.publicKeyB64, adminKeys.publicKeyB64, timestamp,
+            sortedMembers, allowMemberInvites, allowMemberSelfRemove,
+            description, avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64,
+            sortedDetails, sortedHandles
+        )
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
+
+        val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
+            groupId = groupId,
+            title = title,
+            adminPublicKeyB64 = adminKeys.publicKeyB64,
+            members = allMembers,
+            avatarB64 = avatarB64,
+            description = description,
+            memberHandles = memberHandlesMap,
+            memberDetails = memberDetailsMap,
+            allowMemberInvites = allowMemberInvites,
+            allowMemberSelfRemove = allowMemberSelfRemove,
+            timestamp = timestamp,
+            signature = signature,
+            adminOnion = adminKeys.onionAddress,
+            adminEncPublicKey = adminKeys.encPublicKeyB64
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = "group_invite_${groupId}",
+            senderId = adminKeys.publicKeyB64,
+            type = "GROUP_INVITE",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        // Send targeted GROUP_INVITE packet to every member with identity alignment
+        for (memberPub in allMembers) {
+            if (memberPub == adminKeys.publicKeyB64 || memberPub == myMain.publicKeyB64) continue
+            val peer = db.peerDao().getPeerByPublicKey(memberPub)
+            val onion = peer?.onionAddress ?: ""
+            if (onion.isBlank()) continue
+
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
+            val effectiveSenderId = if (allowMemberInvites || contactIdentity == "burnable") {
+                adminKeys.publicKeyB64
+            } else {
+                myMain.publicKeyB64
+            }
+
+            val memberPacket = packet.copy(
+                id = "group_invite_${groupId}_${memberPub}",
+                senderId = effectiveSenderId,
+                targetUserId = memberPub
+            )
+            meshSocialRepository.dispatchPacket(onion, memberPacket)
+            kotlinx.coroutines.delay(300L) // Stagger invites to prevent Tor circuit collision
+        }
+        Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members (admin=${adminKeys.publicKeyB64.take(8)}...)")
+    }
+
+    suspend fun syncMemberPeers(memberDetails: Map<String, com.noslop.app.mesh.GroupMemberInfo>?) {
+        if (memberDetails == null) return
+        val myPub = getLocalIdentity()?.publicKeyB64
+        val myBurnable = getBurnableIdentity()?.publicKeyB64
+        for ((pubKey, info) in memberDetails) {
+            if (pubKey == myPub || pubKey == myBurnable) continue
+            val existing = peerDao.getPeerByPublicKey(pubKey)
+            if (existing == null) {
+                val pubBytes = try { android.util.Base64.decode(pubKey, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "group"
+                val handle = info.handle?.takeIf { it.isNotBlank() && it != "Member" } ?: "Member_${pubKey.take(6)}"
+                peerDao.insertPeer(
+                    Peer(
+                        publicKeyB64 = pubKey,
+                        handle = handle,
+                        tripcode = tripcode,
+                        onionAddress = info.onionAddress ?: "",
+                        encPublicKeyB64 = info.encPublicKey ?: "",
+                        isTrusted = false,
+                        isTemporary = false,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                )
+            } else {
+                var updated = existing
+                // S02: Never overwrite a trusted contact's keys from unauthenticated directory hints
+                if (!existing.isTrusted) {
+                    if (existing.encPublicKeyB64.isBlank() && !info.encPublicKey.isNullOrBlank()) {
+                        updated = updated.copy(encPublicKeyB64 = info.encPublicKey)
+                    }
+                    if (existing.onionAddress.isBlank() && !info.onionAddress.isNullOrBlank()) {
+                        updated = updated.copy(onionAddress = info.onionAddress)
+                    }
+                }
+                if ((existing.handle.startsWith("Member") || existing.handle == "Peer") && !info.handle.isNullOrBlank() && info.handle != "Member") {
+                    updated = updated.copy(handle = info.handle)
+                }
+                if (updated != existing) {
+                    peerDao.insertPeer(updated.copy(lastSeenAt = System.currentTimeMillis()))
+                }
+            }
+        }
+    }
+
+    suspend fun acceptGroupInvite(groupId: String) {
+        val setting = db.appSettingDao().getSetting("pending_group_invite_$groupId")
+        if (!setting.isNullOrBlank()) {
+            try {
+                val invite = com.noslop.app.util.Json.gson.fromJson(setting, com.noslop.app.mesh.GroupInvitePayload::class.java)
+                val membersJson = com.noslop.app.util.Json.gson.toJson(invite.members)
+                val memberHandlesJson = com.noslop.app.util.Json.gson.toJson(invite.memberHandles ?: emptyMap<String, String>())
+                val group = GroupChat(
+                    groupId = invite.groupId,
+                    title = invite.title,
+                    adminPublicKeyB64 = invite.adminPublicKeyB64,
+                    membersJson = membersJson,
+                    createdAt = invite.timestamp,
+                    description = invite.description,
+                    allowMemberInvites = invite.allowMemberInvites,
+                    allowMemberSelfRemove = invite.allowMemberSelfRemove,
+                    avatarB64 = invite.avatarB64,
+                    memberHandlesJson = memberHandlesJson,
+                    revision = invite.timestamp
+                )
+                db.groupChatDao().insertGroupChat(group)
+                db.appSettingDao().removeSetting("pending_group_invite_$groupId")
+
+                // Sync directory peers and admin details into peerDao
+                syncMemberPeers(invite.memberDetails)
+                if (!invite.adminPublicKeyB64.isNullOrBlank() && !invite.adminOnion.isNullOrBlank()) {
+                    val adminPeer = peerDao.getPeerByPublicKey(invite.adminPublicKeyB64)
+                    if (adminPeer == null) {
+                        val pubBytes = try { android.util.Base64.decode(invite.adminPublicKeyB64, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+                        val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "admin"
+                        peerDao.insertPeer(
+                            // D01: a group admin is a group member (relationship NONE), not a friend.
+                            // Friends-only posts, sync and media stay off-limits to them.
+                            Peer(
+                                publicKeyB64 = invite.adminPublicKeyB64,
+                                handle = invite.memberHandles?.get(invite.adminPublicKeyB64) ?: "Group Admin",
+                                tripcode = tripcode,
+                                onionAddress = invite.adminOnion ?: "",
+                                encPublicKeyB64 = invite.adminEncPublicKey ?: "",
+                                isTrusted = false,
+                                relationship = PeerRelationship.NONE,
+                                isTemporary = false,
+                                lastSeenAt = System.currentTimeMillis()
+                            )
+                        )
+                    } else if (adminPeer.encPublicKeyB64.isBlank() || adminPeer.onionAddress.isBlank()) {
+                        peerDao.insertPeer(
+                            adminPeer.copy(
+                                encPublicKeyB64 = adminPeer.encPublicKeyB64.ifBlank { invite.adminEncPublicKey ?: "" },
+                                onionAddress = adminPeer.onionAddress.ifBlank { invite.adminOnion ?: "" }
+                            )
+                        )
+                    }
+                }
+                // Request group catchup to synchronize latest group directory and state
+                requestGroupCatchup(groupId)
+                Logger.info("REPOSITORY", "Accepted group invite for '${invite.title}' ($groupId) and synced members")
+            } catch (e: Exception) {
+                Logger.error("REPOSITORY", "Failed to parse pending group invite for $groupId: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun declineGroupInvite(groupId: String) {
+        db.appSettingDao().removeSetting("pending_group_invite_$groupId")
+        Logger.info("REPOSITORY", "Declined group invite for $groupId")
+    }
+
+    suspend fun sendTypingSignal(peerPub: String, isTyping: Boolean) {
+        val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
+        // D04: as the identity this contact knows (it used to always be the personal one).
+        val myKeys = identityRouter.forPeer(peerPub, peer)?.keys ?: return
+        if (peer.onionAddress.isNotBlank()) {
+            val typingPayload = com.noslop.app.mesh.TypingPayload(
+                chatWithPeerPub = myKeys.publicKeyB64,
+                isTyping = isTyping,
+                timestamp = System.currentTimeMillis()
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                targetUserId = peerPub,
+                type = "TYPING",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(typingPayload)
+            )
+            meshTransport.sendPacket(peer.onionAddress, packet = packet)
+        }
+    }
+
+    suspend fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null, privacy: String = "public") {
+        val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val msgId = java.util.UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+        val myHandle = getLocalHandle() ?: "Me"
+
+        val memberPubs: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        // Determine sender keys: always an identity that is a member of this group, because receivers
+        // drop group messages from non-members and verify the v2 AAD against the sender key.
+        // "Friends only" uses the main identity when it is a member. R3: open groups no longer switch
+        // to the burnable identity when it is not the member key (a member invited under its main key
+        // who also had a burnable identity sent as a non-member, and every recipient dropped it).
+        val senderKeys = groupSenderKeys(memberPubs, group.allowMemberInvites, privacy, myKeys, burnableKeys)
+
+        // P0-2: Store group message body encrypted at rest with AAD binding
+        val (encryptedBody, bodyNonce) = try {
+            com.noslop.app.crypto.GroupMessageCrypto.encrypt(text, groupId = groupId, msgId = msgId)
+        } catch (e: Exception) {
+            Logger.error("REPOSITORY", "Refusing to store group message in cleartext after encryption failure: ${e.message}")
+            return
+        }
+        val localMsg = ChatMessage(
+            id = msgId,
+            chatWithPeerPub = groupId,
+            senderPub = senderKeys.publicKeyB64,
+            ciphertext = encryptedBody,
+            nonce = bodyNonce,
+            timestamp = timestamp,
+            mediaId = media?.id,
+            mediaType = media?.type,
+            replyToMessageId = replyToMessageId
+        )
+        messageDao.insertMessage(localMsg)
+
+        Logger.info("REPOSITORY", "sendGroupMessage: groupId=$groupId, members=${memberPubs.size}, privacy=$privacy, localEcho=$msgId, sender=${senderKeys.publicKeyB64.take(8)}...")
+
+        val jsonPayload = com.google.gson.JsonObject().apply {
+            addProperty("content", text)
+            addProperty("groupId", groupId)
+            // D10c: the attachment names the identity the message is sent as.
+            if (media != null) add("media", com.noslop.app.util.Json.gson.toJsonTree(
+                media.copy(originNode = senderKeys.onionAddress, ownerId = senderKeys.publicKeyB64)
+            ))
+            if (replyToMessageId != null) addProperty("replyTo", replyToMessageId)
+        }.toString()
+
+        var directSentCount = 0
+
+        for (memberPub in memberPubs) {
+            if (memberPub == senderKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+            val peer = peerDao.getPeerByPublicKey(memberPub)
+            if (privacy == "friends" && (peer == null || !peer.isTrusted || peer.isTemporary)) {
+                continue
+            }
+
+            val encPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
+            if (encPub == null) {
+                // Never fall back to the Ed25519 key for X25519 encryption. D01/D06: never send an
+                // automatic CONNECTION_REQUEST either (it would fake the user's consent); the member's
+                // key comes from the signed group directory via catch-up.
+                Logger.warn("REPOSITORY", "Member ${memberPub.take(12)}... has no X25519 key. Requesting group catch-up.")
+                requestGroupCatchup(groupId)
+                continue
+            }
+
+            // C08: Group messages ride on pairwise v2 directional AAD encryption binding groupId and memberPub
+            val (ciphertext, nonce) = CryptoService.encryptDMV2(
+                plaintext = jsonPayload,
+                theirEncPubB64 = encPub,
+                myEncPrivB64 = senderKeys.encPrivateKeyB64,
+                senderEdPub = senderKeys.publicKeyB64,
+                recipientEdPub = memberPub,
+                msgId = msgId,
+                groupId = groupId,
+                timestamp = timestamp
+            )
+            if (ciphertext.isBlank() || nonce.isBlank()) {
+                Logger.error("REPOSITORY", "sendGroupMessage: encryption FAILED for member ${memberPub.take(12)}... -- not sending")
+                continue
+            }
+
+            val msgPayload = com.noslop.app.mesh.EncryptedPayload(
+                id = msgId,
+                ciphertext = ciphertext,
+                nonce = nonce,
+                groupId = groupId,
+                timestamp = timestamp,
+                v = 2
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = senderKeys.publicKeyB64,
+                targetUserId = memberPub,
+                type = "MESSAGE",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(msgPayload)
+            )
+
+            if (peer != null && peer.onionAddress.isNotBlank()) {
+                meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
+                directSentCount++
+            } else {
+                // Store-and-forward queue for members with unknown onion address or offline
+                db.pendingGroupMessageDao().insert(
+                    PendingGroupMessage(
+                        groupId = groupId,
+                        memberPub = memberPub,
+                        msgId = msgId,
+                        ciphertext = ciphertext,
+                        nonce = nonce,
+                        createdAt = timestamp
+                    )
+                )
+                // Also broadcast via gossip so intermediate peers can relay to the target
+                val gossipDm = packet.copy(id = java.util.UUID.randomUUID().toString(), hops = 6)
+                com.noslop.app.mesh.GossipService.broadcast(gossipDm)
+                Logger.info("REPOSITORY", "Enqueued and gossip-relayed group message $msgId for member ${memberPub.take(12)}...")
+            }
+        }
+        Logger.info("REPOSITORY", "sendGroupMessage: dispatched to $directSentCount direct member(s)")
+    }
+
+    suspend fun updateGroupChat(
+        groupId: String,
+        title: String,
+        description: String?,
+        avatarB64: String?,
+        allowInvites: Boolean,
+        allowSelfRemove: Boolean,
+        membersList: List<String>,
+        bannedMembersList: List<String> = emptyList()
+    ) {
+        val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
+        val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
+        // isAdmin already determined above with dual-identity support || (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        val adminKeys = if (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
+
+        // --- NOSLOP_GROUP_DELTA_V1 ---
+        // This used to send addedMembers = membersList, i.e. the COMPLETE new
+        // member list, and never set removedMembers at all. The receiver does
+        // addAll(added) then distinct(), so a removal could never propagate --
+        // the removed member stayed in every other peer's copy of the group and
+        // kept receiving its messages. Diff against the stored list and send
+        // the actual deltas instead.
+        val previousMembers: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        val newMembers = membersList.distinct()
+        val addedMembers = newMembers.filter { it !in previousMembers }
+        val removedMembers = previousMembers.filter { it !in newMembers }
+
+        val membersJson = com.noslop.app.util.Json.gson.toJson(newMembers)
+        val timestamp = System.currentTimeMillis()
+
+        val myHandle = getLocalHandle() ?: "Me"
+        val existingHandles = existing.getMemberHandles().toMutableMap()
+        for (pub in newMembers) {
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) existingHandles[pub] = peer.handle
+            else if (pub == myKeys.publicKeyB64) existingHandles[pub] = myHandle
+            // D04: our creator key goes by the creator handle (older copies may hold the personal one).
+            else if (burnableKeys != null && pub == burnableKeys.publicKeyB64) existingHandles[pub] = ownHandleFor(pub)
+        }
+        val memberHandlesMap = existingHandles.toMap()
+
+        val isAdmin = existing.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        val effectiveTitle = if (isAdmin) title else existing.title
+        val effectiveDescription = if (isAdmin) description else existing.description
+        val effectiveAvatarB64 = if (isAdmin) avatarB64 else existing.avatarB64
+        val effectiveAllowInvites = if (isAdmin) allowInvites else existing.allowMemberInvites
+        val effectiveAllowSelfRemove = if (isAdmin) allowSelfRemove else existing.allowMemberSelfRemove
+        val effectiveBannedList = if (isAdmin) bannedMembersList else existing.getBannedMembers()
+
+        val updatedGroup = existing.copy(
+            title = effectiveTitle,
+            description = effectiveDescription,
+            avatarB64 = effectiveAvatarB64,
+            allowMemberInvites = effectiveAllowInvites,
+            allowMemberSelfRemove = effectiveAllowSelfRemove,
+            membersJson = membersJson,
+            memberHandlesJson = com.noslop.app.util.Json.gson.toJson(memberHandlesMap),
+            bannedMembersJson = com.noslop.app.util.Json.gson.toJson(effectiveBannedList),
+            // W04: Only admin updates advance revision to prevent member clock skew rejecting admin updates
+            revision = if (isAdmin) timestamp else existing.revision
+        )
+        db.groupChatDao().insertGroupChat(updatedGroup)
+
+        // R3: a non-admin signs as the identity it is a member under. Signing with the main key while
+        // the membership is the burnable one made every receiver reject the update (no member matched).
+        val signingKey = if (isAdmin) adminKeys else groupMemberIdentity(previousMembers, existing.allowMemberInvites, myKeys, burnableKeys)
+        val sortedAdded = addedMembers.sorted().joinToString(",")
+        val sortedRemoved = removedMembers.sorted().joinToString(",")
+        val sortedBanned = com.noslop.app.mesh.encodeOptBanned(if (isAdmin) effectiveBannedList else null)
+
+        val wireTitle = if (isAdmin) effectiveTitle else null
+        val wireDesc = if (isAdmin) effectiveDescription else null
+        val wireAvatar = if (isAdmin) effectiveAvatarB64 else null
+        val wireAllowInvites = if (isAdmin) effectiveAllowInvites else null
+        val wireAllowSelfRemove = if (isAdmin) effectiveAllowSelfRemove else null
+
+        val allMembersForDetails = (newMembers + existing.adminPublicKeyB64).distinct()
+        val memberDetailsMap = allMembersForDetails.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = peer.handle,
+                    encPublicKey = peer.encPublicKeyB64,
+                    onionAddress = peer.onionAddress
+                )
+            } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = ownHandleFor(adminKeys.publicKeyB64),
+                    encPublicKey = adminKeys.encPublicKeyB64,
+                    onionAddress = adminKeys.onionAddress
+                )
+            } else null
+        }.toMap()
+
+        val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+        val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
+
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupUpdatePayload(
+            groupId,
+            wireTitle,
+            signingKey.publicKeyB64,
+            timestamp,
+            sortedAdded,
+            sortedRemoved,
+            sortedBanned,
+            wireDesc,
+            wireAvatar,
+            wireAllowInvites,
+            wireAllowSelfRemove,
+            sortedDetails,
+            sortedHandles
+        )
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
+
+        val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
+            groupId = groupId,
+            title = wireTitle,
+            avatarB64 = wireAvatar,
+            description = wireDesc,
+            addedMembers = addedMembers.takeIf { it.isNotEmpty() },
+            removedMembers = removedMembers.takeIf { it.isNotEmpty() },
+            // W04: Pass empty list when admin clears bans so receivers clear rather than keep bans
+            bannedMembers = if (isAdmin) effectiveBannedList else null,
+            memberHandles = memberHandlesMap,
+            memberDetails = memberDetailsMap,
+            allowMemberInvites = wireAllowInvites,
+            allowMemberSelfRemove = wireAllowSelfRemove,
+            timestamp = timestamp,
+            signature = signature
+        )
+        Logger.info("REPOSITORY", "Group $groupId update: +${addedMembers.size} / -${removedMembers.size} member(s)")
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = signingKey.publicKeyB64,
+            type = "GROUP_UPDATE",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload)
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        // Send targeted GROUP_UPDATE packets to existing members to ensure retries if offline
+        for (memberPub in newMembers) {
+            if (memberPub == myKeys.publicKeyB64 || memberPub == signingKey.publicKeyB64) continue
+            if (addedMembers.contains(memberPub)) continue // New members get a GROUP_INVITE below
+            val memberPacket = packet.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                targetUserId = memberPub
+            )
+            val peer = db.peerDao().getPeerByPublicKey(memberPub)
+            val onion = peer?.onionAddress ?: ""
+            meshSocialRepository.dispatchPacket(onion, memberPacket)
+        }
+
+        // Newly added members don't have the group yet, so they need a full
+        // GROUP_INVITE (not GROUP_UPDATE which requires the group to exist).
+        if (addedMembers.isNotEmpty()) {
+            val inviteTimestamp = System.currentTimeMillis()
+            val sortedNewMembers = newMembers.sorted().joinToString(",")
+            // R3: the inviter signs as its member identity (see signingKey above).
+            val inviterSigningKey = signingKey
+            val storedAdminPeer = db.peerDao().getPeerByPublicKey(existing.adminPublicKeyB64)
+            val effectiveAdminOnion = if (isAdmin) adminKeys.onionAddress else (storedAdminPeer?.onionAddress ?: "")
+            val effectiveAdminEncPub = if (isAdmin) adminKeys.encPublicKeyB64 else (storedAdminPeer?.encPublicKeyB64 ?: "")
+
+            val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+            val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
+            val invitePayloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+                groupId, effectiveTitle, existing.adminPublicKeyB64, inviterSigningKey.publicKeyB64, inviteTimestamp,
+                sortedNewMembers, effectiveAllowInvites, effectiveAllowSelfRemove,
+                effectiveDescription, effectiveAvatarB64, effectiveAdminOnion, effectiveAdminEncPub,
+                sortedDetails, sortedHandles
+            )
+            val inviteSig = com.noslop.app.crypto.CryptoService.sign(invitePayloadToSign, inviterSigningKey.privateKeyB64)
+
+            val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
+                groupId = groupId,
+                title = effectiveTitle,
+                adminPublicKeyB64 = existing.adminPublicKeyB64,
+                members = newMembers,
+                avatarB64 = effectiveAvatarB64,
+                description = effectiveDescription,
+                memberHandles = memberHandlesMap,
+                memberDetails = memberDetailsMap,
+                allowMemberInvites = effectiveAllowInvites,
+                allowMemberSelfRemove = effectiveAllowSelfRemove,
+                timestamp = inviteTimestamp,
+                signature = inviteSig,
+                adminOnion = effectiveAdminOnion,
+                adminEncPublicKey = effectiveAdminEncPub
+            )
+            for (addedPub in addedMembers) {
+                if (addedPub == myKeys.publicKeyB64) continue
+                val peer = db.peerDao().getPeerByPublicKey(addedPub)
+                val onion = peer?.onionAddress ?: ""
+                if (onion.isBlank()) continue
+
+                // R3: the admin invites as the admin identity (unchanged); a member as its member identity.
+                val effectiveSenderId = if (isAdmin) adminKeys.publicKeyB64 else signingKey.publicKeyB64
+
+                val invitePacket = com.noslop.app.mesh.NetworkPacket(
+                    id = "group_invite_${groupId}_${addedPub}",
+                    senderId = effectiveSenderId,
+                    targetUserId = addedPub,
+                    type = "GROUP_INVITE",
+                    payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
+                )
+                if (onion.isNotBlank()) {
+                    meshSocialRepository.dispatchPacket(onion, invitePacket)
+                }
+                Logger.info("REPOSITORY", "Sent GROUP_INVITE for $groupId to newly added member ${addedPub.take(8)}... (senderId=${effectiveSenderId.take(8)})")
+            }
+            // Also broadcast general GROUP_INVITE across the mesh so offline/indirect members receive it
+            val generalInvitePacket = com.noslop.app.mesh.NetworkPacket(
+                id = "group_invite_${groupId}_${System.currentTimeMillis()}",
+                senderId = signingKey.publicKeyB64,
+                type = "GROUP_INVITE",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(generalInvitePacket)
+        }
+
+        // If we removed ourselves from the group, delete the group locally
+        // (the broadcast only reaches other nodes — we never process our own packet)
+        if (removedMembers.contains(myKeys.publicKeyB64) || removedMembers.contains(signingKey.publicKeyB64)) {
+            db.groupChatDao().deleteGroupChat(groupId)
+            Logger.info("REPOSITORY", "Left group $groupId: removed self from members and deleted locally")
+        }
+    }
+
+    suspend fun deleteGroupChat(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
+        val existing = db.groupChatDao().getGroupChatById(groupId)
+        val isAdmin = existing != null && (existing.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && existing.adminPublicKeyB64 == burnableKeys.publicKeyB64))
+        val adminKeys = if (burnableKeys != null && existing?.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
+
+        if (existing != null && isAdmin) {
+            // Admin: broadcast GROUP_DELETE directly to all members' onion addresses and over gossip
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, "delete", adminKeys.publicKeyB64, timestamp.toString())
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
+            val deletePayload = com.noslop.app.mesh.GroupDeletePayload(
+                groupId = groupId,
+                adminPublicKeyB64 = adminKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = adminKeys.publicKeyB64,
+                type = "GROUP_DELETE",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(deletePayload)
+            )
+            val members = try {
+                com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
+            } catch (e: Exception) { emptyList() }
+            for (memberPub in members) {
+                if (memberPub == adminKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+                val peer = peerDao.getPeerByPublicKey(memberPub)
+                if (peer != null && peer.onionAddress.isNotBlank()) {
+                    meshSocialRepository.dispatchPacket(peer.onionAddress, packet.copy(targetUserId = memberPub))
+                }
+            }
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+            db.groupChatDao().deleteGroupChat(groupId)
+            Logger.info("REPOSITORY", "Admin deleted group $groupId and dispatched GROUP_DELETE to ${members.size} members")
+        } else if (existing != null) {
+            // Non-admin: delegate directly to leaveGroupChat for complete exit, burnable resolution, and ghost cleanup
+            leaveGroupChat(groupId)
+            return
+        } else {
+            // Group not found locally — just ensure cleanup
+            db.groupChatDao().deleteGroupChat(groupId)
+        }
+
+        // Clean up any remaining ghost peers stored only for this deleted group
+        if (existing != null) {
+            val deletedGroupMembers = try {
+                com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList() + existing.adminPublicKeyB64
+            } catch (_: Exception) { emptyList() }
+            cleanupOrphanedGroupPeers(deletedGroupMembers, excludedGroupId = groupId)
+        }
+    }
+
+    suspend fun leaveGroupChat(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val burnable = getBurnableIdentity()
+        val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
+
+        val previousMembers: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(existing.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        // Determine which identity we are known by in this group
+        val signingKey = groupMemberIdentity(previousMembers, existing.allowMemberInvites, myKeys, burnable)
+
+        // R3: signed in the canonical 13-field form the receivers verify (see groupLeavePayload).
+        val updatePayload = groupLeavePayload(groupId, signingKey, System.currentTimeMillis())
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = signingKey.publicKeyB64,
+            type = "GROUP_UPDATE",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload)
+        )
+
+        // 1. Direct targeted dispatch to all group members (including admin) so it reliably reaches them
+        val allGroupPeers = (previousMembers + existing.adminPublicKeyB64).distinct()
+        for (memberPub in allGroupPeers) {
+            if (memberPub == signingKey.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+            val p = peerDao.getPeerByPublicKey(memberPub)
+            if (p != null && p.onionAddress.isNotBlank()) {
+                meshSocialRepository.dispatchPacket(p.onionAddress, packet.copy(targetUserId = memberPub))
+            }
+        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        // 2. Delete group locally
+        db.groupChatDao().deleteGroupChat(groupId)
+
+        // 3. Clean up ghost peers stored only for this group to prevent them appearing as Pending Requests
+        cleanupOrphanedGroupPeers(allGroupPeers, excludedGroupId = groupId)
+
+        Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${signingKey.publicKeyB64.take(8)}... and cleaned up group peers")
+    }
+
+    suspend fun resendGroupInvites(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        if (!isAdmin) {
+            Logger.warn("REPOSITORY", "Cannot resend invites for group $groupId: local user is not admin")
+            return
+        }
+        val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
+
+        val members = try {
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        val myHandle = getLocalHandle() ?: "Me"
+        val adminHandle = ownHandleFor(adminKeys.publicKeyB64)
+        val memberHandlesMap = members.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) pub to peer.handle
+            else if (pub == adminKeys.publicKeyB64) pub to adminHandle
+            else if (pub == myKeys.publicKeyB64) pub to myHandle
+            else null
+        }.toMap()
+
+        val allMembersForResend = (members + group.adminPublicKeyB64).distinct()
+        val memberDetailsMap = allMembersForResend.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = peer.handle,
+                    encPublicKey = peer.encPublicKeyB64,
+                    onionAddress = peer.onionAddress
+                )
+            } else if (pub == adminKeys.publicKeyB64 || pub == myKeys.publicKeyB64) {
+                pub to com.noslop.app.mesh.GroupMemberInfo(
+                    handle = adminHandle,
+                    encPublicKey = adminKeys.encPublicKeyB64,
+                    onionAddress = adminKeys.onionAddress
+                )
+            } else null
+        }.toMap()
+
+        val timestamp = group.createdAt
+        val sortedMembers = members.sorted().joinToString(",")
+        val sortedDetails = com.noslop.app.mesh.canonicalMemberDetailsString(memberDetailsMap)
+        val sortedHandles = com.noslop.app.mesh.canonicalMemberHandlesString(memberHandlesMap)
+        val payloadToSign = com.noslop.app.mesh.canonicalGroupInvitePayload(
+            group.groupId, group.title, group.adminPublicKeyB64, adminKeys.publicKeyB64, timestamp,
+            sortedMembers, group.allowMemberInvites, group.allowMemberSelfRemove,
+            group.description, group.avatarB64, adminKeys.onionAddress, adminKeys.encPublicKeyB64,
+            sortedDetails, sortedHandles
+        )
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, adminKeys.privateKeyB64)
+        val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
+            groupId = group.groupId,
+            title = group.title,
+            adminPublicKeyB64 = group.adminPublicKeyB64,
+            members = members,
+            avatarB64 = group.avatarB64,
+            description = group.description,
+            memberHandles = memberHandlesMap,
+            memberDetails = memberDetailsMap,
+            allowMemberInvites = group.allowMemberInvites,
+            allowMemberSelfRemove = group.allowMemberSelfRemove,
+            timestamp = timestamp,
+            signature = signature,
+            adminOnion = adminKeys.onionAddress,
+            adminEncPublicKey = adminKeys.encPublicKeyB64
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = "group_invite_${groupId}",
+            senderId = if (group.allowMemberInvites) adminKeys.publicKeyB64 else myKeys.publicKeyB64,
+            type = "GROUP_INVITE",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
+        )
+
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        for (memberPub in members) {
+            if (memberPub == adminKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+            val peer = db.peerDao().getPeerByPublicKey(memberPub)
+            val onion = peer?.onionAddress ?: ""
+            if (onion.isBlank()) continue
+
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
+            val effectiveSenderId = if (group.allowMemberInvites || contactIdentity == "burnable") {
+                adminKeys.publicKeyB64
+            } else {
+                myKeys.publicKeyB64
+            }
+
+            val memberPacket = packet.copy(
+                id = "group_invite_${groupId}_${memberPub}",
+                senderId = effectiveSenderId,
+                targetUserId = memberPub
+            )
+            meshSocialRepository.dispatchPacket(onion, memberPacket)
+        }
+        Logger.info("REPOSITORY", "Re-sent group invites for '${group.title}' ($groupId) to ${members.size} member(s)")
+    }
+
+    /**
+     * R3b: the identity to send a group message as, for the UI to stamp attachments with the same
+     * origin onion / owner the message is sent under (see groupSenderKeys).
+     */
+    suspend fun groupSenderIdentity(groupId: String, privacy: String): CryptoService.IdentityKeys? {
+        val myKeys = getLocalIdentity() ?: return null
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return myKeys
+        val members: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java)?.toList() ?: emptyList()
+        } catch (e: Exception) { emptyList() }
+        return groupSenderKeys(members, group.allowMemberInvites, privacy, myKeys, getBurnableIdentity())
+    }
+
+    suspend fun requestGroupCatchup(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
+        val group = db.groupChatDao().getGroupChatById(groupId)
+        val members = if (group != null) {
+            try {
+                com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
+            } catch (e: Exception) { emptyList() }
+        } else emptyList()
+        // R3: parsed membership (was a substring match on membersJson, review D11).
+        val senderKeys = if (burnableKeys != null && (members.contains(burnableKeys.publicKeyB64) || group?.adminPublicKeyB64 == burnableKeys.publicKeyB64)) burnableKeys else myKeys
+
+        val timestamp = System.currentTimeMillis()
+        val queryPayload = com.noslop.app.mesh.GroupQueryPayload(
+            groupId = groupId,
+            requesterId = senderKeys.publicKeyB64,
+            timestamp = timestamp
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = senderKeys.publicKeyB64,
+            type = "GROUP_QUERY",
+            payload = com.noslop.app.util.Json.gson.toJsonTree(queryPayload)
+        )
+
+        if (members.isNotEmpty()) {
+            members.filter { it != myKeys.publicKeyB64 && it != burnableKeys?.publicKeyB64 }.forEach { memberPub ->
+                val memberPacket = packet.copy(targetUserId = memberPub)
+                val peer = peerDao.getPeerByPublicKey(memberPub)
+                if (peer != null && peer.onionAddress.isNotBlank()) {
+                    meshTransport.sendPacket(peer.onionAddress, packet = memberPacket)
+                }
+            }
+        }
+        // Always gossip GROUP_QUERY so relay members and admin can resolve missing keys
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+    }
+
+    suspend fun requestAllGroupsCatchup() {
+        try {
+            val groups = db.groupChatDao().getAllGroupChatsList()
+            for (group in groups) {
+                requestGroupCatchup(group.groupId)
+            }
+        } catch (e: Exception) {
+            Logger.warn("REPOSITORY", "Failed to request group catchup for all groups: ${e.message}")
+        }
+    }
+
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()
     val conversations: Flow<List<ChatMessage>> = messageDao.getConversations()
 
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
-        messageDao.getMessagesWithPeer(peerPub)
+        kotlinx.coroutines.flow.flow {
+            messageDao.getMessagesWithPeer(peerPub).collect { list ->
+                // Check hyphen or groupChatDao to explicitly distinguish group threads from peer public keys
+                val isGroup = peerPub.contains("-") || db.groupChatDao().getGroupChatById(peerPub) != null
+                val decrypted = if (isGroup) {
+                    list.map { msg ->
+                        msg.copy(ciphertext = com.noslop.app.crypto.GroupMessageCrypto.decrypt(
+                            msg.ciphertext, msg.nonce, groupId = msg.chatWithPeerPub, msgId = msg.id
+                        ))
+                    }
+                } else {
+                    list
+                }
+                emit(decrypted)
+            }
+        }
 
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
         commentDao.getCommentsForPost(postId)
@@ -107,15 +1705,64 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun putAppSetting(key: String, value: String) { appSettingDao.insertSetting(AppSetting(key, value)) }
     suspend fun getAppSetting(key: String): String? { return appSettingDao.getSetting(key) }
     
+    suspend fun getAppLanguage(): String = appSettingDao.getSetting("app_language") ?: "en"
+    suspend fun setAppLanguage(lang: String) = appSettingDao.insertSetting(AppSetting("app_language", lang))
+    
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
+    suspend fun getIdentityVersion(): Int = identityRepository.getIdentityVersion()
+    suspend fun needsIdentityRecovery(): Boolean = identityRepository.needsIdentityRecovery()
+    suspend fun getWordCloudMnemonic(): String = identityRepository.getMnemonic() ?: ""
+    suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? = identityRepository.getBurnableIdentity()
+    suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys = identityRepository.generateBurnableIdentity()
+    suspend fun clearBurnableIdentity() {
+        val burnable = identityRepository.getBurnableIdentity()
+        if (burnable != null) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = CryptoService.encodeForSigning(burnable.publicKeyB64, timestamp.toString())
+            val sig = CryptoService.sign(payloadToSign, burnable.privateKeyB64)
+            val exitPacket = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = burnable.publicKeyB64,
+                type = "USER_EXIT",
+                payload = com.noslop.app.util.Json.gson.toJsonTree(com.noslop.app.mesh.UserExitPayload(burnable.publicKeyB64, timestamp, sig)),
+                signature = sig
+            )
+            com.noslop.app.mesh.GossipService.broadcast(exitPacket)
+        }
+        com.noslop.app.tor.TorService.unregisterBurnableHiddenService()
+        identityRepository.clearBurnableIdentity()
+        _identityUpdateFlow.emit(Unit)
+    }
+
+    /**
+     * Stores our onion address when it changed, and refreshes the identity flows. The ViewModel calls
+     * this on every start with the current address, which is also what gives `localKeys` its first value.
+     *
+     * It used to broadcast an untargeted USER_HANDSHAKE (6 hops) on every call, changed or not. Since
+     * C02/D07 every receiver rejects a handshake that doesn't name one of its identities ("Rejected
+     * USER_HANDSHAKE: targetUserId null is not a local identity"), and it wasn't signed in the v2 form
+     * receivers check either, so all it did was spend Tor circuits across the mesh right after each
+     * restart. Peers learn our onion address from the ANNOUNCE_PEER presence heartbeat.
+     */
     suspend fun updateOnionAddress(address: String) {
-        identityRepository.updateOnionAddress(address)
+        if (address.isNotBlank() && getLocalIdentity()?.onionAddress != address) {
+            identityRepository.updateOnionAddress(address)
+        }
         _identityUpdateFlow.emit(Unit)
     }
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         identityRepository.saveIdentity(handle, keys, mnemonic)
-        com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
+        com.noslop.app.mesh.GossipService.initialize(
+            peerDao, 
+            meshTransport, 
+            keys.publicKeyB64,
+            getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
+            checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) },
+            checkIsLocalUser = { pub -> isLocalUser(pub) }
+        )
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
         com.noslop.app.mesh.MediaManager.initialize(this)
         startPresenceHeartbeat()
         
@@ -160,13 +1807,78 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     val isUsingInsecureStorage = identityRepository.isUsingInsecureStorage
 
-    fun startPresenceHeartbeat() = meshSocialRepository.startPresenceHeartbeat()
+    suspend fun cleanupOrphanedGroupPeers(candidatePubs: Collection<String>, excludedGroupId: String? = null) = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity()
+        val burnable = getBurnableIdentity()
+        val otherGroups = db.groupChatDao().getAllGroupChatsList().filter { excludedGroupId == null || it.groupId != excludedGroupId }
+        val otherGroupMembers = otherGroups.flatMap {
+            try {
+                com.noslop.app.util.Json.gson.fromJson(it.membersJson, Array<String>::class.java).toList() + it.adminPublicKeyB64
+            } catch (_: Exception) { emptyList() }
+        }.toSet()
+
+        for (memberPub in candidatePubs) {
+            if (memberPub !in otherGroupMembers && memberPub != myKeys?.publicKeyB64 && memberPub != burnable?.publicKeyB64) {
+                val p = peerDao.getPeerByPublicKey(memberPub)
+                // D06: only plain group stubs are cleaned up — never a pending request in either direction.
+                if (p != null && p.relationship == PeerRelationship.NONE && !p.isDiscoverable) {
+                    peerDao.deletePeer(p)
+                    Logger.info("REPOSITORY", "Cleaned up non-contact group peer: ${p.handle}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Startup peer maintenance, run once when the presence heartbeat starts. Split out so the
+     * D01 regression test can run exactly this code deterministically.
+     */
+    internal suspend fun runStartupPeerMaintenance() {
+        try {
+            val allPeersList = peerDao.getAllPeersList()
+            for (p in allPeersList) {
+                // Upgrade placeholder handle 'Member' to distinguished handle to prevent key loss
+                if (p.handle == "Member") {
+                    peerDao.insertPeer(p.copy(handle = "Member_${p.publicKeyB64.take(6)}"))
+                }
+                // D01: the former "heal" block that promoted burnable-contact peers to trusted on
+                // every start was removed — it granted trust without consent. Trust now comes only
+                // from relationship == ACCEPTED (see PeerDao.insertPeer).
+            }
+            if (preferencesRepository.isNodeBanned(OFFICIAL_CREATOR_PUBKEY)) {
+                postDao.deletePostsByAuthor(OFFICIAL_CREATOR_PUBKEY)
+                val oldP = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
+                if (oldP != null) peerDao.deletePeer(oldP)
+            }
+        } catch (e: Exception) {
+            Logger.warn("REPOSITORY", "Startup peer maintenance failed: ${e.message}")
+        }
+    }
+
+    fun startPresenceHeartbeat() {
+        repositoryScope.launch(Dispatchers.IO) { runStartupPeerMaintenance() }
+        meshSocialRepository.startPresenceHeartbeat()
+    }
+
+    fun stopPresenceHeartbeat() = meshSocialRepository.stopPresenceHeartbeat()
 
     // --- Media / Notification / Foreground Settings (delegated to SettingsRepository) ---
     suspend fun getMediaSettings(): MediaSettings = settingsRepository.getMediaSettings()
 
     suspend fun updateMediaSettings(settings: MediaSettings) =
         settingsRepository.updateMediaSettings(settings)
+
+    suspend fun getMeshFilterSettings(): MeshFilterSettings =
+        settingsRepository.getMeshFilterSettings()
+
+    suspend fun updateMeshFilterSettings(settings: MeshFilterSettings) =
+        settingsRepository.updateMeshFilterSettings(settings)
+
+    suspend fun getFeedMixSettings(): FeedMixSettings =
+        settingsRepository.getFeedMixSettings()
+
+    suspend fun updateFeedMixSettings(settings: FeedMixSettings) =
+        settingsRepository.updateFeedMixSettings(settings)
 
     suspend fun getNotificationSettings(): NotificationSettings =
         settingsRepository.getNotificationSettings()
@@ -180,9 +1892,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         settingsRepository.setForegroundServiceEnabled(enabled)
 
     suspend fun initSendOnEnterSetting() = settingsRepository.initSendOnEnterSetting()
+    suspend fun initTorForClearnetSetting() = settingsRepository.initTorForClearnetSetting()
+    suspend fun initAutoUpdateSetting() = settingsRepository.initAutoUpdateSetting()
 
+    suspend fun setUseTorForClearnet(enabled: Boolean) = settingsRepository.setUseTorForClearnet(enabled)
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) = settingsRepository.setAutoUpdateEnabled(enabled)
     suspend fun setSendOnEnterEnabled(enabled: Boolean) =
         settingsRepository.setSendOnEnterEnabled(enabled)
+
+    suspend fun initBreakReminderSettings() = settingsRepository.initBreakReminderSettings()
+    suspend fun setBreakReminderEnabled(enabled: Boolean) = settingsRepository.setBreakReminderEnabled(enabled)
+    suspend fun setBreakReminderMode(mode: String) = settingsRepository.setBreakReminderMode(mode)
+    suspend fun setBreakReminderIntervalSlides(interval: Int) = settingsRepository.setBreakReminderIntervalSlides(interval)
+    suspend fun setBreakReminderIntervalMinutes(interval: Int) = settingsRepository.setBreakReminderIntervalMinutes(interval)
 
     // --- Feed Methods (delegated to FeedRepository) ---
     suspend fun insertSource(source: FeedSource) = feedRepository.insertSource(source)
@@ -199,33 +1921,196 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun updateSavedState(itemId: String, isSaved: Boolean) =
         feedRepository.updateSavedState(itemId, isSaved)
 
+    suspend fun getSavedFeedItemsList(): List<FeedItem> = withContext(Dispatchers.IO) {
+        db.feedDao().getSavedItemsList()
+    }
+
     // --- Engagement: viewed history & swipe tracking (delegated to EngagementRepository) ---
     // Thin pass-throughs preserving the repository's public API; logic lives in the extracted,
     // single-responsibility EngagementRepository (Stage 0.3).
 
-    suspend fun markAsViewed(itemId: String, itemType: String) =
-        engagementRepository.markAsViewed(itemId, itemType)
+    suspend fun markAsViewed(itemId: String, itemType: String, url: String? = null, canonicalKey: String? = null) =
+        engagementRepository.markAsViewed(itemId, itemType, url, canonicalKey)
+
+    suspend fun deleteFeedItemsByAuthor(author: String) =
+        feedRepository.deleteFeedItemsByAuthor(author)
 
     suspend fun getViewedItemIds(): Set<String> =
         engagementRepository.getViewedItemIds()
 
     val allViewedHistory: Flow<List<ViewedHistoryItem>> = engagementRepository.allViewedHistory
 
-    suspend fun recordSwipe(itemId: String) =
-        engagementRepository.recordSwipe(itemId)
+    suspend fun getAllViewedHistoryList(): List<ViewedHistoryItem> =
+        engagementRepository.getAllViewedHistoryList()
+
+    suspend fun recordSwipe(itemId: String, url: String? = null, canonicalKey: String? = null) =
+        engagementRepository.recordSwipe(itemId, url, canonicalKey)
 
     suspend fun getSwipeExcludedIds(): Set<String> =
         engagementRepository.getSwipeExcludedIds()
 
+    suspend fun clearAllHistory() = engagementRepository.clearAllHistory()
+
     // --- Feed pipeline & toggles (delegated to FeedRepository) ---
     suspend fun clearFeedData() = feedRepository.clearFeedData()
 
+    suspend fun ensureDefaultApiSourcesExist() = feedRepository.ensureDefaultApiSourcesExist()
+
+    suspend fun ensureDefaultDiscoverableNode() = withContext(Dispatchers.IO) {
+        // If the official node is banned by the user, do not re-seed it
+        if (preferencesRepository.isNodeBanned(OFFICIAL_CREATOR_PUBKEY)) {
+            return@withContext
+        }
+
+        // Clean up any placeholder peer from earlier development
+        val oldPlaceholder = peerDao.getPeerByPublicKey("official_noslop_creator_node_key")
+        if (oldPlaceholder != null) {
+            peerDao.deletePeer(oldPlaceholder)
+        }
+
+        val myKeys = getLocalIdentity()
+        val burnable = getBurnableIdentity()
+        // If this device IS the official creator node, do not seed as a peer
+        if (myKeys?.publicKeyB64 == OFFICIAL_CREATOR_PUBKEY || burnable?.publicKeyB64 == OFFICIAL_CREATOR_PUBKEY) {
+            return@withContext
+        }
+
+        val pubBytes = try {
+            android.util.Base64.decode(OFFICIAL_CREATOR_PUBKEY, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "noslop"
+
+        val existing = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
+        val officialDonationLink = "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+        if (existing == null) {
+            peerDao.insertPeer(
+                Peer(
+                    publicKeyB64 = OFFICIAL_CREATOR_PUBKEY,
+                    handle = "NoSlop",
+                    tripcode = tripcode,
+                    onionAddress = OFFICIAL_CREATOR_ONION,
+                    encPublicKeyB64 = OFFICIAL_CREATOR_ENC_PUBKEY,
+                    isTrusted = false,
+                    isDiscoverable = true,
+                    isCreator = true,
+                    fundMeLink = officialDonationLink,
+                    bio = "Official NoSlop Creator Node — The unfiltered pulse of the mesh.",
+                    lastSeenAt = System.currentTimeMillis()
+                )
+            )
+            Logger.info("REPOSITORY", "Seeded official NoSlop Creator Node ($tripcode) into discoverable peers")
+        } else if (!existing.isDiscoverable || existing.onionAddress != OFFICIAL_CREATOR_ONION || existing.encPublicKeyB64 != OFFICIAL_CREATOR_ENC_PUBKEY || existing.fundMeLink.isNullOrBlank()) {
+            peerDao.insertPeer(
+                existing.copy(
+                    onionAddress = OFFICIAL_CREATOR_ONION,
+                    encPublicKeyB64 = OFFICIAL_CREATOR_ENC_PUBKEY,
+                    isDiscoverable = true,
+                    isCreator = true,
+                    fundMeLink = existing.fundMeLink?.takeIf { it.isNotBlank() } ?: officialDonationLink
+                )
+            )
+        }
+    }
+
+    companion object {
+        /**
+         * R3: the identity this device is known by in a group, for anything it signs as a (non-admin)
+         * member: the burnable identity when that is the member key, else the main one. Before the
+         * group lists either (an invite we have not seen reflected yet), an open group uses the
+         * burnable identity, as sendGroupMessage does.
+         */
+        internal fun groupMemberIdentity(
+            members: List<String>,
+            allowMemberInvites: Boolean,
+            main: CryptoService.IdentityKeys,
+            burnable: CryptoService.IdentityKeys?
+        ): CryptoService.IdentityKeys = when {
+            burnable != null && members.contains(burnable.publicKeyB64) -> burnable
+            members.contains(main.publicKeyB64) -> main
+            burnable != null && allowMemberInvites -> burnable
+            else -> main
+        }
+
+        /**
+         * R3b: the identity a group message (and its attachment's origin) is sent as. "Friends only"
+         * uses the main key when it is a member; otherwise the member key (groupMemberIdentity).
+         */
+        internal fun groupSenderKeys(
+            members: List<String>,
+            allowMemberInvites: Boolean,
+            privacy: String,
+            main: CryptoService.IdentityKeys,
+            burnable: CryptoService.IdentityKeys?
+        ): CryptoService.IdentityKeys =
+            if (privacy == "friends" && members.contains(main.publicKeyB64)) main
+            else groupMemberIdentity(members, allowMemberInvites, main, burnable)
+
+        /**
+         * R3 (regression restore, register R7a): a member's signed self-removal. It must be signed with
+         * the same 13-field canonicalGroupUpdatePayload the receiver verifies (HandshakePacketHandler.
+         * resolveUpdateSigner). Since 7de5d96 the leave was signed as an 11-field encodeForSigning with
+         * "" for every absent field, so every member and the admin rejected it ("signature matches no
+         * current member") and the leaver stayed in everyone else's copy of the group.
+         */
+        internal fun groupLeavePayload(
+            groupId: String,
+            member: CryptoService.IdentityKeys,
+            timestamp: Long
+        ): com.noslop.app.mesh.GroupUpdatePayload {
+            val removed = listOf(member.publicKeyB64)
+            val toSign = com.noslop.app.mesh.canonicalGroupUpdatePayload(
+                groupId = groupId,
+                title = null,
+                signerPublicKeyB64 = member.publicKeyB64,
+                timestamp = timestamp,
+                sortedAdded = "",
+                sortedRemoved = removed.sorted().joinToString(","),
+                sortedBanned = com.noslop.app.mesh.encodeOptBanned(null),
+                description = null,
+                avatarB64 = null,
+                allowMemberInvites = null,
+                allowMemberSelfRemove = null,
+                sortedMemberDetails = com.noslop.app.mesh.canonicalMemberDetailsString(null),
+                sortedMemberHandles = com.noslop.app.mesh.canonicalMemberHandlesString(null)
+            )
+            return com.noslop.app.mesh.GroupUpdatePayload(
+                groupId = groupId,
+                removedMembers = removed,
+                timestamp = timestamp,
+                signature = CryptoService.sign(toSign, member.privateKeyB64)
+            )
+        }
+
+        const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEAK12RuYO4u9W6tuUc2Hr7ZkcYTuUs6QSR8P4ePGKKWXg="
+        const val OFFICIAL_CREATOR_ONION = "fnozdomdxc55lovw4uonq6x3mzdrqtxfftuqjepq7ypdyyuklf4i7cqd.onion"
+        const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAfFAMyI71qis42am7fyx0L8Th/giuitRXwFfSEmnX/Ws="
+
+        fun isPrivateLanAddress(ip: String?): Boolean {
+            if (ip.isNullOrBlank()) return false
+            return ip == "127.0.0.1" || ip == "localhost" ||
+                    ip.startsWith("192.168.") || ip.startsWith("10.") ||
+                    (ip.startsWith("172.") && (ip.substringAfter("172.").substringBefore(".").toIntOrNull() ?: 0) in 16..31)
+        }
+    }
+
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()
 
-    suspend fun refreshFeeds() = feedRepository.refreshFeeds()
+    suspend fun refreshFeeds(awaitCompletion: Boolean = false): FeedSyncResult = feedRepository.refreshFeeds(awaitCompletion)
+    suspend fun deleteYouTubeItems() = feedRepository.deleteYouTubeItems()
 
-    suspend fun searchCustomFeed(query: String, filterMode: String?) =
+    suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =
         feedRepository.searchCustomFeed(query, filterMode)
+
+    /** E5s: one page of a search from the search modal (see FeedRepository.searchCustomFeedPage). */
+    suspend fun searchCustomFeedPage(
+        query: String,
+        filterMode: String?,
+        cursor: com.noslop.app.feeds.PublicApiService.SearchCursor,
+        firstPage: Boolean
+    ): List<String> = feedRepository.searchCustomFeedPage(query, filterMode, cursor, firstPage)
+
+    fun searchHasMorePages(filterMode: String?, cursor: com.noslop.app.feeds.PublicApiService.SearchCursor): Boolean =
+        feedRepository.searchHasMorePages(filterMode, cursor)
 
     // --- User Preferences for API Pipeline (delegated to PreferencesRepository) ---
     // These thin pass-throughs preserve the repository's public API while the persistence logic
@@ -279,12 +2164,132 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun getUserProfile(): UserProfile =
         preferencesRepository.getUserProfile()
 
+    /** D04: the creator identity's own profile; the empty profile (handle "Creator") until set. */
+    suspend fun getCreatorProfile(): UserProfile =
+        preferencesRepository.getCreatorProfile()
+
+    /**
+     * D04: stores the creator profile and tells the creator identity's contacts (IDENTITY_UPDATE signed
+     * by the creator key; GossipService sends it to creator contacts only).
+     */
+    suspend fun saveCreatorProfile(profile: UserProfile) {
+        preferencesRepository.saveCreatorProfile(profile)
+        _identityUpdateFlow.emit(Unit)
+        meshSocialRepository.broadcastCreatorIdentityUpdate()
+    }
+
+    /** D04: a burned creator identity starts with an empty profile, so nothing links old and new. */
+    suspend fun clearCreatorProfile() = preferencesRepository.clearCreatorProfile()
+
+    /** D10d: the profile the secondary identity goes by (Studio fields in creator mode, else the personal ones). */
+    suspend fun secondaryIdentityProfile(): ResolvedProfile = resolveSecondaryProfile(
+        isCreatorNode = getAppSetting(CREATOR_MODE_KEY) == "true",
+        creatorProfile = getCreatorProfile(),
+        personalProfile = getUserProfile(),
+        personalHandle = getLocalHandle()
+    )
+
+    /** D10d: the checks a burnable identity from a backup or creator identity file must pass (null: none failed). */
+    internal fun burnableIdentityProblem(bObj: org.json.JSONObject): String? = try {
+        identityRepository.burnableIdentityProblem(bObj, "noslop_probe_${System.currentTimeMillis()}")
+    } catch (e: Exception) {
+        e.message ?: "Malformed identity"
+    }
+
+    /**
+     * D10e: forgets the contacts bound to the creator identity (contact_identity = burnable), except
+     * [keep]. Called after the creator identity is burned or replaced (and its USER_EXIT sent): those
+     * contacts knew the old identity, and with the binding left in place the new identity would talk to
+     * them and link the two. Their content is cleared later by the orphaned-content purge. Returns how
+     * many were forgotten.
+     */
+    suspend fun dropCreatorContacts(keep: Set<String> = emptySet()): Int {
+        var dropped = 0
+        for (peer in peerDao.getAllPeersList()) {
+            if (peer.publicKeyB64 in keep) continue
+            if (appSettingDao.getSetting("contact_identity_${peer.publicKeyB64}") != "burnable") continue
+            peerDao.deletePeer(peer)
+            appSettingDao.removeSetting("contact_identity_${peer.publicKeyB64}")
+            dropped++
+        }
+        if (dropped > 0) Logger.info("REPOSITORY", "Forgot $dropped contact(s) of the previous creator identity")
+        return dropped
+    }
+
+    /** D10d: installs a creator identity from a creator identity file (CreatorIdentityArchive). */
+    suspend fun restoreBurnableIdentity(bObj: org.json.JSONObject): IdentityRestoreResult =
+        identityRepository.restoreBurnableIdentity(bObj).also {
+            if (it is IdentityRestoreResult.Success) _identityUpdateFlow.emit(Unit)
+        }
+
+    /** D04: the handle that goes with one of our own keys (creator handle for the creator key). */
+    suspend fun ownHandleFor(publicKeyB64: String): String =
+        identityRouter.forKey(publicKeyB64)?.handle ?: getLocalHandle()
+
+    suspend fun saveBannedChannels(channels: List<String>) =
+        preferencesRepository.saveBannedChannels(channels)
+
+    suspend fun getBannedChannels(): List<String> =
+        preferencesRepository.getBannedChannels()
+
+    suspend fun banChannel(channelName: String) =
+        preferencesRepository.banChannel(channelName)
+
+    suspend fun unbanChannel(channelName: String) =
+        preferencesRepository.unbanChannel(channelName)
+
+    suspend fun getBannedNodes(): List<PreferencesRepository.BannedNode> = preferencesRepository.getBannedNodes()
+    suspend fun banNode(publicKeyB64: String, handle: String) {
+        preferencesRepository.banNode(publicKeyB64, handle)
+        deletePeer(publicKeyB64, notifyRemote = false)
+    }
+    suspend fun unbanNode(publicKeyB64: String) {
+        preferencesRepository.unbanNode(publicKeyB64)
+        if (publicKeyB64 == OFFICIAL_CREATOR_PUBKEY) {
+            ensureDefaultDiscoverableNode()
+        }
+    }
+    suspend fun isNodeBanned(publicKeyB64: String): Boolean = preferencesRepository.isNodeBanned(publicKeyB64)
+
+    suspend fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) =
+        preferencesRepository.saveChannelCutoffSettings(enabled, year, month)
+
+    suspend fun getChannelCutoffSettings(): Triple<Boolean, Int, Int> =
+        preferencesRepository.getChannelCutoffSettings()
+
     suspend fun factoryReset() = withContext(Dispatchers.IO) {
-        // Clear all database tables
+        // 1. Delete all media files and cache from disk
+        com.noslop.app.mesh.MediaManager.deleteAllMediaFiles()
+
+        // 2. Clear all database tables
         db.clearAllTables()
         
-        // Clear EncryptedSharedPreferences (identity, onboarding flag, etc.)
+        // 3. Clear EncryptedSharedPreferences (identity, onboarding flag, etc.)
         identityRepository.clearAll()
+
+        // 4. Clear API keys and system preferences
+        try {
+            val apiPrefFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_api_keys.xml")
+            if (apiPrefFile.exists()) apiPrefFile.delete()
+            val sysPrefFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_system.xml")
+            if (sysPrefFile.exists()) sysPrefFile.delete()
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn(TAG, "Reset: could not delete the API key or system preferences: ${e.message}")
+        }
+
+        // 5. Unregister Tor hidden services
+        try {
+            com.noslop.app.tor.TorService.unregisterHiddenServices()
+            com.noslop.app.tor.TorService.unregisterBurnableHiddenService()
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn(TAG, "Reset: could not unregister the hidden services: ${e.message}")
+        }
+
+        // 6. Reset in-memory states
+        com.noslop.app.mesh.GossipService.resetAllState()
+        meshSocialRepository.clearOutbox()
+        com.noslop.app.ui.PreloadManager.evictAll()
+        com.noslop.app.ui.components.PlaybackPositionStore.clearAll()
         
         setOnboardingComplete(false)
         _identityUpdateFlow.emit(Unit)
@@ -305,6 +2310,21 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // --- Social Mesh & Direct Messages Routing ---
     suspend fun deleteMeshPost(postId: String): Boolean = meshSocialRepository.deleteMeshPost(postId)
 
+    suspend fun editMeshPost(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String = "public"
+    ): Boolean = meshSocialRepository.editMeshPost(postId, newContent, mediaMetadata, privacy)
+
+    /** D10c: an edit that moves our post to our other identity (MeshSocialRepository.identityMoveFor). */
+    suspend fun moveMeshPostToOtherIdentity(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String
+    ): MeshPost? = meshSocialRepository.moveMeshPostToOtherIdentity(postId, newContent, mediaMetadata, privacy)
+
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
@@ -318,8 +2338,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, clearnetMediaType, postIdOverride
     )
 
-    suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 
-        meshPacketHandler.handleIncomingPacket(packet)
+    suspend fun handleIncomingPacket(
+        packet: com.noslop.app.mesh.NetworkPacket,
+        reply: com.noslop.app.mesh.ReplyChannel? = null
+    ): Boolean = meshPacketHandler.handleIncomingPacket(packet, reply)
 
     suspend fun setIncomingRequest(peer: Peer) = meshSocialRepository.setIncomingRequest(peer)
     fun setHandshakeAccepted(peer: Peer) = meshSocialRepository.setHandshakeAccepted(peer)
@@ -331,20 +2353,247 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
-        encPublicKeyB64: String = ""
-    ): Boolean = meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64)
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false,
+        intro: String = ContactIntro.NETWORK,
+        shareMainIdentity: Boolean = false
+    ): Boolean {
+        if (useBurnableIdentity && getBurnableIdentity() == null) {
+            val newBurnable = generateBurnableIdentity()
+            val mainIdentity = getLocalIdentity()
+            if (mainIdentity != null) {
+                com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, newBurnable.privateKeyB64)
+            }
+            var waitCount = 0
+            while (com.noslop.app.tor.TorService.currentBurnableOnionAddress == null && waitCount < 10) {
+                kotlinx.coroutines.delay(500)
+                waitCount++
+            }
+        }
+        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity)
+    }
 
-    suspend fun acceptConnectionRequest(peer: Peer): Boolean =
-        meshSocialRepository.acceptConnectionRequest(peer)
+    /**
+     * D10b: [confirmedByUser] is true only when the user tapped Accept on a screen that showed the
+     * requester's name.tag and check code (the request dialog, the notification card, the contact
+     * card). If that request was signed as coming from a camera scan of our QR code, the contact is
+     * marked verified in person, provided the keys are still the ones the user was shown ([peer]).
+     * Creator auto-accept and crossing requests pass false and never verify anyone.
+     */
+    suspend fun acceptConnectionRequest(
+        peer: Peer,
+        replyVia: com.noslop.app.mesh.ReplyChannel? = null,
+        confirmedByUser: Boolean = false
+    ): Boolean {
+        val before = peerDao.getPeerByPublicKey(peer.publicKeyB64)
+        val cameFromScan = before?.relationship == PeerRelationship.INCOMING_PENDING && requestCameFromScan(peer.publicKeyB64)
+        val accepted = meshSocialRepository.acceptConnectionRequest(peer, replyVia)
+        if (accepted && confirmedByUser && cameFromScan) {
+            val shown = safetyFingerprintOf(peer)
+            val current = peerDao.getPeerByPublicKey(peer.publicKeyB64)?.let { safetyFingerprintOf(it) }
+            if (current != null && current == shown) {
+                peerDao.setVerifiedFingerprint(peer.publicKeyB64, current)
+                Logger.info("PEER_TRUST", "Contact ${peer.publicKeyB64.take(8)} verified in person (scanned our QR code; approved by the user)")
+            }
+        }
+        return accepted
+    }
+
+    /** Round A2: answers a still-polling request we already declined, on the requester's connection. */
+    suspend fun answerDeclinedRequest(addressedIdentity: String, peerPub: String, reply: com.noslop.app.mesh.ReplyChannel): Boolean =
+        meshSocialRepository.answerDeclinedRequest(addressedIdentity, peerPub, reply)
+
+    /** Round A2: the re-signed CONNECTION_REQUEST the requester sends while its request is pending. */
+    internal suspend fun buildPendingRequestProbe(peerPub: String): com.noslop.app.mesh.NetworkPacket? =
+        meshSocialRepository.buildPendingRequestProbe(peerPub)
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.rejectConnectionRequest(peer)
 
-    suspend fun togglePeerTrust(peer: Peer) = meshSocialRepository.togglePeerTrust(peer)
+    suspend fun cancelOutgoingRequest(publicKeyB64: String): Boolean = meshSocialRepository.cancelOutgoingRequest(publicKeyB64)
 
-    suspend fun deletePeer(publicKeyB64: String) = meshSocialRepository.deletePeer(publicKeyB64)
+    /** D07: true when this peer was last seen speaking the pre-v0.7.0 handshake protocol. */
+    suspend fun isPeerOnLegacyProtocol(publicKeyB64: String): Boolean =
+        appSettingDao.getSetting("peer_legacy_protocol_$publicKeyB64") != null
+
+    /**
+     * D10: a contact's safety fingerprint as this device knows it (their Ed25519 key and the X25519
+     * key we encrypt to); null until an encryption key is known.
+     */
+    fun safetyFingerprintOf(peer: Peer): String? =
+        com.noslop.app.crypto.CryptoService.deriveSafetyFingerprint(peer.publicKeyB64, peer.encPublicKeyB64)
+
+    /** D10b: whether the pending request from [publicKeyB64] was signed as coming from a camera scan of our QR. */
+    suspend fun requestCameFromScan(publicKeyB64: String): Boolean =
+        appSettingDao.getSetting("request_intro_$publicKeyB64") == ContactIntro.QR_CAMERA
+
+    /**
+     * D10b: a contact's encryption key changed (and was applied, see HandshakePacketHandler). The
+     * chat shows a one-line notice until the user dismisses it.
+     */
+    suspend fun recordKeyChange(publicKeyB64: String) {
+        appSettingDao.insertSetting(AppSetting("key_changed_at_$publicKeyB64", System.currentTimeMillis().toString()))
+        Logger.warn("PEER_TRUST", "Encryption key of ${publicKeyB64.take(8)} changed; applied, in-person verification reset")
+    }
+
+    /** D10b: when the contact's key last changed, while the notice has not been dismissed. */
+    suspend fun keyChangedAt(publicKeyB64: String): Long? =
+        appSettingDao.getSetting("key_changed_at_$publicKeyB64")?.toLongOrNull()
+
+    suspend fun dismissKeyChangeNotice(publicKeyB64: String) {
+        appSettingDao.removeSetting("key_changed_at_$publicKeyB64")
+    }
+
+    private val tagMigrationMutex = kotlinx.coroutines.sync.Mutex()
+
+    /** D10b: the raw or X.509-wrapped Ed25519 key bytes of a stored identity key, or null (e.g. "admin_…" rows). */
+    private fun identityKeyBytes(publicKeyB64: String): ByteArray? = try {
+        android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT).takeIf { it.size == 32 || it.size == 44 }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * D10b, once per install (setting `identity_tags_v2_done`; [force] is for tests). Started by the
+     * ViewModel at app start and safe to call again:
+     *  * applies encryption keys still held in pendingEncKey from D10 (each gets the chat notice),
+     *  * gives every stored contact and every stored post author the 8-character tag, and removes a
+     *    stale tag from the end of their handle (contacts: current or legacy tag; posts: legacy tag),
+     *  * reloads both of our own identities, which rewrites their stored tags and display name.
+     * If it fails it runs again on the next start.
+     */
+    suspend fun migrateIdentityTagsV2(force: Boolean = false) = withContext(Dispatchers.IO) {
+        tagMigrationMutex.withLock {
+            if (!force && appSettingDao.getSetting("identity_tags_v2_done") == "true") return@withLock
+            var keysApplied = 0
+            var contacts = 0
+            var authors = 0
+            for (p in peerDao.getAllPeersList()) {
+                val held = p.pendingEncKey
+                if (!held.isNullOrBlank() && p.relationship == PeerRelationship.ACCEPTED) {
+                    if (peerDao.applyEncKeyChange(p.publicKeyB64, held) > 0) {
+                        recordKeyChange(p.publicKeyB64)
+                        keysApplied++
+                    }
+                }
+                val bytes = identityKeyBytes(p.publicKeyB64) ?: continue
+                val tag = try { CryptoService.deriveTripcode(bytes) } catch (_: Exception) { continue }
+                val handle = CryptoService.stripIdentityTag(p.handle, bytes)
+                if (tag != p.tripcode || handle != p.handle) {
+                    peerDao.updateTagAndHandle(p.publicKeyB64, tag, handle)
+                    contacts++
+                }
+            }
+            val writable = db.openHelper.writableDatabase
+            for (author in postDao.getAllPostsList().map { it.authorPublicKeyB64 }.distinct()) {
+                val bytes = identityKeyBytes(author) ?: continue
+                val tag = try { CryptoService.deriveTripcode(bytes) } catch (_: Exception) { continue }
+                val legacySuffix = ".${CryptoService.deriveLegacyTripcode(bytes)}"
+                writable.execSQL(
+                    "UPDATE mesh_posts SET authorTripcode = ? WHERE authorPublicKeyB64 = ? AND authorTripcode != ?",
+                    arrayOf<Any?>(tag, author, tag)
+                )
+                writable.execSQL(
+                    "UPDATE mesh_posts SET authorHandle = substr(authorHandle, 1, length(authorHandle) - ?) " +
+                        "WHERE authorPublicKeyB64 = ? AND length(authorHandle) > ? AND substr(authorHandle, -?) = ?",
+                    arrayOf<Any?>(legacySuffix.length, author, legacySuffix.length, legacySuffix.length, legacySuffix)
+                )
+                authors++
+            }
+            identityRepository.loadIdentity()
+            identityRepository.getBurnableIdentity()
+            appSettingDao.insertSetting(AppSetting("identity_tags_v2_done", "true"))
+            Logger.info(TAG, "Identity tag migration done: $keysApplied held key(s) applied, $contacts contact(s) and $authors post author(s) updated")
+        }
+    }
+
+    /**
+     * D08/D10: whether a mesh post's media can be checked against what its author signed.
+     * True when the post has no mesh media, is our own, or its stored signature verifies in the
+     * v2 (C17) form over a digest recorded for that media. A digest that is only cached on the
+     * owner rows (for example hashed from a local file by [mediaDigestFor]) counts only when the
+     * author's signature covers it.
+     */
+    suspend fun isMeshPostMediaVerified(post: MeshPost): Boolean {
+        val mediaId = MediaOwner.mediaIdFromUrl(post.mediaUrl) ?: return true
+        val mine = setOfNotNull(getLocalIdentity()?.publicKeyB64, getBurnableIdentity()?.publicKeyB64)
+        if (post.authorPublicKeyB64 in mine) return true
+        val candidates = (listOfNotNull(postDao.getRecordedMediaDigest(MediaOwner.TYPE_POST, post.id)) +
+            mediaOwnerDao.getOwners(mediaId).mapNotNull { it.sha256 }).distinct()
+        return candidates.any { digest ->
+            val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
+                post.privacy, mediaId, post.clearnetUrl, digest
+            )
+            com.noslop.app.crypto.CryptoService.verify(payload, post.signature, post.authorPublicKeyB64)
+        }
+    }
+
+    suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = meshSocialRepository.deletePeer(publicKeyB64, notifyRemote)
+    suspend fun deleteNotificationsBySender(senderPub: String) = db.notificationDao().deleteNotificationsBySender(senderPub)
+    suspend fun purgeOrphanedPeerContent() = meshSocialRepository.purgeOrphanedPeerContent()
+
+    suspend fun shareDiscoverableNodesWith(peer: Peer) = meshSocialRepository.shareDiscoverableNodesWith(peer)
+
+    suspend fun requestDmSync(peer: Peer) = meshSocialRepository.requestDmSync(peer)
+    suspend fun requestAllPeersDmSync() = meshSocialRepository.requestAllPeersDmSync()
+    fun flushOutboxForPeer(peerPub: String, onionAddress: String, force: Boolean = false) =
+        meshSocialRepository.flushOutboxForPeer(peerPub, onionAddress, force)
+    suspend fun retryFailedDirectMessage(msgId: String): Boolean = meshSocialRepository.retryFailedDirectMessage(msgId)
+
+    suspend fun reissueLocalPostsWithCanonicalSignatures() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val burnableKeys = getBurnableIdentity()
+        val allLocalPosts = postDao.getAllPostsList()
+        for (post in allLocalPosts) {
+            if (post.isOrphaned) continue // V08: Never reissue or overwrite tombstones
+            val signingKey = when (post.authorPublicKeyB64) {
+                myKeys.publicKeyB64 -> myKeys
+                burnableKeys?.publicKeyB64 -> burnableKeys
+                else -> null
+            } ?: continue
+
+            val rawMediaId = post.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }
+            val canonicalPayload = CryptoService.encodeForSigning(
+                post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
+                post.privacy, rawMediaId, post.clearnetUrl
+            )
+            // R2: a C17 v2 signature (canonical fields + media SHA-256) is current, not legacy. Re-signing
+            // it as 8-field silently stripped the media integrity binding on every Tor start.
+            val digest = if (rawMediaId != null) mediaDigestFor(rawMediaId) else null
+            val v2Payload = digest?.let {
+                CryptoService.encodeForSigning(
+                    post.id, post.authorPublicKeyB64, post.content, post.timestamp.toString(), post.authorAvatarB64,
+                    post.privacy, rawMediaId, post.clearnetUrl, it
+                )
+            }
+            if (v2Payload != null && CryptoService.verify(v2Payload, post.signature, post.authorPublicKeyB64)) continue
+            if (!CryptoService.verify(canonicalPayload, post.signature, post.authorPublicKeyB64)) {
+                val newSig = CryptoService.sign(v2Payload ?: canonicalPayload, signingKey.privateKeyB64)
+                // V08: Transactional compare-and-update on exact signature and timestamp read
+                val rows = postDao.updateSignatureIfUnchanged(
+                    id = post.id,
+                    authorId = post.authorPublicKeyB64,
+                    oldSignature = post.signature,
+                    expectedTimestamp = post.timestamp,
+                    newSignature = newSig
+                )
+                if (rows > 0) {
+                    Logger.info("REPOSITORY", "Re-issued canonical signature for local authored post ${post.id}")
+                }
+            }
+        }
+    }
+
+    suspend fun onTorReady() = withContext(Dispatchers.IO) {
+        Logger.info("REPOSITORY", "Tor is READY: Triggering high-priority DM catchup and peer heartbeat")
+        reissueLocalPostsWithCanonicalSignatures()
+        meshSocialRepository.requestAllPeersDmSync()
+        startPresenceHeartbeat()
+    }
 
     suspend fun requestInventorySync(peer: Peer) = meshSocialRepository.requestInventorySync(peer)
+    suspend fun requestAllPeersInventorySync() = meshSocialRepository.requestAllPeersInventorySync()
 
     suspend fun markNotificationAsRead(id: String) = withContext(Dispatchers.IO) {
         db.notificationDao().markAsRead(id)
@@ -362,6 +2611,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.notificationDao().deleteNotification(id)
     }
 
+    suspend fun deleteGroupInviteNotifications(groupId: String) = withContext(Dispatchers.IO) {
+        db.notificationDao().deleteGroupInviteNotifications(groupId)
+    }
+
+    suspend fun onDmAckReceived(msgId: String, senderPub: String) =
+        meshSocialRepository.onDmAckReceived(msgId, senderPub)
+
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
@@ -378,6 +2634,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = meshSocialRepository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata)
 
+    suspend fun editComment(commentId: String, newContent: String): Boolean =
+        meshSocialRepository.editComment(commentId, newContent)
+
+    suspend fun deleteComment(commentId: String): Boolean =
+        meshSocialRepository.deleteComment(commentId)
+
     suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean =
         meshSocialRepository.reactToMeshPost(postId, reactionType)
 
@@ -386,11 +2648,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun reactToFeedItem(item: FeedItem) = meshSocialRepository.reactToFeedItem(item)
 
+    suspend fun getReactedAnchorIds(): Set<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val reactionIds = db.reactionDao().getAllReactionsList().map { it.postId }.toSet()
+        val voteIds = db.voteDao().getAllVotedPostIds().toSet()
+        (reactionIds + voteIds).toSet()
+    }
+
     suspend fun reactToFeedItemWithType(item: FeedItem, reactionType: String): Boolean =
         meshSocialRepository.reactToFeedItemWithType(item, reactionType)
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean =
         meshSocialRepository.reactToChat(messageId, reactionType, recipientPubB64)
+
+    suspend fun reactToGroupChat(messageId: String, reactionType: String, groupId: String): Boolean =
+        meshSocialRepository.reactToGroupChat(messageId, reactionType, groupId)
 
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean =
         meshSocialRepository.reactToComment(commentId, reactionType)
@@ -412,4 +2683,76 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
      * ANNOUNCE_PEER staleness timeout.
      */
     fun broadcastUserExitAsync() = meshSocialRepository.broadcastUserExitAsync()
+
+    suspend fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
+        meshSocialRepository.deleteDirectMessages(messageIds, peerPubB64)
+    }
+
+    suspend fun clearChat(peerPubB64: String) {
+        meshSocialRepository.clearChat(peerPubB64)
+    }
+
+    suspend fun clearGroupChat(groupId: String) {
+        messageDao.deleteGroupMessages(groupId)
+        triggerDmSync()
+    }
+
+    suspend fun deleteGroupMessages(messageIds: List<String>, groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val burnableKeys = getBurnableIdentity()
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64 || (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64)
+        val adminKeys = if (burnableKeys != null && group.adminPublicKeyB64 == burnableKeys.publicKeyB64) burnableKeys else myKeys
+
+        val memberPubs: List<String> = try {
+            com.noslop.app.util.Json.gson.fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        for (messageId in messageIds) {
+            val msg = messageDao.getMessageById(messageId) ?: continue
+            val isMyMsg = msg.senderPub == myKeys.publicKeyB64 || (burnableKeys != null && msg.senderPub == burnableKeys.publicKeyB64)
+            val canDelete = isMyMsg || isAdmin
+
+            if (!canDelete) {
+                Logger.info("REPOSITORY", "Skipping delete of message $messageId: not owner and not admin")
+                continue
+            }
+
+            val signingKey = if (isAdmin && !isMyMsg) adminKeys else if (burnableKeys != null && msg.senderPub == burnableKeys.publicKeyB64) burnableKeys else myKeys
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, signingKey.publicKeyB64, timestamp.toString())
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
+
+            val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
+                messageId = messageId,
+                authorId = signingKey.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature,
+                groupId = groupId
+            )
+
+            // Delete locally
+            messageDao.deleteMessageById(messageId)
+
+            // Broadcast to all group members
+            for (memberPub in memberPubs) {
+                if (memberPub == signingKey.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
+                val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
+                if (peer.onionAddress.isNotBlank()) {
+                    val packet = com.noslop.app.mesh.NetworkPacket(
+                        id = "del_${messageId}_${memberPub}",
+                        hops = 3,
+                        senderId = signingKey.publicKeyB64,
+                        targetUserId = memberPub,
+                        type = "DELETE_MESSAGE",
+                        payload = com.noslop.app.util.Json.gson.toJsonTree(deletePay),
+                        signature = signature
+                    )
+                    meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
+                }
+            }
+            kotlinx.coroutines.delay(150L)
+        }
+        triggerDmSync()
+    }
 }

@@ -1,0 +1,1 @@
+In this folder we clone the repositories of all other related projects for easy reference when implementing features.

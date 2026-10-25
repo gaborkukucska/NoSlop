@@ -165,6 +165,317 @@ class WireProtocolTest {
         assertNull(restored.payload)
     }
 
+    /** C09 (round E2): the envelope signature fields use snake_case keys and round-trip. */
+    @Test
+    fun envelopeFields_roundTrip_withSnakeCaseKeys() {
+        val p = NetworkPacket(senderId = "s", type = "POST", envV = 1, envTs = 1_700_000_000_000L, envSig = "c2ln")
+        val obj = JsonParser.parseString(p.toJson()).asJsonObject
+        assertTrue(obj.has("env_v"))
+        assertTrue(obj.has("env_ts"))
+        assertTrue(obj.has("env_sig"))
+        val restored = NetworkPacket.fromJson(p.toJson())
+        assertEquals(1, restored.envV)
+        assertEquals(1_700_000_000_000L, restored.envTs)
+        assertEquals("c2ln", restored.envSig)
+        assertNull("absent when not set", NetworkPacket.fromJson(NetworkPacket(senderId = "s", type = "POST").toJson()).envSig)
+    }
+
+    @Test
+    fun groupQueryPayload_roundTrips() {
+        val query = GroupQueryPayload(groupId = "grp-1", requesterId = "req-123", timestamp = 1700000000000L)
+        val packet = NetworkPacket(
+            senderId = "req-123",
+            type = "GROUP_QUERY",
+            payload = gson.toJsonTree(query)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupQueryPayload()
+        assertNotNull(extracted)
+        assertEquals("grp-1", extracted?.groupId)
+        assertEquals("req-123", extracted?.requesterId)
+    }
+
+    @Test
+    fun groupSyncPayload_roundTrips() {
+        val sync = GroupSyncPayload(groupChatJson = "{\"title\":\"Mesh Devs\"}", timestamp = 1700000000000L, signature = "sig-abc")
+        val packet = NetworkPacket(
+            senderId = "admin-1",
+            type = "GROUP_SYNC",
+            payload = gson.toJsonTree(sync)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupSyncPayload()
+        assertNotNull(extracted)
+        assertEquals("{\"title\":\"Mesh Devs\"}", extracted?.groupChatJson)
+        assertEquals("sig-abc", extracted?.signature)
+    }
+
+    @Test
+    fun editCommentPayload_roundTrips() {
+        val edit = EditCommentPayload(
+            postId = "post-1",
+            commentId = "comm-1",
+            authorId = "author-xyz",
+            authorAvatarB64 = "b64avatar",
+            content = "Updated comment content",
+            timestamp = 1700000000000L,
+            signature = "sig-123"
+        )
+        val packet = NetworkPacket(
+            senderId = "author-xyz",
+            type = "EDIT_COMMENT",
+            payload = gson.toJsonTree(edit)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getEditCommentPayload()
+        assertNotNull(extracted)
+        assertEquals("post-1", extracted?.postId)
+        assertEquals("comm-1", extracted?.commentId)
+        assertEquals("author-xyz", extracted?.authorId)
+        assertEquals("b64avatar", extracted?.authorAvatarB64)
+        assertEquals("Updated comment content", extracted?.content)
+        assertEquals("sig-123", extracted?.signature)
+
+        val json = gson.toJson(edit)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("post_id"))
+        assertTrue(obj.has("comment_id"))
+        assertTrue(obj.has("author_id"))
+        assertTrue(obj.has("author_avatar_b64"))
+    }
+
+    @Test
+    fun deleteCommentPayload_roundTrips() {
+        val del = DeleteCommentPayload(
+            postId = "post-1",
+            commentId = "comm-1",
+            authorId = "author-xyz",
+            timestamp = 1700000000000L,
+            signature = "sig-del"
+        )
+        val packet = NetworkPacket(
+            senderId = "author-xyz",
+            type = "DELETE_COMMENT",
+            payload = gson.toJsonTree(del)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getDeleteCommentPayload()
+        assertNotNull(extracted)
+        assertEquals("post-1", extracted?.postId)
+        assertEquals("comm-1", extracted?.commentId)
+        assertEquals("author-xyz", extracted?.authorId)
+        assertEquals("sig-del", extracted?.signature)
+
+        val json = gson.toJson(del)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("post_id"))
+        assertTrue(obj.has("comment_id"))
+        assertTrue(obj.has("author_id"))
+    }
+
+    @Test
+    fun editPostPayload_roundTrips() {
+        val edit = EditPostPayload(
+            postId = "post-1",
+            authorId = "author-xyz",
+            authorAvatarB64 = "b64avatar",
+            content = "Updated post content",
+            timestamp = 1700000000000L,
+            signature = "sig-edit-123",
+            mediaId = "media-456",
+            mediaMetadata = MediaMetadata(
+                id = "media-456",
+                type = "image",
+                mimeType = "image/jpeg",
+                size = 1024,
+                chunkCount = 1
+            ),
+            privacy = "friends",
+            clearnetUrl = "https://example.com/story"
+        )
+        val packet = NetworkPacket(
+            senderId = "author-xyz",
+            type = "EDIT_POST",
+            payload = gson.toJsonTree(edit)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getEditPostPayload()
+        assertNotNull(extracted)
+        assertEquals("post-1", extracted?.postId)
+        assertEquals("author-xyz", extracted?.authorId)
+        assertEquals("b64avatar", extracted?.authorAvatarB64)
+        assertEquals("Updated post content", extracted?.content)
+        assertEquals("sig-edit-123", extracted?.signature)
+        assertEquals("media-456", extracted?.mediaId)
+        assertEquals("friends", extracted?.privacy)
+        assertEquals("https://example.com/story", extracted?.clearnetUrl)
+
+        val json = gson.toJson(edit)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("post_id"))
+        assertTrue(obj.has("author_id"))
+        assertTrue(obj.has("clearnet_url"))
+    }
+
+    @Test
+    fun groupInvitePayload_roundTrips() {
+        val invite = GroupInvitePayload(
+            groupId = "grp-123",
+            title = "Test Group",
+            adminPublicKeyB64 = "admin-pub-key",
+            members = listOf("admin-pub-key", "alice-pub-key"),
+            avatarB64 = "b64avatar",
+            description = "Group description",
+            allowMemberInvites = true,
+            allowMemberSelfRemove = true,
+            timestamp = 1700000000000L,
+            signature = "sig-invite",
+            adminOnion = "admin.onion",
+            adminEncPublicKey = "admin-enc-pub"
+        )
+        val packet = NetworkPacket(
+            senderId = "admin-pub-key",
+            type = "GROUP_INVITE",
+            payload = gson.toJsonTree(invite)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupInvitePayload()
+        assertNotNull(extracted)
+        assertEquals("grp-123", extracted?.groupId)
+        assertEquals("Test Group", extracted?.title)
+        assertEquals("admin-pub-key", extracted?.adminPublicKeyB64)
+        assertEquals(listOf("admin-pub-key", "alice-pub-key"), extracted?.members)
+        assertEquals("admin.onion", extracted?.adminOnion)
+        assertEquals("admin-enc-pub", extracted?.adminEncPublicKey)
+        assertEquals(true, extracted?.allowMemberInvites)
+        assertEquals(true, extracted?.allowMemberSelfRemove)
+        assertEquals("sig-invite", extracted?.signature)
+
+        val json = gson.toJson(invite)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("group_id"))
+        assertTrue(obj.has("admin_public_key"))
+        assertTrue(obj.has("admin_onion"))
+        assertTrue(obj.has("admin_enc_public_key"))
+        assertTrue(obj.has("allow_member_invites"))
+        assertTrue(obj.has("allow_member_self_remove"))
+    }
+
+    @Test
+    fun groupUpdatePayload_roundTrips() {
+        val update = GroupUpdatePayload(
+            groupId = "grp-123",
+            title = "New Title",
+            addedMembers = listOf("bob-pub-key"),
+            removedMembers = listOf("charlie-pub-key"),
+            bannedMembers = listOf("mallory-pub-key"),
+            allowMemberInvites = false,
+            allowMemberSelfRemove = true,
+            timestamp = 1700000005000L,
+            signature = "sig-update"
+        )
+        val packet = NetworkPacket(
+            senderId = "admin-pub-key",
+            type = "GROUP_UPDATE",
+            payload = gson.toJsonTree(update)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupUpdatePayload()
+        assertNotNull(extracted)
+        assertEquals("grp-123", extracted?.groupId)
+        assertEquals("New Title", extracted?.title)
+        assertEquals(listOf("bob-pub-key"), extracted?.addedMembers)
+        assertEquals(listOf("removed_members"), listOf("removed_members").also { assertEquals(listOf("charlie-pub-key"), extracted?.removedMembers) })
+        assertEquals(listOf("mallory-pub-key"), extracted?.bannedMembers)
+        assertEquals(false, extracted?.allowMemberInvites)
+        assertEquals(true, extracted?.allowMemberSelfRemove)
+        assertEquals("sig-update", extracted?.signature)
+
+        val json = gson.toJson(update)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("group_id"))
+        assertTrue(obj.has("added_members"))
+        assertTrue(obj.has("removed_members"))
+        assertTrue(obj.has("banned_members"))
+        assertTrue(obj.has("allow_member_invites"))
+        assertTrue(obj.has("allow_member_self_remove"))
+    }
+
+    @Test
+    fun dmAckPayload_roundTrips() {
+        val ack = DmAckPayload(
+            msgId = "msg-ack-test-1",
+            nonce = "dGVzdC1ub25jZQ==",
+            ciphertext = "dGVzdC1jaXBoZXJ0ZXh0",
+            timestamp = 1700000000000L,
+            v = 2
+        )
+        val packet = NetworkPacket(
+            id = "packet-ack-1",
+            hops = 3,
+            senderId = "sender-pub-key",
+            targetUserId = "target-pub-key",
+            type = "DM_ACK",
+            payload = gson.toJsonTree(ack)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getDmAckPayload()
+        assertNotNull(extracted)
+        assertEquals("msg-ack-test-1", extracted?.msgId)
+        assertEquals("dGVzdC1ub25jZQ==", extracted?.nonce)
+        assertEquals("dGVzdC1jaXBoZXJ0ZXh0", extracted?.ciphertext)
+        assertEquals(2, extracted?.v)
+
+        val json = gson.toJson(ack)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("msg_id"))
+        assertTrue(obj.has("nonce"))
+        assertTrue(obj.has("ciphertext"))
+    }
+
+    @Test
+    fun groupDeletePayload_roundTrips() {
+        val delete = GroupDeletePayload(
+            groupId = "grp-123",
+            adminPublicKeyB64 = "admin-pub-key",
+            timestamp = 1700000010000L,
+            signature = "sig-del"
+        )
+        val packet = NetworkPacket(
+            senderId = "admin-pub-key",
+            type = "GROUP_DELETE",
+            payload = gson.toJsonTree(delete)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupDeletePayload()
+        assertNotNull(extracted)
+        assertEquals("grp-123", extracted?.groupId)
+        assertEquals("admin-pub-key", extracted?.adminPublicKeyB64)
+        assertEquals("sig-del", extracted?.signature)
+
+        val json = gson.toJson(delete)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("group_id"))
+        assertTrue(obj.has("admin_public_key"))
+    }
+
+    @Test
+    fun followPayload_roundTrips() {
+        val follow = FollowPayload(
+            followedPublicKeyB64 = "node-target",
+            followerPublicKeyB64 = "node-follower",
+            timestamp = 1700000000000L,
+            signature = "sig-follow",
+            action = "follow"
+        )
+        val packet = NetworkPacket(
+            senderId = "node-follower",
+            type = "FOLLOW",
+            payload = gson.toJsonTree(follow)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getFollowPayload()
+        assertNotNull(extracted)
+        assertEquals("node-target", extracted?.followedPublicKeyB64)
+        assertEquals("node-follower", extracted?.followerPublicKeyB64)
+        assertEquals("follow", extracted?.action)
+
+        val json = gson.toJson(follow)
+        val obj = JsonParser.parseString(json).asJsonObject
+        assertTrue(obj.has("followed_public_key"))
+        assertTrue(obj.has("follower_public_key"))
+    }
+
     private fun samplePost() = PostPayload(
         id = "post-1",
         authorId = "author-1",

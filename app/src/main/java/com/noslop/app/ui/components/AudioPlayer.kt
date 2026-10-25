@@ -21,9 +21,22 @@ import com.noslop.app.ui.PreloadManager
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun AudioPlayer(url: String, isVisible: Boolean = true) {
+fun AudioPlayer(
+    url: String,
+    isVisible: Boolean = true,
+    stableKey: String? = null,
+    // Called each time playback actually starts, like VideoPlayer's onPlaybackStarted; mesh audio posts
+    // use it to count as seen.
+    onPlaybackStarted: (() -> Unit)? = null
+) {
+    val actualKey = stableKey ?: url
+    val currentOnPlaybackStarted by rememberUpdatedState(onPlaybackStarted)
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
+    // --- NOSLOP_MEDIA_PEERS_V1 ---
+    // STATE_BUFFERING was logged but never surfaced, so a track that was still
+    // loading looked identical to one sitting paused.
+    var isBuffering by remember(url) { mutableStateOf(true) }
     var progress by remember { mutableStateOf(0f) }
     var duration by remember { mutableStateOf(0L) }
     var currentPos by remember { mutableStateOf(0L) }
@@ -35,12 +48,13 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
         if (isVisible) {
             hasError = false
             
-            val preloaded = PreloadManager.claim(url)
+            val preloaded = PreloadManager.claim(actualKey, url) ?: PreloadManager.claim(url, url)
             val player = if (preloaded != null) {
                 preloaded.apply {
                     playWhenReady = true
-                    val resumeMs = PlaybackPositionStore.resumePositionFor(url)
-                    if (resumeMs > 0L) {
+                    val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)
+                    // Ignore micro-seeks under 8s to prevent destroying preloaded audio buffer over Tor
+                    if (resumeMs >= 8000L && Math.abs(currentPosition - resumeMs) > 3000L) {
                         Logger.info("AUDIO", "Resuming preloaded audio at ${resumeMs}ms: $url")
                         seekTo(resumeMs)
                     }
@@ -52,6 +66,9 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                         override fun onIsPlayingChanged(playing: Boolean) {
                             Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
                             isPlaying = playing
+                            // --- NOSLOP_AUDIO_SPINNER_V1 --- audio is audibly flowing; never show a spinner
+                            if (playing) isBuffering = false
+                            if (playing) currentOnPlaybackStarted?.invoke()
                         }
                         override fun onPlaybackStateChanged(state: Int) {
                             val stateStr = when(state) {
@@ -62,6 +79,8 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                                 else -> "UNKNOWN"
                             }
                             Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                            // --- NOSLOP_AUDIO_SPINNER_V1 --- the preloaded branch was missed first time round
+                            isBuffering = state == androidx.media3.common.Player.STATE_BUFFERING
                             if (state == androidx.media3.common.Player.STATE_READY) {
                                 duration = this@apply.duration
                             }
@@ -73,22 +92,33 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                     }
                 }
             } else {
-                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
+                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.activeClearnetClient)
                 
                 val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
                     .setUsage(androidx.media3.common.C.USAGE_MEDIA)
                     .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build()
                     
+                val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                        10000, // min buffer (10s)
+                        30000, // max buffer (30s)
+                        500,   // buffer for playback (0.5s)
+                        4000   // buffer for playback after rebuffer (4s)
+                    )
+                    .setPrioritizeTimeOverSizeThresholds(true)
+                    .build()
+
                 androidx.media3.exoplayer.ExoPlayer.Builder(context)
                     .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+                    .setLoadControl(loadControl)
                     .setAudioAttributes(audioAttributes, true)
                     .build().apply {
                         val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
                         setMediaItem(mediaItem)
                         volume = 1f
-                        val resumeMs = PlaybackPositionStore.resumePositionFor(url)
-                        if (resumeMs > 0L) {
+                        val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)
+                        if (resumeMs >= 8000L) {
                             Logger.info("AUDIO", "Resuming audio at ${resumeMs}ms: $url")
                             seekTo(resumeMs)
                         }
@@ -104,6 +134,9 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                             override fun onIsPlayingChanged(playing: Boolean) {
                                 Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
                                 isPlaying = playing
+                                // --- NOSLOP_AUDIO_SPINNER_V1 --- audio is audibly flowing; never show a spinner
+                                if (playing) isBuffering = false
+                                if (playing) currentOnPlaybackStarted?.invoke()
                             }
                             override fun onPlaybackStateChanged(state: Int) {
                                 val stateStr = when(state) {
@@ -114,6 +147,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                                     else -> "UNKNOWN"
                                 }
                                 Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                                isBuffering = state == androidx.media3.common.Player.STATE_BUFFERING
                                 if (state == androidx.media3.common.Player.STATE_READY) {
                                     duration = this@apply.duration
                                 }
@@ -124,6 +158,13 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                 
             exoPlayer = player
             isPlaying = player.isPlaying
+            // --- NOSLOP_AUDIO_SPINNER_V1 ---
+            // The decisive fix. A claimed preloaded player has usually reached
+            // STATE_READY while still sitting in the preload cache, before the
+            // UI attaches its listener. onPlaybackStateChanged only fires on a
+            // CHANGE, so no callback ever arrives and the listener alone can
+            // never clear the initial `true`. Seed from the real state instead.
+            isBuffering = player.playbackState == androidx.media3.common.Player.STATE_BUFFERING
             if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
                 duration = player.duration
             }
@@ -134,7 +175,10 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             
             onDispose {
                 try {
-                    PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+                    val pos = player.currentPosition
+                    if (pos >= 8000L) {
+                        PlaybackPositionStore.save(actualKey, pos, player.duration)
+                    }
                 } catch (e: Exception) {
                     Logger.warn("AUDIO", "Failed to save playback position for $url: ${e.message}")
                 }
@@ -174,7 +218,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                 if (ticksSinceSave >= 25) {
                     ticksSinceSave = 0
                     try {
-                        PlaybackPositionStore.save(url, currentPos, duration)
+                        PlaybackPositionStore.save(actualKey, currentPos, duration)
                     } catch (e: Exception) { /* player may be mid-release; ignore */ }
                 }
                 kotlinx.coroutines.delay(200)
@@ -189,16 +233,27 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        IconButton(
-            onClick = { exoPlayer?.let { if (isPlaying) it.pause() else it.play() } },
-            modifier = Modifier.size(80.dp).background(AccentGreen, CircleShape)
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = null,
-                tint = PrimaryBlack,
-                modifier = Modifier.size(48.dp)
-            )
+        // --- NOSLOP_MEDIA_PEERS_V1 ---
+        // Progress ring around the play button while the track buffers.
+        Box(contentAlignment = Alignment.Center) {
+            if (isBuffering && !hasError) {
+                CircularProgressIndicator(
+                    color = AccentGreen,
+                    modifier = Modifier.size(96.dp),
+                    strokeWidth = 3.dp
+                )
+            }
+            IconButton(
+                onClick = { exoPlayer?.let { if (isPlaying) it.pause() else it.play() } },
+                modifier = Modifier.size(80.dp).background(AccentGreen, CircleShape)
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = PrimaryBlack,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(32.dp))

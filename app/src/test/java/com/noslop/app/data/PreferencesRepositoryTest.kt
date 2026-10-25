@@ -70,8 +70,8 @@ class PreferencesRepositoryTest {
     }
 
     @Test
-    fun negativeKeywords_emptyWhenUnset() = runBlocking {
-        assertTrue(repo.getUserNegativeKeywords().isEmpty())
+    fun negativeKeywords_defaultWhenUnset() = runBlocking {
+        assertEquals(listOf("advertisement", "ad", "advert", "commercial", "best deal", "coupon", "promo code"), repo.getUserNegativeKeywords())
     }
 
     @Test

@@ -1,5 +1,8 @@
+// FILE: app/src/main/java/com/noslop/app/ui/QRScanScreen.kt
 @file:kotlin.OptIn(com.google.accompanist.permissions.ExperimentalPermissionsApi::class)
 package com.noslop.app.ui
+
+import com.noslop.app.util.tr
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -23,11 +26,18 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -37,13 +47,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.gson.Gson
-import com.google.mlkit.vision.barcode.BarcodeScannerOptions
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.common.InputImage
 import com.noslop.app.debug.Logger
 import com.noslop.app.ui.theme.*
 import java.util.concurrent.ExecutorService
@@ -59,7 +68,9 @@ data class QRScannedPeer(
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun QRScanScreen(
-    onPeerScannedAndAccepted: (handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String) -> Unit,
+    onPeerScannedAndAccepted: (handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String, intro: String) -> Unit,
+    dmStep: Int = 4,
+    viewModel: com.noslop.app.ui.NoSlopViewModel? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -68,9 +79,12 @@ fun QRScanScreen(
     var scannedRawData by remember { mutableStateOf<String?>(null) }
     var parsedPeer by remember { mutableStateOf<QRScannedPeer?>(null) }
     var showConfirmDialog by remember { mutableStateOf(false) }
+    // D10b: where the identity came from (camera, picture or paste); only a camera scan verifies.
+    var scanSource by remember { mutableStateOf(com.noslop.app.data.ContactIntro.QR_CAMERA) }
     
     var showManualEntry by remember { mutableStateOf(false) }
     var manualEntryText by remember { mutableStateOf("") }
+    var galleryRect by remember { mutableStateOf(Rect.Zero) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -78,9 +92,10 @@ fun QRScanScreen(
         if (uri != null && scannedRawData == null) {
             decodeQrFromUri(context, uri) { result ->
                 if (result != null) {
+                    scanSource = com.noslop.app.data.ContactIntro.QR_IMAGE
                     scannedRawData = result
                 } else {
-                    Toast.makeText(context, "No QR code found in this image", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("No QR code found in this image"), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -90,15 +105,35 @@ fun QRScanScreen(
         val raw = scannedRawData
         if (raw != null) {
             try {
-                val peer = Gson().fromJson(raw, QRScannedPeer::class.java)
+                // First, check if it's a HAI-Net Hub Web Login QR code
+                try {
+                    val authJson = org.json.JSONObject(raw)
+                    if (authJson.optString("type") == "hainet_auth") {
+                        val sessionId = authJson.optString("session")
+                        val ip = authJson.optString("ip")
+                        
+                        if (sessionId.isNotBlank() && ip.isNotBlank()) {
+                            viewModel?.handleQrLogin(sessionId, ip)
+                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Authenticating with Hub..."), Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                            return@LaunchedEffect
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Not a JSON object or not a login QR, fall through to peer parsing
+                }
+
+                val peer = com.noslop.app.util.Json.gson.fromJson(raw, QRScannedPeer::class.java)
                 if (peer.handle.isNotBlank() && peer.publicKey.isNotBlank() && peer.onionAddress.isNotBlank()) {
                     parsedPeer = peer
                     showConfirmDialog = true
                 } else {
+                    Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Invalid QR Code format"), Toast.LENGTH_SHORT).show()
                     scannedRawData = null
                 }
             } catch (e: Exception) {
                 Logger.warn("QR_SCAN", "Scanned raw data is not a valid peer payload: $raw")
+                Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Invalid QR Code format"), Toast.LENGTH_SHORT).show()
                 scannedRawData = null
             }
         }
@@ -128,7 +163,7 @@ fun QRScanScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Scan Mesh Peer",
+                        text = "Scan Mesh Peer".tr,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextLight
@@ -137,7 +172,7 @@ fun QRScanScreen(
                         onClick = onDismiss,
                         modifier = Modifier.background(SurfaceDark, RoundedCornerShape(12.dp))
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = AccentGreen)
+                        Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = AccentGreen)
                     }
                 }
 
@@ -154,6 +189,7 @@ fun QRScanScreen(
                             CameraScanPreview(
                                 onBarcodeDetected = { barcode ->
                                     if (scannedRawData == null) {
+                                        scanSource = com.noslop.app.data.ContactIntro.QR_CAMERA
                                         scannedRawData = barcode
                                     }
                                 }
@@ -172,7 +208,7 @@ fun QRScanScreen(
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text(
-                                        text = "Center the peer's QR code in the grid",
+                                        text = "Center the peer's QR code in the grid".tr,
                                         color = AccentGreen,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
@@ -183,6 +219,7 @@ fun QRScanScreen(
                                     
                                     Spacer(modifier = Modifier.height(24.dp))
                                     
+
                                     // Bottom Controls Row (Padded beneath the grid to guarantee visibility)
                                     Row(
                                         modifier = Modifier
@@ -191,15 +228,18 @@ fun QRScanScreen(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Button(
-                                            onClick = { imagePickerLauncher.launch("image/*") },
-                                            modifier = Modifier.weight(1f).height(50.dp),
+                                            onClick = { 
+                                                if (dmStep == 3) viewModel?.advanceDmTutorial()
+                                                imagePickerLauncher.launch("image/*") 
+                                            },
+                                            modifier = Modifier.weight(1f).height(50.dp).onGloballyPositioned { galleryRect = it.boundsInRoot() },
                                             colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
                                             border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
                                             Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Gallery", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("Gallery".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         }
                                         
                                         Button(
@@ -211,7 +251,7 @@ fun QRScanScreen(
                                         ) {
                                             Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Paste Raw", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("Paste Raw".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         }
                                     }
                                 }
@@ -231,10 +271,10 @@ fun QRScanScreen(
                     ) {
                         Icon(Icons.Default.CameraAlt, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Camera Permission Required", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextLight)
+                        Text("Camera Permission Required".tr, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextLight)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "NoSlop needs access to the camera to scan contact node QR codes and initiate handshakes.",
+                            text = "NoSlop needs access to the camera to scan contact node QR codes and initiate handshakes.".tr,
                             style = MaterialTheme.typography.bodyMedium, color = TextMuted, textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(24.dp))
@@ -242,19 +282,22 @@ fun QRScanScreen(
                             onClick = { cameraPermissionState.launchPermissionRequest() },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                         ) {
-                            Text("Grant Access", fontWeight = FontWeight.Bold)
+                            Text("Grant Access".tr, fontWeight = FontWeight.Bold)
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
-                                onClick = { imagePickerLauncher.launch("image/*") },
-                                modifier = Modifier.weight(1f),
+                                onClick = { 
+                                    if (dmStep == 3) viewModel?.advanceDmTutorial()
+                                    imagePickerLauncher.launch("image/*") 
+                                },
+                                modifier = Modifier.weight(1f).onGloballyPositioned { galleryRect = it.boundsInRoot() },
                                 border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
                             ) {
-                                Text("Gallery", fontWeight = FontWeight.Bold)
+                                Text("Gallery".tr, fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
                                 onClick = { showManualEntry = true },
@@ -262,7 +305,7 @@ fun QRScanScreen(
                                 border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
                             ) {
-                                Text("Paste", fontWeight = FontWeight.Bold)
+                                Text("Paste".tr, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -274,13 +317,13 @@ fun QRScanScreen(
                 AlertDialog(
                     onDismissRequest = { showManualEntry = false },
                     containerColor = SurfaceDark,
-                    title = { Text("Paste Identity String", color = TextLight, fontWeight = FontWeight.Bold) },
+                    title = { Text("Paste Identity String".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                     text = {
                         OutlinedTextField(
                             value = manualEntryText,
                             onValueChange = { manualEntryText = it },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-                            placeholder = { Text("Paste the raw JSON identity payload here...", color = TextMuted) },
+                            placeholder = { Text("Paste the raw JSON identity payload here...".tr, color = TextMuted) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = TextLight,
                                 unfocusedTextColor = TextLight,
@@ -291,18 +334,19 @@ fun QRScanScreen(
                     confirmButton = {
                         Button(
                             onClick = {
+                                scanSource = com.noslop.app.data.ContactIntro.PASTED
                                 scannedRawData = manualEntryText
                                 showManualEntry = false
                                 manualEntryText = ""
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                         ) {
-                            Text("Process", fontWeight = FontWeight.Bold)
+                            Text("Process".tr, fontWeight = FontWeight.Bold)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { showManualEntry = false }) {
-                            Text("Cancel", color = TextMuted)
+                            Text("Cancel".tr, color = TextMuted)
                         }
                     }
                 )
@@ -317,106 +361,428 @@ fun QRScanScreen(
                         },
                         properties = DialogProperties(dismissOnClickOutside = false),
                         containerColor = SurfaceDark,
-                        title = { Text("Send Connection Request?", color = TextLight, fontWeight = FontWeight.Bold) },
+                        title = { Text("Send Connection Request?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                         text = {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                Text("Handle: ${peer.handle}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+                                ScannedPeerChecks(peer = peer, source = scanSource, viewModel = viewModel)
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("ONION ADDRESS:", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                Text(peer.onionAddress, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                                Text("ONION ADDRESS:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                Text(if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("PUBLIC KEY:", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                Text(peer.publicKey.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                                Text("PUBLIC KEY:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                Text(if (peer.publicKey.length > 8) peer.publicKey.take(8) + "..." else peer.publicKey, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Sending a request will notify the peer. If they accept, you will establish a secure E2EE mesh connection.", style = MaterialTheme.typography.bodySmall, color = TextMuted, modifier = Modifier.padding(top = 12.dp))
+                                Text("Sending a request will notify the peer. If they accept, you will establish a secure E2EE mesh connection.".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted, modifier = Modifier.padding(top = 12.dp))
                             }
                         },
                         confirmButton = {
                             Button(
                                 onClick = {
-                                    onPeerScannedAndAccepted(peer.handle, peer.publicKey, peer.onionAddress, peer.encPublicKey ?: "")
-                                    Toast.makeText(context, "Connection request sent!", Toast.LENGTH_LONG).show()
+                                    onPeerScannedAndAccepted(peer.handle, peer.publicKey, peer.onionAddress, peer.encPublicKey ?: "", scanSource)
+                                    Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent!"), Toast.LENGTH_LONG).show()
                                     showConfirmDialog = false
                                     onDismiss()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                             ) {
-                                Text("Send Request", fontWeight = FontWeight.Bold)
+                                Text("Send Request".tr, fontWeight = FontWeight.Bold)
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = {
                                 scannedRawData = null
                                 showConfirmDialog = false
-                            }) { Text("Reject", color = DestructiveRed) }
+                            }) { Text("Reject".tr, color = DestructiveRed) }
                         }
                     )
                 }
             }
         }
+
+        if (dmStep == 3) {
+            com.noslop.app.ui.tabs.TutorialSpotlight(
+                targetRect = galleryRect, 
+                text = "4. Scan with camera or select from Gallery".tr, 
+                onClickTarget = { 
+                    viewModel?.advanceDmTutorial()
+                    imagePickerLauncher.launch("image/*") 
+                }
+            )
+        }
     }
 }
 
 private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> Unit) {
-    try {
-        val inputImage = InputImage.fromFilePath(context, uri)
-        val scanner = BarcodeScanning.getClient()
-        scanner.process(inputImage)
-            .addOnSuccessListener { barcodes ->
-                onResult(barcodes.firstOrNull()?.rawValue)
+    com.noslop.app.util.AppScopes.io.launch {
+        try {
+            val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+                    decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = true
+                    // R5: a full-resolution camera photo is ~12-50 MP; keep the longest side within
+                    // MAX_GALLERY_QR_SIDE so decoding stays fast and cannot run out of memory.
+                    val w = info.size.width
+                    val h = info.size.height
+                    val longest = maxOf(w, h)
+                    if (longest > MAX_GALLERY_QR_SIDE) {
+                        val scale = MAX_GALLERY_QR_SIDE.toFloat() / longest
+                        decoder.setTargetSize((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1))
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
             }
-            .addOnFailureListener {
-                onResult(null)
+
+            if (bitmap == null) {
+                Logger.warn("QR_SCAN", "Gallery image could not be decoded as a bitmap")
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+                return@launch
             }
-    } catch (e: Exception) {
-        onResult(null)
+
+            val intArray = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            val text = decodeQrFromArgb(intArray, bitmap.width, bitmap.height)
+            Logger.info("QR_SCAN", "Gallery image ${bitmap.width}x${bitmap.height}: ${if (text != null) "QR code detected (${text.length} chars)" else "no QR code found"}")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(text) }
+        } catch (e: Exception) {
+            Logger.warn("QR_SCAN", "Gallery image decode failed: ${e.javaClass.simpleName}: ${e.message}")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+        }
     }
 }
 
-@SuppressLint("UnrememberedMutableState")
+/** R5: longest side a gallery image is decoded at. */
+private const val MAX_GALLERY_QR_SIDE = 2048
+
+/**
+ * R5: decodes a QR code from an image picked from the gallery (ARGB pixels). Pure, so it is unit tested.
+ *
+ * The gallery path used to make one attempt: full-size RGB, no TRY_HARDER, no inverted pass, and
+ * transparent pixels read as black. So a light-on-dark code, a PNG with a transparent background, or a
+ * small code in a large photo all came back as "No QR code found in this image". This tries, in order:
+ * the image composited over white and (when it has transparency) over black; at full size and then at
+ * halved sizes; each with the hybrid and the global-histogram binarizer, normal and inverted.
+ */
+internal fun decodeQrFromArgb(pixels: IntArray, width: Int, height: Int): String? {
+    if (width <= 0 || height <= 0 || pixels.size < width * height) return null
+    val reader = com.google.zxing.MultiFormatReader().apply {
+        setHints(
+            mapOf(
+                com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+                com.google.zxing.DecodeHintType.TRY_HARDER to true
+            )
+        )
+    }
+    val hasTransparency = pixels.any { (it ushr 24) != 0xFF }
+    val backgrounds = if (hasTransparency) intArrayOf(255, 0) else intArrayOf(255)
+    for (background in backgrounds) {
+        var lum = argbToLuminance(pixels, width, height, background)
+        var w = width
+        var h = height
+        while (true) {
+            decodeQrLuminance(lum, w, h, reader)?.let { return it }
+            decodeQrLuminanceGlobal(lum, w, h, reader)?.let { return it }
+            if (minOf(w, h) < 400) break
+            val halved = halveLuminance(lum, w, h)
+            lum = halved
+            w /= 2
+            h /= 2
+        }
+    }
+    return null
+}
+
+/** ARGB to 8-bit luminance, composited over a [background] grey level (255 = white). */
+internal fun argbToLuminance(pixels: IntArray, width: Int, height: Int, background: Int): ByteArray {
+    val out = ByteArray(width * height)
+    for (i in 0 until width * height) {
+        val p = pixels[i]
+        val a = p ushr 24
+        val r = (p shr 16) and 0xFF
+        val g = (p shr 8) and 0xFF
+        val b = p and 0xFF
+        val lum = (r * 299 + g * 587 + b * 114) / 1000
+        out[i] = ((lum * a + background * (255 - a)) / 255).toByte()
+    }
+    return out
+}
+
+/** 2x2 box-average downscale of a luminance plane (odd last row/column dropped). */
+internal fun halveLuminance(lum: ByteArray, width: Int, height: Int): ByteArray {
+    val w = width / 2
+    val h = height / 2
+    val out = ByteArray(w * h)
+    for (y in 0 until h) {
+        val r0 = (2 * y) * width
+        val r1 = r0 + width
+        for (x in 0 until w) {
+            val x0 = 2 * x
+            val sum = (lum[r0 + x0].toInt() and 0xFF) + (lum[r0 + x0 + 1].toInt() and 0xFF) +
+                (lum[r1 + x0].toInt() and 0xFF) + (lum[r1 + x0 + 1].toInt() and 0xFF)
+            out[y * w + x] = (sum / 4).toByte()
+        }
+    }
+    return out
+}
+
+/** Like [decodeQrLuminance], with ZXing's global-histogram binarizer (better on smooth, high-contrast images). */
+internal fun decodeQrLuminanceGlobal(
+    luminance: ByteArray,
+    width: Int,
+    height: Int,
+    reader: com.google.zxing.MultiFormatReader
+): String? {
+    val source = com.google.zxing.PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
+    for (candidate in listOf(source, source.invert())) {
+        try {
+            return reader.decodeWithState(com.google.zxing.BinaryBitmap(com.google.zxing.common.GlobalHistogramBinarizer(candidate))).text
+        } catch (_: com.google.zxing.ReaderException) {
+        } finally {
+            reader.reset()
+        }
+    }
+    return null
+}
+
+/**
+ * Decodes one camera frame's luminance (Y) plane with ZXing. Pure function so it can be unit tested.
+ *
+ * The Y plane is commonly row-padded (rowStride > width) and may have a pixelStride > 1. ZXing's
+ * PlanarYUVLuminanceSource needs a tightly packed width x height array, so the plane is repacked
+ * first; passing the padded buffer with dataWidth = width shears the image and nothing decodes.
+ */
+internal fun packLuminancePlane(
+    plane: java.nio.ByteBuffer,
+    width: Int,
+    height: Int,
+    rowStride: Int,
+    pixelStride: Int
+): ByteArray {
+    val out = ByteArray(width * height)
+    val buffer = plane.duplicate()
+    buffer.rewind()
+    if (pixelStride == 1 && rowStride == width && buffer.remaining() >= out.size) {
+        buffer.get(out, 0, out.size)
+        return out
+    }
+    val row = ByteArray(rowStride.coerceAtLeast(width * pixelStride))
+    for (y in 0 until height) {
+        val rowStart = y * rowStride
+        if (rowStart >= buffer.limit()) break
+        buffer.position(rowStart)
+        val len = minOf(row.size, buffer.remaining())
+        buffer.get(row, 0, len)
+        val outRow = y * width
+        if (pixelStride == 1) {
+            System.arraycopy(row, 0, out, outRow, minOf(width, len))
+        } else {
+            var x = 0
+            while (x < width && x * pixelStride < len) {
+                out[outRow + x] = row[x * pixelStride]
+                x++
+            }
+        }
+    }
+    return out
+}
+
+internal fun decodeQrLuminance(
+    luminance: ByteArray,
+    width: Int,
+    height: Int,
+    reader: com.google.zxing.MultiFormatReader
+): String? {
+    val source = com.google.zxing.PlanarYUVLuminanceSource(luminance, width, height, 0, 0, width, height, false)
+    return try {
+        reader.decodeWithState(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))).text
+    } catch (_: com.google.zxing.NotFoundException) {
+        // Inverted (light-on-dark) codes: try once more on the inverted source.
+        try {
+            reader.reset()
+            reader.decodeWithState(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source.invert()))).text
+        } catch (_: com.google.zxing.ReaderException) {
+            null
+        }
+    } catch (_: com.google.zxing.ReaderException) {
+        null
+    } finally {
+        reader.reset()
+    }
+}
+
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 @Composable
 fun CameraScanPreview(onBarcodeDetected: (String) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
     val previewView = remember { PreviewView(context) }
+    // The analyzer outlives recompositions; always call the latest callback.
+    val latestOnDetected by rememberUpdatedState(onBarcodeDetected)
+    val cameraProviderRef = remember { java.util.concurrent.atomic.AtomicReference<ProcessCameraProvider?>(null) }
 
-    DisposableEffect(Unit) { onDispose { cameraExecutor.shutdown() } }
-
-    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize()) { view ->
+    // Bind the camera ONCE per composition lifetime. (Binding inside AndroidView's update block
+    // re-ran on every recomposition — the scanner's animation recomposes continuously — so the
+    // camera was torn down and rebound constantly and no frame was ever analysed to completion.)
+    DisposableEffect(lifecycleOwner) {
+        val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+        // After a hit, pause decoding briefly so one QR produces one callback, not one per frame.
+        val pausedUntil = java.util.concurrent.atomic.AtomicLong(0L)
+        val loggedFormat = java.util.concurrent.atomic.AtomicBoolean(false)
+        var lastErrorLogAt = 0L
+        val reader = com.google.zxing.MultiFormatReader().apply {
+            setHints(
+                mapOf(
+                    com.google.zxing.DecodeHintType.POSSIBLE_FORMATS to listOf(com.google.zxing.BarcodeFormat.QR_CODE),
+                    com.google.zxing.DecodeHintType.TRY_HARDER to true
+                )
+            )
+        }
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
-            val barcodeScanner = BarcodeScanning.getClient()
-            
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-
-            imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                val mediaImage = imageProxy.image
-                if (mediaImage != null) {
-                    val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                    barcodeScanner.process(inputImage)
-                        .addOnSuccessListener { barcodes ->
-                            for (barcode in barcodes) {
-                                barcode.rawValue?.let { value -> onBarcodeDetected(value) }
-                            }
-                        }
-                        .addOnFailureListener { }
-                        .addOnCompleteListener { imageProxy.close() }
-                } else {
-                    imageProxy.close()
-                }
-            }
-
             try {
+                val cameraProvider = cameraProviderFuture.get()
+                cameraProviderRef.set(cameraProvider)
+                val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                    .build()
+
+                imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                    try {
+                        if (System.currentTimeMillis() < pausedUntil.get()) return@setAnalyzer
+                        val plane = imageProxy.planes[0]
+                        val width = imageProxy.width
+                        val height = imageProxy.height
+                        if (loggedFormat.compareAndSet(false, true)) {
+                            Logger.info("QR_SCAN", "Camera frames: ${width}x$height rowStride=${plane.rowStride} pixelStride=${plane.pixelStride} rotation=${imageProxy.imageInfo.rotationDegrees}")
+                        }
+                        val luminance = packLuminancePlane(plane.buffer, width, height, plane.rowStride, plane.pixelStride)
+                        val text = decodeQrLuminance(luminance, width, height, reader)
+                        if (!text.isNullOrBlank()) {
+                            // Rejected payloads (invalid QR) can be re-scanned after the pause.
+                            pausedUntil.set(System.currentTimeMillis() + 2_000L)
+                            Logger.info("QR_SCAN", "QR code detected (${text.length} chars)")
+                            ContextCompat.getMainExecutor(context).execute { latestOnDetected(text) }
+                        }
+                    } catch (e: Exception) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastErrorLogAt > 5_000L) {
+                            lastErrorLogAt = now
+                            Logger.warn("QR_SCAN", "Frame analysis failed: ${e.javaClass.simpleName}: ${e.message}")
+                        }
+                    } finally {
+                        imageProxy.close()
+                    }
+                }
+
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis)
+                Logger.info("QR_SCAN", "Camera bound for QR scanning")
             } catch (e: Exception) {
                 Logger.error("QR_SCAN", "Failed to bind camera use cases: ${e.message}")
             }
         }, ContextCompat.getMainExecutor(context))
+
+        onDispose {
+            try { cameraProviderRef.get()?.unbindAll() } catch (_: Exception) {}
+            cameraExecutor.shutdown()
+        }
+    }
+
+    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+}
+
+/**
+ * D10b: what the user checks before sending a request to a scanned identity: the name with the tag
+ * derived from the key (never the tag written in the code), the check code to compare with the other
+ * person's own ID card, where the code came from, and warnings for an edited tag or a familiar name.
+ */
+@Composable
+internal fun ScannedPeerChecks(peer: QRScannedPeer, source: String, viewModel: com.noslop.app.ui.NoSlopViewModel?) {
+    val derivedTag by produceState<String?>(initialValue = null, peer.publicKey) {
+        value = withContext(kotlinx.coroutines.Dispatchers.Default) { com.noslop.app.crypto.CryptoService.tripcodeOfKey(peer.publicKey) }
+    }
+    val writtenTag = remember(peer.handle) {
+        Regex("""\.([a-z2-7]{8}|[a-z2-7]{6})$""").find(peer.handle.trim())?.groupValues?.get(1)
+    }
+    val tagMismatch by produceState(initialValue = false, peer.publicKey, writtenTag) {
+        val tag = writtenTag
+        value = tag != null && withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val bytes = try { android.util.Base64.decode(peer.publicKey, android.util.Base64.DEFAULT) } catch (_: Exception) { null }
+            bytes == null || !com.noslop.app.crypto.CryptoService.isTripcodeOf(bytes, tag)
+        }
+    }
+    val checkCode = remember(peer.publicKey, peer.encPublicKey) {
+        com.noslop.app.crypto.CryptoService.deriveCheckCode(peer.publicKey, peer.encPublicKey ?: "")
+    }
+    val peers by (viewModel?.peers?.collectAsState() ?: mutableStateOf(emptyList<com.noslop.app.data.Peer>()))
+    val sameName = remember(peers, peer.handle, peer.publicKey) {
+        com.noslop.app.data.sameNameContact(peers, peer.handle, peer.publicKey)
+    }
+    val name = com.noslop.app.data.handleWithoutTag(peer.handle)
+
+    Text(
+        text = if (derivedTag != null) "$name.$derivedTag" else name,
+        color = AccentGreen,
+        fontWeight = FontWeight.Bold,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 16.sp
+    )
+    if (checkCode != null) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Check code: {code}".tr.replace("{code}", checkCode),
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 14.sp
+        )
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = "Their own ID card shows the same name and check code.".tr,
+        color = TextMuted,
+        fontSize = 11.sp
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    when {
+        source == com.noslop.app.data.ContactIntro.QR_CAMERA && checkCode != null -> Text(
+            text = "Scanned with your camera. Once they accept, they show as verified in person.".tr,
+            color = AccentGreen,
+            fontSize = 12.sp
+        )
+        source == com.noslop.app.data.ContactIntro.QR_IMAGE -> Text(
+            text = "This code was read from a picture. Anyone can send a picture of a code, so continue only if you know it came from this person. They will not show as verified.".tr,
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+        source == com.noslop.app.data.ContactIntro.PASTED -> Text(
+            text = "This ID was pasted. Continue only if you know it came from this person. They will not show as verified.".tr,
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+    if (tagMismatch) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "The tag written in this code does not belong to its key, so the code may have been edited. Do not connect unless this person confirms the name and check code.".tr,
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+    if (sameName != null) {
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "You already have a contact named {name}. If this is meant to be the same person, compare the check code with them before you continue.".tr
+                .replace("{name}", "${com.noslop.app.data.handleWithoutTag(sameName.handle)}.${sameName.tripcode}"),
+            color = DestructiveRed,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }

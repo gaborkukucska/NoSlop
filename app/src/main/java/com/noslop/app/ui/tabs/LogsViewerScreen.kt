@@ -1,5 +1,7 @@
 package com.noslop.app.ui.tabs
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -7,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,17 +45,17 @@ fun LogsViewerScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
                 }
-                Text("System Logs", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
+                Text("System Logs".tr, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
             }
 
             Row {
-                IconButton(onClick = { viewModel.copyLogToClipboard(context) }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs", tint = AccentGreen)
+                IconButton(onClick = { viewModel.copyLogToClipboard(context, selectedLevelFilter) }) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs".tr, tint = AccentGreen)
                 }
                 IconButton(onClick = { viewModel.clearLogFile() }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Clear logs", tint = DestructiveRed)
+                    Icon(Icons.Default.Delete, contentDescription = "Clear logs".tr, tint = DestructiveRed)
                 }
             }
         }

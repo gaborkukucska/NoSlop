@@ -16,9 +16,9 @@ import okhttp3.Request
 object PexelsApiClient {
 
     private const val TAG = "PEXELS_API"
-    private val gson = Gson()
+    private val gson = com.noslop.app.util.Json.gson
 
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun getCuratedPhotos(
         apiKeyRepo: ApiKeyRepository,
@@ -48,6 +48,24 @@ object PexelsApiClient {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val url = "https://api.pexels.com/v1/search?query=$encodedQuery&per_page=$perPage"
         return fetchPhotos(url, apiKey, sourceId)
+    }
+
+    /** E5s2: one page of [searchPhotos] (pages numbered from 1). */
+    suspend fun searchPhotosPage(
+        query: String,
+        page: Int,
+        apiKeyRepo: ApiKeyRepository,
+        sourceId: String = "api-pexels-photo",
+        perPage: Int = 20
+    ): SourcePage {
+        val apiKey = apiKeyRepo.getKey("pexels")
+        if (apiKey.isNullOrBlank()) {
+            Logger.debug(TAG, "No Pexels API key — skipping photo search")
+            return SourcePage.NONE
+        }
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val url = "https://api.pexels.com/v1/search?query=$encodedQuery&per_page=$perPage" + pageParam(page)
+        return fetchPhotosPage(url, apiKey, sourceId)
     }
 
     suspend fun getPopularVideos(
@@ -80,7 +98,11 @@ object PexelsApiClient {
         return fetchVideos(url, apiKey, sourceId)
     }
 
-    private fun fetchPhotos(url: String, apiKey: String, sourceId: String): List<FeedItem> {
+    private fun fetchPhotos(url: String, apiKey: String, sourceId: String): List<FeedItem> =
+        fetchPhotosPage(url, apiKey, sourceId).items
+
+    /** E5s2: [fetchPhotos], with whether Pexels has a further page. */
+    private fun fetchPhotosPage(url: String, apiKey: String, sourceId: String): SourcePage {
         return try {
             val request = Request.Builder()
                 .url(url)
@@ -91,12 +113,12 @@ object PexelsApiClient {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "Pexels photos returned ${response.code}")
-                return emptyList()
+                return SourcePage.failed()
             }
 
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)
-            val photos = root.getAsJsonArray("photos") ?: return emptyList()
+            val photos = root.getAsJsonArray("photos") ?: return SourcePage.END
 
             val items = mutableListOf<FeedItem>()
             for (element in photos) {
@@ -116,8 +138,19 @@ object PexelsApiClient {
                         author = photographer,
                         excerpt = "Photo by $photographer on Pexels",
                         thumbnailUrl = src.get("medium")?.asString,
-                        publishedAt = System.currentTimeMillis(),
-                        mediaUrl = src.get("large2x")?.asString ?: src.get("large")?.asString,
+                        // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
+                        publishedAt = 0L,
+                        // --- NOSLOP_TOR_GATE_UI_V1 --- Pexels serves pre-rendered
+                        // sizes: large2x is ~1.5MB, medium ~150KB. Over Tor that
+                        // is the difference between usable and not.
+                        mediaUrl = when (
+                            try { com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.imageQuality }
+                            catch (_: Exception) { "high" }
+                        ) {
+                            "low" -> src.get("medium")?.asString ?: src.get("small")?.asString
+                            "medium" -> src.get("large")?.asString ?: src.get("medium")?.asString
+                            else -> src.get("large2x")?.asString ?: src.get("large")?.asString
+                        },
                         mediaType = "image",
                         apiSource = "pexels"
                     ))
@@ -127,10 +160,11 @@ object PexelsApiClient {
             }
 
             Logger.info(TAG, "Pexels photos: fetched ${items.size}")
-            items
+            // Pexels names the next page in "next_page" while there is one.
+            SourcePage(items, hasMore = photos.size() > 0 && root.get("next_page")?.isJsonPrimitive == true)
         } catch (e: Exception) {
             Logger.error(TAG, "Pexels photos request failed", e.message)
-            emptyList()
+            SourcePage.failed()
         }
     }
 
@@ -191,7 +225,8 @@ object PexelsApiClient {
                         author = userName,
                         excerpt = "Video by $userName on Pexels",
                         thumbnailUrl = thumbnailUrl,
-                        publishedAt = System.currentTimeMillis(),
+                        // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
+                        publishedAt = 0L,
                         mediaUrl = bestFileUrl,
                         mediaType = "video",
                         apiSource = "pexels"
