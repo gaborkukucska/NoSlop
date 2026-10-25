@@ -120,7 +120,8 @@ class BridgeMediaCache(
      * outbound link to that peer, else by dialing the onion learned via DIAL_PEER (handshake-less,
      * Android's connectionless model). Silently drops for peers we can't reach — the requester retries.
      */
-    private suspend fun sendToPeer(requesterId: String, fromLink: String?, packet: NetworkPacket) {
+    private suspend fun sendToPeer(requesterId: String, fromLink: String?, unsigned: NetworkPacket) {
+        val packet = Envelope.sign(unsigned)   // our own packet: Android needs our envelope (upstream E2)
         val androidId = NodeId.toAndroid(requesterId)
         val link = fromLink?.takeIf { it in transport.links }
             ?: transport.links.firstOrNull { it == androidId || it == requesterId }

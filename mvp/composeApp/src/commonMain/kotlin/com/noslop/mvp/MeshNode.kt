@@ -68,11 +68,19 @@ class MeshNode(
         transport.onReceive { fromLink, packet -> receive(fromLink, packet) }
     }
 
-    /** Originate a packet from this node: remember it (so its echo is deduped) and flood to all links. */
+    /**
+     * Originate a packet from this node: envelope-sign it ([Envelope], required by Android since upstream
+     * round E2), remember it (so its echo is deduped) and flood to all links.
+     */
     suspend fun broadcast(packet: NetworkPacket) {
-        firewall.remember(packet)
-        transport.links.forEach { transport.send(it, packet) }
+        val signed = stamp(packet)
+        firewall.remember(signed)
+        transport.links.forEach { transport.send(it, signed) }
     }
+
+    /** Envelope-sign a packet this node is the sender of; anyone else's packet keeps its own envelope. */
+    private fun stamp(p: NetworkPacket): NetworkPacket =
+        if (p.senderId == nodeId) Envelope.sign(p.copy(envV = null, envTs = null, envSig = null)) else p
 
     private suspend fun receive(fromLink: String, packet: NetworkPacket) {
         if (!firewall.admit(packet)) return                      // TTL / dedup / rate-limit
@@ -102,7 +110,7 @@ class MeshNode(
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {
         val nextHops = (packet.hops ?: maxHops) - 1
         if (nextHops <= 0) return                                // TTL exhausted — stop relaying
-        val fwd = packet.copy(hops = nextHops, senderId = nodeId)
+        val fwd = stamp(packet.copy(hops = nextHops, senderId = nodeId))   // re-stamped sender ⇒ our envelope
         transport.links.filter { it != fromLink }.forEach { transport.send(it, fwd) }
     }
 }

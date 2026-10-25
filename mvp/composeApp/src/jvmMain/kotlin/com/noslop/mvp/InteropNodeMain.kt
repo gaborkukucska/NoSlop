@@ -40,8 +40,9 @@ fun main() = runBlocking {
     // 1) Tell the bridge to dial Gabor + keep sending the signed connection request.
     scope.launch {
         client.requestDial(gabor)
+        val nonce = randomNonceHex()   // v2: one nonce per request; each probe re-sends it with a fresh timestamp
         repeat(12) {
-            val ok = client.sendConnectionRequest(gabor, bridgeOnion)
+            val ok = client.sendConnectionRequest(gabor, bridgeOnion, nonce)
             println("[desktop] → CONNECTION_REQUEST to Gabor (signed=$ok, attempt ${it + 1})")
             delay(15_000)
         }

@@ -222,12 +222,12 @@ actual object DmCrypto {
         }
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray = try {
-        cipher(javax.crypto.Cipher.ENCRYPT_MODE, key, nonce).doFinal(plaintext) // out = ciphertext || 16-byte tag
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray = try {
+        cipher(javax.crypto.Cipher.ENCRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(plaintext) // out = ciphertext || 16-byte tag
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? = try {
-        cipher(javax.crypto.Cipher.DECRYPT_MODE, key, nonce).doFinal(ciphertextAndTag)
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray): ByteArray? = try {
+        cipher(javax.crypto.Cipher.DECRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(ciphertextAndTag)
     } catch (e: Exception) { null }
 
     actual fun randomBytes(n: Int): ByteArray = ByteArray(n).also { SecureRandom().nextBytes(it) }

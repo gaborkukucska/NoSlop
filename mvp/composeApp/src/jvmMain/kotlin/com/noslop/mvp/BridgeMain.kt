@@ -52,6 +52,9 @@ fun main(args: Array<String>) = runBlocking {
             }
             return@onReceive
         }
+        // Upstream round E2: Android signs an envelope on every packet. Check it before anything relays it to
+        // the leaves (which hold no Android keys to check it themselves). Leaf packets carry their own.
+        if (NodeId.isAndroidId(fromLink) && !acceptEnvelope(packet, "peer link")) return@onReceive
         if (!firewall.admit(packet)) return@onReceive          // TTL / dedup / rate-limit
         // Media cache interception (#6b) — BEFORE relaying:
         //  · chunks answering our own pull are consumed, not relayed;
@@ -121,6 +124,7 @@ fun main(args: Array<String>) = runBlocking {
                         val line = reader.readLine() ?: break
                         if (line.isBlank()) continue
                         val pkt = runCatching { NetworkPacket.fromJson(line) }.getOrNull() ?: continue
+                        if (!acceptEnvelope(pkt, "inbound")) continue
                         if (!firewall.admit(pkt)) continue
                         // Media cache (#6b): peers dial us here because leaf posts advertise OUR onion as
                         // origin_node — serve cached media / recovery directly instead of forwarding.
@@ -181,4 +185,12 @@ fun main(args: Array<String>) = runBlocking {
         delay(60_000)
         println("[bridge] alive — leaves+peers=${transport.links.size}, known peers=${peers.size}")
     }
+}
+
+/** Envelope check for packets from Android peers (upstream `MeshTransport.acceptEnvelope`). */
+private fun acceptEnvelope(packet: NetworkPacket, from: String): Boolean {
+    val verdict = Envelope.verify(packet)
+    if (verdict == Envelope.Verdict.VALID) return true
+    println("[bridge] dropped ${packet.type} ${(packet.id ?: "?").take(8)}… from ${packet.senderId.take(8)}… ($from): envelope $verdict")
+    return false
 }

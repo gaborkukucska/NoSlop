@@ -27,6 +27,10 @@ data class MeshContact(
     // Epoch-ms of the last CONNECTION_REQUEST we sent this peer. Gates re-sends to ~once per retry window so a
     // peer who's simply offline isn't spammed on every reconnect/relaunch (a handshake can stay pending for days).
     @SerialName("last_handshake_at") val lastHandshakeAt: Long? = null,
+    // Protocol v2: the nonce of our outstanding CONNECTION_REQUEST. Kept so probes re-send the SAME request
+    // and so the peer's USER_HANDSHAKE can be checked against it. Null = no v2 request sent yet (a contact
+    // saved before v2: its lastHandshakeAt refers to a request current Android builds never accepted).
+    @SerialName("pending_nonce") val pendingNonce: String? = null,
 ) {
     fun toQrJson(): String = WireJson.encodeToString(serializer(), this)
 
@@ -102,6 +106,13 @@ object SavedContacts {
         val cur = list()
         if (cur.none { it.nodeId == nodeId }) return
         persist(cur.map { if (it.nodeId == nodeId) it.copy(lastHandshakeAt = at) else it })
+    }
+
+    /** Persist the nonce of our outstanding v2 CONNECTION_REQUEST to [nodeId]. */
+    fun recordPendingNonce(nodeId: String, nonce: String) {
+        val cur = list()
+        if (cur.none { it.nodeId == nodeId }) return
+        persist(cur.map { if (it.nodeId == nodeId) it.copy(pendingNonce = nonce) else it })
     }
 
     private fun persist(contacts: List<MeshContact>) {

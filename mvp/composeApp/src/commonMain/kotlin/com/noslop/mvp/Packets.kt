@@ -36,6 +36,10 @@ data class NetworkPacket(
     var signature: String? = null,
     val type: String,
     val payload: JsonElement? = null,
+    // Upstream round E2 envelope signature (see [Envelope]). Android drops packets without one.
+    @SerialName("env_v") val envV: Int? = null,
+    @SerialName("env_ts") val envTs: Long? = null,
+    @SerialName("env_sig") val envSig: String? = null,
 ) {
     fun toJson(): String = WireJson.encodeToString(serializer(), this)
 
@@ -70,6 +74,7 @@ data class NetworkPacket(
     fun getDeletePostPayload(): DeletePostPayload? = decode("DELETE_POST", DeletePostPayload.serializer())
     fun getSyncRequestPayload(): SyncRequestPayload? = decode("SYNC_REQUEST", SyncRequestPayload.serializer())
     fun getSyncResponsePayload(): SyncResponsePayload? = decode("SYNC_RESPONSE", SyncResponsePayload.serializer())
+    fun getDmAckPayload(): DmAckPayload? = decode("DM_ACK", DmAckPayload.serializer())
 }
 
 /**
@@ -116,6 +121,8 @@ data class MediaMetadata(
     @SerialName("origin_node") val originNode: String? = null,
     @SerialName("owner_id") val ownerId: String? = null,
     @SerialName("thumbnail_b64") val thumbnailB64: String? = null,
+    // Lowercase hex SHA-256 of the file (upstream C17). When set, posts are signed in the v2 form that covers it.
+    val sha256: String? = null,
 )
 
 /**
@@ -181,6 +188,24 @@ data class EncryptedPayload(
     // Sender's node id, carried because the hub re-stamps NetworkPacket.senderId on each forward (privacy);
     // without this the recipient can't address a reply back to the original sender.
     @SerialName("sender_node_id") val senderNodeId: String? = null,
+    // DM format: 2 = directional key + AAD (upstream C08/D05); 1 = legacy. Android refuses v1 from any key
+    // that has spoken v2 (including a v2 handshake), so we always send 2.
+    val v: Int = 1,
+)
+
+/**
+ * Upstream DM_ACK (v3, D05): "ACK" sealed with the directional DM key. [ackCiphertext] uses the AAD label
+ * `noslop-dm-ack-v3`; the legacy [ciphertext] uses the MESSAGE label and rides along for older builds.
+ */
+@Serializable
+data class DmAckPayload(
+    @SerialName("msg_id") val msgId: String,
+    val nonce: String = "",
+    val ciphertext: String = "",
+    val timestamp: Long? = null,
+    val v: Int = 3,
+    @SerialName("ack_nonce") val ackNonce: String? = null,
+    @SerialName("ack_ciphertext") val ackCiphertext: String? = null,
 )
 
 @Serializable
@@ -252,6 +277,9 @@ data class CommentData(
     val content: String,
     val timestamp: Long,
     val signature: String,
+    @SerialName("media_id") val mediaId: String? = null,
+    @SerialName("media_type") val mediaType: String? = null,
+    @SerialName("media_metadata") val mediaMetadata: MediaMetadata? = null,
 )
 
 /** Ask peers for content/engagement since [since] (ms epoch). Peers answer with **targeted**
@@ -303,9 +331,14 @@ data class SyncResponsePayload(
 data class EditPostPayload(
     @SerialName("post_id") val postId: String,
     @SerialName("author_id") val authorId: String,
+    @SerialName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
     val signature: String,
+    @SerialName("media_id") val mediaId: String? = null,
+    @SerialName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+    val privacy: String? = null,
+    @SerialName("clearnet_url") val clearnetUrl: String? = null,
 )
 
 /** Author deletes their post — signed `"$postId|$authorId|$timestamp"`. Same author-match rule; the post
@@ -329,4 +362,22 @@ data class PeerHandshakePayload(
     @SerialName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
     val timestamp: Long,
     val signature: String? = null,
-)
+    val bio: String? = null,
+    // Protocol v2 (upstream D07): a request carries a fresh random nonce; the accepting USER_HANDSHAKE
+    // echoes it. Both name the identity they are addressed to. All three are covered by the signature.
+    @SerialName("request_nonce") val requestNonce: String? = null,
+    @SerialName("in_reply_to_nonce") val inReplyToNonce: String? = null,
+    @SerialName("target_user_id") val targetUserId: String? = null,
+    val version: Int = 1,
+    val intro: String? = null,
+) {
+    /** The v2 signed string (upstream `CryptoService.canonicalHandshakePayloadV2`). */
+    fun canonicalV2(): String {
+        val parts = mutableListOf<String?>(
+            "noslop-hs-v2", fromUserId, fromUsername, fromHomeNode, fromEncryptionPublicKey ?: "",
+            targetUserId ?: "", requestNonce ?: inReplyToNonce ?: "", timestamp.toString(), authorAvatarB64, bio,
+        )
+        if (intro != null) parts.add(intro)
+        return encodeForSigning(*parts.toTypedArray())
+    }
+}

@@ -129,25 +129,27 @@ class CryptoKitDm: IosDm {
         return secret.withUnsafeBytes { Data($0).base64EncodedString() }
     }
 
-    func sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String) -> String {
+    func sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String, aadBase64: String) -> String {
         guard let keyData = Data(base64Encoded: keyBase64),
               let nonceData = Data(base64Encoded: nonceBase64),
               let plaintext = Data(base64Encoded: plaintextBase64),
+              let aad = Data(base64Encoded: aadBase64),
               let nonce = try? ChaChaPoly.Nonce(data: nonceData),
-              let box = try? ChaChaPoly.seal(plaintext, using: SymmetricKey(data: keyData), nonce: nonce)
+              let box = try? ChaChaPoly.seal(plaintext, using: SymmetricKey(data: keyData), nonce: nonce, authenticating: aad)
         else { return "" }
         return (box.ciphertext + box.tag).base64EncodedString()
     }
 
-    func openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String) -> String? {
+    func openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String, aadBase64: String) -> String? {
         guard let keyData = Data(base64Encoded: keyBase64),
               let nonceData = Data(base64Encoded: nonceBase64),
+              let aad = Data(base64Encoded: aadBase64),
               let ctAndTag = Data(base64Encoded: ciphertextAndTagBase64), ctAndTag.count >= 16,
               let nonce = try? ChaChaPoly.Nonce(data: nonceData) else { return nil }
         let ciphertext = ctAndTag.prefix(ctAndTag.count - 16)
         let tag = ctAndTag.suffix(16)
         guard let box = try? ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag),
-              let plaintext = try? ChaChaPoly.open(box, using: SymmetricKey(data: keyData)) else { return nil }
+              let plaintext = try? ChaChaPoly.open(box, using: SymmetricKey(data: keyData), authenticating: aad) else { return nil }
         return plaintext.base64EncodedString()
     }
 }

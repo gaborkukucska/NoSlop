@@ -147,12 +147,12 @@ actual object DmCrypto {
         KeyAgreement.getInstance("X25519", bc).run { init(priv); doPhase(pub, true); generateSecret() }
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray = try {
-        cipher(Cipher.ENCRYPT_MODE, key, nonce).doFinal(plaintext)
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray = try {
+        cipher(Cipher.ENCRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(plaintext)
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? = try {
-        cipher(Cipher.DECRYPT_MODE, key, nonce).doFinal(ciphertextAndTag)
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray): ByteArray? = try {
+        cipher(Cipher.DECRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(ciphertextAndTag)
     } catch (e: Exception) { null }
 
     actual fun randomBytes(n: Int): ByteArray = ByteArray(n).also { SecureRandom().nextBytes(it) }

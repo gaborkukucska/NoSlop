@@ -108,6 +108,8 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(libs.sqldelight.sqlite.driver)
+            // Reference renderer for the envelope payload digest: Android hashes Gson's rendering (ProtocolV2Test).
+            implementation("com.google.code.gson:gson:2.11.0")
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -263,4 +265,10 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+// ProtocolV2Test writes the packets we send to <dir>/kmp-v2-vectors.json when run with -PkmpVectorsOut=<dir>,
+// so upstream's Android verifiers can be pointed at them.
+tasks.withType<Test>().configureEach {
+    project.findProperty("kmpVectorsOut")?.let { systemProperty("kmpVectorsOut", it.toString()) }
 }

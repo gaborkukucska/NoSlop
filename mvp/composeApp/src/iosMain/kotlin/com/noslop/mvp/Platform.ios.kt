@@ -208,9 +208,9 @@ interface IosDm {
     /** Raw 32-byte X25519 shared secret (base64), from my raw private key + their raw public key. "" on failure. */
     fun sharedSecretBase64(myPrivRawBase64: String, theirPubRawBase64: String): String
     /** ChaCha20-Poly1305 seal → base64(ciphertext || 16-byte tag). "" on failure. */
-    fun sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String): String
+    fun sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String, aadBase64: String): String
     /** ChaCha20-Poly1305 open of base64(ciphertext||tag) → base64(plaintext); null on auth failure. */
-    fun openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String): String?
+    fun openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String, aadBase64: String): String?
 }
 
 object IosDmBridge {
@@ -228,15 +228,15 @@ actual object DmCrypto {
         return if (out.isEmpty()) ByteArray(0) else Base64.decode(out)
     }
 
-    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray {
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray {
         val d = IosDmBridge.dm ?: return ByteArray(0)
-        val out = d.sealBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(plaintext))
+        val out = d.sealBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(plaintext), Base64.encode(aad))
         return if (out.isEmpty()) ByteArray(0) else Base64.decode(out)
     }
 
-    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? {
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray): ByteArray? {
         val d = IosDmBridge.dm ?: return null
-        val out = d.openBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(ciphertextAndTag)) ?: return null
+        val out = d.openBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(ciphertextAndTag), Base64.encode(aad)) ?: return null
         return Base64.decode(out)
     }
 

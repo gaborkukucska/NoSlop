@@ -31,7 +31,15 @@ class MeshClient(
                 // Our DMs carry the sender's enc-key in the payload; Android's don't, so fall back to the
                 // sender's stored contact (resolved by the UI). packet.senderId is already hex on our side.
                 val senderPub = dm.senderEncPublicKey ?: resolveEncPub?.invoke(packet.senderId) ?: return
-                val plain = decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) ?: return
+                // DM v2 first (directional key + AAD over sender, recipient, id, group, timestamp), as upstream
+                // receivers do; v1 only as a fallback for 1:1 messages from older builds.
+                val ts = dm.timestamp ?: nowMillis()
+                val plainV2 = decryptDmV2(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64(),
+                    senderEdPub = packet.senderId, recipientEdPub = nodeId, msgId = dm.id, groupId = dm.groupId, timestamp = ts)
+                val plain = plainV2
+                    ?: (if (dm.groupId == null) decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) else null)
+                    ?: return
+                if (dm.groupId == null) sendDmAck(dm.id, packet.senderId, senderPub)
                 val content = unwrapDmContent(plain)   // Android wraps as {"content":…,"replyTo":…}; unwrap (raw fallback)
                 // Reply must go to the ORIGINAL sender (our DMs carry senderNodeId; Android's use senderId,
                 // which the bridge does NOT re-stamp — only re-encodes — so it's the true sender).
@@ -81,33 +89,30 @@ class MeshClient(
                 if (packet.targetUserId != null && packet.targetUserId != nodeId) return
                 var applied = 0
                 for (p in s.posts) {
-                    val sig = p.signature ?: continue
-                    val msg = buildString {
-                        append(p.id).append('|').append(p.authorId).append('|').append(p.content).append('|').append(p.timestamp)
-                        p.authorAvatarB64?.let { append('|').append(it) }
-                    }
-                    if (!verify(msg, sig, p.authorId)) continue
+                    if (!verifyPost(p)) continue
                     store?.savePost(p.toMeshPost())
                     onPost?.invoke(p); applied++
                 }
                 s.comments?.forEach { c ->
-                    val msg = buildString {
-                        append(c.postId).append('|').append(c.id).append('|').append(c.content).append('|').append(c.timestamp)
-                        c.authorAvatarB64?.let { append('|').append(it) }
-                    }
-                    if (!verify(msg, c.signature, c.authorId)) return@forEach
+                    val data = CommentData(
+                        id = c.id, authorId = c.authorId, authorName = c.authorName,
+                        authorAvatarB64 = c.authorAvatarB64, content = c.content,
+                        timestamp = c.timestamp, signature = c.signature,
+                        mediaId = c.mediaId, mediaType = c.mediaType, mediaMetadata = c.mediaMetadata,
+                    )
+                    if (!verifyComment(c.postId, data)) return@forEach
                     onComment?.invoke(CommentPayload(
                         postId = c.postId,
-                        comment = CommentData(
-                            id = c.id, authorId = c.authorId, authorName = c.authorName,
-                            authorAvatarB64 = c.authorAvatarB64, content = c.content,
-                            timestamp = c.timestamp, signature = c.signature,
-                        ),
+                        comment = data,
                         parentCommentId = c.parentCommentId,
                     )); applied++
                 }
                 s.reactions?.forEach { r ->
-                    if (!verify("${r.postId}|${r.reactionType}|${r.authorId}|${r.timestamp}", r.signature, r.authorId)) return@forEach
+                    val ok = listOf(
+                        encodeForSigning(r.postId, r.reactionType, r.authorId, r.timestamp.toString()),
+                        "${r.postId}|${r.reactionType}|${r.authorId}|${r.timestamp}",
+                    ).any { runCatching { verify(it, r.signature, r.authorId) }.getOrDefault(false) }
+                    if (!ok) return@forEach
                     onReaction?.invoke(ReactionPayload(
                         postId = r.postId, reactionType = r.reactionType, authorId = r.authorId,
                         timestamp = r.timestamp, signature = r.signature, action = "add",
@@ -199,8 +204,10 @@ class MeshClient(
         val authorId = androidId                 // base64 X.509 — the id Android signs/verifies posts against
         val id = randomId()
         val ts = nowMillis()
-        val signature = signWithIdentity("$id|$authorId|$text|$ts")   // no avatar segment — we don't attach one
-        // NOTE media fields are NOT part of the signed string (Android parity — see the C1 format above).
+        // Upstream canonical form: encodeForSigning(id, author, content, ts, avatar, privacy, mediaId, clearnetUrl),
+        // plus the media SHA-256 when there is one (v2). The old pipe form is refused by current Android builds.
+        val base = arrayOf(id, authorId, text, ts.toString(), null, "public", media?.id, null)
+        val signature = signWithIdentity(media?.sha256?.let { encodeForSigning(*base, it) } ?: encodeForSigning(*base))
         val post = PostPayload(
             id = id,
             authorId = authorId,
@@ -227,12 +234,18 @@ class MeshClient(
     suspend fun sendDm(contact: MeshContact, text: String, replyToMessageId: String? = null): String? {
         val theirPub = DmKeys.normalizePeerPublicX509B64(contact.encPublicKeyX509B64) ?: return null
         // Wrap in Android's {"content":…,"replyTo":…} envelope so replies (and later media) interoperate.
-        val (ct, nonce) = encryptDM(wrapDmContent(text, replyToMessageId), theirPub, DmKeys.privateKeyPkcs8B64()) ?: return null
+        // DM v2 (upstream C08): the key is per direction and the AAD binds sender, recipient, id and time.
         val msgId = randomId()
+        val ts = nowMillis()
+        val (ct, nonce) = encryptDmV2(
+            wrapDmContent(text, replyToMessageId), theirPub, DmKeys.privateKeyPkcs8B64(),
+            senderEdPub = nodeId, recipientEdPub = contact.nodeId, msgId = msgId, groupId = null, timestamp = ts,
+        ) ?: return null
         val payload = EncryptedPayload(
             id = msgId, nonce = nonce, ciphertext = ct,
-            timestamp = nowMillis(), senderEncPublicKey = DmKeys.publicKeyX509B64(),
+            timestamp = ts, senderEncPublicKey = DmKeys.publicKeyX509B64(),
             senderNodeId = nodeId, // so the recipient can reply (hub re-stamps packet.senderId on forward)
+            v = 2,
         )
         node.broadcast(messagePacket(nodeId, contact.nodeId, payload))
         return msgId
@@ -247,7 +260,7 @@ class MeshClient(
     suspend fun sendReaction(postId: String, reactionType: String, add: Boolean): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$postId|$reactionType|$authorId|$ts") ?: return false
+        val signature = signWithIdentity(encodeForSigning(postId, reactionType, authorId, ts.toString())) ?: return false
         val payload = ReactionPayload(
             postId = postId, reactionType = reactionType, authorId = authorId,
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
@@ -266,7 +279,7 @@ class MeshClient(
         val authorId = androidId
         val id = randomId()
         val ts = nowMillis()
-        val signature = signWithIdentity("$postId|$id|$content|$ts") ?: return null
+        val signature = signWithIdentity(encodeForSigning(postId, id, content, ts.toString(), null)) ?: return null
         val comment = CommentData(
             id = id, authorId = authorId, authorName = identity.handle,
             content = content, timestamp = ts, signature = signature,
@@ -284,7 +297,7 @@ class MeshClient(
     suspend fun sendVote(postId: String, voteType: String, add: Boolean): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$postId|$voteType|$authorId|$ts") ?: return false
+        val signature = signWithIdentity(encodeForSigning(postId, voteType, authorId, ts.toString())) ?: return false
         val payload = VotePayload(
             postId = postId, voteType = voteType, authorId = authorId,
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
@@ -301,7 +314,7 @@ class MeshClient(
     suspend fun sendChatReaction(messageId: String, reactionType: String, add: Boolean): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$messageId|$reactionType|$authorId|$ts") ?: return false
+        val signature = signWithIdentity(encodeForSigning(messageId, reactionType, authorId, ts.toString())) ?: return false
         val payload = ChatReactionPayload(
             messageId = messageId, reactionType = reactionType, authorId = authorId,
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
@@ -317,7 +330,7 @@ class MeshClient(
     suspend fun sendCommentReaction(commentId: String, reactionType: String, add: Boolean): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$commentId|$reactionType|$authorId|$ts") ?: return false
+        val signature = signWithIdentity(encodeForSigning(commentId, reactionType, authorId, ts.toString())) ?: return false
         val payload = CommentReactionPayload(
             commentId = commentId, reactionType = reactionType, authorId = authorId,
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
@@ -333,7 +346,7 @@ class MeshClient(
     suspend fun sendCommentVote(commentId: String, voteType: String, add: Boolean): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$commentId|$voteType|$authorId|$ts") ?: return false
+        val signature = signWithIdentity(encodeForSigning(commentId, voteType, authorId, ts.toString())) ?: return false
         val payload = CommentVotePayload(
             commentId = commentId, voteType = voteType, authorId = authorId,
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
@@ -350,8 +363,10 @@ class MeshClient(
     suspend fun sendEditPost(postId: String, newContent: String): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$postId|$authorId|$newContent|$ts") ?: return false
-        val payload = EditPostPayload(postId = postId, authorId = authorId, content = newContent, timestamp = ts, signature = signature)
+        // Upstream canonical 8-field form (pipe edits are refused since D08). Privacy is stated explicitly so
+        // both ends sign the same string; media isn't re-sent on a text edit.
+        val signature = signWithIdentity(encodeForSigning(postId, authorId, newContent, ts.toString(), null, "public", null, null)) ?: return false
+        val payload = EditPostPayload(postId = postId, authorId = authorId, content = newContent, timestamp = ts, signature = signature, privacy = "public")
         store?.updatePostContent(postId, newContent)
         node.broadcast(editPostPacket(nodeId, payload))
         return true
@@ -364,7 +379,7 @@ class MeshClient(
     suspend fun sendDeletePost(postId: String): Boolean {
         val authorId = androidId
         val ts = nowMillis()
-        val signature = signWithIdentity("$postId|$authorId|$ts") ?: return false
+        val signature = signWithIdentity(encodeForSigning(postId, authorId, ts.toString())) ?: return false
         val payload = DeletePostPayload(postId = postId, authorId = authorId, timestamp = ts, signature = signature)
         store?.markPostOrphaned(postId)
         node.broadcast(deletePostPacket(nodeId, payload))
@@ -412,6 +427,7 @@ class MeshClient(
             originNode = bridgeOnion,
             ownerId = androidId,
             thumbnailB64 = picked.thumbnailB64,
+            sha256 = Sha256.hex(bytes),   // upstream C17: receivers check the download against it; posts sign it (v2)
         )
     }
 
@@ -445,25 +461,50 @@ class MeshClient(
      * accepts our DMs. [myHomeNode] is the onion the peer should reply to (the bridge's onion), and it's part
      * of the signed payload. Returns false if we can't sign with our identity key.
      */
-    suspend fun sendConnectionRequest(contact: MeshContact, myHomeNode: String): Boolean =
-        sendHandshake(contact, myHomeNode, "CONNECTION_REQUEST")
+    suspend fun sendConnectionRequest(contact: MeshContact, myHomeNode: String, requestNonce: String): Boolean =
+        sendHandshake(contact, myHomeNode, "CONNECTION_REQUEST", requestNonce = requestNonce)
 
-    /** Accept an incoming request: reply with a signed USER_HANDSHAKE so the peer marks us trusted. */
-    suspend fun sendUserHandshake(contact: MeshContact, myHomeNode: String): Boolean =
-        sendHandshake(contact, myHomeNode, "USER_HANDSHAKE")
+    /** Accept an incoming request: reply with a signed USER_HANDSHAKE echoing the request's nonce. */
+    suspend fun sendUserHandshake(contact: MeshContact, myHomeNode: String, inReplyToNonce: String): Boolean =
+        sendHandshake(contact, myHomeNode, "USER_HANDSHAKE", inReplyToNonce = inReplyToNonce)
 
-    private suspend fun sendHandshake(contact: MeshContact, myHomeNode: String, type: String): Boolean {
+    /**
+     * Protocol v2 handshake (upstream D07): signed over [PeerHandshakePayload.canonicalV2], which binds our
+     * DM key, the identity we address and the request nonce. Sent from our hex node id like every packet
+     * (the bridge re-encodes ids for Android, and the envelope is signed over the Android form).
+     */
+    private suspend fun sendHandshake(
+        contact: MeshContact, myHomeNode: String, type: String,
+        requestNonce: String? = null, inReplyToNonce: String? = null,
+    ): Boolean {
         val myUserId = NodeId.toAndroid(nodeId)               // base64 X.509 Ed25519 (Android id form)
-        val username = identity.handle.substringBefore(".")
-        val ts = nowMillis()
-        val signature = signWithIdentity("$myUserId|$username|$myHomeNode|$ts") ?: return false
-        val hs = PeerHandshakePayload(
-            id = randomId(), fromUserId = myUserId, fromUsername = username,
+        val unsigned = PeerHandshakePayload(
+            id = randomId(), fromUserId = myUserId, fromUsername = identity.handle.substringBefore("."),
             fromDisplayName = "${identity.handle}.${identity.tripcode}", fromHomeNode = myHomeNode,
-            fromEncryptionPublicKey = DmKeys.publicKeyX509B64(), timestamp = ts, signature = signature,
+            fromEncryptionPublicKey = DmKeys.publicKeyX509B64(), timestamp = nowMillis(),
+            requestNonce = requestNonce, inReplyToNonce = inReplyToNonce,
+            targetUserId = NodeId.toAndroid(contact.nodeId), version = 2,
         )
-        node.broadcast(handshakePacket(myUserId, NodeId.toAndroid(contact.nodeId), hs, type))
+        val signature = signWithIdentity(unsigned.canonicalV2()) ?: return false
+        node.broadcast(handshakePacket(nodeId, contact.nodeId, unsigned.copy(signature = signature), type, hops = 3))
         return true
+    }
+
+    /**
+     * Acknowledge a 1:1 DM the way upstream does (DM_ACK v3, D05): "ACK" sealed with the directional key,
+     * once under the ACK label and once under the message label for older builds. Without it the sender
+     * keeps the message in its outbox and re-sends it for up to a week.
+     */
+    private suspend fun sendDmAck(msgId: String, toNodeId: String, theirEncPub: String) {
+        val ts = nowMillis()
+        val my = DmKeys.privateKeyPkcs8B64()
+        val (ackCt, ackNonce) = encryptDmV2("ACK", theirEncPub, my, nodeId, toNodeId, msgId, null, ts, DM_AAD_ACK) ?: return
+        val (ct, nonce) = encryptDmV2("ACK", theirEncPub, my, nodeId, toNodeId, msgId, null, ts) ?: ("" to "")
+        val ack = DmAckPayload(msgId = msgId, nonce = nonce, ciphertext = ct, timestamp = ts, v = 3, ackNonce = ackNonce, ackCiphertext = ackCt)
+        node.broadcast(NetworkPacket(
+            id = randomId(), hops = 3, senderId = nodeId, targetUserId = toNodeId, type = "DM_ACK",
+            payload = NetworkPacket.payloadOf(ack, DmAckPayload.serializer()),
+        ))
     }
 
     fun close() = transport.close()

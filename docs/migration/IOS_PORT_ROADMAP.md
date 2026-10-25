@@ -80,3 +80,27 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 - **Media-over-mesh is the architectural hard part** — confirm the bridge relay/cache design before
   Phase 5; iOS can't receive peer media directly.
 - Each phase ships as its own compile-tested, installable increment (same cadence as the feed work).
+
+## Protocol v2 parity with Android 0.7.1-alpha (2026-10-25)
+
+Upstream made two hard wire breaks after our June merge: v2-only handshakes (D07, 2026-10-07) and an
+Ed25519 envelope signature on every packet (E2, 2026-10-13). Until this port, current Android builds
+silently dropped everything the iOS leaf sent. Merged upstream `main` (`bb30d7f`) and ported:
+
+- **Envelope** (`Envelope.kt`): signed in `MeshNode.broadcast` over the Android form of the ids, so it
+  survives the bridge's hex→base64 re-encoding; the payload digest hashes a Gson-identical rendering
+  (`gsonCanonicalJson`). The bridge verifies envelopes on everything from Android and signs its own
+  media-cache replies.
+- **Handshakes v2**: nonce + target + DM key under `encodeForSigning("noslop-hs-v2", …)`; the app keeps
+  one nonce per request (`MeshContact.pendingNonce`) and probes every 15 s for 10 min like upstream.
+- **DM v2**: HKDF-SHA256 directional key + AAD (needed an AAD parameter on `DmCrypto` and the CryptoKit
+  bridge); v1 kept only as a receive fallback. We now send DM_ACK v3 so Android stops re-sending.
+- **Canonical signatures** for posts (v2 with media SHA-256), edits, deletes, votes and reactions; the
+  verifier accepts both the new and the old forms.
+- SHA-256/HMAC/HKDF in pure common Kotlin (`Sha256.kt`), so iOS needed no new dependency.
+
+Verified both ways: `ProtocolV2Test` checks vectors produced by upstream's own `EnvelopeAuth` /
+`CryptoService` (`jvmTest/resources/android-v2-vectors.json`), and upstream's `EnvelopeAuth.verify`,
+`MeshPacketVerifier.verify` and `decryptDMV2` accepted every packet type the KMP side emits (run as a
+scratch Robolectric test in `app/`, not committed). `jvmTest` 128/128, `testDebugUnitTest` 102/102,
+iOS `xcodebuild` succeeded. Not yet verified end to end against a live Android phone.

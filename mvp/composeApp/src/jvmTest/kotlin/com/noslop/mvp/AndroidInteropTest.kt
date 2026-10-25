@@ -83,8 +83,9 @@ class AndroidInteropTest {
         val fromUserId = NodeId.hexToAndroid(nodeIdHex)              // → X.509 base64 (THE FIX)
         assertEquals(pubX509, fromUserId, "wrap raw→X.509 must reproduce the real Android key")
 
-        // Build + sign the exact handshake string MeshClient.sendConnectionRequest signs.
-        val msg = "$fromUserId|alice|somebridge.onion|1718900000000"
+        // Build + sign the v2 handshake string MeshClient.sendConnectionRequest signs (upstream D07).
+        val msg = PeerHandshakePayload(id = "h", fromUserId = fromUserId, fromUsername = "alice", fromDisplayName = "alice",
+            fromHomeNode = "somebridge.onion", timestamp = 1718900000000, requestNonce = "n", targetUserId = "t", version = 2).canonicalV2()
         val sig = sign(msg, priv)
 
         // Verify exactly as Android's HandshakePacketHandler does: verify(payload, sig, connPay.fromUserId).

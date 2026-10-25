@@ -863,10 +863,17 @@ private class MeshUiState(private val scope: CoroutineScope) {
                 if (contact.encPublicKeyX509B64.isNotBlank() && contacts.none { it.nodeId == contact.nodeId }) {
                     SavedContacts.add(contact); reloadContacts()
                 }
+                // v2 handshakes name the identity they are for; ignore ones addressed to someone else (the bridge
+                // fans every inbound packet out to all its leaves).
+                if (hs.targetUserId != null && hs.targetUserId != client.androidId) return@launch
+                // A USER_HANDSHAKE must answer OUR outstanding request (upstream D07: the nonce echo is the consent).
+                val stored = contacts.firstOrNull { it.nodeId == contact.nodeId }
+                if (type == "USER_HANDSHAKE" && stored?.pendingNonce != null && hs.inReplyToNonce != stored.pendingNonce) return@launch
                 // Either direction of a handshake means the peer is mutually linked — stop re-sending requests.
                 SavedContacts.markAccepted(contact.nodeId); reloadContacts()
                 if (type == "CONNECTION_REQUEST") {
-                    activeInvite?.host?.let { home -> client.sendUserHandshake(contact, home) }  // accept them back
+                    val theirNonce = hs.requestNonce ?: return@launch
+                    activeInvite?.host?.let { home -> client.sendUserHandshake(contact, home, theirNonce) }  // accept them back
                     status = "🤝 ${contact.handle} connected — added to contacts"
                 } else {
                     status = "🤝 ${contact.handle} accepted your request ✓"
@@ -1073,22 +1080,32 @@ private class MeshUiState(private val scope: CoroutineScope) {
         val homeNode = activeInvite?.host ?: return       // the bridge onion we're connected through
         // Already handshake-complete (persisted), or a loop is already running for them — don't re-spam.
         if (contact.accepted || !handshaking.add(contact.nodeId)) return
-        // Be patient instead of bursting: a peer can be offline for days. If we sent a request within the retry
+        // Be patient instead of bursting: a peer can be offline for days. If we sent a v2 request within the retry
         // window, stay quiet (across reconnects/relaunches) — we'll try again only after it lapses or they accept.
+        // A contact with no pendingNonce never had a v2 request, whatever lastHandshakeAt says.
         val last = contact.lastHandshakeAt
-        if (last != null && nowMillis() - last < HANDSHAKE_RETRY_MS) { handshaking.remove(contact.nodeId); return }
+        if (contact.pendingNonce != null && last != null && nowMillis() - last < HANDSHAKE_RETRY_MS) {
+            handshaking.remove(contact.nodeId); return
+        }
+        // One nonce per request: probes re-send the same request (fresh timestamp and id), as upstream does.
+        val nonce = randomNonceHex()
+        SavedContacts.recordPendingNonce(contact.nodeId, nonce)
+        SavedContacts.recordHandshake(contact.nodeId, nowMillis()); reloadContacts()
         scope.launch {
             try {
                 client.requestDial(contact)
-                // The bridge needs a few seconds to dial the peer's onion; send before it's linked and the request
-                // is dropped (0 peers). So wait, send once, then a single backup to cover a slow Tor dial — and stop.
+                // The bridge needs a few seconds to dial the peer's onion; a request sent before that is relayed to
+                // nobody. Then probe like upstream's requester (Round A2): every 15 s for up to 10 min, until the
+                // peer accepts. The peer's user has to approve, so the answer can take minutes.
                 delay(20_000)
-                repeat(2) { attempt ->
+                val deadline = nowMillis() + PROBE_WINDOW_MS
+                while (nowMillis() < deadline) {
                     if (contacts.firstOrNull { it.nodeId == contact.nodeId }?.accepted == true) return@launch
-                    val ok = client.sendConnectionRequest(contact, homeNode)
-                    if (!ok) { status = "Can't sign handshake (identity key)"; return@launch }
-                    if (attempt == 0) { SavedContacts.recordHandshake(contact.nodeId, nowMillis()); reloadContacts() }
-                    if (attempt == 0) delay(30_000)        // backup send only if still unaccepted after a slow dial
+                    if (connected) {
+                        val ok = client.sendConnectionRequest(contact, homeNode, nonce)
+                        if (!ok) { status = "Can't sign handshake (identity key)"; return@launch }
+                    }
+                    delay(PROBE_INTERVAL_MS)
                 }
             } finally {
                 handshaking.remove(contact.nodeId)
@@ -1098,6 +1115,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     private companion object {
         const val HANDSHAKE_RETRY_MS = 3L * 24 * 60 * 60 * 1000   // ~3 days between handshake retries
+        const val PROBE_INTERVAL_MS = 15_000L                       // upstream Round A2 probe cadence
+        const val PROBE_WINDOW_MS = 10L * 60 * 1000                 // …for up to 10 minutes
         const val BLOCKED_KEY = "blocked_authors"                  // meta-store key, newline-joined author ids
         const val SYNC_WINDOW_MS = 7L * 24 * 60 * 60 * 1000       // catch-up horizon for SYNC_REQUEST
     }

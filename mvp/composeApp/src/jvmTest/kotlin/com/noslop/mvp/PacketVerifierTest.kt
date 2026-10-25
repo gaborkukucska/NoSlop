@@ -16,21 +16,22 @@ class PacketVerifierTest {
     private fun handshake(ts: Long, sig: String?) = PeerHandshakePayload(
         id = "h1", fromUserId = pub, fromUsername = "alice", fromDisplayName = "alice.x1",
         fromHomeNode = "bridge.onion", fromEncryptionPublicKey = "encpub", timestamp = ts, signature = sig,
+        requestNonce = "nonce-1", targetUserId = "target", version = 2,
     )
 
     @Test
     fun valid_handshake_passes_tampered_and_unsigned_are_rejected() {
         val ts = 1718900000000L
-        val sig = sign("$pub|alice|bridge.onion|$ts", priv)
+        val sig = sign(handshake(ts, null).canonicalV2(), priv)
         val ok = handshakePacket(pub, "target", handshake(ts, sig), "CONNECTION_REQUEST")
-        assertTrue(verifyPacket(ok), "a correctly signed handshake must verify")
+        assertTrue(verifyPacket(ok), "a correctly signed v2 handshake must verify")
 
         // Tamper the signed content (username) — signature no longer matches.
         val tampered = ok.copy(payload = NetworkPacket.payloadOf(handshake(ts, sig).copy(fromUsername = "mallory"), PeerHandshakePayload.serializer()))
         assertFalse(verifyPacket(tampered), "tampered handshake must be rejected")
 
         // Unsigned handshake — rejected outright (handshakes are required-signed).
-        val unsigned = ok.copy(payload = NetworkPacket.payloadOf(handshake(ts, null), PeerHandshakePayload.serializer()))
+        val unsigned = ok.copy(payload = NetworkPacket.payloadOf(handshake(ts, null), PeerHandshakePayload.serializer()), signature = null)
         assertFalse(verifyPacket(unsigned), "unsigned handshake must be rejected")
     }
 
