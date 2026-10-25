@@ -53,12 +53,13 @@ class TorControlTest {
 
         assertTrue(sawAuth, "client authenticated with the password")
         assertEquals(
-            "ADD_ONION NEW:ED25519-V3 Port=9876,127.0.0.1:9876", addOnionLine,
-            "client requested a v3 onion forwarding the virtual port to the local listen port",
+            "ADD_ONION NEW:ED25519-V3 Flags=Detach Port=9876,127.0.0.1:9876", addOnionLine,
+            "client requested a detached v3 onion forwarding the virtual port to the local listen port",
         )
         assertEquals(
-            "abcdefghij234567abcdefghij234567abcdefghij234567abcdefgh.onion", onion,
+            "abcdefghij234567abcdefghij234567abcdefghij234567abcdefgh.onion", onion.address,
             "addOnion returns <ServiceID>.onion",
         )
+        assertEquals("somebase64privatekeymaterial", onion.privateKey, "addOnion captures the key so the onion can be re-published")
     }
 }

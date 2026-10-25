@@ -31,8 +31,14 @@ class TorProcess(
             ).firstOrNull { it.canExecute() }?.absolutePath
             ?: "tor" // last resort: PATH
 
-    /** Start tor and block until it reports a full bootstrap (or [timeoutMs] elapses). Returns this. */
-    fun start(timeoutMs: Long = 90_000): TorProcess {
+    /**
+     * Start tor and wait up to [timeoutMs] for "Bootstrapped 100%". A slow bootstrap is **not** an error: tor
+     * keeps running and finishes on its own, and ADD_ONION is accepted before bootstrap completes (the
+     * descriptor is published once it does). The previous behaviour threw here, which made the hub silently
+     * fall back to plain TCP and print a LAN-only QR whenever a stale directory cache made the first bootstrap
+     * exceed the window — exactly what happened after a four-month gap. Returns this.
+     */
+    fun start(timeoutMs: Long = 300_000): TorProcess {
         dataDir.mkdirs()
         val bin = resolveBinary()
 
@@ -56,16 +62,27 @@ class TorProcess(
             .redirectErrorStream(true).start()
         process = proc
 
-        // Wait for bootstrap, echoing tor's progress.
-        val reader = proc.inputStream.bufferedReader()
-        val deadline = nowMillis() + timeoutMs
-        while (nowMillis() < deadline) {
-            val line = reader.readLine() ?: break
-            if (line.contains("Bootstrapped")) println("[tor] ${line.substringAfter("] ").ifBlank { line }}")
-            if (line.contains("Bootstrapped 100%")) return this
-            if (line.contains("[err]")) error("tor failed: $line")
-        }
-        error("tor did not bootstrap within ${timeoutMs}ms")
+        // Drain tor's output for the life of the process on a daemon thread, echoing bootstrap progress. Draining
+        // forever matters: once tor's stdout pipe fills (64 KB), tor blocks on its next log write and the hub's
+        // onion goes dark. The old code stopped reading after bootstrap.
+        val bootstrapped = java.util.concurrent.CountDownLatch(1)
+        val fatal = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        Thread({
+            proc.inputStream.bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    if (line.contains("Bootstrapped")) println("[tor] ${line.substringAfter("] ").ifBlank { line }}")
+                    if (line.contains("Bootstrapped 100%")) bootstrapped.countDown()
+                    if (line.contains("[err]")) { fatal.set(line); bootstrapped.countDown() }
+                }
+            }
+            bootstrapped.countDown()   // EOF: tor exited
+        }, "tor-stdout").apply { isDaemon = true }.start()
+
+        val done = bootstrapped.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        fatal.get()?.let { error("tor failed: $it") }
+        if (!proc.isAlive) error("tor exited before bootstrapping (exit ${proc.exitValue()})")
+        if (!done) println("[tor] not yet bootstrapped after ${timeoutMs / 1000}s — continuing; the onion publishes when bootstrap completes.")
+        return this
     }
 
     fun stop() {
