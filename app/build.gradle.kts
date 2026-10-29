@@ -22,14 +22,18 @@ configurations.all {
 
 android {
     namespace = "com.noslop.app"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
         applicationId = "com.noslop.me.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 72
-        versionName = "0.7.2-alpha"
+        versionCode = 73
+        versionName = "0.7.3-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -257,7 +261,7 @@ dependencies {
     // --- Lazysodium ---
 
     // --- Tor ---
-    implementation("info.guardianproject:tor-android:0.4.9.11")
+    implementation("info.guardianproject:tor-android:0.4.9.14")
 
     // --- CameraX / Accompanist permissions for QR code / scanning support if needed ---
     implementation(libs.androidx.camera.core)
