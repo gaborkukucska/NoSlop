@@ -22,7 +22,7 @@ configurations.all {
 
 android {
     namespace = "com.noslop.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.noslop.me.app"
