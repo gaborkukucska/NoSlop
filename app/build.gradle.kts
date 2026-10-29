@@ -257,7 +257,7 @@ dependencies {
     // --- Lazysodium ---
 
     // --- Tor ---
-    implementation("info.guardianproject:tor-android:0.4.8.16")
+    implementation("info.guardianproject:tor-android:0.4.9.11")
 
     // --- CameraX / Accompanist permissions for QR code / scanning support if needed ---
     implementation(libs.androidx.camera.core)
