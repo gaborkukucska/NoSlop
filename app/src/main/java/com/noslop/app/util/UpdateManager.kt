@@ -1,48 +1,52 @@
 // FILE: app/src/main/java/com/noslop/app/util/UpdateManager.kt
 package com.noslop.app.util
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.provider.Settings
+import android.provider.MediaStore
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import com.noslop.app.debug.Logger
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.security.MessageDigest
 
 /**
- * Downloads and installs OTA updates.
+ * Downloads OTA updates over Tor and saves them to the user's Download folder.
+ *
+ * --- NOSLOP_SAVE_TO_DOWNLOADS_V1 ---
+ * NoSlop no longer installs updates itself. It used to declare
+ * REQUEST_INSTALL_PACKAGES (github flavour) and hand the downloaded APK
+ * straight to the package installer. Google Play Protect classifies that
+ * pattern (an app that downloads APKs and launches the installer) as harmful,
+ * and from 0.7.2 it blocked every new github build, including a rebuild of the
+ * unchanged 0.7.1 source. The play flavour, which has no updater, passed.
+ *
+ * Now the verified APK is written to the public Download folder and the user
+ * installs it from their Files app, which runs the normal system installer and
+ * Play Protect check. The download still goes over Tor and is still verified
+ * (checksum + signing certificate) before it is saved; a file that fails
+ * either check is deleted and never reaches the Download folder.
  *
  * --- NOSLOP_RELEASE_CHECKSUM_V1 ---
- * The previous version computed the downloaded APK's SHA-256, logged it as
- * "Downloaded APK SHA-256 verified: <hex>", and then compared it to nothing at
- * all before launching the installer. The only real gates were a 2MB floor and
- * a text/html content-type check, so a MITM (or a compromised CDN, or a
- * hijacked release asset) could substitute any APK over 2MB and the app would
- * cheerfully hand it to the package installer.
- *
- * Now: the digest is compared against the checksum published with the release
- * (see UpdateChecker.expectedSha256). On mismatch the file is deleted and the
- * install is refused. When no checksum is published the install is refused by
- * default — call with allowUnverified = true only from a UI path where the user
- * has been shown an explicit warning and agreed to it.
+ * The digest is compared against the checksum published with the release
+ * (see UpdateChecker.expectedSha256). On mismatch the file is deleted. When no
+ * checksum is published the download is refused by default — call with
+ * allowUnverified = true only from a UI path where the user has been shown an
+ * explicit warning and agreed to it.
  *
  * STILL MISSING, deliberately: this verifies INTEGRITY against whatever the
  * update channel said, not AUTHENTICITY. An attacker who controls both
- * content.json and the APK can publish a matching pair. The fix is an Ed25519
- * signature over the APK verified against a public key compiled into the app —
- * §2 of docs/PRIVACY_AND_SECURITY_PROPOSAL.md. Do not describe OTA as
+ * content.json and the APK can publish a matching pair. The certificate check
+ * below narrows that (the APK must be signed by the installed app's key, and
+ * Android's installer enforces the same), but the fix is an Ed25519 signature
+ * over the APK verified against a public key compiled into the app — §2 of
+ * docs/PRIVACY_AND_SECURITY_PROPOSAL.md. Do not describe OTA as
  * MITM-resistant until that lands.
- *
- * Also note: the old `DownloadReceiver` no-op BroadcastReceiver and its
- * DOWNLOAD_COMPLETE manifest registration are gone. Nothing has used Android's
- * DownloadManager here for a long time.
  */
 object UpdateManager {
 
@@ -51,23 +55,7 @@ object UpdateManager {
     /** Anything smaller than this is a truncated download or an error page. */
     private const val MIN_APK_BYTES = 2L * 1024 * 1024
 
-    fun canInstallPackages(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.packageManager.canRequestPackageInstalls()
-        } else {
-            true
-        }
-    }
-
-    fun requestInstallPermission(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                data = Uri.parse("package:${context.packageName}")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            context.startActivity(intent)
-        }
-    }
+    private const val APK_MIME = "application/vnd.android.package-archive"
 
     /**
      * @param expectedSha256 the digest published with the release, lowercase hex.
@@ -79,16 +67,10 @@ object UpdateManager {
         context: Context,
         url: String,
         version: String,
-        force: Boolean = false,
         expectedSha256: String? = null,
         allowUnverified: Boolean = false
     ) {
-        if (!force && !canInstallPackages(context)) {
-            Logger.warn(TAG, "Install permission not granted, requesting it from user")
-            Toast.makeText(context, LanguageManager.translate("Please allow NoSlop to install updates, then try again"), Toast.LENGTH_LONG).show()
-            requestInstallPermission(context)
-            return
-        }
+        val appContext = context.applicationContext
 
         // NOSLOP_RELEASE_CHECKSUM_V1 — refuse before spending the bandwidth.
         if (expectedSha256.isNullOrBlank() && !allowUnverified) {
@@ -104,13 +86,14 @@ object UpdateManager {
         val normalisedExpected = expectedSha256?.trim()?.lowercase()
 
         val fileName = "NoSlop_$version.apk"
-        val updatesDir = java.io.File(context.filesDir, "updates").apply { mkdirs() }
-        val destFile = java.io.File(updatesDir, fileName)
+        // Download into private cache first; only a verified file is copied out.
+        val tmpDir = File(appContext.cacheDir, "updates").apply { mkdirs() }
+        val tmpFile = File(tmpDir, fileName)
 
         Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
         Logger.info(TAG, "Starting update download for version $version")
 
-        com.noslop.app.util.AppScopes.io.launch {
+        AppScopes.io.launch {
             try {
                 if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                     Logger.info(TAG, "Waiting for Tor bootstrap before downloading update...")
@@ -118,13 +101,13 @@ object UpdateManager {
                     if (!ready) {
                         Logger.warn(TAG, "Tor not ready — cancelling update download")
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(context, LanguageManager.translate("Tor network not ready. Download cancelled."), Toast.LENGTH_LONG).show()
+                            Toast.makeText(appContext, LanguageManager.translate("Tor network not ready. Download cancelled."), Toast.LENGTH_LONG).show()
                         }
                         return@launch
                     }
                 }
 
-                if (destFile.exists()) destFile.delete()
+                if (tmpFile.exists()) tmpFile.delete()
 
                 val request = okhttp3.Request.Builder().url(url).build()
                 val response = com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute()
@@ -134,7 +117,7 @@ object UpdateManager {
                     Logger.error(TAG, "Download failed with HTTP $code")
                     response.close()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, LanguageManager.translate("Download failed: HTTP {code}").replace("{code}", code.toString()), Toast.LENGTH_LONG).show()
+                        Toast.makeText(appContext, LanguageManager.translate("Download failed: HTTP {code}").replace("{code}", code.toString()), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -145,7 +128,7 @@ object UpdateManager {
                     Logger.error(TAG, "Server returned HTML instead of an APK. Is the release private/draft?")
                     response.close()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, LanguageManager.translate("Download error: Server returned a webpage (Release might be private/draft)"), Toast.LENGTH_LONG).show()
+                        Toast.makeText(appContext, LanguageManager.translate("Download error: Server returned a webpage (Release might be private/draft)"), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -153,12 +136,11 @@ object UpdateManager {
                 val contentLength = body?.contentLength() ?: -1L
                 Logger.info(TAG, "Download started. Expected size: $contentLength bytes")
 
-                // Digest as we stream, so the file is never read twice and there
-                // is no window between hashing and installing.
+                // Digest as we stream, so the file is never read twice.
                 val digest = MessageDigest.getInstance("SHA-256")
 
                 val inputStream = body?.byteStream()
-                val outputStream = FileOutputStream(destFile)
+                val outputStream = FileOutputStream(tmpFile)
                 val buffer = ByteArray(64 * 1024)
                 var bytesRead: Int
                 var totalBytesRead = 0L
@@ -176,7 +158,7 @@ object UpdateManager {
                                 if (now - lastToastTime > 3000) {
                                     val mb = totalBytesRead / (1024 * 1024)
                                     withContext(Dispatchers.Main) {
-                                        Toast.makeText(context, LanguageManager.translate("Downloading update: {mb}MB...").replace("{mb}", mb.toString()), Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(appContext, LanguageManager.translate("Downloading update: {mb}MB...").replace("{mb}", mb.toString()), Toast.LENGTH_SHORT).show()
                                     }
                                     lastToastTime = now
                                 }
@@ -189,9 +171,9 @@ object UpdateManager {
 
                 if (totalBytesRead < MIN_APK_BYTES) {
                     Logger.error(TAG, "File too small ($totalBytesRead bytes), probably corrupted.")
-                    destFile.delete()
+                    tmpFile.delete()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, LanguageManager.translate("Download corrupted (file too small). Try again."), Toast.LENGTH_LONG).show()
+                        Toast.makeText(appContext, LanguageManager.translate("Download corrupted (file too small). Try again."), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -200,9 +182,9 @@ object UpdateManager {
                 // truncated APK, not a valid one.
                 if (contentLength > 0 && totalBytesRead != contentLength) {
                     Logger.error(TAG, "Truncated download: got $totalBytesRead of $contentLength bytes")
-                    destFile.delete()
+                    tmpFile.delete()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, LanguageManager.translate("Download incomplete. Try again."), Toast.LENGTH_LONG).show()
+                        Toast.makeText(appContext, LanguageManager.translate("Download incomplete. Try again."), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -211,16 +193,15 @@ object UpdateManager {
 
                 if (normalisedExpected != null) {
                     if (!constantTimeEquals(actualSha256, normalisedExpected)) {
-                        // This is the case the old code could not detect at all.
                         Logger.error(
                             TAG,
-                            "CHECKSUM MISMATCH — refusing to install",
+                            "CHECKSUM MISMATCH — refusing the downloaded update",
                             "expected=${normalisedExpected.take(12)}… actual=${actualSha256.take(12)}…"
                         )
-                        destFile.delete()
+                        tmpFile.delete()
                         withContext(Dispatchers.Main) {
                             Toast.makeText(
-                                context,
+                                appContext,
                                 LanguageManager.translate("Update REJECTED: the downloaded file does not match the published checksum. It has been deleted."),
                                 Toast.LENGTH_LONG
                             ).show()
@@ -229,17 +210,17 @@ object UpdateManager {
                     }
                     Logger.info(TAG, "APK checksum verified against the published SHA-256")
                 } else {
-                    Logger.warn(TAG, "Installing an UNVERIFIED APK — no published checksum, user opted in")
+                    Logger.warn(TAG, "Saving an UNVERIFIED APK — no published checksum, user opted in")
                 }
 
-                // C23: Verify downloaded APK's signing certificate matches the installed application
-                val certMatches = verifyApkCertificate(context, destFile)
+                // C23: the downloaded APK must be signed by the same key as the installed app.
+                val certMatches = verifyApkCertificate(appContext, tmpFile)
                 if (!certMatches) {
-                    Logger.error(TAG, "CERTIFICATE MISMATCH — refusing to install downloaded APK signed with conflicting key")
-                    destFile.delete()
+                    Logger.error(TAG, "CERTIFICATE MISMATCH — refusing downloaded APK signed with a conflicting key")
+                    tmpFile.delete()
                     withContext(Dispatchers.Main) {
                         Toast.makeText(
-                            context,
+                            appContext,
                             LanguageManager.translate("Update REJECTED: the downloaded file certificate does not match the installed application."),
                             Toast.LENGTH_LONG
                         ).show()
@@ -247,29 +228,90 @@ object UpdateManager {
                     return@launch
                 }
 
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, LanguageManager.translate("Download complete! Launching installer..."), Toast.LENGTH_SHORT).show()
-                    launchInstaller(context, destFile)
+                // NOSLOP_SAVE_TO_DOWNLOADS_V1 — hand the verified file to the user, not the installer.
+                val savedAs = try {
+                    saveToDownloads(appContext, tmpFile, fileName)
+                } finally {
+                    tmpFile.delete()
                 }
+                Logger.info(TAG, "Verified update saved for manual install: $savedAs")
+
+                val message = LanguageManager.translate("{file} is in your Download folder. Open it from your Files app to install.")
+                    .replace("{file}", savedAs)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                }
+                NotificationHelper.showNotification(
+                    context = appContext,
+                    title = LanguageManager.translate("Update downloaded"),
+                    message = message
+                )
 
             } catch (e: Exception) {
-                Logger.error(TAG, "Exception during download: ${e.message}")
-                try { destFile.delete() } catch (_: Exception) {}
+                Logger.error(TAG, "Exception during update download: ${e.message}")
+                try { tmpFile.delete() } catch (_: Exception) {}
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, LanguageManager.translate("Download failed: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
+                    Toast.makeText(appContext, LanguageManager.translate("Download failed: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
 
     /**
-     * Length-independent, branch-free comparison. Overkill for a public digest,
-     * but it costs nothing and stops this becoming a bad example to copy.
+     * Copies [source] into the public Download folder and returns the name it was
+     * saved under (MediaStore may add " (1)" if a file with that name exists and
+     * isn't ours to replace). On Android 9 and older, where writing to the public
+     * folder needs a storage permission NoSlop doesn't have, it goes to the app's
+     * own Download folder and the full path is returned instead.
      */
+    private fun saveToDownloads(context: Context, source: File, fileName: String): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: throw IOException("external storage unavailable")
+            dir.mkdirs()
+            val dest = File(dir, fileName)
+            source.copyTo(dest, overwrite = true)
+            return dest.absolutePath
+        }
+
+        val resolver = context.contentResolver
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+
+        // Replace an earlier copy of this same version that NoSlop saved itself.
+        try {
+            resolver.delete(collection, "${MediaStore.MediaColumns.DISPLAY_NAME}=?", arrayOf(fileName))
+        } catch (e: Exception) {
+            Logger.debug(TAG, "No earlier copy removed: ${e.message}")
+        }
+
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, APK_MIME)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(collection, values) ?: throw IOException("could not create the file in Download")
+
+        try {
+            val out = resolver.openOutputStream(uri) ?: throw IOException("could not open the file in Download")
+            out.use { o -> source.inputStream().use { it.copyTo(o) } }
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+            throw e
+        }
+
+        return resolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            ?: fileName
+    }
+
     /**
-     * C23: Pre-install APK signing certificate verification against the currently installed app.
-     * Guarantees that downloaded updates were signed by the exact same author key before invoking
-     * the system package installer.
+     * C23: APK signing certificate verification against the currently installed app.
+     * Guarantees that a downloaded update was signed by the exact same author key
+     * before it is offered to the user.
      */
     fun verifyApkCertificate(context: Context, apkFile: File): Boolean {
         return try {
@@ -277,8 +319,8 @@ object UpdateManager {
             val archiveCerts = getArchiveCertificates(context.packageManager, apkFile)
 
             if (installedCerts.isEmpty() || archiveCerts.isEmpty()) {
-                // If certificates cannot be extracted (e.g. test harness), allow system installer to enforce rules
-                Logger.warn(TAG, "Skipping pre-install cert check (installed=${installedCerts.size}, archive=${archiveCerts.size})")
+                // If certificates cannot be extracted (e.g. test harness), the system installer still enforces this.
+                Logger.warn(TAG, "Skipping cert check (installed=${installedCerts.size}, archive=${archiveCerts.size})")
                 return true
             }
 
@@ -343,31 +385,14 @@ object UpdateManager {
         }
     }
 
+    /**
+     * Length-independent, branch-free comparison. Overkill for a public digest,
+     * but it costs nothing and stops this becoming a bad example to copy.
+     */
     private fun constantTimeEquals(a: String, b: String): Boolean {
         if (a.length != b.length) return false
         var diff = 0
         for (i in a.indices) diff = diff or (a[i].code xor b[i].code)
         return diff == 0
-    }
-
-    private fun launchInstaller(context: Context, file: File) {
-        try {
-            val fileUri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
-
-            val installIntent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-            }
-
-            context.startActivity(installIntent)
-            Logger.info(TAG, "Package installer launched successfully")
-        } catch (e: Exception) {
-            Logger.error(TAG, "Failed to launch installer: ${e.message}")
-            Toast.makeText(context, LanguageManager.translate("Failed to open installer: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
-        }
     }
 }

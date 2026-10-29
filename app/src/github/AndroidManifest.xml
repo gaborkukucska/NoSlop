@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Automatic Updates for GitHub / Direct APK distribution -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- NOSLOP_SAVE_TO_DOWNLOADS_V1: no REQUEST_INSTALL_PACKAGES. Updates are downloaded
+         and verified in-app, then saved to Download for the user to install from Files.
+         Play Protect flags apps that download APKs and launch the installer. -->
 </manifest>
