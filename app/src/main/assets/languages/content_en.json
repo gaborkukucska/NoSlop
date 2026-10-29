@@ -219,6 +219,8 @@
   "Download File": "Download File",
   "Download GIF": "Download GIF",
   "Download Update": "Download Update",
+  "Update downloaded": "Update downloaded",
+  "{file} is in your Download folder. Open it from your Files app to install.": "{file} is in your Download folder. Open it from your Files app to install.",
   "Download complete! Launching installer...": "Download complete! Launching installer...",
   "Download corrupted (file too small). Try again.": "Download corrupted (file too small). Try again.",
   "Download error: Server returned a webpage (Release might be private/draft)": "Download error: Server returned a webpage (Release might be private/draft)",

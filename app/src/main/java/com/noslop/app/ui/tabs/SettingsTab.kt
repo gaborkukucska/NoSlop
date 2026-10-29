@@ -147,29 +147,14 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
                                 
-                                val canInstall = UpdateManager.canInstallPackages(context)
+                                // NOSLOP_SAVE_TO_DOWNLOADS_V1: NoSlop downloads and verifies the update,
+                                // then saves it to Download; the user installs it from their Files app.
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    if (!canInstall) {
-                                        Button(
-                                            onClick = { UpdateManager.requestInstallPermission(context) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
-                                            modifier = Modifier.padding(end = 8.dp)
-                                        ) {
-                                            Text("Give Permission".tr, color = TextLight)
-                                        }
-                                        Button(
-                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = true, expectedSha256 = updateInfo!!.expectedSha256) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                                        ) {
-                                            Text("Just Download APK".tr, color = TextLight)
-                                        }
-                                    } else {
-                                        Button(
-                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = false, expectedSha256 = updateInfo!!.expectedSha256) },
-                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                                        ) {
-                                            Text("Download Update".tr, color = TextLight)
-                                        }
+                                    Button(
+                                        onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, expectedSha256 = updateInfo!!.expectedSha256) },
+                                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                                    ) {
+                                        Text("Download Update".tr, color = TextLight)
                                     }
                                 }
                             }

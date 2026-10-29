@@ -190,7 +190,8 @@ class CodeHygieneArchitectureTest {
         "com/noslop/app/ui/components/AndroidGifTextField.kt|} catch (_: Exception) {}" to 1,
         "com/noslop/app/ui/components/AudioPlayer.kt|} catch (e: Exception) { /* player may be mid-release; ignore */ }" to 1,
         "com/noslop/app/util/UpdateChecker.kt|} catch (_: Exception) { /* ignore corrupt cache */ }" to 1,
-        "com/noslop/app/util/UpdateManager.kt|try { destFile.delete() } catch (_: Exception) {}" to 1
+        "com/noslop/app/util/UpdateManager.kt|try { tmpFile.delete() } catch (_: Exception) {}" to 1,
+        "com/noslop/app/util/UpdateManager.kt|try { resolver.delete(uri, null, null) } catch (_: Exception) {}" to 1
         )
     }
 }
