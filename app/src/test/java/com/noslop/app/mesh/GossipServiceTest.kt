@@ -20,6 +20,7 @@ class GossipServiceTest {
 
     @Before
     fun resetGossipState() {
+        GossipService.resetForTesting()
         val cls = GossipService::class.java
         @Suppress("UNCHECKED_CAST")
         val processed = cls.getDeclaredField("processedPacketIds")
@@ -325,5 +326,143 @@ class GossipServiceTest {
             payload = com.google.gson.JsonObject().apply { addProperty("content", "hello") }
         )
         assertFalse("Text post dropped due to strict filter", GossipService.processIncoming(textPost))
+    }
+
+    // --- P1: dedup keyed on type + id + payload digest ---
+
+    private fun json(vararg pairs: Pair<String, String>) =
+        com.google.gson.JsonObject().apply { pairs.forEach { (k, v) -> addProperty(k, v) } }
+
+    @Test
+    fun dedup_samePacketViaTwoRelays_isStillDropped() = runBlocking {
+        val prevEnforce = MeshPacketVerifier.enforce
+        MeshPacketVerifier.enforce = false
+        try {
+            // Same type/id/payload; a relay changes only hops and (re-stamped) sender_id.
+            val payload = json("content" to "hello")
+            assertTrue(GossipService.processIncoming(
+                NetworkPacket(id = "relay-1", hops = 6, senderId = "relay-a", type = "POST", payload = payload)))
+            assertFalse("identical packet via a second relay must dedup",
+                GossipService.processIncoming(
+                    NetworkPacket(id = "relay-1", hops = 4, senderId = "relay-b", type = "POST", payload = payload.deepCopy())))
+        } finally {
+            MeshPacketVerifier.enforce = prevEnforce
+        }
+    }
+
+    @Test
+    fun dedup_spoofedIdWithDifferentPayload_doesNotBurnRealPacket() = runBlocking {
+        val prevEnforce = MeshPacketVerifier.enforce
+        MeshPacketVerifier.enforce = false
+        try {
+            // An untrusted node sends a firewall-exempt, signature-unverifiable MEDIA_* packet under its
+            // own envelope, reusing the victim's packet id, before the real packet arrives.
+            assertTrue(GossipService.processIncoming(NetworkPacket(
+                id = "victim-1", hops = 6, senderId = "attacker", type = "MEDIA_REQUEST",
+                payload = json("mediaId" to "junk"))))
+            // Same type as the victim, different payload.
+            assertTrue(GossipService.processIncoming(NetworkPacket(
+                id = "victim-1", hops = 6, senderId = "attacker", type = "POST",
+                payload = json("content" to "evil"))))
+
+            val real = NetworkPacket(id = "victim-1", hops = 6, senderId = "victim", type = "POST",
+                payload = json("content" to "the real post"))
+            assertTrue("real packet must not be blocked by a spoof reusing its id",
+                GossipService.processIncoming(real))
+            assertFalse("real packet still dedups against itself",
+                GossipService.processIncoming(real.copy(senderId = "relay-x", hops = 3)))
+        } finally {
+            MeshPacketVerifier.enforce = prevEnforce
+        }
+    }
+
+    // --- P1 (1.8): firewall buffer release reaches the handler ---
+
+    /**
+     * Wires GossipService to a mocked transport whose repository behaves like MeshPacketHandler: it runs
+     * [GossipService.processIncoming] and "dispatches" (completes the deferred) only if that admits it.
+     */
+    private fun wireDispatch(isTrusted: () -> Boolean, sender: String): kotlinx.coroutines.CompletableDeferred<NetworkPacket> {
+        val delivered = kotlinx.coroutines.CompletableDeferred<NetworkPacket>()
+        val dao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+        io.mockk.coEvery { dao.getPeerByPublicKey(sender) } answers {
+            com.noslop.app.data.Peer(sender, "", "", "", isTrusted = isTrusted())
+        }
+        io.mockk.coEvery { dao.getAllPeersList() } returns emptyList()
+        val repo = io.mockk.mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
+        io.mockk.coEvery { repo.getAppSetting(any()) } returns null
+        io.mockk.coEvery { repo.isNodeBanned(any()) } returns false
+        io.mockk.coEvery { repo.handleIncomingPacket(any(), any()) } coAnswers {
+            val p = firstArg<NetworkPacket>()
+            val admitted = GossipService.processIncoming(p)
+            if (admitted) delivered.complete(p)
+            admitted
+        }
+        val tx = io.mockk.mockk<MeshTransport>(relaxed = true)
+        io.mockk.every { tx.repository } returns repo
+        GossipService.initialize(dao, tx, "local-key")
+        return delivered
+    }
+
+    /** A MESSAGE that is not a directed DM for us, so it goes through the trust firewall and buffer. */
+    private fun relayedMessage(id: String, sender: String) = NetworkPacket(
+        id = id, hops = 6, senderId = sender, type = "MESSAGE", payload = json("ciphertext" to "abc-$id")
+    )
+
+    @Test
+    fun flush_deliversBufferedMessageToHandler_whenSenderBecomesTrusted() = runBlocking {
+        var trusted = false
+        val delivered = wireDispatch({ trusted }, "newbie")
+        val msg = relayedMessage("m-1", "newbie")
+
+        assertFalse("untrusted MESSAGE is held, not processed", GossipService.processIncoming(msg))
+
+        trusted = true // handshake completed inside the 15 s window
+        GossipService.flushFirewallBuffer("newbie")
+
+        val got = kotlinx.coroutines.withTimeout(5_000) { delivered.await() }
+        assertEquals("buffered message reaches the handler", "m-1", got.id)
+        assertFalse("after release the packet dedups again",
+            GossipService.processIncoming(msg.copy(hops = 5)))
+    }
+
+    @Test
+    fun flush_honoursReleaseDecision_evenIfTrustReadLags() = runBlocking {
+        // The release is the firewall decision: the replay must not be re-buffered and lost.
+        val delivered = wireDispatch({ false }, "lagging")
+        assertFalse(GossipService.processIncoming(relayedMessage("m-2", "lagging")))
+        GossipService.flushFirewallBuffer("lagging")
+        val got = kotlinx.coroutines.withTimeout(5_000) { delivered.await() }
+        assertEquals("m-2", got.id)
+    }
+
+    // --- P1 (1.7): bounded per-sender state ---
+
+    @Test
+    fun firewallBuffer_capsNumberOfBufferedSenders() = runBlocking {
+        val dao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+        io.mockk.coEvery { dao.getPeerByPublicKey(any()) } returns null
+        GossipService.initialize(dao, io.mockk.mockk(relaxed = true), "local-key")
+        for (i in 0 until 300) {
+            GossipService.processIncoming(relayedMessage("cap-$i", "sybil-$i"))
+        }
+        @Suppress("UNCHECKED_CAST")
+        val buffer = GossipService::class.java.getDeclaredField("firewallBuffer")
+            .apply { isAccessible = true }.get(GossipService) as Map<String, *>
+        assertTrue("buffered sender count is capped (was ${buffer.size})", buffer.size in 1..256)
+    }
+
+    @Test
+    fun rateLimitTable_isBounded() = runBlocking {
+        for (i in 0 until GossipService.MAX_RATE_LIMITED_SENDERS) {
+            GossipService.processIncoming(post("rt-$i", "rt-sender-$i"))
+        }
+        assertFalse("a new sender beyond the table cap is dropped while the window is live",
+            GossipService.processIncoming(post("rt-over", "rt-sender-over")))
+        @Suppress("UNCHECKED_CAST")
+        val limits = GossipService::class.java.getDeclaredField("senderRateLimits")
+            .apply { isAccessible = true }.get(GossipService) as Map<String, *>
+        assertTrue("rate-limit table is capped (was ${limits.size})",
+            limits.size <= GossipService.MAX_RATE_LIMITED_SENDERS)
     }
 }

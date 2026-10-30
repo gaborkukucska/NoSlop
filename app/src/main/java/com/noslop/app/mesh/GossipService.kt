@@ -28,6 +28,19 @@ object GossipService {
     // (MediaManager.handleRecoveryRequest).
 
     private val firewallBuffer = ConcurrentHashMap<String, MutableList<NetworkPacket>>()
+
+    // P1 (1.7): caps on per-sender state. Sender keys are free to mint, so without a cap a flood of
+    // distinct senders grows these maps without bound. Buffering is best-effort (new senders are simply
+    // not buffered once full); the rate-limit tables prune first and then fail closed for new senders.
+    private const val MAX_BUFFERED_SENDERS = 256
+    private const val MAX_BUFFERED_PER_SENDER = 10
+    private const val FIREWALL_BUFFER_TTL_MS = 15_000L
+    internal const val MAX_RATE_LIMITED_SENDERS = 4096
+
+    // P1 (1.8): dedup keys of buffered packets being replayed by [flushFirewallBuffer]. The release is
+    // the firewall decision for that packet, so processIncoming skips the trust check for it exactly once
+    // (a trust read that lags the handshake must not re-buffer and lose it).
+    private val releasedPacketKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
     private val senderMediaBytes = ConcurrentHashMap<String, Long>()
 
     private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
@@ -261,6 +274,7 @@ object GossipService {
         globalUntrustedDmCount = 0
         globalUntrustedDmWindowStart = 0L
         firewallBuffer.clear()
+        releasedPacketKeys.clear()
         senderMediaBytes.clear()
         recentlyDeletedPeers.clear()
         peerSendFailures.clear()
@@ -268,32 +282,71 @@ object GossipService {
     }
 
 
+    /**
+     * Release the MESSAGE packets buffered for [senderId] now that the sender is trusted.
+     *
+     * P1 (1.8): the buffer used to be replayed through [processIncoming] alone, which only filters and
+     * forwards — handler dispatch happens in [MeshPacketHandler.handleIncomingPacket] — so every buffered
+     * message was marked processed and then dropped for good. Each packet now goes through the full
+     * dispatch path (NoSlopRepository.handleIncomingPacket), the same entry MeshTransport uses after the
+     * envelope check that this packet already passed when it first arrived. Its dedup key is put in
+     * [releasedPacketKeys] so the replay is not re-buffered by a trust read that lags the handshake.
+     */
     fun flushFirewallBuffer(senderId: String) {
-        val buffer = firewallBuffer.remove(senderId)
-        if (buffer != null && buffer.isNotEmpty()) {
-            Logger.info(TAG, "Flushing ${buffer.size} buffered packets for newly trusted peer $senderId")
-            scope.launch {
-                for (packet in buffer) {
-                    processIncoming(packet)
+        val buffer = firewallBuffer.remove(senderId) ?: return
+        // Snapshot under the list's monitor: the TTL timer may still be removing from it.
+        val packets = synchronized(buffer) { buffer.toList().also { buffer.clear() } }
+        if (packets.isEmpty()) return
+        Logger.info(TAG, "Flushing ${packets.size} buffered packets for newly trusted peer $senderId")
+        scope.launch {
+            for (packet in packets) {
+                val key = dedupKey(packet)
+                releasedPacketKeys.add(key)
+                try {
+                    val repo = transport?.repository
+                    if (repo == null) {
+                        Logger.warn(TAG, "Cannot replay buffered packet ${packet.id}: transport not initialized")
+                    } else if (repo.handleIncomingPacket(packet)) {
+                        // Same bookkeeping as MeshTransport after a handled inbound packet.
+                        EnvelopeAuth.recordProcessed(packet)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Replay of buffered packet ${packet.id} failed: ${e.message}")
+                } finally {
+                    // Single use: never leave a release token behind (e.g. the dispatch dropped it early).
+                    releasedPacketKeys.remove(key)
                 }
             }
         }
     }
 
-    private var cleanupJob: Job? = null
+    /**
+     * Dedup key: type + id + payload digest. Keying on the bare id let any node with a valid envelope of
+     * its own (e.g. an untrusted one sending a firewall-exempt, signature-unverifiable MEDIA_* packet)
+     * reuse a victim packet's id and burn it before the real packet arrived. The same packet arriving over
+     * two relays shares type, id and payload (relays change only hops and, for most types, sender_id;
+     * neither is in the payload), so legit duplicates still dedup.
+     */
+    internal fun dedupKey(packet: NetworkPacket): String =
+        "${packet.type}|${packet.id ?: "unknown"}|${EnvelopeAuth.payloadDigest(packet.payload)}"
 
-    private var peerDao: PeerDao? = null
-    private var transport: MeshTransport? = null
-    private var localPublicKeyB64: String = ""
-    private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
-    private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
-    var pushPacketToHub: (suspend (NetworkPacket) -> Boolean)? = null
+    @Volatile private var cleanupJob: Job? = null
+
+    // P1 (1.7): written by initialize() on the startup thread, read on IO threads.
+    @Volatile private var peerDao: PeerDao? = null
+    @Volatile private var transport: MeshTransport? = null
+    @Volatile private var localPublicKeyB64: String = ""
+    @Volatile private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
+    @Volatile private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
+    @Volatile var pushPacketToHub: (suspend (NetworkPacket) -> Boolean)? = null
     private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Logger.error(TAG, "Uncaught coroutine exception in GossipService: ${throwable.message}", throwable.stackTraceToString())
     }
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + coroutineExceptionHandler)
 
-    private var checkIsLocalUser: (suspend (String) -> Boolean)? = null
+    @Volatile private var checkIsLocalUser: (suspend (String) -> Boolean)? = null
 
     fun initialize(
         peerDao: PeerDao,
@@ -314,8 +367,15 @@ object GossipService {
         cleanupJob = scope.launch {
             while (isActive) {
                 delay(60_000)
-                cleanupFailureTracking()
-                cleanupRateLimitsAndFirewall()
+                // P1 (1.7): one failing pass must not end pruning for the rest of the process lifetime.
+                try {
+                    cleanupFailureTracking()
+                    cleanupRateLimitsAndFirewall()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Periodic gossip cleanup failed: ${e.message}", e.stackTraceToString())
+                }
             }
         }
     }
@@ -331,43 +391,61 @@ object GossipService {
 
     private fun cleanupRateLimitsAndFirewall() {
         val now = System.currentTimeMillis()
-        val rateLimitWindowMs = 10_000L
 
-        val rateLimitIter = senderRateLimits.entries.iterator()
-        while (rateLimitIter.hasNext()) {
-            val entry = rateLimitIter.next()
-            entry.value.removeAll { now - it > rateLimitWindowMs }
-            if (entry.value.isEmpty()) {
-                rateLimitIter.remove()
-            }
-        }
+        pruneRateMap(senderRateLimits, now, 10_000L)
+        pruneRateMap(announcementRateLimits, now, 60_000L)
+        pruneRateMap(dmRateLimits, now, 60_000L)
 
-        val firewallIter = firewallBuffer.entries.iterator()
-        while (firewallIter.hasNext()) {
-            val entry = firewallIter.next()
-            if (entry.value.isEmpty()) {
-                firewallIter.remove()
-            }
-        }
-
-        val announceIter = announcementRateLimits.entries.iterator()
-        while (announceIter.hasNext()) {
-            val entry = announceIter.next()
-            entry.value.removeAll { now - it > 60_000L }
-            if (entry.value.isEmpty()) {
-                announceIter.remove()
-            }
-        }
-
-        val dmIter = dmRateLimits.entries.iterator()
-        while (dmIter.hasNext()) {
-            val entry = dmIter.next()
-            entry.value.removeAll { now - it > 60_000L }
-            if (entry.value.isEmpty()) {
-                dmIter.remove()
+        for (senderId in firewallBuffer.keys.toList()) {
+            firewallBuffer.computeIfPresent(senderId) { _, list ->
+                if (synchronized(list) { list.isEmpty() }) null else list
             }
         }
         senderMediaBytes.clear()
+    }
+
+    /**
+     * P1 (1.7): drop expired timestamps and empty entries. Every per-sender list is only touched inside a
+     * ConcurrentHashMap compute-family call (serialised per key) and under the list's own monitor — here
+     * and in [checkRate] — so the cleaner can no longer race a rate check (the old unlocked removeAll could
+     * throw ConcurrentModificationException, which killed the cleanup loop for good).
+     */
+    private fun pruneRateMap(map: ConcurrentHashMap<String, MutableList<Long>>, now: Long, windowMs: Long) {
+        for (key in map.keys.toList()) {
+            map.computeIfPresent(key) { _, list ->
+                synchronized(list) {
+                    list.removeAll { now - it > windowMs }
+                    if (list.isEmpty()) null else list
+                }
+            }
+        }
+    }
+
+    private enum class RateCheck { OK, LIMITED, TABLE_FULL }
+
+    /** Sliding-window rate check for [key] (at most [max] events per [windowMs]) with a bounded table. */
+    private fun checkRate(
+        map: ConcurrentHashMap<String, MutableList<Long>>,
+        key: String,
+        now: Long,
+        windowMs: Long,
+        max: Int
+    ): RateCheck {
+        if (map.size >= MAX_RATE_LIMITED_SENDERS && !map.containsKey(key)) pruneRateMap(map, now, windowMs)
+        var result = RateCheck.OK
+        map.compute(key) { _, existing ->
+            if (existing == null && map.size >= MAX_RATE_LIMITED_SENDERS) {
+                result = RateCheck.TABLE_FULL
+                return@compute null
+            }
+            val list = existing ?: ArrayList()
+            synchronized(list) {
+                list.removeAll { now - it > windowMs }
+                if (list.size >= max) result = RateCheck.LIMITED else list.add(now)
+            }
+            list
+        }
+        return result
     }
 
 
@@ -378,6 +456,7 @@ object GossipService {
      * Bounded at 1000 ids, evicting the oldest 100 on overflow (unchanged).
      */
     private fun markProcessed(packetId: String) {
+        // packetId is the full [dedupKey] (type|id|payload digest), not the bare id.
         synchronized(processedPacketIds) {
             if (processedPacketIds.contains(packetId)) return
             if (processedPacketIds.size >= 1000) {
@@ -437,8 +516,15 @@ object GossipService {
         // untrusted sender was recorded here and then buffered in step 4; when
         // flushFirewallBuffer() replayed it after the peer became trusted, this
         // check dropped it as a duplicate and the message was lost. It now lands.
+        //
+        // P1: keyed on type + id + payload digest ([dedupKey]), not the bare id. Verify-before-mark
+        // alone did not stop id burning: a MEDIA_* packet is firewall-exempt and signature-unverifiable
+        // here, so any node could send one under its own valid envelope with a victim packet's id.
+        val dedupKey = dedupKey(packet)
+        // A packet being replayed from the firewall buffer: the release was its firewall decision.
+        val isReleasedReplay = releasedPacketKeys.remove(dedupKey)
         synchronized(processedPacketIds) {
-            if (processedPacketIds.contains(packetId)) {
+            if (processedPacketIds.contains(dedupKey)) {
                 Logger.debug(TAG, "Dropping duplicate packet: $packetId")
                 return false
             }
@@ -450,15 +536,16 @@ object GossipService {
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST" || packet.type == "DM_SYNC_REQUEST"
         val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT" || packet.type == "PEER_REMOVED"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
-            val now = System.currentTimeMillis()
-            val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
-            synchronized(limitList) {
-                limitList.removeAll { now - it > 10000 }
-                if (limitList.size >= 20) {
+            when (checkRate(senderRateLimits, senderId, System.currentTimeMillis(), 10_000L, 20)) {
+                RateCheck.OK -> Unit
+                RateCheck.LIMITED -> {
                     Logger.warn("FIREWALL", "Rate limit exceeded for $senderId. Dropping packet $packetId.")
                     return false
                 }
-                limitList.add(now)
+                RateCheck.TABLE_FULL -> {
+                    Logger.warn("FIREWALL", "Rate-limit table full ($MAX_RATE_LIMITED_SENDERS senders). Dropping packet $packetId from new sender $senderId.")
+                    return false
+                }
             }
         }
 
@@ -493,12 +580,7 @@ object GossipService {
                     globalUntrustedDmCount++
                 }
 
-                val limitList = dmRateLimits.getOrPut(senderId) { ArrayList() }
-                val limited = synchronized(limitList) {
-                    limitList.removeAll { now - it > 60_000L }
-                    if (limitList.size >= 10) true else { limitList.add(now); false }
-                }
-                if (limited) {
+                if (checkRate(dmRateLimits, senderId, now, 60_000L, 10) != RateCheck.OK) {
                     Logger.warn("FIREWALL", "Rate limit (10/60s) exceeded for untrusted DM sender $senderId. Dropping MESSAGE $packetId.")
                     return false
                 }
@@ -507,15 +589,9 @@ object GossipService {
 
         // Dedicated rate limit for unauthenticated announcements, follows, & identity updates (5 per 60s per sender)
         if (isDiscoverable || isIdentityUpdate || isFollowPacket) {
-            val now = System.currentTimeMillis()
-            val limitList = announcementRateLimits.getOrPut(senderId) { ArrayList() }
-            synchronized(limitList) {
-                limitList.removeAll { now - it > 60_000L }
-                if (limitList.size >= 5) {
-                    Logger.warn("FIREWALL", "Announcement rate limit (5/60s) exceeded for $senderId. Dropping ${packet.type} $packetId.")
-                    return false
-                }
-                limitList.add(now)
+            if (checkRate(announcementRateLimits, senderId, System.currentTimeMillis(), 60_000L, 5) != RateCheck.OK) {
+                Logger.warn("FIREWALL", "Announcement rate limit (5/60s) exceeded for $senderId. Dropping ${packet.type} $packetId.")
+                return false
             }
         }
         
@@ -567,21 +643,13 @@ object GossipService {
             }
         }
 
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isDirectedMessageForUs) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket && !isSenderInGroup && !isFollowPacket && !isDirectedMessageForUs && !isReleasedReplay) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 if (peer == null || !peer.isTrusted) {
                     if (packet.type == "MESSAGE") {
-                        val buffer = firewallBuffer.getOrPut(senderId) { java.util.Collections.synchronizedList(mutableListOf()) }
-                        if (buffer.size < 10) {
-                            buffer.add(packet)
-                            Logger.info("FIREWALL", "Buffered MESSAGE packet ${packet.id} from untrusted sender $senderId for 15s")
-                            scope.launch {
-                                delay(15000)
-                                buffer.remove(packet)
-                            }
-                        }
+                        bufferUntrustedMessage(senderId, packet)
                     }
                     Logger.warn("FIREWALL", "FIREWALL BLOCKED: Sender $senderId is not trusted. Dropping ${packet.type} packet $packetId")
                     return false
@@ -649,7 +717,7 @@ object GossipService {
         // 4.6. Record the id, now that the packet has survived authentication.
         // A forgery never reaches this line, so it can no longer displace the
         // real packet it was impersonating.
-        markProcessed(packetId)
+        markProcessed(dedupKey)
 
         // R1 (regression restore of F18, removed in 4579860): a packet from a known peer that survived
         // authentication proves the peer is alive, so its failure cooldown is cleared.
@@ -797,6 +865,41 @@ object GossipService {
 
 
 
+
+    /**
+     * Hold a MESSAGE from a not-yet-trusted sender for [FIREWALL_BUFFER_TTL_MS] so [flushFirewallBuffer]
+     * can release it if the handshake completes in time. P1 (1.7): every list mutation happens inside a
+     * compute-family call on [firewallBuffer] (serialised per sender) and under the list's monitor, the
+     * number of buffered senders is capped, and the TTL timer drops the entry once it is empty.
+     */
+    private fun bufferUntrustedMessage(senderId: String, packet: NetworkPacket) {
+        var buffered = false
+        firewallBuffer.compute(senderId) { _, existing ->
+            if (existing == null && firewallBuffer.size >= MAX_BUFFERED_SENDERS) return@compute null
+            val buffer = existing ?: java.util.Collections.synchronizedList(mutableListOf<NetworkPacket>())
+            synchronized(buffer) {
+                if (buffer.size < MAX_BUFFERED_PER_SENDER) {
+                    buffer.add(packet)
+                    buffered = true
+                }
+            }
+            buffer
+        }
+        if (!buffered) {
+            Logger.warn("FIREWALL", "Firewall buffer full; not buffering MESSAGE ${packet.id} from $senderId")
+            return
+        }
+        Logger.info("FIREWALL", "Buffered MESSAGE packet ${packet.id} from untrusted sender $senderId for ${FIREWALL_BUFFER_TTL_MS / 1000}s")
+        scope.launch {
+            delay(FIREWALL_BUFFER_TTL_MS)
+            firewallBuffer.computeIfPresent(senderId) { _, list ->
+                synchronized(list) {
+                    list.remove(packet)
+                    if (list.isEmpty()) null else list
+                }
+            }
+        }
+    }
 
     /**
      * Forward to all connected peers except sender, with hops decremented by 1
