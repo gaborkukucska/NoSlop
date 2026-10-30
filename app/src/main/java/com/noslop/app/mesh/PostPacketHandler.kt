@@ -30,6 +30,16 @@ class PostPacketHandler(
         internal fun downloadMetadata(metadata: MediaMetadata, digestIsSigned: Boolean): MediaMetadata =
             if (digestIsSigned || metadata.sha256 == null) metadata else metadata.copy(sha256 = null)
 
+        /**
+         * P1-D: `origin_node` (and `mediaMetadata.origin_node`) are not covered by the post signature, so
+         * any relay could point the media download of someone else's post at a host of its choosing. A
+         * claimed origin is used only if it is the onion derived from the author's key (every NoSlop
+         * sender sets its own identity's onion; nothing sets a third-party host). Returns the first such
+         * claim, or null so callers fall back to the author's stored peer onion.
+         */
+        internal fun verifiedOriginOnion(authorId: String, vararg claimed: String?): String? =
+            claimed.firstOrNull { !it.isNullOrBlank() && CryptoService.isOnionOf(authorId, it) }
+
         /** Test hook: replaces MediaManager.checkAndAutoDownload so a test can read what was requested. */
         @Volatile
         internal var autoDownloadForTesting: (suspend (MediaMetadata, String, String, String?) -> Unit)? = null
@@ -98,7 +108,12 @@ class PostPacketHandler(
             }
         }
 
-        val resolvedOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
+        // P1-D: an unsigned origin is honoured only when it is the author's own onion.
+        val originOnion = verifiedOriginOnion(postPay.authorId, postPay.originNode, postPay.mediaMetadata?.originNode)
+        if (originOnion == null && (!postPay.originNode.isNullOrBlank() || !postPay.mediaMetadata?.originNode.isNullOrBlank())) {
+            Logger.warn(TAG, "POST ${postPay.id}: origin_node is not the author's onion; ignored")
+        }
+        val resolvedOnion = originOnion ?: peer?.onionAddress ?: packet.senderId
         val meshPost = MeshPost(
             id = postPay.id,
             authorPublicKeyB64 = postPay.authorId,
@@ -173,13 +188,14 @@ class PostPacketHandler(
         }
         
         if (postPay.mediaMetadata != null) {
-            val peerOnion = postPay.originNode ?: postPay.mediaMetadata.originNode ?: peer?.onionAddress
+            val peerOnion = originOnion ?: peer?.onionAddress
             Logger.info(TAG, "Requesting auto-download for POST media ${postPay.mediaMetadata.id} from ${peerOnion ?: "unknown"}")
             if (!isV2 && mediaHash != null) {
                 Logger.warn(TAG, "POST ${postPay.id}: media digest not covered by the signature; downloading unverified")
             }
             autoDownload(
-                downloadMetadata(postPay.mediaMetadata, isV2),
+                // P1-D: MediaManager falls back to metadata.originNode, so the unverified one is not passed on.
+                downloadMetadata(postPay.mediaMetadata, isV2).copy(originNode = peerOnion),
                 "friends",
                 postPay.authorId,
                 peerOnion
@@ -221,7 +237,8 @@ class PostPacketHandler(
         val existingPost = postDao.getPostById(editPay.postId)
         if (existingPost != null) {
             val peer = peerDao.getPeerByPublicKey(editPay.authorId)
-            val resolvedOnion = editPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
+            val originOnion = verifiedOriginOnion(editPay.authorId, editPay.mediaMetadata?.originNode)
+            val resolvedOnion = originOnion ?: peer?.onionAddress ?: packet.senderId
             // S08/U06: Retain existing descriptor when media is retained without replacement
             val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" }
             val newMediaType = if (editPay.mediaId != null) (editPay.mediaMetadata?.type ?: existingPost.mediaType) else null
@@ -248,12 +265,12 @@ class PostPacketHandler(
                 // D08: like POST, keep the signed digest for sync re-serving and download checks.
                 if (isV2) repo.recordMediaDigest(editPay.mediaId, mediaHash)
                 if (editPay.mediaMetadata != null) {
-                    val peerOnion = editPay.mediaMetadata.originNode ?: peer?.onionAddress
+                    val peerOnion = originOnion ?: peer?.onionAddress
                     if (!isV2 && mediaHash != null) {
                         Logger.warn(TAG, "EDIT_POST ${editPay.postId}: media digest not covered by the signature; downloading unverified")
                     }
                     autoDownload(
-                        downloadMetadata(editPay.mediaMetadata, isV2),
+                        downloadMetadata(editPay.mediaMetadata, isV2).copy(originNode = peerOnion),
                         "friends",
                         editPay.authorId,
                         peerOnion

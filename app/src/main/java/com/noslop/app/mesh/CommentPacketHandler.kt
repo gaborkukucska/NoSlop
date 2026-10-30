@@ -62,7 +62,11 @@ class CommentPacketHandler(
             mediaId = commPay.comment.mediaId,
             mediaType = commPay.comment.mediaType
         )
-        commentDao.insertComment(meshComment)
+        // P1-A: a replayed COMMENT must not restore a deleted comment or roll back an edit.
+        if (!commentDao.insertCommentSafely(meshComment)) {
+            Logger.debug(TAG, "Dropping COMMENT ${commPay.comment.id}: deleted, author mismatch, or not newer than the stored revision")
+            return true
+        }
         // R2: keep the signed digest (sync re-serving, download verification).
         if (isV2) repo.recordMediaDigest(commPay.comment.mediaId, mediaHash)
         
@@ -145,8 +149,8 @@ class CommentPacketHandler(
                 Logger.warn(TAG, "Rejected EDIT_COMMENT: Author mismatch")
                 return false
             }
-            if (editPay.timestamp >= existingComment.timestamp) {
-                commentDao.updateCommentContent(editPay.commentId, editPay.content, editPay.timestamp, editPay.signature)
+            // P1-A: an edit never revives a deleted comment, and an older edit never wins.
+            if (commentDao.editCommentSafely(editPay.commentId, editPay.authorId, editPay.content, editPay.timestamp, editPay.signature)) {
                 Logger.info(TAG, "Applied EDIT_COMMENT for ${editPay.commentId}")
             }
         }
@@ -170,9 +174,13 @@ class CommentPacketHandler(
                 return false
             }
             if (deletePay.timestamp >= existingComment.timestamp) {
-                commentDao.markCommentDeleted(deletePay.commentId)
+                // P1-A: also tombstoned, so a replayed COMMENT / EDIT_COMMENT cannot bring it back.
+                commentDao.deleteCommentWithTombstone(deletePay.commentId, deletePay.authorId, deletePay.timestamp)
                 Logger.info(TAG, "Applied DELETE_COMMENT for ${deletePay.commentId}")
             }
+        } else {
+            // P1-A: delete-before-create. Remember the signed deletion so the comment is not stored later.
+            commentDao.deleteCommentWithTombstone(deletePay.commentId, deletePay.authorId, deletePay.timestamp)
         }
         return true
     }
