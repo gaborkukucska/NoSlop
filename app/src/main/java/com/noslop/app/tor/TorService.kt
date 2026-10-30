@@ -589,16 +589,9 @@ object TorService {
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
 
-            val controlLines = TorControlChannel.torrcLines()
-            val content = buildString {
-                append("SocksPort $SOCKS_PORT IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth\n")
-                append("ClientPreferIPv6ORPort 0\n")
-                append(controlLines)
-                // Only append CookieAuthentication when a TCP ControlPort is actually declared
-                if (controlLines.contains("ControlPort")) {
-                    append("CookieAuthentication 0\n")
-                }
-            }
+            // Content (incl. HTTPTunnelPort 0) lives in TorControlChannel.buildTorrc
+            // so it can be unit-tested.
+            val content = TorControlChannel.buildTorrc(SOCKS_PORT, TorControlChannel.torrcLines())
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
         } catch (e: Exception) {
@@ -656,6 +649,29 @@ object TorService {
     }
 
     /**
+     * Diagnostic for NOSLOP_HTTPTUNNEL_OFF_V1: log which proxy listeners tor
+     * actually opened, so a device log confirms the HTTP tunnel is off (expect
+     * `250-net/listeners/httptunnel=` with an empty value). Best-effort only.
+     */
+    private fun logProxyListeners(ch: TorControlChannel.Channel) {
+        try {
+            for (key in listOf("net/listeners/socks", "net/listeners/httptunnel")) {
+                ch.send("GETINFO $key")
+                val parts = mutableListOf<String>()
+                // Reply is "250-key=value" then "250 OK"; bound the read.
+                while (parts.size < 4) {
+                    val l = ch.readLine() ?: break
+                    parts.add(l)
+                    if (l == "250 OK" || l.startsWith("5")) break
+                }
+                Logger.info(TAG, "Tor listeners", parts.joinToString(" | "))
+            }
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Listener diagnostics failed: ${e.message}")
+        }
+    }
+
+    /**
      * Poll the Tor ControlPort until Tor reports 100% bootstrap progress.
      *
      * --- NOSLOP_BOOTSTRAP_TRUTH_V1 ---
@@ -687,6 +703,7 @@ object TorService {
                                 }
                                 if (line.contains("PROGRESS=100")) {
                                     Logger.info(TAG, "Tor bootstrap reached 100%: $line")
+                                    logProxyListeners(ch)
                                     return@withContext true
                                 }
                             }

@@ -65,8 +65,8 @@ object SshDeployer {
         onLog: (String) -> Unit = {},
         // NOSLOP_SSH_HOSTKEY_V1
         // Called on the FIRST connection to a host whose key is not yet pinned.
-        // Return true to pin and continue, false to abort. When null, trust-on-
-        // first-use applies and the fingerprint is only logged. A key that has
+        // Return true to pin and continue, false to abort. When null, an unpinned
+        // host is refused (NOSLOP_SSH_HOSTKEY_V2: no trust-on-first-use). A key that has
         // CHANGED is never routed here — that case is refused unconditionally.
         onHostKeyPrompt: (suspend (host: String, fingerprint: String) -> Boolean)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -86,61 +86,39 @@ object SshDeployer {
             if (!knownHostsFile.exists()) knownHostsFile.createNewFile()
             jsch.setKnownHosts(knownHostsFile.absolutePath)
 
-            // A UserInfo that never answers a host-key question. Used for the
-            // strict first pass; the yes-once variant below is only installed
-            // after the fingerprint has been accepted.
-            fun silentUserInfo() = object : com.jcraft.jsch.UserInfo {
-                override fun getPassphrase() = null
-                override fun getPassword() = pass
-                override fun promptPassword(message: String) = true
-                override fun promptPassphrase(message: String) = true
-                override fun promptYesNo(message: String) = false
-                override fun showMessage(message: String) {
-                    Logger.info(TAG, "SSH Message: $message")
-                }
-            }
-
-            fun newSession(strict: String, ui: com.jcraft.jsch.UserInfo): com.jcraft.jsch.Session {
+            // --- NOSLOP_SSH_HOSTKEY_V2 ---
+            // Both passes run StrictHostKeyChecking=ask. The probe answers no to
+            // every host-key question and records it; the pinning pass answers
+            // yes only for the fingerprint the user approved. The decision logic
+            // and the JSch 0.2.17 behaviour it depends on are in SshHostKeyPolicy.
+            fun newSession(ui: com.jcraft.jsch.UserInfo): com.jcraft.jsch.Session {
                 val s = jsch.getSession(user, ip, 22)
                 s.setPassword(pass)
                 s.userInfo = ui
-                s.setConfig("StrictHostKeyChecking", strict)
+                s.setConfig("StrictHostKeyChecking", "ask")
                 s.serverAliveInterval = 0
                 return s
             }
 
+            val logSshMessage: (String) -> Unit = { Logger.info(TAG, "SSH Message: $it") }
+
             var connectionAttempts = 0
             var session: com.jcraft.jsch.Session
-            var hostKeyApproved = false
+            var approvedFingerprint: String? = null
 
             while (true) {
+                val ui: SshHostKeyPolicy.PasswordUserInfo = approvedFingerprint?.let {
+                    SshHostKeyPolicy.PinOnceUserInfo(pass, it, logSshMessage)
+                } ?: SshHostKeyPolicy.ProbeUserInfo(pass, logSshMessage)
                 try {
                     connectionAttempts++
-
-                    // Phase 1 — strict. JSch throws rather than prompting, so an
-                    // unknown or changed key cannot be silently accepted.
-                    session = newSession(
-                        if (hostKeyApproved) "ask" else "yes",
-                        if (hostKeyApproved) {
-                            // Yes exactly once, so JSch writes the pin we just approved.
-                            object : com.jcraft.jsch.UserInfo {
-                                override fun getPassphrase() = null
-                                override fun getPassword() = pass
-                                override fun promptPassword(message: String) = true
-                                override fun promptPassphrase(message: String) = true
-                                override fun promptYesNo(message: String): Boolean {
-                                    Logger.info(TAG, "Pinning approved SSH host key for $ip")
-                                    return true
-                                }
-                                override fun showMessage(message: String) {
-                                    Logger.info(TAG, "SSH Message: $message")
-                                }
-                            }
-                        } else silentUserInfo()
-                    )
+                    session = newSession(ui)
 
                     session.connect(15000)
                     session.timeout = 0 // Remove socket timeout after connection is established
+                    if (ui is SshHostKeyPolicy.PinOnceUserInfo && ui.accepted > 0) {
+                        Logger.info(TAG, "Pinned approved SSH host key for $ip", "fingerprint=$approvedFingerprint")
+                    }
 
                     // Start manual keepalive to keep NAT alive without dropping connection on missed replies
                     // We open a dummy channel and write to its stdin to generate client-to-server traffic
@@ -164,68 +142,102 @@ object SshDeployer {
 
                     break
                 } catch (e: Exception) {
-                    val msg = e.message ?: ""
-
-                    // --- The key we pinned no longer matches. Never overridable. ---
-                    if (msg.startsWith("HostKey has been changed")) {
-                        Logger.error(TAG, "SSH HOST KEY MISMATCH for $ip — refusing to connect")
-                        withContext(Dispatchers.Main) {
-                            onLog(
-                                "\n[SECURITY] REFUSED: the SSH host key for $ip does not match " +
-                                    "the one NoSlop pinned on a previous deployment.\n" +
-                                    "This is what an interception attempt looks like. It is also what " +
-                                    "a genuine OS reinstall looks like.\n" +
-                                    "Nothing was sent. If you rebuilt this machine yourself, clear the " +
-                                    "pin from Settings and deploy again.\n"
-                            )
-                        }
-                        return@withContext Result.failure(
-                            Exception(
-                                "SSH host key for $ip has changed since the last deployment. " +
-                                    "Refusing to send your identity. Clear the stored host key if " +
-                                    "you rebuilt this machine."
-                            )
-                        )
-                    }
-
-                    // --- First sight of this host. Confirm, then pin. ---
-                    if (msg.startsWith("UnknownHostKey") && !hostKeyApproved) {
-                        val fingerprint = msg.substringAfter("key fingerprint is", "").trim().trimEnd('.')
-                        Logger.info(TAG, "Unpinned SSH host key for $ip", "fingerprint=$fingerprint")
-                        withContext(Dispatchers.Main) {
-                            onLog(
-                                "\n[SECURITY] First connection to $ip.\n" +
-                                    "Host key fingerprint: $fingerprint\n" +
-                                    "Your SSH password and private identity are about to be sent to " +
-                                    "whoever holds this key. Compare it against the Hub before trusting it.\n"
-                            )
-                        }
-
-                        val approved = onHostKeyPrompt?.invoke(ip, fingerprint) ?: run {
-                            // Trust on first use. Weaker than an explicit confirmation,
-                            // but it pins, so every subsequent connection is protected.
-                            Logger.warn(TAG, "No host-key confirmation handler supplied — pinning on first use")
+                    when (val failure = SshHostKeyPolicy.classifyFailure(e, ui.lastPrompt)) {
+                        // --- The key we pinned no longer matches. Never overridable. ---
+                        SshHostKeyPolicy.Failure.ChangedKey -> {
+                            Logger.error(TAG, "SSH HOST KEY MISMATCH for $ip — refusing to connect")
                             withContext(Dispatchers.Main) {
-                                onLog("Pinning this key (trust-on-first-use) and continuing...\n")
+                                onLog(
+                                    "\n[SECURITY] REFUSED: the SSH host key for $ip does not match " +
+                                        "the one NoSlop pinned on a previous deployment.\n" +
+                                        "This is what an interception attempt looks like. It is also what " +
+                                        "a genuine OS reinstall looks like.\n" +
+                                        "Nothing was sent. If you rebuilt this machine yourself, clear the " +
+                                        "pin from Settings and deploy again.\n"
+                                )
                             }
-                            true
+                            return@withContext Result.failure(
+                                Exception(
+                                    "SSH host key for $ip has changed since the last deployment. " +
+                                        "Refusing to send your identity. Clear the stored host key if " +
+                                        "you rebuilt this machine."
+                                )
+                            )
                         }
 
-                        if (!approved) {
-                            Logger.info(TAG, "User rejected SSH host key for $ip")
-                            withContext(Dispatchers.Main) { onLog("Host key rejected. Deployment cancelled.\n") }
-                            return@withContext Result.failure(Exception("SSH host key rejected by user"))
+                        // --- First sight of this host. Confirm, then pin. ---
+                        is SshHostKeyPolicy.Failure.UnknownHost -> {
+                            if (approvedFingerprint != null) {
+                                // The pinning pass was offered a key other than the one
+                                // the user approved (swapped between probe and reconnect).
+                                Logger.error(
+                                    TAG, "SSH host key for $ip changed during confirmation — refusing",
+                                    "approved=$approvedFingerprint offered=${failure.fingerprint}"
+                                )
+                                withContext(Dispatchers.Main) {
+                                    onLog(
+                                        "\n[SECURITY] REFUSED: $ip presented a different host key " +
+                                            "(${failure.fingerprint}) from the one you approved. Nothing was sent.\n"
+                                    )
+                                }
+                                return@withContext Result.failure(
+                                    Exception("SSH host key for $ip changed during confirmation")
+                                )
+                            }
+                            val fingerprint = failure.fingerprint
+                            Logger.info(TAG, "Unpinned SSH host key for $ip", "fingerprint=$fingerprint")
+                            withContext(Dispatchers.Main) {
+                                onLog(
+                                    "\n[SECURITY] First connection to $ip.\n" +
+                                        "Host key fingerprint: $fingerprint\n" +
+                                        "Your SSH password and private identity are about to be sent to " +
+                                        "whoever holds this key. Compare it against the Hub before trusting it.\n"
+                                )
+                            }
+
+                            when (SshHostKeyPolicy.decideUnknownHost(ip, fingerprint, onHostKeyPrompt)) {
+                                is SshHostKeyPolicy.Decision.Approved -> {
+                                    approvedFingerprint = fingerprint
+                                    connectionAttempts-- // the probe is not a failed attempt
+                                    continue
+                                }
+                                SshHostKeyPolicy.Decision.Declined -> {
+                                    Logger.info(TAG, "User rejected SSH host key for $ip")
+                                    withContext(Dispatchers.Main) { onLog("Host key rejected. Deployment cancelled.\n") }
+                                    return@withContext Result.failure(Exception("SSH host key rejected by user"))
+                                }
+                                SshHostKeyPolicy.Decision.NoConfirmationHandler -> {
+                                    // Fail closed: this deploy sends the SSH password and the
+                                    // private identity, so an unconfirmed key is never trusted
+                                    // on first use.
+                                    Logger.warn(TAG, "No host-key confirmation handler supplied — refusing unpinned host $ip")
+                                    withContext(Dispatchers.Main) {
+                                        onLog("Host key could not be confirmed. Deployment cancelled.\n")
+                                    }
+                                    return@withContext Result.failure(
+                                        Exception("SSH host key for $ip is not pinned and could not be confirmed")
+                                    )
+                                }
+                            }
                         }
 
-                        hostKeyApproved = true
-                        connectionAttempts-- // the strict probe is not a failed attempt
-                        continue
+                        SshHostKeyPolicy.Failure.UnverifiedRejection -> {
+                            Logger.error(TAG, "SSH host key for $ip rejected without a fingerprint: ${e.message}")
+                            withContext(Dispatchers.Main) {
+                                onLog("\n[SECURITY] Could not verify the SSH host key for $ip. Nothing was sent.\n")
+                            }
+                            return@withContext Result.failure(
+                                Exception("SSH host key for $ip could not be verified")
+                            )
+                        }
+
+                        SshHostKeyPolicy.Failure.NotHostKey -> {
+                            if (connectionAttempts >= 3) throw e
+                            Logger.warn(TAG, "SSH Connection attempt $connectionAttempts failed: ${e.message}. Retrying in 2s...")
+                            withContext(Dispatchers.Main) { onLog("Connection attempt $connectionAttempts failed. Retrying in 2s...\n") }
+                            kotlinx.coroutines.delay(2000)
+                        }
                     }
-
-                    if (connectionAttempts >= 3) throw e
-                    Logger.warn(TAG, "SSH Connection attempt $connectionAttempts failed: ${e.message}. Retrying in 2s...")
-                    withContext(Dispatchers.Main) { onLog("Connection attempt $connectionAttempts failed. Retrying in 2s...\n") }
-                    kotlinx.coroutines.delay(2000)
                 }
             }
 
