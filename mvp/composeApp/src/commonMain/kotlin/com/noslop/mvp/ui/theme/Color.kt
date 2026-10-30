@@ -9,7 +9,7 @@ val AccentGreen = Color(0xFF00FF88)
 val SurfaceDark = Color(0xFF141414)
 val BorderSubtle = Color(0xFF2A2A2A)
 val TextLight = Color(0xFFF0F0F0)
-val TextMuted = Color(0xFF666666)
+val TextMuted = Color(0xFFA0A0A0)   // readable muted grey on the black theme (was #666666, too dark to see)
 val DestructiveRed = Color(0xFFFF4444)
 
 // Material Dark/Light compatible sets

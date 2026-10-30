@@ -21,15 +21,57 @@ class KeychainIdentity: IosKeychain {
 
     func reset() {
         SecItemDelete(baseQuery() as CFDictionary)
+        SecItemDelete(baseQuery(account: dmAccount) as CFDictionary)
+    }
+
+    // X25519 DM private key (raw 32 bytes), base64, stored under its own Keychain account.
+    private let dmAccount = "x25519-dm-private-key"
+
+    func loadDmPrivB64() -> String? {
+        var query = baseQuery(account: dmAccount)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return data.base64EncodedString()
+    }
+
+    func saveDmPrivB64(value: String) {
+        guard let data = Data(base64Encoded: value) else { return }
+        SecItemDelete(baseQuery(account: dmAccount) as CFDictionary) // overwrite any prior
+        var query = baseQuery(account: dmAccount)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    func signIdentityBase64(messageBase64: String) -> String? {
+        guard let priv = loadPrivateKey(), let msg = Data(base64Encoded: messageBase64),
+              let sig = try? priv.signature(for: msg) else { return nil }
+        return sig.base64EncodedString()
+    }
+
+    // Raw key accessors required by the IosKeychain protocol (used by upstream's identity paths).
+    func getPrivateKeyBase64() -> String? {
+        loadPrivateKey()?.rawRepresentation.base64EncodedString()
+    }
+
+    func getEncPrivateKeyBase64() -> String? { loadDmPrivB64() }
+
+    func getEncPublicKeyBase64() -> String? {
+        guard let b64 = loadDmPrivB64(), let data = Data(base64Encoded: b64),
+              let priv = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) else { return nil }
+        return priv.publicKey.rawRepresentation.base64EncodedString()
     }
 
     // MARK: - Keychain
 
-    private func baseQuery() -> [String: Any] {
+    private func baseQuery(account: String? = nil) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account ?? self.account,
         ]
     }
 
@@ -87,25 +129,27 @@ class CryptoKitDm: IosDm {
         return secret.withUnsafeBytes { Data($0).base64EncodedString() }
     }
 
-    func sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String) -> String {
+    func sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String, aadBase64: String) -> String {
         guard let keyData = Data(base64Encoded: keyBase64),
               let nonceData = Data(base64Encoded: nonceBase64),
               let plaintext = Data(base64Encoded: plaintextBase64),
+              let aad = Data(base64Encoded: aadBase64),
               let nonce = try? ChaChaPoly.Nonce(data: nonceData),
-              let box = try? ChaChaPoly.seal(plaintext, using: SymmetricKey(data: keyData), nonce: nonce)
+              let box = try? ChaChaPoly.seal(plaintext, using: SymmetricKey(data: keyData), nonce: nonce, authenticating: aad)
         else { return "" }
         return (box.ciphertext + box.tag).base64EncodedString()
     }
 
-    func openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String) -> String? {
+    func openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String, aadBase64: String) -> String? {
         guard let keyData = Data(base64Encoded: keyBase64),
               let nonceData = Data(base64Encoded: nonceBase64),
+              let aad = Data(base64Encoded: aadBase64),
               let ctAndTag = Data(base64Encoded: ciphertextAndTagBase64), ctAndTag.count >= 16,
               let nonce = try? ChaChaPoly.Nonce(data: nonceData) else { return nil }
         let ciphertext = ctAndTag.prefix(ctAndTag.count - 16)
         let tag = ctAndTag.suffix(16)
         guard let box = try? ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag),
-              let plaintext = try? ChaChaPoly.open(box, using: SymmetricKey(data: keyData)) else { return nil }
+              let plaintext = try? ChaChaPoly.open(box, using: SymmetricKey(data: keyData), authenticating: aad) else { return nil }
         return plaintext.base64EncodedString()
     }
 }
@@ -117,9 +161,14 @@ struct iOSApp: App {
         IosKeychainBridge.shared.keychain = KeychainIdentity()
         IosSignerBridge.shared.signer = CryptoKitSigner()
         IosDmBridge.shared.dm = CryptoKitDm()
-        IosTorBridge.shared.tor = TorManager() // Tor starts lazily on the first "Via Tor" connect (MeshScreen)
+        let tor = TorManager()
+        IosTorBridge.shared.tor = tor
+        tor.start() // warm Tor up at launch so it's (nearly) bootstrapped by the time the user connects
         IosQrScannerBridge.shared.scanner = QrScanner()
-        IosVideoPlayerBridge.shared.factory = SwiftVideoPlayerFactory()
+        IosImagePickerBridge.shared.picker = ImagePicker()                 // attach-image for mesh posts (#6c)
+        IosSharerBridge.shared.sharer = SharerBridge()                     // identity share sheet (QR + message)
+        IosVideoPlayerBridge.shared.factory = SwiftVideoPlayerFactory()   // inline component player (upstream)
+        IosFullscreenVideoBridge.shared.player = VideoPlayerBridge()       // full-screen quick-play (Feed button)
     }
 
     var body: some Scene {

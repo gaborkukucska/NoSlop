@@ -4,6 +4,271 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-07-03 — Roadmap #6: media upload + bridge cache (iOS-authored images reach Android) 🟢
+
+The last big architectural item: an iOS post can now **carry an image**, and Android peers can fetch it
+**even after the phone goes offline** — the bridge is a media host, not just a relay.
+
+Design insight that kept this small: no new upload protocol. The bridge **pulls** the leaf's media with
+the exact requester-driven MEDIA_REQUEST/MEDIA_CHUNK flow from #5b — `MediaDownloadManager` is
+commonMain, so the JVM bridge reuses it verbatim; the leaf answers requests from disk. One protocol,
+both directions, and `MediaServeTest.uploadLoop` closes the loop in-process on every target.
+
+- **Leaf serving (#6a):** `MeshClient` answers MEDIA_REQUESTs for media it holds via `buildMediaChunk`
+  (the shared serve half — Android `handleMediaRequest` semantics: byte range, short-read EOF, clamped
+  hostile lengths).
+- **Bridge cache (#6b):** `BridgeMediaCache` — pulls on relaying a leaf POST with `media_metadata`
+  (chunks answering the pull are consumed, not relayed), serves cached media to Android peers (inbound
+  :9999 dials land here because posts advertise the bridge onion as `origin_node`; replies go over the
+  maintained peer link or a handshake-less dial), answers MEDIA_RELAY_REQUEST with MEDIA_RECOVERY_FOUND,
+  hourly LRU sweep (2 GB / 5 days, Android parity).
+- **Publish with image (#6c):** `ImagePicker` expect/actual — iOS PHPickerViewController Swift bridge
+  (no photo permission needed; returns temp path + ~90 px JPEG thumbnail b64, Android-style), desktop
+  AWT FileDialog + ImageIO thumbnail. `MeshClient.importMediaForPost` copies bytes under a fresh
+  extension-bearing media id (Android infers MIME from it) + builds Android-shape metadata
+  (`chunkCount = size/256K+1`, `ownerId`, bridge `origin_node`); `publish(text, media)` attaches it
+  (media fields are NOT in the signed string — Android parity). 🖼 attach button + staged-thumbnail row
+  in the mesh composer; own posts render the full image immediately.
+- Xcode project regenerated (xcodegen) to include `ImagePicker.swift`; registered in `iOSApp.swift`.
+
+Tests: `MediaServeTest` (4 — range/EOF/clamp/missing + the full manager↔serve upload loop, real file
+I/O on every target). jvmTest + compileKotlinIosArm64 green.
+
+**To verify live:** publish an image post from the phone → bridge logs `pulling media…` → `media
+cached:` → Gabby's node downloads from the bridge (its request should hit the inbound listener). Then
+kill the app and confirm the media still serves.
+
+**Still open:** chat media (images in DMs — same machinery, needs the DM envelope's media fields),
+progressive streaming for big video, edit-post UI, creator follow, H3/M3/M5/M6.
+
+---
+
+## 2026-07-02 (overnight session, cont.) — Roadmap #5c, #7, #8, #9, engagement sync, hardening 🟢
+
+Autonomous overnight run continuing from #5b (below). Seven more increments, each compile-tested
+(jvmTest + compileKotlinIosArm64; full iosSimulatorArm64Test green at checkpoints):
+
+- **#5c video/audio** (`3e97bf0`) — tap-to-download any media type, playback from `file://` via the
+  existing players.
+- **#7 feed memory + viewed-history** (`2364849`) — `FeedSession` position memory across tab switches;
+  >5 s dwell → SQLDelight viewed-history, excluded next load (5000 cap, Android parity).
+- **#8 search by media type** (`0ef0166`) — Search Videos/Audio/Images/Articles routed to Android's
+  source sets; UI chips in the filters card.
+- **#9 moderation** (`8dcb566`) — EDIT_POST/DELETE_POST wire + required-signed verifier + author-match
+  apply; 🗑 delete-own-post, 🚫 block-author (persisted; hides posts/comments/DMs).
+- **Engagement sync** (`ba6dfea`) — SYNC_REQUEST on connect; verified SYNC_RESPONSE items fed through
+  the live-gossip callbacks (single dedup path). SyncWireTest parses literal Android JSON.
+- **Punch-list hardening** (`473e93a`) — H2 hub identity pinning (`HubIdentityMismatch`, reconnect
+  monitor stops on impostor), M2 structural NodeId (64-lowercase-hex invariant + NodeIdTest), M4
+  HttpTimeout 30s/15s everywhere + 10 MB NetworkImage cap.
+- **Portability cleanups** (`929688d`) — deleted dead `data/MeshSocialRepository`/`EngagementRepository`
+  (M1) + ChatScreen stub; Logger ring buffer + live LogsViewerScreen; transport logs routed; mesh posts
+  now LOAD from the store on launch (was write-only).
+
+**Still open (biggest first):** #6 media upload/broadcast + bridge cache (architectural — bridge becomes
+a media host; design in MEDIA_OVER_MESH_DESIGN.md §Upload), chat media attachments (blocked on #6),
+progressive streaming for large video, edit-post UI, creator follow, exit/rejected announcements,
+H3/M3/M5/M6 punch-list items, ApiUtil dedup.
+
+**Upstream note (fetched 2026-07-01, corrected 2026-07-03):** Gabor pushed a new `Legacy-Android`
+branch + `v0.2.2-alpha` tag (NOT on main): mesh packet filtering (peers can drop packet types!) and
+crypto migrated to Lazysodium/BC-raw (wire format preserved, "backwards compatibility is partial").
+The "remove chat reaction support" commit is narrower than its title: `handleChatReaction` (verify +
+persist, our exact signed format) is INTACT on the tag — the commit only removed CHAT_REACTION from the
+mesh-filter gating and bypassed outgoing reaction filtering. **Chat-reaction interop is preserved; no
+patch needed.** When the branch lands on main, still run a signature round-trip (crypto migration).
+
+---
+
+## 2026-07-01 — Roadmap #5b: media download pipeline (images over the mesh) 🟢
+
+An Android media post's **full image now downloads over the mesh and renders on iOS** — thumbnail shows
+instantly (5a), the file transfers through the bridge over Tor, and the feed card swaps to the full image.
+Adopted the design-doc defaults: auto-download images ≤ 5 MB, tap-to-load for bigger ones, 64 KB chunk cap,
+broadcast request routing (option A — zero bridge changes needed).
+
+What landed:
+- **Wire payloads** (`Packets.kt`): `MediaRequestPayload` / `MediaChunkPayload` / `MediaRelayRequestPayload`
+  / `MediaRecoveryFoundPayload` / `MediaTransferAckPayload`, byte-compatible with Android's Gson shapes;
+  golden-vector `MediaWireTest` incl. parsing a literal Android chunk JSON.
+- **`MediaDownloadManager`** (commonMain): port of Android `MediaManager`'s receiver half — requester-driven
+  byte ranges, AIMD (16 KB slow start → 64 KB cap, concurrency 1→4, halve on timeout), 120 s chunk timeout +
+  retry queue, 4-timeout → `MEDIA_RELAY_REQUEST` recovery broadcast, EOF via short read, `.part` → rename,
+  `MEDIA_TRANSFER_ACK` on completion. Hostile-input hardening beyond Android: media ids sanitized to a safe
+  file name (no path escape), transfers rejected when `size` is 0/absurd (25 MB hard cap), writes bounded to
+  the declared size (a lying origin can't grow the file).
+- **`MediaFiles` expect/actual**: random-access offset writes — iOS `NSFileHandle` (Application
+  Support/NoSlopMedia), JVM `RandomAccessFile` (`~/.noslop-hub/media`), Android `filesDir/NoSlopMedia`.
+- **Firewall parity fix** (`MeshFirewall`): `MEDIA_*`/`SYNC_*` are exempt from the 20/10 s rate limit exactly
+  like Android's GossipService — without this, both the leaf and the **bridge** silently rate-dropped chunk
+  streams into a timeout crawl. Dedup + TTL still apply.
+- **UI**: `LocalFileImage` (decode-from-disk, no fetch), download progress chip over the thumbnail,
+  "Load full image" tap affordance for over-cap images, auto-download kick on POST receipt.
+- Tests: `MediaWireTest` (6), `MediaDownloaderTest` (6, real file I/O on every target incl. out-of-order
+  reassembly + hostile-metadata cases), firewall exemption cases (12 total). All jvmTest green.
+
+Routing note (why option A works): the Android origin answers a MEDIA_REQUEST by dialing the requester's
+onion **from its peer table** — for an iOS leaf that's the bridge onion (set at handshake via
+`from_home_node`), so chunks flow origin → bridge:9999 → leaf with no bridge code changes.
+
+**Next:** 5c (video/audio + progressive playback), then #6 upload/bridge-cache. Independent quick wins
+queued: feed viewed-history (#7), punch-list H2/M2/M4 hardening.
+
+---
+
+## 2026-06-19 (later) — Android interop: signed handshake DELIVERED to a live Android node 🟢🟡
+
+The bridge is now a complete bidirectional gateway, and a **signed CONNECTION_REQUEST from the iPhone was
+relayed to Gabor's real Android node** (`ios→android CONNECTION_REQUEST → 1 peer`, ×3 via retries). Awaiting
+only his **Accept** for the full human DM round-trip.
+
+What landed (all driven by Gabor's feedback "I need a handshake request, I haven't gotten one"):
+- **Signed CONNECTION_REQUEST** (`IdentitySigner` expect/actual — iOS signs with the Keychain identity key
+  via a new bridge method; JVM/Android from their stored key). `MeshClient.sendConnectionRequest` builds the
+  Android `PeerHandshakePayload`, signs `from_user_id|from_username|from_home_node|timestamp`, with
+  `from_home_node` = the BRIDGE's onion (so replies route back). `App.handshakeAndroidContact` sends it on
+  connect/add-contact, retried to cover the bridge's dial latency.
+- **Dynamic peers:** the phone sends the bridge a `DIAL_PEER` for each Android contact (which now carries its
+  `onionAddress`); the bridge learns + dials peers automatically — no hardcoded args. Scales to many contacts.
+- **Persistent bridge onion:** `TorControl.addOnion` reuses a saved ED25519-V3 key; the bridge keeps the SAME
+  `.onion` across restarts (no more re-scanning). `latzrm6z…onion`.
+- **Bidirectional:** bridge onion also maps :9999; a handshake-less inbound listener accepts Android peers
+  dialing in (their connectionless per-send reply model) and relays to the iOS leaves. So Gabor's
+  USER_HANDSHAKE/DM replies route: Gabor → bridge:9999 → iPhone (decrypts via stored contact).
+- Node-id translation (hex↔base64, same X.509 DER) at the boundary; DM crypto + key encodings already matched.
+
+**Verified live:** bridge dials Gabor's onion ✓, relays the signed request to him ✓. **Pending:** Gabor taps
+Accept (his node was intermittently offline — driving). Then verify the DM both ways on-device.
+
+Earlier today: clearnet video (AVPlayer, audio ✓), DM key→Keychain, saved-hub persistence + default,
+share-my-QR + persisted/nameable contacts, connection UX (auto-reconnect/eager-dial/Disconnect/keyboard),
+app icon.
+
+---
+
+## 2026-06-19 — Phase 2: Android-network interop bridge (the migration payoff) 🟢 built, ⏳ awaiting live peer
+
+The KMP app can now interoperate with the **existing Android NoSlop network** — the whole point of the
+migration. Built + unit-tested; the live cross-platform DM just needs the Android peer (Gabor) online.
+
+- **Discovery (from reading the Android source + Gabor's real QR):** Android is **peer-to-peer** (each device
+  hosts its own onion, dials peers' onions directly on `Constants.MESH_PORT` = 9999), uses **no link handshake**
+  (reads raw `NetworkPacket` JSON lines), and identifies nodes by **base64** X.509 Ed25519 keys (we use hex —
+  *same DER bytes*). DM crypto + key encodings already match ours; contact QR is `{handle, publicKey,
+  encPublicKey, onionAddress}`. We conform to Android (can't change the deployed app).
+- **iOS leaf can't host an onion**, so two-way with a P2P Android node needs a bridge. **Solution: the desktop
+  hub becomes bilingual** (`BridgeMain` / `runBridge`): iOS leaves dial its onion the normal way; it dials the
+  Android peer's onion handshake-less; it relays between the two on one transport (sides distinguished by
+  link-id format), re-encoding `senderId`/`targetUserId` hex↔base64 at the boundary **without re-stamping**
+  (Android decrypts DMs by original-sender contact lookup). Retries the peer dial every 20s.
+- **Transport:** `SocketTransport.connect(handshake=false, peerId=…)` — handshake-less mode. `NodeId` codec
+  (hex↔base64, idempotent) + packet id-translation. All in `AndroidInteropTest` (jvmTest), green, incl. against
+  Gabor's real key.
+- **iOS:** `MeshContact.parse` also reads Android's QR (normalizes id to hex); "Show my QR" emits Android shape
+  (universal); `MeshClient.resolveEncPub` decrypts Android DMs (which omit the in-payload sender key) via the
+  stored contact.
+- **Live test status:** bridge runs, bootstraps Tor, publishes its onion, dials Gabor's
+  `s4zk7w5u…onion:9999` correctly — currently `SOCKS REP=4` (his node offline). Auto-connects when he's up.
+
+**Also this session:** clearnet video playback (AVPlayer, on-device w/ audio), DM key → iOS Keychain,
+saved-hub persistence + default, share-my-QR + persisted/nameable contacts, connection UX (auto-reconnect +
+eager dial + Disconnect + keyboard dismiss), app icon (NoSlop floppy).
+
+**Next:** the live Gabor DM once his device is online; then Android-side Keystore for the DM key, RSS, etc.
+
+---
+
+## 2026-06-19 — Phase 1 step 13: end-to-end encrypted DMs on-device (hub stays blind) 🟢
+
+**Two-way encrypted DM proven on the phone, relayed by a hub that can't read it.** Owner steered two key
+design points: (1) the hub must NOT decrypt DMs (privacy) → leaf-to-leaf, hub relays ciphertext only;
+(2) DMs reach a peer who is *also* a leaf on the same hub (hub-and-spoke), reachable via the onion.
+
+- **X25519 DM keypair** (`DmKeys`) per node, separate from the Ed25519 identity. No new platform crypto:
+  the public key is derived as `priv·basepoint` through the existing `x25519SharedSecret` primitive (proven
+  by a two-keypair cross round-trip test on JVM). Persisted via `DmKeyStore`. **Hardening TODO:** move the
+  DM private key into Keychain/Keystore (currently device prefs/file like the saved hubs).
+- **MeshContact** (handle + node id + X25519 pub) shared as a JSON QR, out of band from the hub.
+  `EncryptedPayload` gained `sender_enc_pub` (so the recipient derives the shared secret without a pre-shared
+  contact) and `sender_node_id` (so replies route to the originator — the hub re-stamps `senderId` on every
+  forward for privacy, which had silently misrouted the first replies to the hub itself).
+- **MeshClient.sendDm/onDm**: seal to a contact, broadcast a MESSAGE; on receipt decrypt only packets whose
+  `targetUserId` is us (the hub floods MESSAGE to all links). Verified live: phone → hub (onion, blind relay)
+  → desktop "creator" leaf (loopback) → decrypt + auto-reply → back to phone, decrypted. Hub logs only
+  "relayed DM … (ciphertext only)".
+- **LeafMain + `runLeaf`**: a desktop test leaf with its own identity (via `NOSLOP_HOME`) standing in for a
+  second phone (e.g. Gabour). For a real remote peer: they need a client (TestFlight build / desktop leaf),
+  scan the hub onion QR to join, and swap contact QRs.
+- **App UX:** new **DMs tab** (scan contact, pick, send; incoming DMs auto-add the sender). **Show-my-QR**
+  (first in-app QR *generation*, via qrose). **Persisted + renameable contacts** (`ContactStore`/`SavedContacts`).
+  **Default hub** — first saved hub (★) is the launch auto-connect target; pin another with ★.
+
+**Next:** harden DM key storage (Keychain/Keystore); get a peer (Gabour) a client for a real remote DM;
+hub→phone post receive-path on-device; app icon.
+
+---
+
+## 2026-06-18 — Phase 1 step 12: Tor onion reachable on-device + saved-hub persistence 🟢
+
+**The ADR-002 endgame works on a real device: install → scan onion QR → connected from anywhere over Tor → post.**
+
+- **Onion bug fixed (the big one).** `TorControl.addOnion` published a v3 onion via `ADD_ONION`, then closed
+  the control connection in its `finally`. Ephemeral onions are torn down when their creating control
+  connection closes **unless `Flags=Detach`** — so the onion was a valid-but-unreachable address (SOCKS
+  `REP=4`). Added `Flags=Detach`. Verified desktop-side first (a SOCKS probe through the hub's own Tor reached
+  the onion on attempt 1 and got the hub node id back through the full circuit), then on the iPhone: the
+  phone's embedded Tor built a circuit, fetched the descriptor, and linked to `…onion:9876`
+  (`[transport] link up: 97559379… ; links=1`).
+- **Also proved earlier in the session over ngrok** (TCP tunnel → hub `localhost:9876`, bypassing the mesh
+  router's client isolation): phone linked + posted, hub received & persisted it (`storedPosts` ++). ngrok
+  validated the socket/handshake layer; Tor is the real "from anywhere" transport.
+- **Network gotcha learned:** the home Wi-Fi is a `cloudmesh` mesh router with **client isolation** — phone
+  and Mac on the same `/24` (.20.3 ↔ .20.4) but device-to-device TCP is blocked (Mac→phone ping works, so not
+  a firewall; macOS firewall confirmed off). That's *why* LAN testing kept failing and *why* Tor/ngrok matter.
+- **Saved-hub persistence + auto-reconnect** (`HubStore` + `SavedNodes`, mirrors `HandleStore`): the app now
+  remembers paired hubs (newest-first, `host:port`-deduped list of invite URIs), auto-reconnects to the most
+  recent on launch, and shows a "Saved hubs" list (tap to (re)connect, ✕ to remove). Groundwork for multi-hub
+  resilience — the model is a list from the start. No more re-scanning every launch.
+
+**Next:** two-way DM needs DM compose/inbox UI (crypto is proven via the self-test; the send path is
+`messagePacket`/`EncryptedPayload` + `DmCrypto.sealDm`/`openDm` — needs recipient X25519 key handling).
+Then hub→phone post delivery (receive-path on-device), and the app icon.
+
+---
+
+## 2026-06-18 — Phase 1 step 11: device LAN test — fixed 3 transport bugs + 1 build gotcha 🟡
+
+On-device LAN test (phone → desktop HUB, Tor off). Found and fixed the real reasons the leaf could never
+link to the hub. **Net: hub now accepts many concurrent + LAN connections; iOS app builds + installs.**
+
+- **Accept loop died after the FIRST connection.** ktor's `SelectorManager` ran on `Dispatchers.Default`
+  (CPU pool), starved by the accept loop + per-link read loops; the 2nd `accept()` threw `SocketException`
+  and the old `catch { break }` killed the listener — so only one peer ever linked. Fix: selector dispatcher
+  is injectable, hub uses `Dispatchers.IO`; accept loop tolerates transient errors (log + continue) and only
+  exits on a closed server socket. Verified: 5 sequential loopback handshakes now all succeed (was 1).
+- **`0.0.0.0` bound an IPv6 wildcard socket** (`*:9876`); inbound IPv4 LAN arrived IPv4-mapped and was
+  rejected. Fix: `runHub` passes `-Djava.net.preferIPv4Stack=true` → clean IPv4 listener.
+- **macOS hairpin EINVAL (test artifact, not a real bug).** Setting `TCP_NODELAY` on a socket accepted from a
+  *hairpin* connection (a host dialing its OWN LAN IP) throws `SocketException: Invalid argument` — reproduced
+  with plain `java.net.ServerSocket` too, so it's a macOS/JDK quirk, not ktor. Genuine remote clients (the
+  phone) don't trigger it. So Mac→own-LAN-IP is NOT a valid local test; loopback or a real second device is.
+- **BUILD GOTCHA — repo is under iCloud-synced `~/Documents`.** iCloud Drive keeps re-stamping
+  `com.apple.FinderInfo` on the Tor xcframework dirs (and anything else), which makes codesign fail with
+  *"resource fork, Finder information, or similar detritus not allowed."* Stripping never sticks (iCloud
+  re-adds it within seconds). **Fix: build with `-derivedDataPath /tmp/noslop-dd` (outside iCloud).**
+  `rsync -av` in CocoaPods' embed phase doesn't copy xattrs, so a non-iCloud DerivedData yields a clean
+  framework. Podfile `post_install` also strips the xcframework as a best-effort safety net.
+- **App UX:** `connectNow()` now parses a `noslop://…` invite pasted into the host field (was → "posix error
+  0"). Scanning remains the intended path.
+
+**Status: BLOCKED on user.** App installed + launched on the iPhone; hub up on `192.168.20.4:9876`. The phone's
+connection wasn't reaching the hub at all (hub log shows zero inbound) — classic iOS **Local Network permission
+off** signature ("No link" = TCP EOF, nothing on the wire). User confirmed Local Network is now enabled in
+Settings; on-device scan retest pending (user stepped away). Next: user scans QR → expect link-up from a
+`192.168.20.x` address in the hub log.
+
+---
+
 ## 2026-06-18 — Phase 1 step 10b: iOS camera QR scanner — "scan to connect" 🟢
 
 The non-tech-user flow is now wired end to end: **point the phone at the hub's QR and it connects.** No

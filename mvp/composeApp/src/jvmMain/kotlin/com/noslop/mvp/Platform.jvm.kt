@@ -26,7 +26,20 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider
  * identity/handle and a JDBC SQLite database. This is what makes the always-on HUB (ADR-002) a real process.
  */
 private val bc = BouncyCastleProvider()
-private val hubDir = File(System.getProperty("user.home"), ".noslop-hub").apply { mkdirs() }
+// Per-node storage dir. Override with NOSLOP_HOME so a second JVM node (e.g. the test "creator" leaf) gets a
+// distinct identity + DM key instead of colliding with the hub's (same nodeId would break DM routing).
+private val hubDir = File(System.getenv("NOSLOP_HOME") ?: File(System.getProperty("user.home"), ".noslop-hub").path).apply { mkdirs() }
+
+/** Signs with the JVM identity key read from the identity file (2nd line = PKCS#8 priv, base64). */
+@OptIn(ExperimentalEncodingApi::class)
+actual object IdentitySigner {
+    private val file = File(hubDir, "identity")
+    actual val isAvailable: Boolean get() = file.exists()
+    actual fun sign(message: ByteArray): ByteArray? {
+        val priv = if (file.exists()) file.readLines().getOrNull(1)?.let { Base64.decode(it) } else null
+        return priv?.let { Signer.signRaw(message, it) }?.takeIf { it.isNotEmpty() }
+    }
+}
 
 @OptIn(ExperimentalEncodingApi::class)
 actual object IdentityKeyStore {
@@ -78,6 +91,36 @@ actual object HandleStore {
     actual fun save(handle: String) { file.writeText(handle) }
 }
 
+/** Saved-hubs blob in a file under the hub dir (same approach as [HandleStore]). */
+actual object HubStore {
+    private val file = File(hubDir, "hubs")
+    actual fun load(): String? = if (file.exists()) file.readText().ifBlank { null } else null
+    actual fun save(blob: String) { file.writeText(blob) }
+    actual fun clear() { file.delete() }
+}
+
+/** X25519 DM private key in a file under the hub dir (per-leaf; the creator-leaf reuses this). */
+actual object DmKeyStore {
+    private val file = File(hubDir, "dm_priv")
+    actual fun load(): String? = if (file.exists()) file.readText().trim().ifBlank { null } else null
+    actual fun save(privRawB64: String) { file.writeText(privRawB64) }
+}
+
+/** Feed-filter text blob in a file under the hub dir. */
+actual object FilterStore {
+    private val file = File(hubDir, "filters")
+    actual fun load(): String? = if (file.exists()) file.readText().ifBlank { null } else null
+    actual fun save(blob: String) { file.writeText(blob) }
+}
+
+/** Saved-DM-contacts blob in a file under the hub dir (same approach as [HubStore]). */
+actual object ContactStore {
+    private val file = File(hubDir, "contacts")
+    actual fun load(): String? = if (file.exists()) file.readText().ifBlank { null } else null
+    actual fun save(blob: String) { file.writeText(blob) }
+    actual fun clear() { file.delete() }
+}
+
 /** JVM Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 stay in commonMain). Mirrors androidMain. */
 actual object Signer {
     actual val isAvailable: Boolean = true
@@ -104,12 +147,12 @@ actual object DmCrypto {
         KeyAgreement.getInstance("X25519", bc).run { init(priv); doPhase(pub, true); generateSecret() }
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray = try {
-        cipher(Cipher.ENCRYPT_MODE, key, nonce).doFinal(plaintext)
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray = try {
+        cipher(Cipher.ENCRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(plaintext)
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? = try {
-        cipher(Cipher.DECRYPT_MODE, key, nonce).doFinal(ciphertextAndTag)
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray): ByteArray? = try {
+        cipher(Cipher.DECRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(ciphertextAndTag)
     } catch (e: Exception) { null }
 
     actual fun randomBytes(n: Int): ByteArray = ByteArray(n).also { SecureRandom().nextBytes(it) }
@@ -132,7 +175,13 @@ actual object DbDriverFactory {
     }
 }
 
-actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
+// Client-level timeouts (punch-list M4) — a hostile/hung server must not pin a fetch forever.
+actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp) {
+    install(io.ktor.client.plugins.HttpTimeout) {
+        requestTimeoutMillis = 30_000
+        connectTimeoutMillis = 15_000
+    }
+}
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 actual fun randomId(): String = java.util.UUID.randomUUID().toString()
@@ -150,4 +199,10 @@ actual object TorService {
 actual object QrScanner {
     actual val isAvailable: Boolean = false
     actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
+}
+
+/** No video playback on the desktop HUB (headless). */
+actual object VideoPlayer {
+    actual val isAvailable: Boolean = false
+    actual fun play(url: String) {}
 }

@@ -43,7 +43,6 @@ fun SegmentedArticleReader(
     val segments: List<String> = remember(rawContent) { splitIntoSegments(rawContent, 800) }
     val effectiveSegments = if (segments.isEmpty()) listOf("") else segments
     val pagerState = rememberPagerState(pageCount = { effectiveSegments.size + 1 })
-    val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
@@ -55,11 +54,14 @@ fun SegmentedArticleReader(
             if (page == 0) {
                 // Page 0: Hero Layout (Magazine Style)
                 Box(modifier = Modifier.fillMaxSize()) {
-                    imageContent(
-                        thumbnailUrl ?: fallbackImage,
-                        ContentScale.Crop,
-                        Modifier.fillMaxSize()
-                    )
+                    // Only show a hero image when the item actually has one — otherwise a clean dark hero, so
+                    // image-less articles don't all repeat the same stock fallback.
+                    val hero = thumbnailUrl?.takeIf { it.isNotBlank() }
+                    if (hero != null) {
+                        imageContent(hero, ContentScale.Crop, Modifier.fillMaxSize())
+                    } else {
+                        Box(Modifier.fillMaxSize().background(SurfaceDark))
+                    }
 
                     // Gradient Scrim
                     Box(
@@ -147,20 +149,20 @@ fun SegmentedArticleReader(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                    }
 
-                        // "Read Full Article" Button on the last segment
-                        if (segmentIndex == effectiveSegments.size - 1 && articleUrl != null && onOpenArticle != null) {
-                            Spacer(modifier = Modifier.height(24.dp))
-                            Button(
-                                onClick = { onOpenArticle(articleUrl) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.align(Alignment.CenterHorizontally)
-                            ) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold)
-                            }
+                    // "Read Full Article" button — anchored to the bottom of the page (not inside the centered
+                    // text column) so it never gets clipped by long article text.
+                    if (segmentIndex == effectiveSegments.size - 1 && articleUrl != null && onOpenArticle != null) {
+                        Button(
+                            onClick = { onOpenArticle(articleUrl) },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }

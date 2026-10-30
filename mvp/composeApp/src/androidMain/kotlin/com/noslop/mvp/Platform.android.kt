@@ -103,6 +103,25 @@ actual object IdentityKeyStore {
             .apply { initialize(255, SecureRandom()) }.generateKeyPair().public.encoded
 }
 
+/** Signs with the Android identity key (PKCS#8 in EncryptedSharedPreferences). */
+actual object IdentitySigner {
+    private fun prefs(): SharedPreferences? {
+        if (!AndroidAppContext.isSet) return null
+        val ctx = AndroidAppContext.context
+        val masterKey = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        return EncryptedSharedPreferences.create(
+            ctx, "noslop_identity", masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+    actual val isAvailable: Boolean get() = AndroidAppContext.isSet
+    actual fun sign(message: ByteArray): ByteArray? {
+        val privB64 = prefs()?.getString("ed25519_priv_pkcs8_b64", null) ?: return null
+        return Signer.signRaw(message, Base64.decode(privB64, Base64.NO_WRAP)).takeIf { it.isNotEmpty() }
+    }
+}
+
 /** Handle persisted in app-private SharedPreferences (in-memory fallback when no context, e.g. tests). */
 actual object HandleStore {
     private const val PREFS = "noslop_handle"
@@ -115,6 +134,53 @@ actual object HandleStore {
         val s = sp()
         if (s != null) s.edit().putString(KEY, handle).apply() else fallback = handle
     }
+}
+
+/** Saved-hubs blob in SharedPreferences (same approach as [HandleStore]). */
+actual object HubStore {
+    private const val PREFS = "noslop_hubs"
+    private const val KEY = "hubs"
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null)
+    actual fun save(blob: String) { sp()?.edit()?.putString(KEY, blob)?.apply() }
+    actual fun clear() { sp()?.edit()?.remove(KEY)?.apply() }
+}
+
+/** X25519 DM private key in SharedPreferences (hardening TODO: move to Keystore like the Ed25519 key). */
+actual object DmKeyStore {
+    private const val PREFS = "noslop_dm"
+    private const val KEY = "dm_priv"
+    private var fallback: String? = null
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null) ?: fallback
+    actual fun save(privRawB64: String) {
+        val s = sp()
+        if (s != null) s.edit().putString(KEY, privRawB64).apply() else fallback = privRawB64
+    }
+}
+
+/** Feed-filter text blob in SharedPreferences. */
+actual object FilterStore {
+    private const val PREFS = "noslop_filters"
+    private const val KEY = "filters"
+    private var fallback: String? = null
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null) ?: fallback
+    actual fun save(blob: String) { val s = sp(); if (s != null) s.edit().putString(KEY, blob).apply() else fallback = blob }
+}
+
+/** Saved-DM-contacts blob in SharedPreferences (same approach as [HubStore]). */
+actual object ContactStore {
+    private const val PREFS = "noslop_contacts"
+    private const val KEY = "contacts"
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null)
+    actual fun save(blob: String) { sp()?.edit()?.putString(KEY, blob)?.apply() }
+    actual fun clear() { sp()?.edit()?.remove(KEY)?.apply() }
 }
 
 /** Android Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 handled in commonMain). */
@@ -156,12 +222,12 @@ actual object DmCrypto {
         }
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray = try {
-        cipher(javax.crypto.Cipher.ENCRYPT_MODE, key, nonce).doFinal(plaintext) // out = ciphertext || 16-byte tag
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray = try {
+        cipher(javax.crypto.Cipher.ENCRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(plaintext) // out = ciphertext || 16-byte tag
     } catch (e: Exception) { ByteArray(0) }
 
-    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? = try {
-        cipher(javax.crypto.Cipher.DECRYPT_MODE, key, nonce).doFinal(ciphertextAndTag)
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray): ByteArray? = try {
+        cipher(javax.crypto.Cipher.DECRYPT_MODE, key, nonce).apply { if (aad.isNotEmpty()) updateAAD(aad) }.doFinal(ciphertextAndTag)
     } catch (e: Exception) { null }
 
     actual fun randomBytes(n: Int): ByteArray = ByteArray(n).also { SecureRandom().nextBytes(it) }
@@ -181,7 +247,13 @@ actual object DbDriverFactory {
         )
 }
 
-actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
+// Client-level timeouts (punch-list M4) — a hostile/hung server must not pin a fetch forever.
+actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp) {
+    install(io.ktor.client.plugins.HttpTimeout) {
+        requestTimeoutMillis = 30_000
+        connectTimeoutMillis = 15_000
+    }
+}
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 actual fun randomId(): String = java.util.UUID.randomUUID().toString()
@@ -199,4 +271,16 @@ actual object TorService {
 actual object QrScanner {
     actual val isAvailable: Boolean = false
     actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
+}
+
+/** Android video playback: hand the URL to a system video viewer (inline ExoPlayer is a later option). */
+actual object VideoPlayer {
+    actual val isAvailable: Boolean get() = AndroidAppContext.isSet
+    actual fun play(url: String) {
+        if (!AndroidAppContext.isSet) return
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+            .setDataAndType(android.net.Uri.parse(url), "video/*")
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { AndroidAppContext.context.startActivity(intent) }
+    }
 }

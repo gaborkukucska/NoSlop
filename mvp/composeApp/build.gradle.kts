@@ -72,6 +72,7 @@ kotlin {
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.primitive.adapters)
             implementation(libs.ktor.network)
+            implementation("io.github.alexzhirkevich:qrose:1.0.1") // Compose-MP QR rendering (share-my-contact)
             implementation(libs.xmlutil.core)
             implementation(libs.xmlutil.serialization)
             implementation(libs.kotlinx.datetime)
@@ -107,6 +108,8 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation(libs.sqldelight.sqlite.driver)
+            // Reference renderer for the envelope payload digest: Android hashes Gson's rendering (ProtocolV2Test).
+            implementation("com.google.code.gson:gson:2.11.0")
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -172,8 +175,51 @@ tasks.register<JavaExec>("runHub") {
     dependsOn(jvmMain.compileTaskProvider, downloadTor)
     classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
     mainClass.set("com.noslop.mvp.HubMainKt")
+    // Force an IPv4 socket stack. Binding "0.0.0.0" otherwise yields an IPv6 wildcard socket (`*:9876`);
+    // inbound IPv4 LAN connections then arrive as IPv4-mapped-IPv6 and the JVM/ktor accept() throws
+    // SocketException "Invalid argument" — so loopback worked but no LAN/phone connection was ever accepted.
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
     // Point TorProcess at the bundled binary, robust to working directory.
     environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
+}
+
+// Run the Android-interop BRIDGE: serves iOS leaves AND dials an existing Android node's onion, relaying
+// between them.  ./gradlew :composeApp:runBridge --args="9876 <peerOnion>.onion <peerBase64Id>"
+tasks.register<JavaExec>("runBridge") {
+    group = "application"
+    description = "Run the NoSlop Android-interop bridge (iOS leaves <-> an Android mesh node)."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider, downloadTor)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.BridgeMainKt")
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
+    environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
+}
+
+// Run a desktop INTEROP test node (stands in for the iPhone) that signs + sends a CONNECTION_REQUEST and DM
+// to an Android peer through a local bridge.  ./gradlew :composeApp:runInteropNode   (bridge must be running)
+tasks.register<JavaExec>("runInteropNode") {
+    group = "application"
+    description = "Run a desktop node that handshakes + DMs an Android peer through the bridge (iOS stand-in)."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.InteropNodeMainKt")
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
+    environment("NOSLOP_HOME", layout.buildDirectory.dir("noslop-desktop").get().asFile.absolutePath)
+}
+
+// Run a desktop test LEAF (stands in for a second phone for leaf-to-leaf DMs). Its own NOSLOP_HOME gives it
+// a distinct identity from the hub.  ./gradlew :composeApp:runLeaf --args="9876"   (hub must be running)
+tasks.register<JavaExec>("runLeaf") {
+    group = "application"
+    description = "Run a NoSlop test leaf (a second node, for DM testing) that connects to a local hub."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.LeafMainKt")
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
+    environment("NOSLOP_HOME", layout.buildDirectory.dir("noslop-leaf").get().asFile.absolutePath)
 }
 
 android {
@@ -219,4 +265,10 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+// ProtocolV2Test writes the packets we send to <dir>/kmp-v2-vectors.json when run with -PkmpVectorsOut=<dir>,
+// so upstream's Android verifiers can be pointed at them.
+tasks.withType<Test>().configureEach {
+    project.findProperty("kmpVectorsOut")?.let { systemProperty("kmpVectorsOut", it.toString()) }
 }

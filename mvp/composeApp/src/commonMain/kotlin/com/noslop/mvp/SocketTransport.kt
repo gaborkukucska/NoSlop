@@ -1,5 +1,6 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.debug.Logger
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.ServerSocket
@@ -36,11 +37,20 @@ import kotlinx.coroutines.sync.withLock
 /** A SOCKS5 proxy to tunnel outbound links through — e.g. Tor's `127.0.0.1:9050`. */
 data class SocksProxy(val host: String, val port: Int)
 
+/**
+ * The node answering at the dialed address is not the one we were told to expect (punch-list H2) —
+ * whoever controls the endpoint (or the route to it) is impersonating the hub. Callers must NOT fall
+ * back to connecting anyway; surface it to the user and stop retrying.
+ */
+class HubIdentityMismatch(val expected: String, val actual: String) :
+    Exception("hub identity mismatch: expected ${expected.take(16)}…, got ${actual.take(16)}…")
+
 class SocketTransport(
     val nodeId: String,
     private val scope: CoroutineScope,
+    selectorDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
 ) : Transport {
-    private val selector = SelectorManager(Dispatchers.Default)
+    private val selector = SelectorManager(selectorDispatcher)
     private val conns = mutableMapOf<String, Conn>()
     private val lock = Mutex()
     private var handler: (suspend (String, NetworkPacket) -> Unit)? = null
@@ -62,8 +72,21 @@ class SocketTransport(
         server = s
         val bound = (s.localAddress as InetSocketAddress).port
         scope.launch {
+            var consecutiveErrors = 0
             while (true) {
-                val socket = try { s.accept() } catch (_: Throwable) { break }
+                val socket = try {
+                    s.accept().also { consecutiveErrors = 0 }
+                } catch (e: Throwable) {
+                    // A closed server socket means we're shutting down — exit. Otherwise the JVM selector can
+                    // throw transient EINVAL ("Invalid argument") between accepts; tolerate a few in a row so a
+                    // single hiccup doesn't permanently kill the listener (which would drop every later peer).
+                    if (server == null) { Logger.info("TRANSPORT", "accept loop ended (server closed)"); break }
+                    if (++consecutiveErrors > 50) { Logger.error("TRANSPORT", "accept loop giving up after $consecutiveErrors errors: $e"); break }
+                    // Note: macOS throws EINVAL here for *hairpin* self-connections (a host dialing its own LAN
+                    // IP) — a test-only artifact; genuine remote clients (the iOS leaf) accept cleanly.
+                    Logger.warn("TRANSPORT", "accept error #$consecutiveErrors (continuing): $e")
+                    continue
+                }
                 scope.launch { handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true)) }
             }
         }
@@ -74,15 +97,21 @@ class SocketTransport(
      * Dial an outbound link (leaf → HUB). Suspends until the id handshake completes and the link is up.
      * If [proxy] is set, the connection is tunnelled through a SOCKS5 proxy — this is how a leaf reaches a
      * HUB's `.onion` via Tor (point [proxy] at Tor's SOCKS port and pass the onion address as [host]).
+     * With [expectedPeerId] set, the peer's handshaked node id is **pinned**: a mismatch closes the socket
+     * and throws [HubIdentityMismatch] instead of linking (punch-list H2 — anyone answering at the onion
+     * must not silently become our hub).
      */
-    suspend fun connect(host: String, port: Int, proxy: SocksProxy? = null) {
+    suspend fun connect(
+        host: String, port: Int, proxy: SocksProxy? = null,
+        handshake: Boolean = true, peerId: String? = null, expectedPeerId: String? = null,
+    ) {
         if (proxy == null) {
             val socket = aSocket(selector).tcp().connect(host, port)
-            handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true))
+            handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true), handshake, peerId, expectedPeerId)
         } else {
             // socks5Connect opens the channels for the handshake; reuse them (a socket's channels open once).
             val (socket, input, output) = socks5Connect(proxy, host, port)
-            handle(socket, input, output)
+            handle(socket, input, output, handshake, peerId, expectedPeerId)
         }
     }
 
@@ -134,9 +163,36 @@ class SocketTransport(
         return Triple(socket, input, output)                            // tunnel to destHost:destPort is open
     }
 
-    private suspend fun handle(socket: Socket, input: ByteReadChannel, output: ByteWriteChannel) {
-        output.writeStringUtf8("$nodeId\n")                          // handshake: announce our id first…
-        val peerId = input.readUTF8Line() ?: run { runCatching { socket.close() }; return } // …then learn theirs
+    private suspend fun handle(
+        socket: Socket, input: ByteReadChannel, output: ByteWriteChannel,
+        handshake: Boolean = true, knownPeerId: String? = null, expectedPeerId: String? = null,
+    ) {
+        val peer = socket.remoteAddress
+        val peerId: String
+        if (handshake) {
+            try {
+                output.writeStringUtf8("$nodeId\n")                  // handshake: announce our id first…
+                peerId = input.readUTF8Line() ?: run {               // …then learn theirs
+                    Logger.warn("TRANSPORT", "EOF reading peer id from $peer")
+                    runCatching { socket.close() }; return
+                }
+            } catch (e: Throwable) {
+                Logger.warn("TRANSPORT", "handshake error with $peer: $e")
+                runCatching { socket.close() }; return
+            }
+            // Identity pinning (H2): the invite told us who should answer here — reject an impostor
+            // BEFORE registering the link (else it would receive our broadcasts, incl. DMs to relay).
+            if (expectedPeerId != null && peerId != expectedPeerId) {
+                Logger.error("TRANSPORT", "REJECTED link from $peer: id ${peerId.take(16)}… ≠ pinned ${expectedPeerId.take(16)}…")
+                runCatching { socket.close() }
+                throw HubIdentityMismatch(expected = expectedPeerId, actual = peerId)
+            }
+        } else {
+            // Handshake-less (Android-protocol peer): no preamble, just NetworkPacket JSON lines. We already
+            // know the peer's id (from its contact card), so use that as the link id.
+            peerId = knownPeerId ?: "peer-$peer"
+        }
+        Logger.info("TRANSPORT", "link up: ${peerId.take(16)} from $peer")
         val conn = Conn(socket, output)
         lock.withLock { conns[peerId] = conn }
         scope.launch {
@@ -159,8 +215,17 @@ class SocketTransport(
         conn.writeLock.withLock { conn.out.writeStringUtf8(packet.toJson() + "\n") }
     }
 
+    /** Drop all open links (the read loops then clean up `conns`) but keep the transport reusable for a
+     *  fresh [connect] — unlike [close], which tears down the selector. For a user-initiated disconnect. */
+    suspend fun disconnectLinks() {
+        val sockets = lock.withLock { conns.values.map { it.socket } }
+        sockets.forEach { runCatching { it.close() } }
+    }
+
     fun close() {
-        runCatching { server?.close() }
+        val s = server
+        server = null // signals the accept loop to exit instead of treating the close() as a transient error
+        runCatching { s?.close() }
         conns.values.forEach { runCatching { it.socket.close() } }
         runCatching { selector.close() }
     }

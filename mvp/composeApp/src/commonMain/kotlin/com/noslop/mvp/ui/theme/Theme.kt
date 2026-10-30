@@ -1,16 +1,11 @@
 // FILE: app/src/main/java/com/noslop/app/ui/theme/Theme.kt
 package com.noslop.mvp.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
     primary = AccentGreen,
@@ -25,7 +20,7 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = TextLight,
     surfaceVariant = SurfaceDark,
     onSurfaceVariant = TextMuted,
-    outline = BorderSubtle
+    outline = TextMuted   // used as muted-text color in several screens; BorderSubtle was invisible on black
 )
 
 private val LightColorScheme = lightColorScheme(

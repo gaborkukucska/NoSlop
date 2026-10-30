@@ -21,7 +21,15 @@ object TorControl {
     /**
      * Authenticate to the control port and register an ephemeral v3 onion forwarding [virtualPort] → the
      * local [targetHost]:[targetPort]. Returns the `<id>.onion` address. Throws on any protocol failure.
+     *
+     * NOTE: `Flags=Detach` is essential — without it tor destroys the ephemeral service the instant this
+     * control connection closes (which the `finally` below does), so the onion resolves to a valid address
+     * but is permanently unreachable (SOCKS REP=4 "host unreachable"). Detach lets it outlive this client.
      */
+    /** Result of [addOnion]: the `.onion` address and the service's private key (to persist + reuse for a
+     *  *stable* onion across restarts — pass it back as [addOnion]'s `privateKey`). */
+    data class Onion(val address: String, val privateKey: String?)
+
     suspend fun addOnion(
         controlHost: String = "127.0.0.1",
         controlPort: Int = 9051,
@@ -29,7 +37,9 @@ object TorControl {
         virtualPort: Int = 9876,
         targetHost: String = "127.0.0.1",
         targetPort: Int = 9876,
-    ): String {
+        privateKey: String? = null,        // reuse a saved key for a persistent address; null = generate new
+        extraVirtualPort: Int? = null,     // a 2nd Port mapping → targetHost:extraVirtualPort (e.g. Android 9999)
+    ): Onion {
         val selector = SelectorManager(Dispatchers.Default)
         val socket = aSocket(selector).tcp().connect(controlHost, controlPort)
         val input = socket.openReadChannel()
@@ -39,17 +49,21 @@ object TorControl {
             val auth = input.readUTF8Line() ?: error("Tor control: no AUTHENTICATE reply")
             require(auth.startsWith("250")) { "Tor control: AUTHENTICATE failed ($auth)" }
 
-            output.writeStringUtf8("ADD_ONION NEW:ED25519-V3 Port=$virtualPort,$targetHost:$targetPort\r\n")
+            val keyParam = if (privateKey != null) "ED25519-V3:$privateKey" else "NEW:ED25519-V3"
+            val extra = extraVirtualPort?.let { " Port=$it,$targetHost:$it" } ?: ""
+            output.writeStringUtf8("ADD_ONION $keyParam Flags=Detach Port=$virtualPort,$targetHost:$targetPort$extra\r\n")
             var serviceId: String? = null
+            var key: String? = privateKey
             while (true) {
                 val line = input.readUTF8Line() ?: break
                 when {
                     line.startsWith("250-ServiceID=") -> serviceId = line.removePrefix("250-ServiceID=").trim()
+                    line.startsWith("250-PrivateKey=") -> key = line.removePrefix("250-PrivateKey=").trim().substringAfter("ED25519-V3:", "").ifBlank { key }
                     line.startsWith("250 OK") -> break
                     !line.startsWith("250") -> error("Tor control: ADD_ONION failed ($line)")
                 }
             }
-            return (serviceId ?: error("Tor control: no ServiceID in ADD_ONION reply")) + ".onion"
+            return Onion((serviceId ?: error("Tor control: no ServiceID in ADD_ONION reply")) + ".onion", key)
         } finally {
             runCatching { socket.close() }
             runCatching { selector.close() }

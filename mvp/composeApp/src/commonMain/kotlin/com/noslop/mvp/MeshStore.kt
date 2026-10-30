@@ -39,6 +39,11 @@ class MeshStore(driver: SqlDriver) {
     fun recentPosts(limit: Long = 100): List<MeshPost> = posts.selectRecent(limit).executeAsList()
     fun post(id: String): MeshPost? = posts.getById(id).executeAsOneOrNull()
     fun postCount(): Long = posts.count().executeAsOne()
+    /** Apply a (verified, author-matched) EDIT_POST: content only — timestamp/order unchanged (Android parity). */
+    fun updatePostContent(id: String, content: String) = posts.updateContent(content, id)
+    /** Apply a (verified, author-matched) DELETE_POST: mark orphaned, don't remove — a late gossip echo
+     *  of the original post is then deduped by INSERT OR IGNORE instead of resurrecting it. */
+    fun markPostOrphaned(id: String) = posts.markOrphaned(id)
 
     // --- Encrypted DMs (ciphertext+nonce only) ---
     fun saveMessage(message: Message) = messages.insertIgnore(message)
@@ -51,6 +56,17 @@ class MeshStore(driver: SqlDriver) {
     fun peers(): List<Peer> = peers.selectAll().executeAsList()
     fun peer(publicKeyB64: String): Peer? = peers.getByKey(publicKeyB64).executeAsOneOrNull()
     fun peerCount(): Long = peers.count().executeAsOne()
+
+    // --- Engagement: viewed history for feed de-dup (mirrors Android's EngagementRepository) ---
+    /** Record an item as viewed (>5 s on screen); history capped at [VIEWED_HISTORY_LIMIT], oldest pruned. */
+    fun markViewed(itemId: String, itemType: String, at: Long = nowMillis()) {
+        engagement.insertViewedItem(com.noslop.mvp.db.ViewedHistoryItem(itemId, itemType, at))
+        val count = engagement.getCount().executeAsOne()
+        if (count > VIEWED_HISTORY_LIMIT) engagement.pruneOldest(count - VIEWED_HISTORY_LIMIT)
+    }
+
+    /** All viewed item ids — the feed excludes these on load so seen items aren't re-shown. */
+    fun viewedIds(): Set<String> = engagement.getAllViewedIds().executeAsList().toSet()
 
     // --- Meta key/value ---
     fun meta(key: String): String? = meta.get(key).executeAsOneOrNull()
@@ -65,5 +81,10 @@ class MeshStore(driver: SqlDriver) {
 
     fun wipe() {
         posts.deleteAll(); messages.deleteAll(); peers.deleteAll()
+    }
+
+    companion object {
+        /** Max viewed-history rows retained (Android parity: EngagementRepository.HISTORY_LIMIT). */
+        const val VIEWED_HISTORY_LIMIT = 5000L
     }
 }

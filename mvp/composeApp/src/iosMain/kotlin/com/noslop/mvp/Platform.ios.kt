@@ -29,6 +29,12 @@ interface IosKeychain {
     fun getEncPrivateKeyBase64(): String?
     /** Delete the stored keypair so the next load creates a fresh one. */
     fun reset()
+    /** Load the stored X25519 DM private key (raw 32-byte, base64), or null if none. */
+    fun loadDmPrivB64(): String?
+    /** Persist the X25519 DM private key (raw 32-byte, base64). */
+    fun saveDmPrivB64(value: String)
+    /** Sign [messageBase64] with the stored identity Ed25519 key (Keychain); base64 signature, null on failure. */
+    fun signIdentityBase64(messageBase64: String): String?
 }
 
 /** Holds the Swift-supplied [IosKeychain]; set once by the iOS app before any identity is loaded. */
@@ -92,6 +98,74 @@ actual object HandleStore {
         platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(handle, KEY)
 }
 
+/** Saved-hubs blob persisted in NSUserDefaults (same approach as [HandleStore]). */
+actual object HubStore {
+    private const val KEY = "noslop_hubs"
+    actual fun load(): String? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(blob: String) =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(blob, KEY)
+    actual fun clear() =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.removeObjectForKey(KEY)
+}
+
+/**
+ * X25519 DM private key in the **Keychain** (via the [IosKeychain] bridge), alongside the Ed25519 key.
+ * One-time migration: an existing key in the old NSUserDefaults slot is moved into the Keychain and the
+ * plaintext copy cleared — so hardening doesn't change the user's DM identity. Falls back to NSUserDefaults
+ * only when no Keychain bridge is present (e.g. Kotlin/Native unit tests).
+ */
+actual object DmKeyStore {
+    private const val LEGACY_KEY = "noslop_dm_priv"
+    private val defaults get() = platform.Foundation.NSUserDefaults.standardUserDefaults
+
+    actual fun load(): String? {
+        val kc = IosKeychainBridge.keychain ?: return defaults.stringForKey(LEGACY_KEY)
+        kc.loadDmPrivB64()?.let { return it }
+        // Migrate a legacy plaintext key into the Keychain, then wipe the plaintext copy.
+        defaults.stringForKey(LEGACY_KEY)?.let { legacy ->
+            kc.saveDmPrivB64(legacy)
+            defaults.removeObjectForKey(LEGACY_KEY)
+            return legacy
+        }
+        return null
+    }
+
+    actual fun save(privRawB64: String) {
+        val kc = IosKeychainBridge.keychain
+        if (kc != null) kc.saveDmPrivB64(privRawB64) else defaults.setObject(privRawB64, LEGACY_KEY)
+    }
+}
+
+/** Signs with the identity Ed25519 key in the Keychain via the Swift bridge (key never leaves the device). */
+@OptIn(ExperimentalEncodingApi::class)
+actual object IdentitySigner {
+    actual val isAvailable: Boolean get() = IosKeychainBridge.keychain != null
+    actual fun sign(message: ByteArray): ByteArray? {
+        val kc = IosKeychainBridge.keychain ?: return null
+        val sigB64 = kc.signIdentityBase64(Base64.encode(message)) ?: return null
+        return runCatching { Base64.decode(sigB64) }.getOrNull()
+    }
+}
+
+/** Feed-filter text blob in NSUserDefaults. */
+actual object FilterStore {
+    private const val KEY = "noslop_filters"
+    actual fun load(): String? = platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(blob: String) = platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(blob, KEY)
+}
+
+/** Saved-DM-contacts blob in NSUserDefaults (same approach as [HubStore]). */
+actual object ContactStore {
+    private const val KEY = "noslop_contacts"
+    actual fun load(): String? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(blob: String) =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(blob, KEY)
+    actual fun clear() =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.removeObjectForKey(KEY)
+}
+
 /**
  * Swift→Kotlin bridge for CryptoKit Ed25519 signing. CryptoKit takes RAW 32-byte keys (not PKCS#8/X.509)
  * and exchanges base64 strings across the bridge for clean byte transfer.
@@ -134,9 +208,9 @@ interface IosDm {
     /** Raw 32-byte X25519 shared secret (base64), from my raw private key + their raw public key. "" on failure. */
     fun sharedSecretBase64(myPrivRawBase64: String, theirPubRawBase64: String): String
     /** ChaCha20-Poly1305 seal → base64(ciphertext || 16-byte tag). "" on failure. */
-    fun sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String): String
+    fun sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String, aadBase64: String): String
     /** ChaCha20-Poly1305 open of base64(ciphertext||tag) → base64(plaintext); null on auth failure. */
-    fun openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String): String?
+    fun openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String, aadBase64: String): String?
 }
 
 object IosDmBridge {
@@ -154,15 +228,15 @@ actual object DmCrypto {
         return if (out.isEmpty()) ByteArray(0) else Base64.decode(out)
     }
 
-    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray {
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray, aad: ByteArray): ByteArray {
         val d = IosDmBridge.dm ?: return ByteArray(0)
-        val out = d.sealBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(plaintext))
+        val out = d.sealBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(plaintext), Base64.encode(aad))
         return if (out.isEmpty()) ByteArray(0) else Base64.decode(out)
     }
 
-    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? {
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray, aad: ByteArray): ByteArray? {
         val d = IosDmBridge.dm ?: return null
-        val out = d.openBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(ciphertextAndTag)) ?: return null
+        val out = d.openBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(ciphertextAndTag), Base64.encode(aad)) ?: return null
         return Base64.decode(out)
     }
 
@@ -224,7 +298,30 @@ actual object QrScanner {
     }
 }
 
-actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
+/** Swift→Kotlin bridge for full-screen video playback (AVKit's AVPlayerViewController). */
+interface IosVideoPlayer {
+    fun play(url: String)
+}
+
+// Our simple full-screen quick-play bridge. Distinct from the inline component player
+// ([IosVideoPlayerBridge] with `factory`, below) so both can coexist after the upstream media-stack merge.
+object IosFullscreenVideoBridge {
+    var player: IosVideoPlayer? = null
+}
+
+actual object VideoPlayer {
+    actual val isAvailable: Boolean get() = IosFullscreenVideoBridge.player != null
+    actual fun play(url: String) { IosFullscreenVideoBridge.player?.play(url) }
+}
+
+// Client-level timeouts (punch-list M4): per-source timeouts exist in the feed aggregator, but without
+// these a hostile/hung server could pin a fetch (and its coroutine) forever — e.g. via NetworkImage.
+actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin) {
+    install(io.ktor.client.plugins.HttpTimeout) {
+        requestTimeoutMillis = 30_000
+        connectTimeoutMillis = 15_000
+    }
+}
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
 actual fun randomId(): String = NSUUID().UUIDString()
@@ -238,8 +335,8 @@ interface IosMediaPlayer {
     fun play()
     fun pause()
     fun seekTo(positionMs: Long)
-    fun release()
-    
+    fun disposePlayer()   // not 'release()' — that collides with NSObject.release in the Swift impl
+
     fun setListener(
         onStateChanged: (isPlaying: Boolean, isBuffering: Boolean) -> Unit,
         onError: (message: String) -> Unit

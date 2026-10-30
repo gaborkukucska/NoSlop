@@ -99,7 +99,7 @@ actual class MediaPlayer actual constructor(val url: String) {
             } catch (e: Exception) {
                 // Ignore
             }
-            player.release()
+            player.disposePlayer()
         }
         iosPlayer = null
         uiView = null
