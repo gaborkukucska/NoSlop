@@ -666,6 +666,14 @@ class HandshakePacketHandler(
             Logger.warn("HANDSHAKE", "Signature mismatch for ANNOUNCE_DISCOVERABLE from ${announcePay.handle}")
             return false
         }
+        // P1-C: the announced onion is stored as the peer's address, so it must be the one derived from the
+        // announcing key (as for ANNOUNCE_PEER, S2). A key owner could otherwise point other nodes' traffic
+        // for its identity at someone else's hidden service. Every NoSlop sender announces its key-derived
+        // (creator/burnable) onion, so no real sender is refused.
+        if (!CryptoService.isOnionOf(authorId, announcePay.onionAddress)) {
+            Logger.warn("HANDSHAKE", "Rejected ANNOUNCE_DISCOVERABLE from ${announcePay.handle}: onion address is not derived from the key")
+            return false
+        }
         
         val isOldPacket = Math.abs(System.currentTimeMillis() - announcePay.timestamp) > 30 * 60 * 1000L
         if (isOldPacket) return true

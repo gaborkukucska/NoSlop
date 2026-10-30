@@ -25,6 +25,7 @@ class SyncPacketHandler(
     private val peerDao = db.peerDao()
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
+    private val engagementOrdering = EngagementOrdering(db.appSettingDao())
 
     /** D10b fix 2: background re-sends of sync replies that were not delivered. */
     private val retryScope = kotlinx.coroutines.CoroutineScope(
@@ -443,7 +444,10 @@ class SyncPacketHandler(
             }
             val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
-            val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
+            // P1-D: an unsigned origin is honoured only when it is the author's own onion; otherwise the
+            // sync responder (which re-serves the post and may hold the media) is asked, as before.
+            val peerOnion = PostPacketHandler.verifiedOriginOnion(postPay.authorId, postPay.originNode, postPay.mediaMetadata?.originNode)
+                ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
 
             val post = MeshPost(
                 id = postPay.id,
@@ -474,7 +478,7 @@ class SyncPacketHandler(
             
             if (postPay.mediaMetadata != null) {
                 com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
-                    if (isV2) postPay.mediaMetadata else postPay.mediaMetadata.copy(sha256 = null),
+                    (if (isV2) postPay.mediaMetadata else postPay.mediaMetadata.copy(sha256 = null)).copy(originNode = peerOnion),
                     "friends",
                     postPay.authorId,
                     peerOnion
@@ -527,14 +531,17 @@ class SyncPacketHandler(
                 mediaId = c.mediaId,
                 mediaType = c.mediaType
             )
-            commentDao.insertComment(meshComment)
+            // P1-A: as for gossip, a synced comment cannot restore a deleted one or roll back an edit.
+            if (!commentDao.insertCommentSafely(meshComment)) return@forEach
             if (isV2) repo.recordMediaDigest(c.mediaId, commentHash)
 
             // Trigger auto-download for comment media (GIFs, images)
             if (c.mediaMetadata != null && c.mediaId != null && c.mediaMetadata.id == c.mediaId) {
-                val peerOnion = peerDao.getPeerByPublicKey(c.authorId)?.onionAddress
+                // P1-D: the unsigned origin is used only if it is the author's onion, and is not passed on otherwise.
+                val peerOnion = PostPacketHandler.verifiedOriginOnion(c.authorId, c.mediaMetadata.originNode)
+                    ?: peerDao.getPeerByPublicKey(c.authorId)?.onionAddress
                 MediaManager.checkAndAutoDownload(
-                    if (isV2) c.mediaMetadata else c.mediaMetadata.copy(sha256 = null),
+                    (if (isV2) c.mediaMetadata else c.mediaMetadata.copy(sha256 = null)).copy(originNode = peerOnion),
                     "friends", c.authorId, peerOnion
                 )
             }
@@ -555,16 +562,23 @@ class SyncPacketHandler(
                 Logger.warn(TAG, "Sync: rejecting reaction ${r.id} — invalid signature")
                 return@forEach
             }
+            // P1-B: the row id is derived from the signed fields (the wire `id` is not signed), and the
+            // reaction is applied only if newer than what we know, so a synced old reaction cannot
+            // undo a later removal.
+            val reactionId = "${r.postId}_${r.authorId}_${r.reactionType}"
             val meshReaction = MeshReaction(
-                id = r.id,
+                id = reactionId,
                 postId = r.postId,
                 authorPublicKeyB64 = r.authorId,
                 reactionType = r.reactionType,
                 timestamp = r.timestamp,
                 signature = r.signature
             )
-            reactionDao.insertReaction(meshReaction)
-            storedReactions++
+            val applied = engagementOrdering.applyRemote(
+                EngagementOrdering.KIND_REACTION, reactionId, r.timestamp, isRemove = false,
+                currentRowTimestamp = { reactionDao.getReactionById(reactionId)?.timestamp }
+            ) { reactionDao.insertReaction(meshReaction) }
+            if (applied) storedReactions++
         }
         if (storedReactions > 0) Logger.info(TAG, "SYNC_RESPONSE: stored $storedReactions reactions")
 

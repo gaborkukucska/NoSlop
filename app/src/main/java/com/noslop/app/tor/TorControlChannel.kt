@@ -175,25 +175,59 @@ object TorControlChannel {
      */
     fun torrcLines(): String {
         val f = socketFile
-        return when (MODE) {
-            Mode.TCP_ONLY -> "ControlPort ${Constants.TOR_CONTROL_PORT}\n"
+        if (MODE == Mode.UNIX_ONLY && f == null) {
+            Logger.error(TAG, "torrcLines() called before configure() — no control socket configured, emitting no control lines")
+        }
+        return controlLines(MODE, f?.absolutePath, Constants.TOR_CONTROL_PORT)
+    }
+
+    /**
+     * Pure form of [torrcLines] (no Context, no BuildConfig) so the emitted
+     * control config is unit-testable.
+     */
+    internal fun controlLines(mode: Mode, socketPath: String?, controlPort: Int): String =
+        when (mode) {
+            Mode.TCP_ONLY -> "ControlPort $controlPort\n"
             Mode.UNIX_ONLY -> {
-                if (f == null) {
-                    Logger.error(TAG, "torrcLines() called before configure() — no control socket configured, emitting no control lines")
+                if (socketPath == null) {
                     ""
                 } else {
-                    "ControlSocket ${f.absolutePath}\nControlSocketsGroupWritable 0\n"
+                    "ControlSocket $socketPath\nControlSocketsGroupWritable 0\n"
                 }
             }
             Mode.AUTO -> {
                 val sb = StringBuilder()
-                if (f != null) {
-                    sb.append("ControlSocket ${f.absolutePath}\n")
+                if (socketPath != null) {
+                    sb.append("ControlSocket $socketPath\n")
                     sb.append("ControlSocketsGroupWritable 0\n")
                 }
-                sb.append("ControlPort ${Constants.TOR_CONTROL_PORT}\n")
+                sb.append("ControlPort $controlPort\n")
                 sb.toString()
             }
+        }
+
+    /**
+     * --- NOSLOP_HTTPTUNNEL_OFF_V1 ---
+     * The full torrc NoSlop writes (pure, so it is unit-testable).
+     *
+     * tor-android's TorService.setDefaultProxyPorts() writes a torrc-defaults of
+     * `SOCKSPort 9050|auto` + `HTTPTunnelPort 8118|auto` (read from the 0.4.9.14
+     * AAR bytecode). An option in torrc replaces the same option from
+     * torrc-defaults, so our SocksPort wins — but nothing overrode
+     * HTTPTunnelPort, which left an unauthenticated HTTP CONNECT proxy into Tor
+     * on loopback for every other app on the device (loopback is not
+     * app-private on Android). NoSlop never uses it, so it is switched off.
+     * tor-android reads `GETINFO net/listeners/httptunnel` at startup and its
+     * getPortFromGetInfo() maps an empty reply to 0, so this is safe for it.
+     */
+    internal fun buildTorrc(socksPort: Int, controlLines: String): String = buildString {
+        append("SocksPort $socksPort IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth\n")
+        append("HTTPTunnelPort 0\n")
+        append("ClientPreferIPv6ORPort 0\n")
+        append(controlLines)
+        // Only append CookieAuthentication when a TCP ControlPort is actually declared
+        if (controlLines.contains("ControlPort")) {
+            append("CookieAuthentication 0\n")
         }
     }
 

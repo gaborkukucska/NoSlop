@@ -70,6 +70,8 @@ class MeshSocialRepository(
     private val commentReactionDao = db.commentReactionDao()
     private val voteDao = db.voteDao()
     private val commentVoteDao = db.commentVoteDao()
+    // P1-B: own add/remove keep the engagement tombstones in step (see EngagementOrdering).
+    private val engagementOrdering = EngagementOrdering(db.appSettingDao())
 
     /**
      * Which of our identities a peer knows us by ([IdentityRouter.forPeer]). The bound contact identity
@@ -2070,7 +2072,8 @@ class MeshSocialRepository(
             signature = signature
         )
 
-        commentDao.markCommentDeleted(commentId)
+        // P1-A: tombstoned, so a COMMENT replayed back to us (e.g. in a sync reply) cannot restore it.
+        commentDao.deleteCommentWithTombstone(commentId, signingKey.publicKeyB64, timestamp)
 
         val existingPost = postDao.getPostById(existing.postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
@@ -2123,18 +2126,20 @@ class MeshSocialRepository(
             signature = signature
         )
 
-        if (action == "remove") {
-            reactionDao.deleteReactionById(reactionId)
-        } else {
-            val localReaction = MeshReaction(
-                id = reactionId,
-                postId = postId,
-                authorPublicKeyB64 = myKeys.publicKeyB64,
-                reactionType = reactionType,
-                timestamp = timestamp,
-                signature = signature
-            )
-            reactionDao.insertReaction(localReaction)
+        engagementOrdering.applyLocal(EngagementOrdering.KIND_REACTION, reactionId, timestamp, isRemove = action == "remove") {
+            if (action == "remove") {
+                reactionDao.deleteReactionById(reactionId)
+            } else {
+                val localReaction = MeshReaction(
+                    id = reactionId,
+                    postId = postId,
+                    authorPublicKeyB64 = myKeys.publicKeyB64,
+                    reactionType = reactionType,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                reactionDao.insertReaction(localReaction)
+            }
         }
         
         com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -2173,18 +2178,20 @@ class MeshSocialRepository(
             signature = signature
         )
 
-        if (action == "remove") {
-            voteDao.deleteVoteById(voteId)
-        } else {
-            val localVote = MeshVote(
-                id = voteId,
-                postId = postId,
-                authorPublicKeyB64 = myKeys.publicKeyB64,
-                voteType = voteType,
-                timestamp = timestamp,
-                signature = signature
-            )
-            voteDao.insertVote(localVote)
+        engagementOrdering.applyLocal(EngagementOrdering.KIND_VOTE, voteId, timestamp, isRemove = action == "remove") {
+            if (action == "remove") {
+                voteDao.deleteVoteById(voteId)
+            } else {
+                val localVote = MeshVote(
+                    id = voteId,
+                    postId = postId,
+                    authorPublicKeyB64 = myKeys.publicKeyB64,
+                    voteType = voteType,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                voteDao.insertVote(localVote)
+            }
         }
 
         com.noslop.app.mesh.GossipService.broadcast(packet)
@@ -2266,18 +2273,20 @@ class MeshSocialRepository(
             action = action
         )
 
-        if (action == "remove") {
-            chatReactionDao.deleteReactionById(reactionId)
-        } else {
-            val localReaction = ChatReaction(
-                id = reactionId,
-                messageId = messageId,
-                authorPublicKeyB64 = myKeys.publicKeyB64,
-                reactionType = reactionType,
-                timestamp = timestamp,
-                signature = signature
-            )
-            chatReactionDao.insertReaction(localReaction)
+        engagementOrdering.applyLocal(EngagementOrdering.KIND_CHAT_REACTION, reactionId, timestamp, isRemove = action == "remove") {
+            if (action == "remove") {
+                chatReactionDao.deleteReactionById(reactionId)
+            } else {
+                val localReaction = ChatReaction(
+                    id = reactionId,
+                    messageId = messageId,
+                    authorPublicKeyB64 = myKeys.publicKeyB64,
+                    reactionType = reactionType,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                chatReactionDao.insertReaction(localReaction)
+            }
         }
 
         val peer = peerDao.getPeerByPublicKey(recipientPubB64)
@@ -2334,18 +2343,20 @@ class MeshSocialRepository(
             groupId = groupId
         )
 
-        if (action == "remove") {
-            chatReactionDao.deleteReactionById(reactionId)
-        } else {
-            val localReaction = ChatReaction(
-                id = reactionId,
-                messageId = messageId,
-                authorPublicKeyB64 = senderKeys.publicKeyB64,
-                reactionType = reactionType,
-                timestamp = timestamp,
-                signature = signature
-            )
-            chatReactionDao.insertReaction(localReaction)
+        engagementOrdering.applyLocal(EngagementOrdering.KIND_CHAT_REACTION, reactionId, timestamp, isRemove = action == "remove") {
+            if (action == "remove") {
+                chatReactionDao.deleteReactionById(reactionId)
+            } else {
+                val localReaction = ChatReaction(
+                    id = reactionId,
+                    messageId = messageId,
+                    authorPublicKeyB64 = senderKeys.publicKeyB64,
+                    reactionType = reactionType,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                chatReactionDao.insertReaction(localReaction)
+            }
         }
 
         val memberPubs: List<String> = try {
@@ -2413,18 +2424,20 @@ class MeshSocialRepository(
         val existingComment = commentDao.getCommentById(commentId)
         val existingPost = existingComment?.postId?.let { postDao.getPostById(it) }
 
-        if (action == "remove") {
-            commentReactionDao.deleteReactionById(reactionId)
-        } else {
-            val localReaction = com.noslop.app.data.CommentReaction(
-                id = reactionId,
-                commentId = commentId,
-                authorPublicKeyB64 = myKeys.publicKeyB64,
-                reactionType = reactionType,
-                timestamp = timestamp,
-                signature = signature
-            )
-            commentReactionDao.insertReaction(localReaction)
+        engagementOrdering.applyLocal(EngagementOrdering.KIND_COMMENT_REACTION, reactionId, timestamp, isRemove = action == "remove") {
+            if (action == "remove") {
+                commentReactionDao.deleteReactionById(reactionId)
+            } else {
+                val localReaction = com.noslop.app.data.CommentReaction(
+                    id = reactionId,
+                    commentId = commentId,
+                    authorPublicKeyB64 = myKeys.publicKeyB64,
+                    reactionType = reactionType,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                commentReactionDao.insertReaction(localReaction)
+            }
         }
 
         val packet = com.noslop.app.mesh.NetworkPacket(
@@ -2472,18 +2485,20 @@ class MeshSocialRepository(
             signature = signature
         )
 
-        if (action == "remove") {
-            commentVoteDao.deleteVoteById(voteId)
-        } else {
-            val localVote = com.noslop.app.data.CommentVote(
-                id = voteId,
-                commentId = commentId,
-                authorPublicKeyB64 = myKeys.publicKeyB64,
-                voteType = voteType,
-                timestamp = timestamp,
-                signature = signature
-            )
-            commentVoteDao.insertVote(localVote)
+        engagementOrdering.applyLocal(EngagementOrdering.KIND_COMMENT_VOTE, voteId, timestamp, isRemove = action == "remove") {
+            if (action == "remove") {
+                commentVoteDao.deleteVoteById(voteId)
+            } else {
+                val localVote = com.noslop.app.data.CommentVote(
+                    id = voteId,
+                    commentId = commentId,
+                    authorPublicKeyB64 = myKeys.publicKeyB64,
+                    voteType = voteType,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                commentVoteDao.insertVote(localVote)
+            }
         }
 
         com.noslop.app.mesh.GossipService.broadcast(packet)

@@ -500,6 +500,80 @@ interface CommentDao {
         markCommentDeletedRow(id)
         deleteCommentMediaOwners(id)
     }
+
+    // --- P1-A: comment replay protection (receiver side; nothing on the wire changes) ---
+    // A deleted comment keeps its row (content "[Deleted]") and its original timestamp, and the
+    // original COMMENT is still validly signed, so a raw REPLACE of a replayed COMMENT restored it.
+    // Deletions are also remembered as an author-scoped tombstone in app_settings (the same store the
+    // post tombstones use), which covers delete-before-create delivery and needs no schema change.
+
+    @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
+    suspend fun getTombstone(key: String): String?
+
+    @Query("INSERT OR REPLACE INTO app_settings (`key`, `value`) VALUES (:key, :value)")
+    suspend fun setTombstone(key: String, value: String)
+
+    /** A deletion of this comment by [authorId] is recorded, or the stored row is the deleted placeholder. */
+    suspend fun isCommentDeleted(existing: MeshComment?, commentId: String, authorId: String): Boolean =
+        (existing != null && isDeletedPlaceholder(existing)) ||
+            getTombstone(commentTombstoneKey(authorId, commentId)) != null
+
+    /**
+     * Insert a gossiped / synced comment, mirroring [PostDao.insertPostSafely]: a comment id belongs to
+     * its first author, a deleted comment stays deleted, and only a strictly newer signed revision
+     * (an edit carries a new timestamp) replaces the stored one. Returns false when nothing was written.
+     * Goes through [insertComment] so the media_owner index (D02) stays in step.
+     */
+    @Transaction
+    suspend fun insertCommentSafely(comment: MeshComment): Boolean {
+        val existing = getCommentById(comment.id)
+        if (existing != null) {
+            if (existing.authorPublicKeyB64 != comment.authorPublicKeyB64) return false
+            if (isDeletedPlaceholder(existing)) return false
+            if (existing.timestamp >= comment.timestamp) return false
+        }
+        val tombstoneTs = getTombstone(commentTombstoneKey(comment.authorPublicKeyB64, comment.id))?.toLongOrNull()
+        if (tombstoneTs != null && tombstoneTs >= comment.timestamp) return false
+        insertComment(comment)
+        return true
+    }
+
+    /**
+     * Apply a signed EDIT_COMMENT: same author, not deleted, not older than the stored revision.
+     * Returns true only when the row was updated.
+     */
+    @Transaction
+    suspend fun editCommentSafely(id: String, authorId: String, newContent: String, newTimestamp: Long, newSignature: String): Boolean {
+        val existing = getCommentById(id) ?: return false
+        if (existing.authorPublicKeyB64 != authorId) return false
+        if (isCommentDeleted(existing, id, authorId)) return false
+        if (newTimestamp < existing.timestamp) return false
+        updateCommentContent(id, newContent, newTimestamp, newSignature)
+        return true
+    }
+
+    /**
+     * Mark a comment deleted and remember the deletion, so that neither a replayed COMMENT nor a
+     * replayed EDIT_COMMENT can bring it back. When the comment is not stored yet (delete-before-create)
+     * only the tombstone is written.
+     */
+    @Transaction
+    suspend fun deleteCommentWithTombstone(id: String, authorId: String, deleteTimestamp: Long) {
+        val key = commentTombstoneKey(authorId, id)
+        val previous = getTombstone(key)?.toLongOrNull()
+        if (previous == null || deleteTimestamp > previous) setTombstone(key, deleteTimestamp.toString())
+        if (getCommentById(id) != null) markCommentDeleted(id)
+    }
+
+    companion object {
+        /** Content written by [markCommentDeletedRow]. */
+        const val DELETED_CONTENT = "[Deleted]"
+
+        fun commentTombstoneKey(authorId: String, commentId: String) = "tombstone_comment_${authorId}_$commentId"
+
+        fun isDeletedPlaceholder(comment: MeshComment) =
+            comment.content == DELETED_CONTENT && comment.mediaId == null && comment.mediaType == null
+    }
 }
 
 @Dao
