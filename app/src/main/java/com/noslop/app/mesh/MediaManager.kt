@@ -204,6 +204,10 @@ object MediaManager {
         var consecutiveTimeouts = 0
         var lastAttemptAt = 0L
         var savedPeerOnion: String? = null // Remembered for fallback during recovery
+        // N2: onion -> the key we addressed our MEDIA_REQUESTs to there. A holder answers as the identity
+        // a request was addressed to (responderIdentity), so only that key (or the key the onion is
+        // derived from) may deliver chunks for this download.
+        val addressedSenders = ConcurrentHashMap<String, String>()
 
         fun updateContiguous() {
             while (writtenOffsets.containsKey(contiguousBytes)) {
@@ -220,6 +224,7 @@ object MediaManager {
         dl.inflightLengths.clear()
         dl.retryQueue.clear()
         dl.writtenOffsets.clear() // Safe because we restart tracking from contiguousBytes
+        dl.addressedSenders.clear()
     }
 
     fun getContiguousBytesWritten(mediaId: String): Long {
@@ -630,6 +635,7 @@ object MediaManager {
                 // Round B: always address the holder (media is never relayed), and sign the request so a
                 // holder that does not know us can still verify who asked (R6b).
                 val targetPubKey = targetPeer?.publicKeyB64 ?: dl.metadata.ownerId?.takeIf { it.isNotBlank() }
+                if (targetPubKey != null) dl.addressedSenders[peer] = targetPubKey
                 val mySenderId = me?.publicKeyB64 ?: ""
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
@@ -673,19 +679,58 @@ object MediaManager {
         }
     }
 
+    /**
+     * N2: whether [senderId] is the node this download is requesting from: the key we addressed our
+     * requests to at the current peer onion, or the key that onion is derived from. The sender id is
+     * authenticated by the envelope signature (EnvelopeAuth), so this binds chunks to the holder we asked.
+     */
+    internal fun isExpectedChunkSender(dl: ActiveDownload, senderId: String): Boolean {
+        if (senderId.isBlank()) return false
+        val peer = dl.peerOnion ?: return false
+        if (dl.addressedSenders[peer] == senderId) return true
+        return CryptoService.isOnionOf(senderId, peer)
+    }
+
     fun handleMediaChunk(senderId: String, payload: MediaChunkPayload) {
         val dl = activeDownloads[payload.mediaId] ?: return
         if (dl.status != ActiveDownload.Status.ACTIVE && dl.status != ActiveDownload.Status.RECOVERING) return
 
-        val data = if (payload.data.isEmpty()) ByteArray(0) else Base64.decode(payload.data, Base64.NO_WRAP)
-        
+        // N2: only the holder we asked may write into this download (before: any sender, at any offset).
+        if (!isExpectedChunkSender(dl, senderId)) {
+            Logger.warn(TAG, "Dropping MEDIA_CHUNK for ${payload.mediaId} from ${senderId.take(12)}: not the peer we requested from")
+            return
+        }
+
+        val data = try {
+            if (payload.data.isEmpty()) ByteArray(0) else Base64.decode(payload.data, Base64.NO_WRAP)
+        } catch (_: Exception) {
+            Logger.warn(TAG, "Dropping MEDIA_CHUNK for ${payload.mediaId}: undecodable data")
+            return
+        }
+
         val offset = payload.byteOffset ?: (payload.chunkIndex.toLong() * dl.currentChunkSize)
-        val requestedLength = dl.inflightLengths.remove(offset) ?: data.size
-        
-        dl.inflight.remove(offset)
+        // N2: the chunk must answer a request we made (inflightLengths keeps requested-but-unanswered
+        // ranges, including timed-out / re-queued ones) and must not be longer than what we asked for.
+        val requestedLength: Int
+        synchronized(dl) {
+            val asked = dl.inflightLengths[offset]
+            if (asked == null || data.size > asked) {
+                Logger.warn(TAG, "Dropping MEDIA_CHUNK for ${payload.mediaId}@$offset (${data.size} B): no matching request")
+                return
+            }
+            if (dl.metadata.size > 0 && offset + data.size > dl.metadata.size) {
+                Logger.warn(TAG, "Dropping MEDIA_CHUNK for ${payload.mediaId}@$offset: beyond the declared size ${dl.metadata.size}")
+                return
+            }
+            dl.inflightLengths.remove(offset)
+            dl.inflight.remove(offset)
+            requestedLength = asked
+        }
         dl.consecutiveTimeouts = 0
 
-        if (payload.totalSize != null && payload.totalSize > dl.totalBytes) {
+        // N2: the declared size (from the post / message metadata) is authoritative; a chunk may only
+        // supply the size when the metadata did not.
+        if (dl.metadata.size <= 0 && payload.totalSize != null && payload.totalSize > dl.totalBytes) {
             dl.totalBytes = payload.totalSize
         }
 
@@ -752,20 +797,17 @@ object MediaManager {
                 return
             }
             
-            if (dl.partFile.exists()) {
-                dl.partFile.renameTo(finalFile)
-            }
-
-            // C17: Verify SHA-256 integrity hash if provided in metadata
+            // C17: Verify SHA-256 integrity hash if provided in metadata. Hash-before-rename: the part file
+            // is checked first and only a verified file ever appears under the final name (before, it was
+            // renamed first, so unverified bytes were briefly readable/servable as the media).
             val expectedHash = dl.metadata.sha256
             if (!expectedHash.isNullOrBlank()) {
-                val actualHash = computeSha256(finalFile)
+                val actualHash = computeSha256(dl.partFile)
                 if (actualHash == null || !actualHash.equals(expectedHash, ignoreCase = true)) {
                     Logger.error(
                         TAG,
                         "C17: Media integrity hash verification FAILED for ${dl.metadata.id}! Expected: $expectedHash, Actual: $actualHash. Deleting corrupt file and initiating recovery."
                     )
-                    finalFile.delete()
                     if (dl.partFile.exists()) dl.partFile.delete()
 
                     val badPeer = dl.peerOnion
@@ -775,12 +817,23 @@ object MediaManager {
 
                     dl.peerOnion = null
                     dl.status = ActiveDownload.Status.RECOVERING
+                    // The part file is gone: restart from byte 0, or recovery would resume at the old end
+                    // of file and never request anything again.
+                    dl.contiguousBytes = 0L
+                    dl.eofOffset = -1L
                     resetDownloadTracking(dl)
+                    updateProgress(dl.metadata.id, 0)
                     dl.lastAttemptAt = System.currentTimeMillis()
                     scope.launch { attemptMeshRecovery(dl) }
                     return
                 }
                 Logger.info(TAG, "C17: Media integrity hash verified for ${dl.metadata.id}: $expectedHash")
+            }
+
+            if (dl.partFile.exists() && !dl.partFile.renameTo(finalFile)) {
+                Logger.error(TAG, "Could not move verified download into place for ${dl.metadata.id}")
+                dl.status = ActiveDownload.Status.ERROR
+                return
             }
             
             dl.status = ActiveDownload.Status.COMPLETED
@@ -1043,6 +1096,9 @@ object MediaManager {
         } catch (_: Exception) { null }
     }
 
+    /** N1: stands for "one of our own identities" when comparing media_owner authors. */
+    private const val SELF_AUTHOR = "\u0000self"
+
     internal suspend fun isAuthorizedByOwnerIndex(repo: NoSlopRepository, mediaId: String, senderId: String): Boolean {
         val owners = try { repo.mediaOwnerDao.getOwners(mediaId) } catch (_: Exception) { emptyList() }
         if (owners.isEmpty()) return false
@@ -1050,12 +1106,28 @@ object MediaManager {
         if (peer?.relationship == com.noslop.app.data.PeerRelationship.BLOCKED) return false
         // D01 friend rule (Peer.isFriend), plus the bound contact identity.
         val isDirectFriend = peer?.isFriend == true && repo.getAppSetting("contact_identity_$senderId") != "burnable"
+        // N1: post/comment rows are created from remote content for a media id the remote side chooses
+        // (an attacker's own signed public post, or a comment, whose mediaId is unsigned), and they sit
+        // beside the rows of a DM/group/private item that uses the same id. Such a row may only open the
+        // media up when its author is the author of every restricted row for that id. Our own identities
+        // (main + burnable) count as one author, and a row we authored ourselves always vouches: we
+        // chose to publish that file.
+        val selfKeys = setOfNotNull(repo.getLocalIdentity()?.publicKeyB64, repo.getBurnableIdentity()?.publicKeyB64)
+        fun authorOf(pub: String) = if (pub in selfKeys) SELF_AUTHOR else pub
+        val restrictedAuthors = owners
+            .filter { it.ownerType == MediaOwner.TYPE_DM || it.ownerType == MediaOwner.TYPE_GROUP || it.privacy == "private" }
+            .map { authorOf(it.authorPub) }
+            .toSet()
+        fun vouches(owner: MediaOwner): Boolean {
+            val author = authorOf(owner.authorPub)
+            return author == SELF_AUTHOR || restrictedAuthors.all { it == author }
+        }
         for (owner in owners) {
             when (owner.ownerType) {
                 MediaOwner.TYPE_POST, MediaOwner.TYPE_COMMENT -> when (owner.privacy) {
-                    "public" -> return true
-                    "private" -> if (senderId == owner.authorPub) return true
-                    else -> if (isDirectFriend || senderId == owner.authorPub) return true
+                    "public" -> if (vouches(owner)) return true
+                    "private" -> if (senderId == owner.authorPub && vouches(owner)) return true
+                    else -> if ((isDirectFriend || senderId == owner.authorPub) && vouches(owner)) return true
                 }
                 MediaOwner.TYPE_DM -> if (owner.ownerId == senderId) return true
                 MediaOwner.TYPE_GROUP -> {
