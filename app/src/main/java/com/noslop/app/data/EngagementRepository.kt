@@ -204,7 +204,7 @@ class EngagementRepository(
     }
 
     private suspend fun pruneOldEngagementData() {
-        val ninetyDaysAgo = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000L
+        val ninetyDaysAgo = System.currentTimeMillis() - FeedRetention.ENGAGEMENT_RETENTION_MS
         viewedHistoryDao.deleteOlderThan(ninetyDaysAgo)
         swipeTrackerDao.deleteOldSwipes(ninetyDaysAgo)
     }

@@ -1236,12 +1236,12 @@ private fun ExoVideoPlayer(
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                     awayRecovery.wasAway = true
-                    Logger.info("VIDEO_AWAY", "App left: state=${exoPlayer?.playbackState} playing=${exoPlayer?.isPlaying} pos=${exoPlayer?.currentPosition} | $rawUrl")
+                    Logger.info("VIDEO_AWAY", "App left: state=${exoPlayer?.playbackState} playing=${exoPlayer?.isPlaying} wants=${exoPlayer?.playWhenReady} suppressed=${exoPlayer?.playbackSuppressionReason} userPaused=$userPaused pos=${exoPlayer?.currentPosition} | $rawUrl")
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {
                     if (awayRecovery.wasAway) {
                         awayRecovery.wasAway = false
-                        Logger.info("VIDEO_AWAY", "App returned: state=${exoPlayer?.playbackState} playing=${exoPlayer?.isPlaying} pos=${exoPlayer?.currentPosition} | $rawUrl")
+                        Logger.info("VIDEO_AWAY", "App returned: state=${exoPlayer?.playbackState} playing=${exoPlayer?.isPlaying} wants=${exoPlayer?.playWhenReady} suppressed=${exoPlayer?.playbackSuppressionReason} userPaused=$userPaused pos=${exoPlayer?.currentPosition} | $rawUrl")
                         if (awayRecovery.retryOnReturn) {
                             awayRecovery.retryOnReturn = false
                             if (exoPlayer?.isPlaying != true && awayRecovery.job?.isActive != true) onRetry()

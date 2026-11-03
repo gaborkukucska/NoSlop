@@ -66,6 +66,11 @@ object YouTubeInternalClient {
     private const val MAX_UNPLAYABLE_REMEMBERED = 500
     private const val MAX_EXIT_ROTATIONS = 2
     private const val MAX_PASSES_WITHOUT_STREAM = 2
+    private const val MAX_ERROR_CIRCUITS = 2
+
+    // The client that produced the last stream. See YouTubePlayability.refusalsBeforeRotating.
+    @Volatile
+    private var lastWinningClient: String? = null
     private val unplayableUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     fun isKnownUnplayable(videoId: String): Boolean {
@@ -839,7 +844,7 @@ object YouTubeInternalClient {
         // and the network is demonstrably fine, compare this list against
         // theirs before doing anything else. Re-check the ordering against a
         // fresh capture at the same time: which client answers changes.
-        val configs = listOf(
+        val configs = YouTubePlayability.winnerFirst(listOf(
             InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
             InnerTubeClientConfig(
                 "TVHTML5", "7", "7.20250312.16.00",
@@ -854,13 +859,16 @@ object YouTubeInternalClient {
                 "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
             ),
             InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
-        )
+        )) { it.clientName == lastWinningClient }
         
         var streamNonce = videoStreamNonces.getOrPut(videoId) { 0 }
         var attempt = 0
-        val maxAttempts = if (isTor) 6 else 1
+        // Most exits are blocked, and a circuit that fails on the first client costs about 3 s, so more
+        // of them fit in the budget than the six that used to take the whole client list each.
+        val maxAttempts = if (isTor) 8 else 1
         var exitRotations = 0
         var passesWithoutStream = 0
+        var errorCircuits = 0
 
         while (attempt < maxAttempts) {
             attempt++
@@ -926,6 +934,7 @@ object YouTubeInternalClient {
                                 val url = extractUrlFromPlayerResponse(root, quality)
                                 if (url != null) {
                                     Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for ${Logger.redact(videoId)}")
+                                    lastWinningClient = config.clientName
                                     registerStreamId(url, videoId, currentStreamId)
                                     response.close()
                                     return@withContext url
@@ -941,12 +950,29 @@ object YouTubeInternalClient {
                                 // so the next attempt automatically routes over a brand new circuit without SIGNAL NEWNYM.
                                 if (playability == "LOGIN_REQUIRED") {
                                     refusedThisAttempt++
-                                    if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
+                                    val refusalsAllowed = if (errorCircuits >= MAX_ERROR_CIRCUITS) {
+                                        EXIT_BLOCKED_THRESHOLD
+                                    } else {
+                                        YouTubePlayability.refusalsBeforeRotating(attempt, EXIT_BLOCKED_THRESHOLD)
+                                    }
+                                    if (refusedThisAttempt >= refusalsAllowed) {
                                         Logger.warn(
                                             TAG,
                                             "$refusedThisAttempt clients refused on circuit $currentStreamId for " +
                                                 "${Logger.redact(videoId)} — advancing stream isolation nonce to escape to a fresh circuit."
                                         )
+                                        streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
+                                        break
+                                    }
+                                }
+
+                                // --- NOSLOP_DEAD_SLIDES_V1 ---
+                                // A video that no longer exists answers ERROR from every exit: one took six
+                                // circuits and 30 s in a capture. Try one more circuit, then let the other
+                                // clients answer before calling it dead, in case it is the client that broke.
+                                if (playability == "ERROR" && config == configs.first()) {
+                                    errorCircuits++
+                                    if (errorCircuits < MAX_ERROR_CIRCUITS && attempt < maxAttempts) {
                                         streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
                                         break
                                     }
@@ -988,6 +1014,11 @@ object YouTubeInternalClient {
                     return@withContext null
                 }
                 streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
+            }
+            if (isTor && errorCircuits >= MAX_ERROR_CIRCUITS) {
+                Logger.warn(TAG, "${Logger.redact(videoId)} answered ERROR from $errorCircuits circuits and no client could play it. Treating it as unplayable.")
+                rememberUnplayable(videoId)
+                return@withContext null
             }
         }
         

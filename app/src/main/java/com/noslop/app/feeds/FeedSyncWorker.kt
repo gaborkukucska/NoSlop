@@ -15,6 +15,7 @@ class FeedSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 return Result.retry()
             }
             val syncResult = NoSlopApp.repository.refreshFeeds(awaitCompletion = true)
+            NoSlopApp.repository.pruneFeedItemsIfDue()
             when (syncResult) {
                 is com.noslop.app.data.FeedSyncResult.Success,
                 is com.noslop.app.data.FeedSyncResult.AlreadyRunning,

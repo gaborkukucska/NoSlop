@@ -2097,6 +2097,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun refreshFeeds(awaitCompletion: Boolean = false): FeedSyncResult = feedRepository.refreshFeeds(awaitCompletion)
     suspend fun deleteYouTubeItems() = feedRepository.deleteYouTubeItems()
+    suspend fun pruneFeedItemsIfDue() = feedRepository.pruneFeedItemsIfDue()
 
     suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =
         feedRepository.searchCustomFeed(query, filterMode)

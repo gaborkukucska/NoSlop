@@ -83,6 +83,36 @@ interface FeedDao {
     @Query("DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0")
     suspend fun clearUnsavedItems()
 
+    // --- NOSLOP_FEED_RETENTION_V1 --- the rules are explained in FeedRetention.
+
+    @Query(
+        "DELETE FROM feed_items WHERE isSaved = 0 " +
+        "AND id NOT IN (SELECT itemId FROM viewed_history) " +
+        "AND publishedAt > 0 AND publishedAt < :staleBefore AND createdAt < :fetchedBefore " +
+        "AND (apiSource IS NULL OR apiSource NOT IN (:archivalSources))"
+    )
+    suspend fun deleteStaleItems(staleBefore: Long, fetchedBefore: Long, archivalSources: List<String>): Int
+
+    @Query(
+        "DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0 " +
+        "AND id NOT IN (SELECT itemId FROM viewed_history) " +
+        "AND createdAt < :staleBefore"
+    )
+    suspend fun deleteStaleUnreadItems(staleBefore: Long): Int
+
+    @Query(
+        "SELECT COUNT(*) FROM feed_items WHERE isSaved = 0 AND isRead = 0 " +
+        "AND id NOT IN (SELECT itemId FROM viewed_history)"
+    )
+    suspend fun getRemovableUnreadCount(): Int
+
+    @Query(
+        "DELETE FROM feed_items WHERE id IN (SELECT id FROM feed_items WHERE isSaved = 0 AND isRead = 0 " +
+        "AND id NOT IN (SELECT itemId FROM viewed_history) " +
+        "ORDER BY createdAt ASC, publishedAt ASC LIMIT :count)"
+    )
+    suspend fun deleteOldestUnreadItems(count: Int): Int
+
 
 }
 

@@ -30,6 +30,21 @@ class YouTubePlayabilityTest {
     }
 
     @Test
+    fun aRefusalMovesToAFreshCircuitUntilTheLastAttempts() {
+        for (attempt in 1..YouTubePlayability.FAST_ROTATION_ATTEMPTS) {
+            assertTrue(YouTubePlayability.refusalsBeforeRotating(attempt, fullWalk = 4) == 1)
+        }
+        assertTrue(YouTubePlayability.refusalsBeforeRotating(YouTubePlayability.FAST_ROTATION_ATTEMPTS + 1, fullWalk = 4) == 4)
+    }
+
+    @Test
+    fun theClientThatLastWorkedGoesFirstAndTheRestKeepTheirOrder() {
+        val clients = listOf("ANDROID", "TVHTML5", "ANDROID_VR", "IOS")
+        assertTrue(YouTubePlayability.winnerFirst(clients) { it == "IOS" } == listOf("IOS", "ANDROID", "TVHTML5", "ANDROID_VR"))
+        assertTrue("no winner yet", YouTubePlayability.winnerFirst(clients) { false } == clients)
+    }
+
+    @Test
     fun theReplayOfAFinishedStreamIsNotLive() {
         assertFalse(YouTubePlayability.isBroadcastingNow(isLive = false, hasLiveStreamability = false))
         assertTrue(YouTubePlayability.isBroadcastingNow(isLive = true, hasLiveStreamability = false))

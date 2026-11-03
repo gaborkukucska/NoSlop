@@ -23,4 +23,17 @@ internal object YouTubePlayability {
      * of a stream that ended long ago, which is an ordinary video with ordinary formats.
      */
     fun isBroadcastingNow(isLive: Boolean, hasLiveStreamability: Boolean): Boolean = isLive || hasLiveStreamability
+
+    // --- NOSLOP_FAST_EXIT_ROTATION_V1 ---
+    // Whether an exit is blocked is decided by the exit, not the client. In a 2.5 hour capture every
+    // client was refused on every blocked circuit, and each extra client asked cost about 0.8 s. So the
+    // first refusal moves on to a fresh circuit, except on the last attempts, which still ask every
+    // client: if YouTube ever gates the client that usually wins, those find the one that works.
+    const val FAST_ROTATION_ATTEMPTS = 6
+
+    fun refusalsBeforeRotating(attempt: Int, fullWalk: Int): Int =
+        if (attempt <= FAST_ROTATION_ATTEMPTS) 1 else fullWalk
+
+    /** Clients to try, the one that last worked first. Otherwise in their given order. */
+    fun <T> winnerFirst(clients: List<T>, isWinner: (T) -> Boolean): List<T> = clients.sortedBy { !isWinner(it) }
 }

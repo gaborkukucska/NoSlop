@@ -141,6 +141,30 @@ class FeedRepository(
         Logger.info(TAG, "Cleared previous feed items and sources")
     }
 
+    /** Applies [FeedRetention], at most once a day. */
+    suspend fun pruneFeedItemsIfDue(nowMs: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
+        try {
+            val lastRun = appSettingDao.getSetting(FeedRetention.LAST_RUN_SETTING)?.toLongOrNull()
+            if (!FeedRetention.isDue(lastRun, nowMs)) return@withContext
+            val staleBefore = nowMs - FeedRetention.RETENTION_MS
+            val rowsBefore = feedDao.getItemCount()
+            val stale = feedDao.deleteStaleItems(staleBefore, nowMs - FeedRetention.FETCH_GRACE_MS, FeedRetention.ARCHIVAL_SOURCES)
+            val staleUnread = feedDao.deleteStaleUnreadItems(staleBefore)
+            val overCap = feedDao.getRemovableUnreadCount() - FeedRetention.MAX_UNREAD_ITEMS
+            val capped = if (overCap > 0) feedDao.deleteOldestUnreadItems(overCap) else 0
+            appSettingDao.insertSetting(AppSetting(FeedRetention.LAST_RUN_SETTING, nowMs.toString()))
+            Logger.info(
+                TAG,
+                "Feed retention: $rowsBefore rows, removed $stale stale, $staleUnread unread and $capped over the cap, " +
+                    "${feedDao.getItemCount()} left, in ${System.currentTimeMillis() - nowMs}ms"
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Feed retention failed: ${e.message}")
+        }
+    }
+
     /** Purge YouTube items so they are re-fetched with correct dates */
     suspend fun deleteYouTubeItems() = withContext(Dispatchers.IO) {
         feedDao.deleteYouTubeItems()

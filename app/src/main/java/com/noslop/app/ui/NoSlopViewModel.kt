@@ -782,6 +782,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _isContactsCollapsed.value = repository.getAppSetting("dms_contacts_collapsed") == "true"
             _isTemporaryContactsCollapsed.value = repository.getAppSetting("temporary_contacts_collapsed") == "true"
         }
+        // Waits for the feed to settle: the first run on a long-used device removes many rows.
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(45_000L)
+            repository.pruneFeedItemsIfDue()
+        }
         // Cleaned up DB Flow: NO MORE PREPENDING! This strictly updates existing items for live reaction counts.
         viewModelScope.launch {
             refreshExclusionCaches()
@@ -1043,12 +1048,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * firing and the ceiling can actually bite on the sources where staleness is
      * a real defect.
      */
-    private val ARCHIVAL_SOURCES = setOf(
-        "nasa", "archive", "internet_archive", "wikimedia", "artic", "openverse", "pexels", "vimeo", "podcast_index", "jamendo"
-    )
+    private val ARCHIVAL_SOURCES = com.noslop.app.data.FeedRetention.ARCHIVAL_SOURCES.toSet()
 
     /** Age ceiling for sources where a stale upload is genuinely stale (< 60 days). */
-    private val FRESHNESS_MAX_AGE_MS = 60L * 24 * 60 * 60 * 1000L
+    private val FRESHNESS_MAX_AGE_MS = com.noslop.app.data.FeedRetention.FRESHNESS_MAX_AGE_MS
 
     private fun <T> Iterable<T>.takeRoundRobin(
         limit: Int,

@@ -48,6 +48,10 @@ class FakeFeedDao : FeedDao {
     override suspend fun deleteItemsByAuthor(author: String) {}
     override suspend fun clearUnsavedItems() {}
     override suspend fun getItemCount(): Int = 0
+    override suspend fun deleteStaleItems(staleBefore: Long, fetchedBefore: Long, archivalSources: List<String>): Int = 0
+    override suspend fun deleteStaleUnreadItems(staleBefore: Long): Int = 0
+    override suspend fun getRemovableUnreadCount(): Int = 0
+    override suspend fun deleteOldestUnreadItems(count: Int): Int = 0
 }
 
 /** Fake [ViewedHistoryDao] preserving insert-IGNORE semantics, count, and oldest-first pruning. */
