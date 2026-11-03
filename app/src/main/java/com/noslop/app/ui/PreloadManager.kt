@@ -52,6 +52,15 @@ object PreloadManager {
     // reach it; VideoPlayer will re-resolve on arrival instead.
     private const val MIN_USEFUL_TTL_MS = 30_000L
 
+    // --- NOSLOP_SMOOTH_TEARDOWN_V1 ---
+    // How long a retired player gets to shut down on its playback thread before release(), which
+    // blocks the main thread until that thread is done.
+    private const val RETIRE_RELEASE_DELAY_MS = 1_200L
+
+    // Building a player costs main-thread time, so a queued warm-up waits out a swipe, within reason.
+    private const val SCROLL_DEFER_STEP_MS = 32L
+    private const val SCROLL_DEFER_MAX_MS = 1_500L
+
 
 
     private class Preloaded(
@@ -69,6 +78,8 @@ object PreloadManager {
     var currentlyPlayingUrl: String? = null
     @Volatile
     var isVideoActive: Boolean = false
+    @Volatile
+    var isFeedScrolling: Boolean = false
     @Volatile
     var lastNetworkByteTimeMs: Long = System.currentTimeMillis()
     @Volatile
@@ -97,7 +108,7 @@ object PreloadManager {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Preloaded>): Boolean {
             if (size > MAX_PRELOAD) {
                 Logger.info("PRELOAD", "Evicting preloaded player for ${eldest.key}")
-                eldest.value.player.release()
+                retire(eldest.value.player)
                 // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
                 // Also drop any queued warm-up for this item. Without this the
                 // task runs to completion, spends bandwidth, and stores into a
@@ -162,9 +173,8 @@ object PreloadManager {
      *   the resolution is already cached when the card appears. That cache is
      *   now TTL-aware, so a stale entry is re-resolved rather than reused.
      *
-     * YouTube direct URLs are deliberately resolved but NOT buffered: they
-     * expire fast enough that a warm player is more likely to be a liability
-     * than a win.
+     * Call this through [launchPreWarm] from the feed, so that a slide the user has
+     * moved past can be cancelled by [retainOnly].
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
@@ -233,7 +243,14 @@ object PreloadManager {
                     finish(rawUrl, deferred)
                     return
                 }
-                warmUp(context, resolved.url, rawUrl, expiresAt, deferred)
+                try {
+                    warmUp(context, resolved.url, rawUrl, expiresAt, deferred)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Cancelled before the task was queued, so nothing else will clear this entry, and
+                    // a URL left in pendingTasks could never be preloaded again.
+                    finish(rawUrl, deferred)
+                    throw e
+                }
             }
             is VideoSource.Embed -> {
                 Logger.info("PRELOAD", "Skipping warmUp for Embed VideoSource (WebView handles this)")
@@ -265,6 +282,11 @@ object PreloadManager {
         com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) {
             for (task in preloadQueue) {
                 try {
+                    var deferredMs = 0L
+                    while (isFeedScrolling && deferredMs < SCROLL_DEFER_MAX_MS) {
+                        kotlinx.coroutines.delay(SCROLL_DEFER_STEP_MS)
+                        deferredMs += SCROLL_DEFER_STEP_MS
+                    }
                     doWarmUp(task.context, task.rawUrl, task.resolvedUrl, task.expiresAtMs)
                 } catch (e: Exception) {
                     Logger.error("PRELOAD", "Error in background warmUp for ${task.rawUrl}: ${e.message}")
@@ -292,7 +314,7 @@ object PreloadManager {
                 return@withContext
             }
             Logger.info("PRELOAD", "Discarding stale preloaded player for $cacheKey before re-warming")
-            preloadedPlayers.remove(cacheKey)?.player?.release()
+            preloadedPlayers.remove(cacheKey)?.let { retire(it.player) }
         }
 
         Logger.info("PRELOAD", "Successfully enqueued preload task for $rawUrl")
@@ -312,17 +334,7 @@ object PreloadManager {
         }
         Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
 
-        val streamId = com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(resolvedUrl)
-            ?: com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(rawUrl)
-            ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
-        val isYouTube = resolvedUrl.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
-        val mediaHttpClient = if (isYouTube) {
-            com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
-        } else if (resolvedUrl.contains("127.0.0.1") || resolvedUrl.contains("localhost")) {
-            com.noslop.app.net.HttpClientProvider.loopbackClient
-        } else {
-            com.noslop.app.net.HttpClientProvider.activeClearnetClient
-        }
+        val mediaHttpClient = com.noslop.app.ui.components.mediaClientFor(resolvedUrl, rawUrl)
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(mediaHttpClient)
             .setTransferListener(globalTransferListener)
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
@@ -404,7 +416,7 @@ object PreloadManager {
                     androidx.media3.common.Player.STATE_ENDED ->
                         Logger.info("PRELOAD", "ExoPlayer reached ENDED state for $rawUrl")
                     androidx.media3.common.Player.STATE_IDLE ->
-                        Logger.warn("PRELOAD", "ExoPlayer in IDLE state for $rawUrl")
+                        Logger.info("PRELOAD", "ExoPlayer in IDLE state for $rawUrl")
                     androidx.media3.common.Player.STATE_BUFFERING -> {}
                 }
             }
@@ -418,7 +430,7 @@ object PreloadManager {
                 val quality = try {
                     com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
                 } catch (_: Exception) { "medium" }
-                preloadedPlayers.remove("$rawUrl||$quality")?.player?.release()
+                preloadedPlayers.remove("$rawUrl||$quality")?.let { retire(it.player) }
             }
         })
     }
@@ -447,7 +459,7 @@ object PreloadManager {
                     "Building a fresh player."
             )
             preloadedPlayers.remove(cacheKey)
-            entry.player.release()
+            retire(entry.player)
             return null
         }
 
@@ -457,7 +469,7 @@ object PreloadManager {
                 "Discarding preloaded player for $cacheKey — player encountered background error (${entry.player.playerError?.errorCode})."
             )
             preloadedPlayers.remove(cacheKey)
-            entry.player.release()
+            retire(entry.player)
             return null
         }
 
@@ -468,7 +480,7 @@ object PreloadManager {
                     "${(System.currentTimeMillis() - entry.expiresAtMs) / 1000}s ago. Building a fresh player."
             )
             preloadedPlayers.remove(cacheKey)
-            entry.player.release()
+            retire(entry.player)
             return null
         }
 
@@ -490,19 +502,93 @@ object PreloadManager {
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             preloadedPlayers.remove(cacheKey)?.let {
                 Logger.info("PRELOAD", "Invalidated preloaded player for $cacheKey")
-                it.player.release()
+                retire(it.player)
             }
         } else {
             com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) {
                 preloadedPlayers.remove(cacheKey)?.let {
                     Logger.info("PRELOAD", "Invalidated preloaded player for $cacheKey")
-                    it.player.release()
+                    retire(it.player)
                 }
             }
         }
         cancelledTasks.add(rawUrl)
         pendingTasks.remove(rawUrl)
         readyTasks.remove(rawUrl)
+    }
+
+    private val mainHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+
+    /**
+     * --- NOSLOP_SMOOTH_TEARDOWN_V1 ---
+     * Ends a player without blocking the main thread. stop() only posts to the playback thread, which
+     * then frees the decoder and cancels the download; the release() that follows has little left to
+     * wait for. Call on the main thread.
+     */
+    private fun retire(player: ExoPlayer) {
+        try {
+            player.stop()
+        } catch (e: Exception) {
+            Logger.debug("PRELOAD", "Stopping a retired player failed: ${e.message}")
+        }
+        mainHandler.postDelayed({
+            try {
+                player.release()
+            } catch (e: Exception) {
+                Logger.debug("PRELOAD", "Releasing a retired player failed: ${e.message}")
+            }
+        }, RETIRE_RELEASE_DELAY_MS)
+    }
+
+    // --- NOSLOP_PRELOAD_TARGETS_V1 ---
+    private val preWarmJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+    /**
+     * [preWarm] as a job [retainOnly] can cancel. A second call for a URL still being warmed returns
+     * the job already running.
+     */
+    fun launchPreWarm(
+        scope: CoroutineScope,
+        context: Context,
+        rawUrl: String,
+        forcedResolvedUrl: String? = null
+    ): kotlinx.coroutines.Job {
+        preWarmJobs[rawUrl]?.takeIf { it.isActive }?.let { return it }
+        val job = scope.launch { preWarm(context, rawUrl, forcedResolvedUrl) }
+        preWarmJobs[rawUrl] = job
+        job.invokeOnCompletion { preWarmJobs.remove(rawUrl, job) }
+        return job
+    }
+
+    /** Returns once a queued warm-up of [rawUrl] has run. [launchPreWarm]'s job ends when it is queued. */
+    suspend fun awaitWarmUpFinished(rawUrl: String) {
+        pendingTasks[rawUrl]?.await()
+    }
+
+    /** Whether a warm player is waiting for [rawUrl]. Main thread only. */
+    fun hasWarmPlayer(rawUrl: String): Boolean = preloadedPlayers.containsKey(cacheKeyFor(rawUrl))
+
+    /**
+     * Drops all preload work except for [keepRawUrls]. A slide the user has moved past cannot be
+     * reached any more, and its resolve would hold one of YouTubeInternalClient's three slots for up
+     * to a minute: over Tor, a few quick swipes used to fill all three, so the slide that was actually
+     * next waited its 15 s and gave up with nothing warmed. Main thread only.
+     */
+    fun retainOnly(keepRawUrls: Set<String>) {
+        for ((rawUrl, job) in preWarmJobs) {
+            if (rawUrl !in keepRawUrls) job.cancel()
+        }
+        // Past the resolve and queued: doWarmUp checks this before it builds anything.
+        for (rawUrl in pendingTasks.keys) {
+            if (rawUrl !in keepRawUrls) cancelledTasks.add(rawUrl)
+        }
+        val unwanted = preloadedPlayers.keys.filter { it.substringBefore("||") !in keepRawUrls }
+        for (cacheKey in unwanted) {
+            preloadedPlayers.remove(cacheKey)?.let {
+                Logger.info("PRELOAD", "Dropping preloaded player for a slide left behind: $cacheKey")
+                retire(it.player)
+            }
+        }
     }
 
     fun evictAll() {

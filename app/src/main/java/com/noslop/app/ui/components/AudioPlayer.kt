@@ -44,8 +44,11 @@ fun AudioPlayer(
     var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
     var hasError by remember { mutableStateOf(false) }
 
-    DisposableEffect(url, isVisible) {
-        if (isVisible) {
+    // --- NOSLOP_SMOOTH_TEARDOWN_V1 --- see PlaybackPolicy.kt
+    val keepPlayer = rememberHeldTrue(isVisible, PLAYER_UNMOUNT_DELAY_MS, url)
+
+    DisposableEffect(url, keepPlayer) {
+        if (keepPlayer) {
             hasError = false
             
             val preloaded = PreloadManager.claim(actualKey, url) ?: PreloadManager.claim(url, url)
@@ -193,11 +196,16 @@ fun AudioPlayer(
 
     LaunchedEffect(isVisible, exoPlayer) {
         exoPlayer?.let { player ->
+            if (isVisible && player.playbackState == androidx.media3.common.Player.STATE_IDLE && player.playerError == null) {
+                player.prepare() // swiped back after the stop below
+            }
             player.playWhenReady = isVisible
             if (isVisible) {
                 player.play()
             } else {
                 player.pause()
+                kotlinx.coroutines.delay(PLAYER_STOP_DELAY_MS)
+                player.stop()
             }
         }
     }

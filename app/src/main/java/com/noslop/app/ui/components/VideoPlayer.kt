@@ -586,6 +586,9 @@ private fun isRecoverablePlaybackError(error: androidx.media3.common.PlaybackExc
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
         androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        // A surface detach or the stuck player detector timed out. The stream may be fine, and a retry
+        // costs less than a dead slide with a Retry button.
+        androidx.media3.common.PlaybackException.ERROR_CODE_TIMEOUT,
         androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
         androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> return true
     }
@@ -617,6 +620,35 @@ fun VideoPlayer(
     thumbnailB64: String? = null,
     stableKey: String? = null,
     onPlaybackStarted: (() -> Unit)? = null
+) {
+    // --- NOSLOP_HELD_PLAYBACK_URL_V1 ---
+    // A mesh video streaming through the proxy switches from the proxy URL to a file:// URL when its
+    // download finishes. Every remember(url) below would reset and the slide would restart from
+    // "Finding stream" mid-watch. While the item is on screen it keeps the URL it started with; the
+    // retry path finds the local file on its own (doResolve) if the proxy stream ever fails.
+    var heldUrl by remember(stableKey ?: url) { mutableStateOf(url) }
+    SideEffect { if (!isVisible) heldUrl = url }
+    VideoPlayerContent(
+        url = if (isVisible) heldUrl else url,
+        isVisible = isVisible,
+        isNextSlide = isNextSlide,
+        thumbnailUrl = thumbnailUrl,
+        thumbnailB64 = thumbnailB64,
+        stableKey = stableKey,
+        onPlaybackStarted = onPlaybackStarted
+    )
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun VideoPlayerContent(
+    url: String,
+    isVisible: Boolean,
+    isNextSlide: Boolean,
+    thumbnailUrl: String?,
+    thumbnailB64: String?,
+    stableKey: String?,
+    onPlaybackStarted: (() -> Unit)?
 ) {
     if (url.isBlank()) return
     val context = LocalContext.current
@@ -674,6 +706,8 @@ fun VideoPlayer(
     }
 
     var lastTorRouting by remember(url) { mutableStateOf(isTorRouting) }
+    // The retryTrigger value this effect last acted on. See NOSLOP_RETRY_ONCE_V1 below.
+    var handledRetry by remember(url) { mutableStateOf(0) }
     LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible, activeVisible, isTorRouting) {
         // Offscreen next slide is warmed by PreloadManager; VideoPlayer only resolves for the visible slide
         if (!isVisible && !activeVisible) return@LaunchedEffect
@@ -690,10 +724,17 @@ fun VideoPlayer(
             return@LaunchedEffect
         }
 
-        // If retryTrigger was reset to 0 after stable playback, do NOT re-resolve or kill the player
-        if (retryTrigger == 0 && isVideoReady && source != null) return@LaunchedEffect
-        val forceRefresh = retryTrigger > 0
+        // --- NOSLOP_RETRY_ONCE_V1 ---
+        // A retry is acted on once. This effect also restarts when isVisible or activeVisible change,
+        // and retryTrigger stays above 0 until 16 s of stable playback. Reading "above 0" as "retry now"
+        // meant that coming back to a slide within those 16 s threw away a healthy player and showed
+        // "Finding stream". If nothing new was asked for and the slide is playing, leave it alone.
+        val retryIsNew = retryTrigger > 0 && retryTrigger != handledRetry
+        handledRetry = retryTrigger
+        if (!retryIsNew && isVideoReady && source != null) return@LaunchedEffect
+        val forceRefresh = retryIsNew
         if (forceRefresh) {
+            Logger.info("VIDEO", "Clearing the source to re-resolve (retry $retryTrigger): $url")
             source = null
             isVideoReady = false
         }
@@ -735,6 +776,9 @@ fun VideoPlayer(
         }
     }
 
+    // --- NOSLOP_SMOOTH_TEARDOWN_V1 --- see PlaybackPolicy.kt
+    val keepPlayerMounted = rememberHeldTrue(isVisible, PLAYER_UNMOUNT_DELAY_MS, url)
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         when (val resolved = source) {
             null -> {
@@ -742,10 +786,10 @@ fun VideoPlayer(
             }
 
             is VideoSource.Direct -> {
-                // Strictly mount ExoVideoPlayer ONLY when this slide is visible to the user.
-                // PreloadManager handles warming upcoming slides; mounting ExoVideoPlayer for offscreen
-                // slides starves Tor bandwidth and kills active playback.
-                if (isVisible) {
+                // Mount ExoVideoPlayer only for the slide on screen, plus a moment after it leaves so the
+                // teardown misses the swipe animation. PreloadManager handles warming upcoming slides;
+                // mounting ExoVideoPlayer for offscreen slides starves Tor bandwidth and kills active playback.
+                if (keepPlayerMounted) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -756,6 +800,7 @@ fun VideoPlayer(
                         ExoVideoPlayer(
                             url = resolved.url,
                             rawUrl = stableKey ?: url,
+                            resolveKey = url,
                             isLandscape = isLandscape,
                             isVisible = isVisible,
                             thumbnailUrl = thumbnailUrl,
@@ -984,11 +1029,61 @@ private fun VideoLoadingOverlay(
     }
 }
 
+/** The HTTP client a stream must be fetched with. A googlevideo URL only works from the exit that resolved it. */
+internal fun mediaClientFor(streamUrl: String, rawUrl: String): okhttp3.OkHttpClient {
+    val streamId = YouTubeInternalClient.getStreamIdForUrl(streamUrl)
+        ?: YouTubeInternalClient.getStreamIdForUrl(rawUrl)
+        ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
+    val isYouTube = streamUrl.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
+    return when {
+        isYouTube -> HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+        streamUrl.contains("127.0.0.1") || streamUrl.contains("localhost") -> HttpClientProvider.loopbackClient
+        else -> HttpClientProvider.activeClearnetClient
+    }
+}
+
+// --- NOSLOP_AWAY_RECOVERY_V1 ---
+// Keeps a player alive through a stall or error while the app is in the background. The normal retry
+// path clears `source`, which releases the player: audio stops, and a user coming back during the
+// resolve (seconds to a minute over Tor) meets "Finding stream" on a video that was playing. Here the
+// player is kept and a fresh stream is swapped into it at the same position.
+private class AwayRecoveryState {
+    var job: kotlinx.coroutines.Job? = null
+    var attempts = 0
+    var retryOnReturn = false
+    var wasAway = false
+}
+
+/**
+ * A source for [streamUrl] on the client that URL needs. A running player keeps the client it was
+ * built with, so after a circuit change setMediaItem() would fetch from the wrong exit: it has to be
+ * given a source that carries its own client.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun buildRecoverySource(
+    context: android.content.Context,
+    streamUrl: String,
+    rawUrl: String
+): androidx.media3.exoplayer.source.MediaSource {
+    val listener = PreloadManager.globalTransferListener
+    val httpFactory = OkHttpDataSource.Factory(mediaClientFor(streamUrl, rawUrl)).setTransferListener(listener)
+    val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpFactory)
+        .setTransferListener(listener)
+    val mimeType = when {
+        streamUrl.contains(".m3u8", ignoreCase = true) || streamUrl.contains("hls", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+        streamUrl.contains(".mpd", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_MPD
+        else -> androidx.media3.common.MimeTypes.VIDEO_MP4
+    }
+    val mediaItem = androidx.media3.common.MediaItem.Builder().setUri(streamUrl).setMimeType(mimeType).build()
+    return DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
+}
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 private fun ExoVideoPlayer(
     url: String,
     rawUrl: String,
+    resolveKey: String = rawUrl,
     isLandscape: Boolean,
     isVisible: Boolean,
     thumbnailUrl: String? = null,
@@ -1008,6 +1103,72 @@ private fun ExoVideoPlayer(
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var isBuffering by remember { mutableStateOf(true) }
+
+    // The player's listeners and the stall sampler outlive the composition that created them, so they
+    // need the current values, not the ones from when they were set up.
+    val currentIsVisible by rememberUpdatedState(isVisible)
+    val currentCanRetry by rememberUpdatedState(canRetry)
+    // A pause the user asked for. onRenderedFirstFrame fires again whenever a surface comes back, and
+    // used to restart a video the user had paused before leaving the app.
+    var userPaused by remember(url, retryKey) { mutableStateOf(false) }
+
+    // --- NOSLOP_AWAY_RECOVERY_V1 ---
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val recoveryScope = rememberCoroutineScope()
+    val awayRecovery = remember(url, retryKey) { AwayRecoveryState() }
+    fun appStateLabel(): String = lifecycleOwner.lifecycle.currentState.name
+
+    /**
+     * True if this call took charge of the failure, because the app is away or a recovery is running.
+     * False means the app is on screen and the caller should use the normal retry path.
+     */
+    fun recoverWhileAway(
+        player: androidx.media3.exoplayer.ExoPlayer,
+        reason: String,
+        freshCircuit: Boolean
+    ): Boolean {
+        val decision = decideAwayRecovery(
+            appStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED),
+            recoveryRunning = awayRecovery.job?.isActive == true,
+            attemptsUsed = awayRecovery.attempts
+        )
+        when (decision) {
+            AwayRecoveryDecision.NOT_AWAY -> return false
+            AwayRecoveryDecision.ALREADY_RUNNING -> return true
+            AwayRecoveryDecision.GIVE_UP -> {
+                Logger.warn("VIDEO_AWAY", "Giving up after ${awayRecovery.attempts} attempts ($reason); will retry on return: $rawUrl")
+                awayRecovery.retryOnReturn = true
+                return true
+            }
+            AwayRecoveryDecision.START -> Unit
+        }
+        val resumeAtMs = player.currentPosition
+        Logger.info("VIDEO_AWAY", "Recovering in place while away ($reason) at pos=${resumeAtMs}ms: $rawUrl")
+        awayRecovery.job = recoveryScope.launch {
+            if (freshCircuit) {
+                YouTubeInternalClient.extractVideoId(rawUrl)?.let { YouTubeInternalClient.advanceStreamNonce(it) }
+            }
+            while (true) {
+                awayRecovery.attempts++
+                PreloadManager.invalidate(rawUrl)
+                sourceCache.keys.removeAll { it.startsWith("$rawUrl||") }
+                val fresh = resolveSource(resolveKey, forceRefresh = true, context = context)
+                if (fresh is VideoSource.Direct) {
+                    player.setMediaSource(buildRecoverySource(context, fresh.url, rawUrl), resumeAtMs)
+                    player.prepare()
+                    Logger.info("VIDEO_AWAY", "Swapped in a fresh stream (attempt ${awayRecovery.attempts}): $rawUrl")
+                    return@launch
+                }
+                if (awayRecovery.attempts >= MAX_AWAY_RECOVERIES) {
+                    Logger.warn("VIDEO_AWAY", "No stream after ${awayRecovery.attempts} attempts; will retry on return: $rawUrl")
+                    awayRecovery.retryOnReturn = true
+                    return@launch
+                }
+                kotlinx.coroutines.delay(AWAY_RECOVERY_RETRY_DELAY_MS)
+            }
+        }
+        return true
+    }
 
     // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
     // One place to notify the parent, rather than duplicating the call at
@@ -1035,8 +1196,18 @@ private fun ExoVideoPlayer(
         exoPlayer?.let { player ->
             if (isVisible) {
                 com.noslop.app.tor.TorService.noteMediaProgress()
+                // --- NOSLOP_SMOOTH_TEARDOWN_V1 ---
+                // Swiped back while the player was still held: it is the active stream again, and may
+                // have been stopped already.
+                PreloadManager.currentlyPlayingUrl = rawUrl
+                if (player.playbackState == androidx.media3.common.Player.STATE_IDLE && player.playerError == null) {
+                    player.prepare()
+                }
+                if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
+                    onReady()
+                }
             }
-            player.playWhenReady = isVisible
+            player.playWhenReady = isVisible && !userPaused
             if (!isVisible) {
                 player.pause()
                 try {
@@ -1049,8 +1220,37 @@ private fun ExoVideoPlayer(
                 } catch (e: Exception) {
                     Logger.debug("VIDEO_DEBUG", "Failed to save playback position on pause: ${e.message}")
                 }
+                // --- NOSLOP_SMOOTH_TEARDOWN_V1 ---
+                // Frees the decoder on the playback thread. Cancelled if the slide comes back in time.
+                kotlinx.coroutines.delay(PLAYER_STOP_DELAY_MS)
+                player.stop()
             }
         }
+    }
+
+    // --- NOSLOP_AWAY_RECOVERY_V1 ---
+    DisposableEffect(lifecycleOwner, url, retryKey) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    awayRecovery.wasAway = true
+                    Logger.info("VIDEO_AWAY", "App left: state=${exoPlayer?.playbackState} playing=${exoPlayer?.isPlaying} pos=${exoPlayer?.currentPosition} | $rawUrl")
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    if (awayRecovery.wasAway) {
+                        awayRecovery.wasAway = false
+                        Logger.info("VIDEO_AWAY", "App returned: state=${exoPlayer?.playbackState} playing=${exoPlayer?.isPlaying} pos=${exoPlayer?.currentPosition} | $rawUrl")
+                        if (awayRecovery.retryOnReturn) {
+                            awayRecovery.retryOnReturn = false
+                            if (exoPlayer?.isPlaying != true && awayRecovery.job?.isActive != true) onRetry()
+                        }
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     var videoSizeState by remember { mutableStateOf(androidx.media3.common.VideoSize.UNKNOWN) }
@@ -1075,6 +1275,14 @@ private fun ExoVideoPlayer(
             kotlinx.coroutines.delay(2000L)
             val p = exoPlayer ?: continue
             try {
+                // A running recovery owns the player until it finishes.
+                if (awayRecovery.job?.isActive == true) {
+                    stalledSamples = 0
+                    continuousBufferingSamples = 0
+                    stablePlaySamples = 0
+                    lastBufPos = -1L
+                    continue
+                }
                 // Do not count stalled samples if player is paused by user or in IDLE state
                 if (!p.playWhenReady || p.playbackState == androidx.media3.common.Player.STATE_IDLE) {
                     stalledSamples = 0
@@ -1091,10 +1299,20 @@ private fun ExoVideoPlayer(
                     stablePlaySamples++
                     if (stablePlaySamples >= 8) { // 16s of continuous stable playback
                         onStablePlayback()
+                        awayRecovery.attempts = 0
                     }
                     continue
                 } else {
                     stablePlaySamples = 0
+                }
+
+                // Suppressed by a transient audio focus loss: not a stall, and retrying would destroy
+                // a healthy player. See canCountAsStall.
+                if (!canCountAsStall(p.playbackState, p.playWhenReady, p.isPlaying)) {
+                    stalledSamples = 0
+                    continuousBufferingSamples = 0
+                    lastBufPos = -1L
+                    continue
                 }
 
                 val isBuffering = p.playbackState == androidx.media3.common.Player.STATE_BUFFERING
@@ -1138,10 +1356,10 @@ private fun ExoVideoPlayer(
                 val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 11 else 5
                 val continuousBufferingCeiling = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 12 else 8
                 val isStalled = (stalledSamples >= stallThresholdSamples || continuousBufferingSamples >= continuousBufferingCeiling)
-                if (isStalled && url.contains("googlevideo") && canRetry) {
+                if (isStalled && url.contains("googlevideo") && currentCanRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Stream stalled in BUFFERING (stalledFor=${stalledSamples * 2}s, bufTime=${continuousBufferingSamples * 2}s) — escaping to fresh Tor circuit at pos=${p.currentPosition}ms: $rawUrl"
+                        "Stream stalled in BUFFERING (stalledFor=${stalledSamples * 2}s, bufTime=${continuousBufferingSamples * 2}s, app=${appStateLabel()}) — escaping to fresh Tor circuit at pos=${p.currentPosition}ms: $rawUrl"
                     )
                     val curPos = p.currentPosition
                     if (curPos > 0L) {
@@ -1149,6 +1367,7 @@ private fun ExoVideoPlayer(
                     }
                     stalledSamples = 0
                     continuousBufferingSamples = 0
+                    if (recoverWhileAway(p, "stall", freshCircuit = true)) continue
                     val videoId = YouTubeInternalClient.extractVideoId(rawUrl)
                     if (videoId != null) {
                         com.noslop.app.feeds.api.YouTubeInternalClient.advanceStreamNonce(videoId)
@@ -1159,7 +1378,7 @@ private fun ExoVideoPlayer(
                     return@LaunchedEffect
                 }
 
-                if (stalledSamples >= stallThresholdSamples && !canRetry) {
+                if (stalledSamples >= stallThresholdSamples && !currentCanRetry) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "Still zero bytes after retries — giving up on this " +
@@ -1187,6 +1406,8 @@ private fun ExoVideoPlayer(
         Logger.info("VIDEO", "Loading video in ExoPlayer: $url (attempt ${retryKey + 1})")
         hasError = false
         isBuffering = true
+        // release() reports its own timeout as a player error. A player on its way out needs no retry.
+        var playerDisposed = false
 
         // Pass the resolved URL: PreloadManager rejects a warm player whose
         // baked-in URL has expired or no longer matches what we just resolved.
@@ -1216,7 +1437,7 @@ private fun ExoVideoPlayer(
                             val hasVideo = currentTracks.isTypeSelected(androidx.media3.common.C.TRACK_TYPE_VIDEO)
                             if (!hasVideo) {
                                 onReady()
-                                if (isVisible) play()
+                                if (currentIsVisible && !userPaused) play()
                             }
                         }
                     }
@@ -1227,7 +1448,7 @@ private fun ExoVideoPlayer(
                             "FIRST FRAME rendered +${System.currentTimeMillis() - diagStartMs}ms | $rawUrl"
                         )
                         onReady()
-                        if (isVisible) {
+                        if (currentIsVisible && !userPaused) {
                             play()
                         }
                     }
@@ -1235,8 +1456,10 @@ private fun ExoVideoPlayer(
                         videoSizeState = videoSize
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        if (isRecoverablePlaybackError(error) && canRetry) {
-                            Logger.warn("VIDEO", "Recoverable playback error (code=${error.errorCode}) for $url — re-resolving a fresh stream URL...")
+                        if (playerDisposed) return
+                        if (currentCanRetry && recoverWhileAway(this@apply, "error ${error.errorCode}", freshCircuit = false)) return
+                        if (isRecoverablePlaybackError(error) && currentCanRetry) {
+                            Logger.warn("VIDEO", "Recoverable playback error (code=${error.errorCode}, app=${appStateLabel()}) for $url — re-resolving a fresh stream URL...")
                             com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                             onRetry()
                         } else {
@@ -1272,17 +1495,7 @@ private fun ExoVideoPlayer(
                 }
             }
         } else {
-            val streamId = YouTubeInternalClient.getStreamIdForUrl(url)
-                ?: YouTubeInternalClient.getStreamIdForUrl(rawUrl)
-                ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
-            val isYouTube = url.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
-            val client = if (isYouTube) {
-                HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
-            } else if (url.contains("127.0.0.1") || url.contains("localhost")) {
-                HttpClientProvider.loopbackClient
-            } else {
-                HttpClientProvider.activeClearnetClient
-            }
+            val client = mediaClientFor(url, rawUrl)
             val transferListener = object : androidx.media3.datasource.TransferListener {
                 override fun onTransferInitializing(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
                 override fun onTransferStart(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
@@ -1368,7 +1581,7 @@ private fun ExoVideoPlayer(
                         }
                         override fun onRenderedFirstFrame() {
                             onReady()
-                            if (isVisible) {
+                            if (currentIsVisible && !userPaused) {
                                 play()
                             }
                         }
@@ -1376,8 +1589,10 @@ private fun ExoVideoPlayer(
                             videoSizeState = videoSize
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            if (isRecoverablePlaybackError(error) && canRetry) {
-                                Logger.warn("VIDEO", "Recoverable playback error (code=${error.errorCode}) for $url — re-resolving a fresh stream URL...")
+                            if (playerDisposed) return
+                            if (currentCanRetry && recoverWhileAway(this@apply, "error ${error.errorCode}", freshCircuit = false)) return
+                            if (isRecoverablePlaybackError(error) && currentCanRetry) {
+                                Logger.warn("VIDEO", "Recoverable playback error (code=${error.errorCode}, app=${appStateLabel()}) for $url — re-resolving a fresh stream URL...")
                                 com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                                 onRetry()
                             } else {
@@ -1400,6 +1615,7 @@ private fun ExoVideoPlayer(
         exoPlayer = player
 
         onDispose {
+            playerDisposed = true
             if (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl == rawUrl) {
                 com.noslop.app.ui.PreloadManager.currentlyPlayingUrl = null
             }
@@ -1414,7 +1630,10 @@ private fun ExoVideoPlayer(
             }
             player.release()
             exoPlayer = null
-            com.noslop.app.ui.PreloadManager.isVideoActive = false
+            // The teardown now runs after the next slide has started: leave its flag alone.
+            if (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl == null) {
+                com.noslop.app.ui.PreloadManager.isVideoActive = false
+            }
         }
     }
 
@@ -1544,6 +1763,7 @@ private fun ExoVideoPlayer(
                     if (player != null) {
                         player.playWhenReady = !player.playWhenReady
                         isPlaying = player.playWhenReady
+                        userPaused = !player.playWhenReady
                         showTimeline = true
                         lastInteractionTime = System.currentTimeMillis()
                     }

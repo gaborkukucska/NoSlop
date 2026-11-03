@@ -715,8 +715,9 @@ fun UnifiedFeedTab(
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
-    val viewedHistoryIds by viewModel.viewedHistoryIds.collectAsState()
-    val viewedHistoryRecords by viewModel.viewedHistoryRecords.collectAsState()
+    // Collected only to keep the flow running for the ViewModel. Not read here: these change on every
+    // swipe, and as keys of unifiedItems below they rebuilt a list that does not depend on them.
+    viewModel.viewedHistoryIds.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
     val showOldMeshPosts by viewModel.showOldMeshPosts.collectAsState()
 
@@ -787,7 +788,7 @@ fun UnifiedFeedTab(
 
     var restoreItemId by remember { mutableStateOf<String?>(null) }
     val openCommentsState by viewModel.openCommentsState.collectAsState()
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds, viewedHistoryRecords, showOldMeshPosts, restoreItemId, openCommentsState) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, showOldMeshPosts, restoreItemId, openCommentsState) {
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
         val targetNavId = restoreItemId ?: openCommentsState?.first
@@ -979,63 +980,64 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(pagerState.settledPage, filterMode) {
-        if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
-        
-        // --- NOSLOP_TOR_PRELOAD_BUDGET_V1 ---
-        // Resolving a stream costs a permit on YouTubeInternalClient's
-        // Semaphore(3) and up to a 60s budget. Over clearnet that is cheap and
-        // preloading four slides is free performance. Over Tor it is the
-        // scarcest resource in the app, and the visible video competes for it on
-        // equal terms with speculative work it does not need yet — which is what
-        // "Gave up waiting 20s for a resolve slot for nrXUUIqGioI — earlier
-        // resolves are still stuck" was: the slide the user is looking at losing
-        // the race to slides they may never reach.
-        //
-        // Under Tor: one slide ahead, none behind, and a longer head start for
-        // the visible resolve. Over clearnet, nothing changes.
-        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        // Over Tor on mobile, preload 1 slide forward to prevent choking the Tor daemon
-        val forwardPreloadLimit = if (overTor) 1 else 2
-        val preloadPreviousSlide = !overTor
-        // Start preloading the immediate next slide promptly (400ms) after settling
-        val firstPreloadDelayMs = 400L
-
-        // 1. Scan backwards to preload the immediate previous video
-        if (preloadPreviousSlide) {
-            for (i in pagerState.currentPage - 1 downTo maxOf(0, pagerState.currentPage - 5)) {
-                val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
-                if (preloadData != null) {
-                    val (rawUrl, forcedUrl) = preloadData
-                    val urlToCheck = forcedUrl ?: rawUrl
-                    if (!urlToCheck.startsWith("file://")) {
-                        preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
-                    }
-                    break // Only keep 1 previous video warm
-                }
+    // --- NOSLOP_PRELOAD_TARGETS_V1 ---
+    // Keyed on the slides wanted rather than the page number, so that a list changing under a pager
+    // that has not moved still warms the next slide. See PreloadTargets.
+    val preloadTargets = remember(unifiedItems, pagerState.settledPage) {
+        selectPreloadTargets(unifiedItems, pagerState.settledPage) { item ->
+            getPreloadDataFromItem(item, context)?.let { (rawUrl, forcedUrl) ->
+                PreloadTarget(rawUrl, forcedUrl).takeUnless { (forcedUrl ?: rawUrl).startsWith("file://") }
             }
         }
+    }
 
-        // 2. Scan forwards to preload upcoming slides near the viewport
-        var preloadedForwardCount = 0
-        for (i in pagerState.settledPage + 1..minOf(unifiedItems.size - 1, pagerState.settledPage + 10)) {
-            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
-            if (preloadData != null) {
-                val (rawUrl, forcedUrl) = preloadData
-                val urlToCheck = forcedUrl ?: rawUrl
-                if (!urlToCheck.startsWith("file://")) {
-                    val targetIndex = i
-                    val delayMs = if (preloadedForwardCount == 0) 50L else 300L
-                    preloadScope.launch { 
-                        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
-                        if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
-                            com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
-                        }
-                    }
-                }
-                preloadedForwardCount++
-                if (preloadedForwardCount >= forwardPreloadLimit) break
-            }
+    LaunchedEffect(pagerState) {
+        androidx.compose.runtime.snapshotFlow { pagerState.isScrollInProgress }.collect {
+            com.noslop.app.ui.PreloadManager.isFeedScrolling = it
+        }
+    }
+
+    LaunchedEffect(preloadTargets, filterMode) {
+        // --- NOSLOP_TOR_PRELOAD_BUDGET_V1 ---
+        // Resolving a stream costs a permit on YouTubeInternalClient's Semaphore(3) and up to a 60s
+        // budget. Over clearnet that is cheap. Over Tor it is the scarcest resource in the app, and the
+        // visible video competes for it with speculative work it does not need yet.
+        //
+        // Under Tor: nothing behind, and the next slide first. The slide after it starts only once the
+        // next one can play, so a user who swipes quickly is not met by a cold slide, and two speculative
+        // resolves never compete. Over clearnet: one behind and two ahead, as before.
+        val preloader = com.noslop.app.ui.PreloadManager
+        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        // Not before the saved position is restored: the first compositions see an empty list or page 0,
+        // and would throw away the slide the splash screen has just spent its time warming.
+        if (hasRestoredInitialPosition && unifiedItems.isNotEmpty()) {
+            preloader.retainOnly(preloadTargets.keepSet(includePrevious = !overTor))
+        }
+        fun warm(target: PreloadTarget) = preloader.launchPreWarm(preloadScope, context, target.rawUrl, target.forcedUrl)
+
+        val first = preloadTargets.forward.firstOrNull()
+        val second = preloadTargets.forward.getOrNull(1)
+        if (!overTor) {
+            preloadTargets.previous?.let { warm(it) }
+            kotlinx.coroutines.delay(50L)
+            first?.let { warm(it) }
+            kotlinx.coroutines.delay(250L)
+            second?.let { warm(it) }
+            return@LaunchedEffect
+        }
+
+        if (first == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(50L)
+        warm(first).join()
+        preloader.awaitWarmUpFinished(first.rawUrl)
+        if (!preloader.hasWarmPlayer(first.rawUrl)) {
+            // Usually a lost exit lottery, which a fresher circuit a moment later wins.
+            kotlinx.coroutines.delay(TOR_PRELOAD_RETRY_DELAY_MS)
+            warm(first).join()
+            preloader.awaitWarmUpFinished(first.rawUrl)
+        }
+        if (second != null && preloader.awaitPlayerReady(first.rawUrl, TOR_PRELOAD_CHAIN_WAIT_MS)) {
+            warm(second)
         }
     }
 
@@ -2160,6 +2162,9 @@ fun UnifiedFeedTab(
         }
     }
 }
+
+private const val TOR_PRELOAD_RETRY_DELAY_MS = 2_500L
+private const val TOR_PRELOAD_CHAIN_WAIT_MS = 20_000L
 
 private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.Context): Pair<String, String?>? {
     return when (item) {

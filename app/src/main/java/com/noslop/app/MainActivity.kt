@@ -220,6 +220,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        com.noslop.app.debug.MainThreadStallMonitor.start()
+    }
+
+    override fun onStop() {
+        com.noslop.app.debug.MainThreadStallMonitor.stop()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         if (this::viewModel.isInitialized) {

@@ -77,7 +77,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode|density|fontScale|keyboard|navigation|touchscreen|locale|layoutDirection|mcc|mnc"
             android:theme="@style/Theme.NoSlop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

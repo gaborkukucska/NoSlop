@@ -201,8 +201,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
 
     // --- Viewed History, Swipe, & Reacted Exclusion Caches ---
+    // @Volatile, and the collections below concurrent: appended feed batches are built on a background
+    // thread (NOSLOP_FEED_BUILD_OFF_MAIN_V1) while the main thread replaces these.
+    @Volatile
     private var cachedViewedIds: Set<String> = emptySet()
+    @Volatile
     private var cachedExcludedIds: Set<String> = emptySet()
+    @Volatile
     private var cachedReactedAnchorIds: Set<String> = emptySet()
     
     private var cachedDefaultFeed = listOf<UnifiedItem>()
@@ -213,12 +218,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
     private val _isSavedPositionLoaded = MutableStateFlow(false)
     val isSavedPositionLoaded: StateFlow<Boolean> = _isSavedPositionLoaded.asStateFlow()
-    private val sessionLoadedIds = mutableSetOf<String>()
+    private val sessionLoadedIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val savedTimestampsMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    @Volatile
     private var lastSearchResultIds = emptySet<String>()
-    private val allSearchResultItemIds = mutableSetOf<String>()
+    private val allSearchResultItemIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var searchExhaustedCount = 0
     private var isLoadingMoreFeedItems = false
+    // A load asked for while an appended batch is being built. Main thread only, like the flag above.
+    private var pendingAppendFilter: String? = null
+    // Bumped each time a list is built from empty, so a batch for the list before it is dropped.
+    private var feedListGeneration = 0
     // E5s: paging of the active search (fetchNextSearchPage). The cursor belongs to one search, the
     // query and the search-modal filter in searchCursorKey. searchResultPage records the page each
     // result arrived on: the list shows earlier pages first, each newest first. searchExhaustedCount
@@ -228,11 +238,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var searchFetchInFlight: com.noslop.app.feeds.PublicApiService.SearchCursor? = null
     private var searchListWaiting = false
     private var searchPagesFetched = 0
-    private val searchResultPage = HashMap<String, Int>()
+    private val searchResultPage: MutableMap<String, Int> = java.util.concurrent.ConcurrentHashMap()
     // E5s: hidden from every list but the user's own records (loadMoreFeedItems).
+    @Volatile
     private var cachedDownvotedKeys: Set<String> = emptySet()
+    @Volatile
     private var cachedBannedNodeKeys: Set<String> = emptySet()
     private val downvoteMutex = kotlinx.coroutines.sync.Mutex()
+    @Volatile
     private var hasShownCreatorDepletionInSession = false
 
     // Session stats for Break / Exit Reminders
@@ -353,12 +366,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     val viewedHistoryIds: StateFlow<Set<String>> = repository.allViewedHistory
         .map { items -> items.map { it.itemId }.toSet() }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
+    @Volatile
     private var activeSearchQuery: String = ""
+    @Volatile
     private var currentFilterMode: String = "Live Feed"
 
+    @Volatile
     private var allFeeds = emptyList<FeedItem>()
+    @Volatile
     private var allMeshes = emptyList<MeshPost>()
     
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -844,10 +862,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             .map { UnifiedItem.Mesh(it) }
                     } else emptyList()
 
+                    // Runs on the main thread after every feed table write, which is every swipe. A find()
+                    // per list item meant list size x table size string comparisons each time.
+                    val feedsById = feeds.associateBy { it.id }
+                    val meshesById = meshes.associateBy { it.id }
                     val updatedFeed = _unifiedFeed.value.mapNotNull { currentItem ->
                         when (currentItem) {
-                            is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
-                            is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id && !it.isOrphaned }?.let { UnifiedItem.Mesh(it) }
+                            is UnifiedItem.Feed -> feedsById[currentItem.id]?.let { UnifiedItem.Feed(it) } ?: currentItem
+                            is UnifiedItem.Mesh -> meshesById[currentItem.id]?.takeIf { !it.isOrphaned }?.let { UnifiedItem.Mesh(it) }
                             is UnifiedItem.Tutorial -> currentItem
                             is UnifiedItem.CreatorDepletion -> currentItem
                             is UnifiedItem.BreakReminder -> currentItem
@@ -1249,10 +1271,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun loadMoreFeedItems(filterMode: String? = null, isInjection: Boolean = false) {
         if (_isOnboardingComplete.value && localKeys.value == null) return
-        if (isLoadingMoreFeedItems) return
-        isLoadingMoreFeedItems = true
-        try {
-            val actualFilter = filterMode ?: currentFilterMode
+        val actualFilter = filterMode ?: currentFilterMode
         if (currentFilterMode != actualFilter) {
             // A load for another mode switches the mode, so it does what syncFilterMode does. The feed
             // screen calls syncFilterMode(mode) right after the user picks a mode, but that call is a
@@ -1300,6 +1319,73 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _unifiedFeed.value = batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             return
         }
+
+        // --- NOSLOP_FEED_BUILD_OFF_MAIN_V1 ---
+        // The pager asks for more as soon as a page near the end composes, and with
+        // beyondViewportPageCount = 2 that is the first frame of a swipe. Building a batch walks every
+        // stored feed item several times, so doing it here froze the swipe half way while the video kept
+        // playing on its own surface. An append now builds on a background thread and only publishes on
+        // the main thread.
+        //
+        // A list built from empty stays synchronous. Its callers empty the list and call this: building
+        // it later would flash the empty-list screen ("Your feed is empty") on every mode switch.
+        if (_unifiedFeed.value.isEmpty() || isInjection) {
+            feedListGeneration++
+            val startedMs = System.currentTimeMillis()
+            val plan = computeFeedBatch(actualFilter)
+            if (plan != null) applyFeedBatch(plan, actualFilter, isInjection)
+            Logger.info("VM", "Feed list built on the main thread in ${System.currentTimeMillis() - startedMs}ms from ${allFeeds.size} stored items")
+            return
+        }
+        if (isLoadingMoreFeedItems) {
+            pendingAppendFilter = actualFilter
+            return
+        }
+        isLoadingMoreFeedItems = true
+        val generationAtStart = feedListGeneration
+        val searchAtStart = activeSearchQuery
+        viewModelScope.launch {
+            val startedMs = System.currentTimeMillis()
+            try {
+                val plan = withContext(Dispatchers.Default) { computeFeedBatch(actualFilter) }
+                val stale = currentFilterMode != actualFilter || activeSearchQuery != searchAtStart ||
+                    feedListGeneration != generationAtStart || _unifiedFeed.value.isEmpty()
+                if (stale) {
+                    if (plan?.addedCreatorDepletion == true) hasShownCreatorDepletionInSession = false
+                    Logger.info("VM", "Dropped a feed batch: the list changed while it was being built")
+                } else if (plan != null) {
+                    applyFeedBatch(plan, actualFilter, isInjection = false)
+                }
+                Logger.info("VM", "Feed batch built off the main thread in ${System.currentTimeMillis() - startedMs}ms from ${allFeeds.size} stored items")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.error("VM", "Building a feed batch failed: ${e.message}")
+            } finally {
+                isLoadingMoreFeedItems = false
+            }
+            val pending = pendingAppendFilter
+            pendingAppendFilter = null
+            if (pending != null && pending == currentFilterMode) loadMoreFeedItems(pending)
+        }
+    }
+
+    /** What a feed build decided, applied by [applyFeedBatch] on the main thread. */
+    private class FeedBatchPlan(
+        val batch: List<UnifiedItem>,
+        val isInitialLoad: Boolean,
+        val cacheAsDefaultFeed: Boolean = false,
+        val addedCreatorDepletion: Boolean = false,
+        val fetchNextSearchPage: Boolean = false,
+        val searchListIsWaiting: Boolean = false
+    )
+
+    /**
+     * Picks the next batch for [actualFilter]. Runs on the main thread for a list built from empty and
+     * on a background thread for an append (see loadMoreFeedItems), so it must not change list state:
+     * that belongs in [applyFeedBatch]. Returns null when there is nothing to do.
+     */
+    private fun computeFeedBatch(actualFilter: String): FeedBatchPlan? {
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
         val burnablePubKey = burnableKeys.value?.publicKeyB64
@@ -1485,8 +1571,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             // E5s: a search that has shown everything it found fetches the next page of the same search
             // (same terms, same filter, newest first). It used to search again with a random extra word
             // ("review", "vlog", ...), which drifted away from what the user asked for.
-            if (isSearchActive) fetchNextSearchPage(actualFilter, listIsWaiting = true)
-            return
+            return if (isSearchActive) {
+                FeedBatchPlan(emptyList(), isInitialLoad = false, fetchNextSearchPage = true, searchListIsWaiting = true)
+            } else {
+                null
+            }
         }
 
         val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && !actualFilter.startsWith("Author:")
@@ -1538,6 +1627,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
             
             val batch = mutableListOf<UnifiedItem>()
+            var needNextSearchPage = false
             
             if (actualFilter == "Liked" || actualFilter == "Saved") {
                 val savedFeeds = allFeeds.filter { it.isSaved }
@@ -1565,9 +1655,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 val sortedSearch = SearchPaging.order(allMatches, { searchResultPage[it.id] }, { it.timestamp.toLong() })
                 batch.addAll(sortedSearch.take(specificNeeded))
                 // Keep the next page coming while the user is still swiping through this one.
-                if (allMatches.size - batch.size < specificNeeded) {
-                    fetchNextSearchPage(actualFilter, listIsWaiting = false)
-                }
+                needNextSearchPage = allMatches.size - batch.size < specificNeeded
             } else {
                 if (actualFilter == "History") {
                     val viewedIdsList = viewedHistoryIds.value.toList()
@@ -1588,46 +1676,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
             
-            sessionLoadedIds.addAll(batch.map { it.id })
-            if (isInjection) {
-                val currentList = _unifiedFeed.value.toMutableList()
-                val upFront = batch.take(3)
-                val dispersed = batch.drop(3)
-                
-                val bufferSize = 3.coerceAtMost(currentList.size)
-                currentList.addAll(bufferSize, upFront)
-                
-                dispersed.forEachIndexed { i, item ->
-                    val insertIndex = (bufferSize + 3 + 2 + (i * 2)).coerceAtMost(currentList.size)
-                    currentList.add(insertIndex, item)
-                }
-                
-                _unifiedFeed.value = currentList.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
-                viewModelScope.launch {
-                    kotlinx.coroutines.delay(150)
-                    if (upFront.isNotEmpty()) {
-                        _restoreScrollPositionEvent.emit(upFront.first().id)
-                    }
-                }
-            } else {
-                // The first batch of a mode or search fills the empty list (every mode switch, search and
-                // "See Old Posts" empties it first) and scrolls to the top. Later batches come from the
-                // pager's infinite scroll and are appended. They used to replace the list and jump to the
-                // top: in Mesh with more than one batch of posts, nearing the end swapped in the next batch
-                // with no way back, and the jump marked the posts in between as seen.
-                _unifiedFeed.value = if (isInitialLoad) {
-                    batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
-                } else {
-                    (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
-                }
-                if (isInitialLoad) {
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(150)
-                        _scrollToTopEvent.emit(Unit)
-                    }
-                }
-            }
-            return
+            return FeedBatchPlan(batch, isInitialLoad, fetchNextSearchPage = needNextSearchPage)
         }
 
         // --- SMART INTERLEAVING ALGORITHM (Live Feed & Random) ---
@@ -1825,10 +1874,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         // Creator Depletion check: if user has creators and fresh creator content < 60 days is exhausted,
         // show an encouraging slide to discover/add more creators, then continue with fresh random content.
+        var addedCreatorDepletion = false
         if (creators.isNotEmpty() && actualFilter == "Live Feed" && !hasShownCreatorDepletionInSession) {
             val hasFreshCreatorVideos = rawVideos.any(isCreatorMatch)
             if (!hasFreshCreatorVideos && _unifiedFeed.value.none { it is UnifiedItem.CreatorDepletion }) {
                 hasShownCreatorDepletionInSession = true
+                addedCreatorDepletion = true
                 finalBatch.add(0, UnifiedItem.CreatorDepletion())
             }
         }
@@ -1856,21 +1907,34 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         
-        sessionLoadedIds.addAll(finalBatch.map { it.id })
-        
+        return FeedBatchPlan(
+            finalBatch,
+            isInitialLoad,
+            cacheAsDefaultFeed = actualFilter == "Live Feed" && !isSearchActive,
+            addedCreatorDepletion = addedCreatorDepletion
+        )
+    }
+
+    /** Publishes what [computeFeedBatch] decided. Main thread only. */
+    private fun applyFeedBatch(plan: FeedBatchPlan, actualFilter: String, isInjection: Boolean) {
+        if (plan.fetchNextSearchPage) fetchNextSearchPage(actualFilter, listIsWaiting = plan.searchListIsWaiting)
+        val batch = plan.batch
+        if (batch.isEmpty() && plan.searchListIsWaiting) return
+        sessionLoadedIds.addAll(batch.map { it.id })
+
         if (isInjection) {
             val currentList = _unifiedFeed.value.toMutableList()
-            val upFront = finalBatch.take(3)
-            val dispersed = finalBatch.drop(3)
-            
+            val upFront = batch.take(3)
+            val dispersed = batch.drop(3)
+
             val bufferSize = 3.coerceAtMost(currentList.size)
             currentList.addAll(bufferSize, upFront)
-            
+
             dispersed.forEachIndexed { i, item ->
                 val insertIndex = (bufferSize + 3 + 2 + (i * 2)).coerceAtMost(currentList.size)
                 currentList.add(insertIndex, item)
             }
-            
+
             _unifiedFeed.value = currentList.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             viewModelScope.launch {
                 kotlinx.coroutines.delay(150)
@@ -1879,24 +1943,26 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         } else {
+            // The first batch of a mode or search fills the empty list (every mode switch, search and
+            // "See Old Posts" empties it first) and scrolls to the top. Later batches come from the
+            // pager's infinite scroll and are appended. They used to replace the list and jump to the
+            // top: in Mesh with more than one batch of posts, nearing the end swapped in the next batch
+            // with no way back, and the jump marked the posts in between as seen.
             _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
-                finalBatch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             } else {
-                (_unifiedFeed.value + finalBatch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             }
-            if (cachedDefaultFeed.isEmpty() && actualFilter == "Live Feed" && !isSearchActive) {
+            if (plan.cacheAsDefaultFeed && cachedDefaultFeed.isEmpty()) {
                 cachedDefaultFeed = _unifiedFeed.value.toList()
             }
             // Force the Pager to snap to the top (Index 0) on fresh filter loads
-            if (isInitialLoad) {
+            if (plan.isInitialLoad) {
                 viewModelScope.launch {
                     kotlinx.coroutines.delay(150)
                     _scrollToTopEvent.emit(Unit)
                 }
             }
-        }
-        } finally {
-            isLoadingMoreFeedItems = false
         }
     }
 fun toggleAggregator() {
@@ -3424,14 +3490,7 @@ fun toggleAggregator() {
         else viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }
     }
 
-    fun getReactionAnchorIdForUrl(url: String): String {
-        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
-        val hash = ByteArray(digest.digestSize)
-        val urlBytes = url.toByteArray()
-        digest.update(urlBytes, 0, urlBytes.size)
-        digest.doFinal(hash, 0)
-        return "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
-    }
+    fun getReactionAnchorIdForUrl(url: String): String = com.noslop.app.data.ReactionAnchor.forUrl(url)
 
     fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String) { viewModelScope.launch { repository.reactToChat(messageId, reactionType, recipientPubB64) } }
 

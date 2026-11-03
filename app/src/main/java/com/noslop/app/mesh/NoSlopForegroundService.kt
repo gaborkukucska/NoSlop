@@ -126,8 +126,10 @@ class NoSlopForegroundService : Service() {
     }
 
     private fun createNotification(contentText: String): Notification {
+        // Brings the running activity back. Clearing the task here destroyed it, which released the
+        // player mid-video and replayed the splash screen for anyone tapping this notification.
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val pendingIntent: PendingIntent = PendingIntent.getActivity(
             this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
