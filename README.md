@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.4--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.5--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
@@ -141,16 +141,17 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 
 ## 📚 Documentation Index
 
-* 🏗️ **[docs/BUILD.md](docs/BUILD.md)** — Compilation instructions and signing configuration.
+* 🏗️ **[docs/BUILD.md](docs/BUILD.md)** — Compilation instructions, signing configuration, and releasing an update.
 * 📡 **[docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)** — Complete 24-packet HAI-Net wire protocol catalog and payload schemas.
 * 🔬 **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — Deep technical specification (crypto derivations, Tor internals, SOCKS5 isolation, media pipelines).
 * 🌍 **[docs/TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — Guide for community localization and language JSON files.
 * 🛡️ **[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — User privacy expectations, data sovereignty, and security posture.
+* 🧭 **[docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md](docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md)** — Proposed creator discovery, community mirroring and Home HUB work (not implemented).
+* 📱 **[docs/migration/](docs/migration/README.md)** — The iOS and desktop port in `mvp/`.
 * 🏠 **[docs/archived/HUB_INTEGRATION_PLAN.md](docs/archived/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.
-* 📈 **[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — Detailed technical milestone changelog, open technical findings, and completed audit resolutions (single source of truth).
+* 📈 **[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — Current status, all remaining work, recent changes and the findings matrix (single source of truth). Older entries are in `docs/archived/PROJECT_STATUS_HISTORY.md`.
 * 🗄️ **[docs/archived/](docs/archived/)** — Historical architectural proposals, milestone verification reports, and legacy roadmaps.
-* 🛠️ **[docs/SUPPORT.md](docs/SUPPORT.md)** — Backup/restore guides, troubleshooting, and operations.
-* 🐞 **[docs/DEBUG.md](docs/DEBUG.md)** — Extracting structured diagnostic logs.
+* 🛠️ **[docs/SUPPORT.md](docs/SUPPORT.md)** — Backup/restore guides, troubleshooting, and extracting diagnostic logs.
 
 ---
 

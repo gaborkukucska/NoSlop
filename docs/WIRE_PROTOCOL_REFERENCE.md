@@ -1,5 +1,9 @@
 # NoSlop — Mesh Wire Protocol Reference (Current State, 2026-11-03)
 
+> **Changing this protocol?** The iOS app in `mvp/` depends on it, and a wire change breaks it
+> silently: packets are dropped with no error on either phone. Put `wire:` or `protocol:` in the
+> commit message (`docs/migration/README.md` §5).
+
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
 payload's JSON field shape, signed-string formats, and the sync/presence/
@@ -1173,5 +1177,5 @@ and are not duplicated in this document:
 **Related docs**: [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) for
 everything outside the wire protocol · [GAP_ANALYSIS.md](archived/GAP_ANALYSIS.md) for
 the feature backlog this protocol surface was built against ·
-[PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
+[PROJECT_STATUS.md](PROJECT_STATUS.md) for current status and recent changes
 log.

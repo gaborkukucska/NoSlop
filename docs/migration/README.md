@@ -48,3 +48,14 @@ Sub-documents detailing historical phases and architectural decision records are
 - `DECISIONS.md` — Detailed ADR catalog.
 - `IOS_MVP_PLAN.md` — Detailed execution plan for iOS MVP sideload.
 - `PROGRESS_LOG.md` — Session journal log.
+
+---
+
+## 5. Working Between `app/` and `mvp/`
+
+Carried over from the merge handoff of 2026-10-30 (`docs/archived/HANDOFF_GABOR.md`).
+
+- **Ownership.** Gabor owns `app/` and the `mvp/` team owns `mvp/`. The `mvp/` team merges `main` into its branch before every handoff, so Gabor always receives a fast-forward.
+- **Protocol changes.** Wire changes are the one thing that breaks the iOS side silently: packets get dropped with no error on either phone. A one-line heads-up in the commit message works, for example `wire:` or `protocol:`. Better still, regenerate the vectors, so `jvmTest` catches the break before anyone's phone does.
+- **Regenerating the vectors.** `android-v2-vectors.json` is built by a small unit test inside `app/` from deterministic seeds. It isn't in `app/src/test` yet.
+- **Building `mvp/`.** `cd mvp && ./gradlew :composeApp:jvmTest` runs the tests, and `./gradlew :composeApp:runBridge --args="9876"` starts the desktop bridge. The iOS app needs Xcode: `mvp/iosApp`.

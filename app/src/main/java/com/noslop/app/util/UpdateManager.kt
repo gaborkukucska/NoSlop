@@ -45,7 +45,7 @@ import java.security.MessageDigest
  * below narrows that (the APK must be signed by the installed app's key, and
  * Android's installer enforces the same), but the fix is an Ed25519 signature
  * over the APK verified against a public key compiled into the app — §2 of
- * docs/PRIVACY_AND_SECURITY_PROPOSAL.md. Do not describe OTA as
+ * docs/archived/PRIVACY_AND_SECURITY_PROPOSAL.md. Do not describe OTA as
  * MITM-resistant until that lands.
  */
 object UpdateManager {

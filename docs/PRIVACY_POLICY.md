@@ -1,8 +1,7 @@
 # Privacy Policy — NoSlop
 
-**Effective date:** 2026-06-20
-**Last updated:** 2026-11-03
-**App:** NoSlop (iOS)
+**Effective date:** 2026-11-03
+**App:** NoSlop (Android)
 **Developer:** NoSlop (open-source project)
 **Source code:** publicly available and auditable
 **Hosted at:** https://noslop.me/privacy

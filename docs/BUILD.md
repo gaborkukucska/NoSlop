@@ -123,16 +123,18 @@ This is the fully featured, production-ready original application located in the
 
 1.  **Compile with Gradle**:
     ```bash
-    ./gradlew :app:assembleDebug
+    ./gradlew :app:assembleGithubDebug
     ```
 
 2.  **Locate output binary**:
-    `app/build/outputs/apk/debug/app-debug.apk`
+    `app/build/outputs/apk/github/debug/NoSlop-github-debug.apk`
 
 3.  **Install via ADB**:
     ```bash
-    adb install -r app/build/outputs/apk/debug/app-debug.apk
+    adb install -r app/build/outputs/apk/github/debug/NoSlop-github-debug.apk
     ```
+
+There are two flavours: `github` (`com.noslop.app`, with the in-app update check) and `play` (`com.noslop.me.app`, without it). Plain `assembleDebug` builds both.
 
 ### Option B: Build the New KMP App
 This is the new Kotlin Multiplatform application currently under development in the `mvp/` directory. Note that this requires the `NOSLOP_STORE_FILE` property to be configured in your `~/.gradle/gradle.properties` for release builds.
@@ -217,4 +219,150 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ---
 
-**Related docs**: [TECHNICAL_REFERENCE.md §12](TECHNICAL_REFERENCE.md#12-build-configuration) for the full build-config/dependency reference · [DEBUG.md](DEBUG.md) if a build succeeds but the app misbehaves at runtime · [SUPPORT.md](SUPPORT.md) for user-facing troubleshooting once the app is running.
+## 8. Releasing an Update
+
+### 8.1 Bump the version
+
+In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.7.5-alpha`). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
+
+Then run the unit tests:
+
+```bash
+./gradlew testGithubDebugUnitTest testPlayDebugUnitTest --rerun-tasks
+```
+
+### 8.2 Smoke test the minified build
+
+Run this before publishing a release, and after any change to `proguard-rules.pro`, a dependency
+version, Gson models, or code that loads classes by name. It catches what unit tests can't: they run
+the debug build, which R8 never shrinks or renames.
+
+It takes about 20 minutes with two devices (or one device and an emulator). Device B can be a debug
+build.
+
+#### Build and install
+
+```
+./gradlew clean assembleGithubRelease assemblePlayRelease
+adb install -r app/build/outputs/apk/github/release/NoSlop-github-release.apk
+```
+
+Use the APK name Gradle prints if it differs. An unsigned release APK (no keystore properties)
+installs only after you sign it. Keep `app/build/outputs/mapping/githubRelease/mapping.txt`: a
+release stack trace can only be read with it (`retrace`).
+
+Clear logcat, then start capturing it for the whole run:
+
+```
+adb logcat -c
+adb logcat -v time > release-smoke.log
+```
+
+#### What to check
+
+Mark each item as passed, or write down what happened.
+
+##### Startup and Tor
+- [ ] Fresh install: onboarding finishes. You get a handle with an 8-character tag and a Word Cloud.
+- [ ] Tor reaches ready, and the feed loads over Tor.
+- [ ] Kill the app and start it again: it starts without the onboarding screen.
+
+##### Identity and keys (Bouncy Castle)
+- [ ] Settings → identity shows the safety fingerprint and the check code.
+- [ ] Restore from the Word Cloud on a second install. You get the same handle, tag and fingerprint.
+- [ ] Turn on Discoverable (creates the secondary identity), then turn it off.
+
+##### Contacts and messages
+- [ ] Device A sends a connection request to B. B sees it pending, accepts it, and both show the
+  contact as a friend.
+- [ ] Exchange direct messages both ways. Each message shows Delivered.
+- [ ] Group: create one, invite B, B accepts, and messages go both ways.
+- [ ] Send an image and a video in a DM. They arrive and play.
+
+##### Media (Media3 / ExoPlayer)
+- [ ] Feed: swipe through at least ten videos with Route Clearnet via Tor on. Each starts, and the
+  next one starts quickly (preloaded). No swipe stops part way.
+- [ ] Turn on Background Playback and Foreground Service. Leave the app while a video plays, for
+  about a minute. It keeps playing. Come back through the launcher, then repeat through the
+  notification. No "Finding stream" either way.
+- [ ] Seek back 20 seconds in a playing video. It doesn't rebuffer (60 s back buffer).
+- [ ] An audio post plays, pauses and seeks.
+- [ ] Attach a video to a post. Compression shows progress, finishes, and the post plays.
+- [ ] Pick a video with HLS in its URL (most YouTube results). It plays.
+
+##### Search and settings (Gson models)
+- [ ] Search "All" and "Videos": results appear, and more arrive as you swipe.
+- [ ] Settings → content: change categories, genres, keywords and a banned channel. Restart the
+  app. The changes are still there.
+- [ ] Change the app language, then restart. The language is kept.
+
+##### Backups
+- [ ] Export a backup, then import it on a second install. Contacts, posts and messages come back.
+- [ ] Export the creator identity archive, then import it.
+
+##### Other
+- [ ] QR: show your code on A and scan it with B.
+- [ ] Update check (GitHub flavor): open Settings → About. There's no crash.
+
+#### Read the log
+
+Search `release-smoke.log` for these strings. Any match is a failure, even if the screen looked fine:
+
+```
+ClassNotFoundException
+NoSuchMethodException
+NoSuchFieldException
+NoClassDefFoundError
+Missing type parameter
+TypeToken must be created
+AbstractMethodError
+not implemented
+```
+
+(`not implemented` is what Media3's LoadControl throws when a pre-1.4 method is reached.)
+
+Then run `retrace` against `mapping.txt` on any obfuscated stack trace you find.
+
+Two more searches, which don't depend on R8:
+
+* `NoSlop/JANK`: there should be no matches. Each one names code that froze the main thread.
+* `Feed retention:`: at most one line a day, and it should report rows removed or none, with no
+  `Feed retention failed`. Note the `Feed batch built` times too.
+
+#### Record the result
+
+Add a dated line to `PROJECT_STATUS.md`: the build version, the devices used, the items that
+passed, and any failures and their stack traces.
+
+### 8.3 Publish on GitHub
+
+Sign with the same keystore as every earlier release. Android refuses an update signed with another key, and so does the app's own certificate check.
+
+```bash
+VERSION=0.7.5-alpha
+./gradlew clean :app:assembleGithubRelease
+cp app/build/outputs/apk/github/release/NoSlop-github-release.apk NoSlop-$VERSION.apk
+sha256sum NoSlop-$VERSION.apk > NoSlop-$VERSION.apk.sha256
+gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --title "NoSlop $VERSION" --notes-file release-notes.md
+```
+
+* **Keep the version in the tag.** The app reads it from the tag (`v0.7.5-alpha`).
+* **Don't mark it as a pre-release or a draft.** The app asks GitHub for `/releases/latest`, which skips both.
+* **Upload one `.apk`.** The app takes the first one it finds.
+* **Upload the `.sha256`.** Without a published checksum, the app refuses the download unless the user opts in.
+* Keep `app/build/outputs/mapping/githubRelease/mapping.txt` for this version.
+
+### 8.4 Update noslop.me
+
+**The app checks `https://noslop.me/content.json` first, and asks GitHub only if that fails or has no usable `hero.apkUrl`.** So a new GitHub release isn't enough while `content.json` lists an older APK. In `content.json`:
+
+* Point `hero.apkUrl` at the new APK. The version must be in that URL. The GitHub download URL works, since it has the tag in its path.
+* Set `hero.apkSha256` to the new digest, or publish `<apk>.sha256` next to the APK.
+
+If `docs/PRIVACY_POLICY.md` changed, update the copy at `https://noslop.me/privacy` too.
+
+An installed app that finds the update downloads it over the user's route, verifies it, and saves it to the Download folder. The user installs it from there.
+
+---
+
+**Related docs**: [TECHNICAL_REFERENCE.md §12](TECHNICAL_REFERENCE.md#12-build-configuration) for the full build-config/dependency reference · [SUPPORT.md](SUPPORT.md#debug-logs) if a build succeeds but the app misbehaves at runtime · [SUPPORT.md](SUPPORT.md) for user-facing troubleshooting once the app is running.

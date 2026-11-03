@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.7.4-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
+versionName `0.7.5-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
 targetSdk 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -771,7 +771,7 @@ machine tuned for Tor's characteristics:
 
 This mirrors the algorithm documented for `hainet-social/src/congestion.rs`
 and directly resolves the gap flagged in
-[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop).
+[GAP_ANALYSIS.md §7](archived/GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop).
 For full detail see
 [WIRE_PROTOCOL_REFERENCE.md §5](WIRE_PROTOCOL_REFERENCE.md#5-media-packet-family-6-types).
 
@@ -1329,12 +1329,12 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
 | `compileSdk` / `targetSdk` | 37.1 (`release(37) { minorApiLevel = 1 }`, required by `tor-android` 0.4.9.13+) / 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 74 / `0.7.4-alpha` |
+| `versionCode` / `versionName` | 75 / `0.7.5-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
-| ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true` (R8 full mode). Rules in `app/proguard-rules.pro`: `tor-android`; Bouncy Castle **provider packages only** (`org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**`, `org.bouncycastle.pqc.jcajce.provider.**`, plus `-dontwarn org.bouncycastle.**`; round E5 — the app calls the lightweight API directly, so R8 keeps what it uses, and nothing asks the provider for an algorithm by name); Gson's `TypeToken` rules (E2b; app code uses no `TypeToken`); Room, mesh packets and settings models. Unit tests run the unshrunk debug build, so check a release build with [RELEASE_SMOKE_TEST.md](RELEASE_SMOKE_TEST.md) after any rule or dependency change. `ReleaseBuildRulesE5Test` fails if the Bouncy Castle keep-all rule returns. |
+| ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true` (R8 full mode). Rules in `app/proguard-rules.pro`: `tor-android`; Bouncy Castle **provider packages only** (`org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**`, `org.bouncycastle.pqc.jcajce.provider.**`, plus `-dontwarn org.bouncycastle.**`; round E5 — the app calls the lightweight API directly, so R8 keeps what it uses, and nothing asks the provider for an algorithm by name); Gson's `TypeToken` rules (E2b; app code uses no `TypeToken`); Room, mesh packets and settings models. Unit tests run the unshrunk debug build, so check a release build with [BUILD.md §8](BUILD.md#8-releasing-an-update) after any rule or dependency change. `ReleaseBuildRulesE5Test` fails if the Bouncy Castle keep-all rule returns. |
 | `GITHUB_PAT` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_PAT`. When non-blank, enables in-app GitHub issue submission via REST API (`POST /repos/gaborkukucska/NoSlop/issues`). When blank, the Submit button in `ReportIssueScreen` is disabled. |
 | `GITHUB_ASSIGNEE` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_ASSIGNEE`. When non-blank, auto-assigns the specified GitHub user to all submitted issues. |
 
@@ -1404,9 +1404,9 @@ is traceable rather than silently disappearing:
 2. ~~`CryptoService.kt`'s class KDoc says DM crypto is "ECDH (P-256) ... ->
    SHA-256 -> AES-256-GCM".~~ **Fixed** — the KDoc now correctly reads
    "X25519 key agreement -> SHA3-256 -> ChaCha20-Poly1305", matching §3.5.
-3. `docs/PROJECT_STATUS.md` milestone 14 describes MeshTransport retries as
+3. `docs/archived/PROJECT_STATUS_HISTORY.md` milestone 14 describes MeshTransport retries as
    "up to 3 times with 2s/4s backoff"; the code implements 5 attempts with
-   `attempt*3000ms` backoff (see §4.1). **Still open** — PROJECT_STATUS.md's
+   `attempt*3000ms` backoff (see §4.1). **Still open** — the history file's
    milestone log is a historical record of what shipped *at the time* and
    isn't being retroactively edited; §4.1 above is the authoritative current
    description.
@@ -2633,7 +2633,7 @@ Mechanism detail lives in the sections it changed:
   returns false and stores nothing when the contact's `encPublicKeyB64` is
   blank; it used to seal to the Ed25519 key. `MeshSocialRepositoryTest`.
 - **Media3 1.11.1 and the Bouncy Castle keep rule (C24, E5)** — §12. Release
-  check: [RELEASE_SMOKE_TEST.md](RELEASE_SMOKE_TEST.md).
+  check: [BUILD.md §8](BUILD.md#8-releasing-an-update).
 - **Search paging (E5s, E5s2).** A search from the search modal goes through
   `FeedRepository.searchCustomFeedPage(query, filterMode, cursor, firstPage)`,
   which calls `PublicApiService.fetchItemsForCategory` with the search's
@@ -2936,7 +2936,7 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 - **Resolve Permit Priority**: In `YouTubeInternalClient.kt`, background preloads (`isPreload = true`) now use a 2-second timeout on `playerResolveGate` and yield immediately if permits are busy, preventing speculative preloads from locking out the active on-screen video.
 - **Bandwidth Concentration**: Reduced `MAX_PRELOAD` from 4 to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe. *(It is back at 4, with lookahead paced as §16.30 describes.)*
 
-## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)
+## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)
 
 (See previous section for group chat, tri-channel transport isolation, and video buffering details.)
 
@@ -3122,7 +3122,8 @@ Tests: `MediaOwnershipAndChunkSecurityTest`.
 the complete, authoritative wire-protocol detail (packet catalog, payload
 JSON shapes, signed-string formats) that supersedes §4/§5 here ·
 [GAP_ANALYSIS.md](archived/GAP_ANALYSIS.md) for the feature backlog vs. gChat/HAI-Net ·
-[PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
-log · [HUB_INTEGRATION_PLAN.md](archived/HUB_INTEGRATION_PLAN.md) for §13's planned
+[PROJECT_STATUS.md](PROJECT_STATUS.md) for current status, remaining work and
+recent changes, [archived/PROJECT_STATUS_HISTORY.md](archived/PROJECT_STATUS_HISTORY.md)
+for the older milestone log · [HUB_INTEGRATION_PLAN.md](archived/HUB_INTEGRATION_PLAN.md) for §13's planned
 HUB-client transition in full detail.
 
