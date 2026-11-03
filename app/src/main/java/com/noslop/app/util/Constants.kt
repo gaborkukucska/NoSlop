@@ -22,12 +22,4 @@ object Constants {
      */
     val TOR_SOCKS_PORT: Int = com.noslop.app.BuildConfig.TOR_SOCKS_PORT
     val TOR_CONTROL_PORT: Int = com.noslop.app.BuildConfig.TOR_CONTROL_PORT
-
-    /**
-     * The NoSlop landing page's content.json — same file the website reads to render the
-     * hero download button. We re-use `hero.apkUrl` (which embeds the release version in
-     * its GitHub path, e.g. ".../download/v0.1.3-alpha/NoSlop.apk") as our single source of
-     * truth for "is there a newer APK available".
-     */
-    const val UPDATE_CHECK_URL = "https://noslop.me/content.json"
 }

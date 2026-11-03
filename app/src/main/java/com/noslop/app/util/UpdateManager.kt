@@ -40,8 +40,8 @@ import java.security.MessageDigest
  * explicit warning and agreed to it.
  *
  * STILL MISSING, deliberately: this verifies INTEGRITY against whatever the
- * update channel said, not AUTHENTICITY. An attacker who controls both
- * content.json and the APK can publish a matching pair. The certificate check
+ * update channel said, not AUTHENTICITY. An attacker who controls the GitHub
+ * release can publish a matching pair. The certificate check
  * below narrows that (the APK must be signed by the installed app's key, and
  * Android's installer enforces the same), but the fix is an Ed25519 signature
  * over the APK verified against a public key compiled into the app — §2 of
@@ -56,6 +56,25 @@ object UpdateManager {
     private const val MIN_APK_BYTES = 2L * 1024 * 1024
 
     private const val APK_MIME = "application/vnd.android.package-archive"
+
+    /**
+     * Starts the download for [info]. A check can finish without the checksum, if fetching it failed
+     * over Tor say, so one more is tried before the download is refused.
+     */
+    fun startDownload(context: Context, info: UpdateInfo) {
+        if (!info.expectedSha256.isNullOrBlank()) {
+            startDownload(context, info.downloadUrl, info.latestVersion, expectedSha256 = info.expectedSha256)
+            return
+        }
+        val appContext = context.applicationContext
+        Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
+        AppScopes.io.launch {
+            val fresh = com.noslop.app.NoSlopApp.updateChecker.checkForUpdate(force = true) ?: info
+            withContext(Dispatchers.Main) {
+                startDownload(appContext, fresh.downloadUrl, fresh.latestVersion, expectedSha256 = fresh.expectedSha256)
+            }
+        }
+    }
 
     /**
      * @param expectedSha256 the digest published with the release, lowercase hex.

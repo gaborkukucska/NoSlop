@@ -31,6 +31,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **`AudioPlayer` has no recovery path.** It no longer tears down mid-swipe, but it doesn't re-resolve in place while the app is away the way `VideoPlayer` does (§16.33).
 * **A dead slide that reaches the screen still shows the unavailable card.** Dead slides leave the Live Feed once a preload finds them, for that session only (§16.31). A fast swipe can get there first.
 * **Slow resolves remain when several exits in a row are blocked.** About 3 s per blocked circuit (§16.32). This is the exit lottery itself; no setting removes it.
+* **A video can stop with no sign, and the cause isn't known.** Seen once, on 2026-11-03: no buffering, no pause icon, no error, and tapping didn't restart it. The app log shows the player made no state change for the 3.5 minutes before the owner's own tap and seek. It needs more testing: whether the sound stopped too, and a device logcat from when it happens.
 * **Log noise.** Repeated send failures to offline mesh peers, and exhausted Invidious "channel joined date" lookups.
 
 **Mesh and security**
@@ -75,6 +76,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 **Verify before release**
 
 * The Gradle unit test run above.
+* The GitHub update check on a device with Route Clearnet via Tor on.
 * A minified release build, using `docs/BUILD.md` §8.2 (E5). Its media section now covers these rounds.
 * Backup export and import on a device (E3).
 * The findings the matrix still marks as not device-verified: C06, C07, C11, D05, D09 and D10.
@@ -85,6 +87,16 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-03) — GitHub-Only Update Check
+
+Not released yet: this follows 0.7.5-alpha and needs a version bump to reach testers. New tests: `UpdatePolicyTest`.
+
+* **Update check** (`NOSLOP_GITHUB_UPDATES_V1`, §15.2). The GitHub build now reads the APK and checksum from the latest GitHub release and never asks noslop.me. Before, the website's APK link ended the check before it reached GitHub, so the release's file list was never read. With 0.7.5 every check logged `checksum=MISSING`, and every tap ended in "This release publishes no checksum".
+  * Over Tor, each call gets three tries on separate circuits, since GitHub limits by exit IP.
+  * A check runs at most once an hour rather than on every return to the app, unless a known update still has no checksum.
+  * A tap on a known update with no checksum tries once more before refusing.
+  * `Constants.UPDATE_CHECK_URL` and the URL version parsing are gone.
 
 ## Completed Changes (2026-11-03) — Release 0.7.5-alpha, Documentation Reorganised (v0.7.5-alpha)
 

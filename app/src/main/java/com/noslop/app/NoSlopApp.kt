@@ -186,7 +186,7 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             Logger.error("APP", "Failed to register WorkManager feed sync: ${e.message}")
         }
 
-        // Daily check of noslop.com/content.json for a newer APK version.
+        // Daily check of the latest GitHub release for a newer APK version.
         // Uses UPDATE (not KEEP, unlike the feed sync above) because this feature is new/evolving —
         // KEEP would silently freeze whatever schedule/constraints existed from the first install
         // that ever registered "update_check_daily", ignoring any future tuning here.

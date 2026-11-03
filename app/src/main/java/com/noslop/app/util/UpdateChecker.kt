@@ -32,17 +32,6 @@ data class UpdateInfo(
     val expectedSha256: String? = null
 )
 
-// Minimal shape of content.json — we only care about the hero block.
-@Keep
-private data class ContentJson(val hero: HeroBlock?)
-@Keep
-private data class HeroBlock(
-    @SerializedName("apkUrl") val apkUrl: String?,
-    @SerializedName("githubUrl") val githubUrl: String?,
-    // NOSLOP_RELEASE_CHECKSUM_V1 — publish this alongside apkUrl in content.json.
-    @SerializedName("apkSha256") val apkSha256: String?
-)
-
 @Keep
 private data class GithubRelease(
     @SerializedName("tag_name") val tagName: String?,
@@ -57,8 +46,8 @@ private data class GithubAsset(
 )
 
 /**
- * Checks the NoSlop website's `content.json` once a day for a newer APK than the one
- * currently installed, and tracks when the user was last notified about it.
+ * Checks the latest GitHub release for a newer APK than the one installed (see [UpdatePolicy]), and
+ * tracks when the user was last notified about it.
  *
  * State (last check time, last notified time, dismissed-for-this-version flag) is persisted
  * in the existing `app_settings` key/value table via [AppSettingDao] — no schema migration
@@ -73,8 +62,8 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
         private const val KEY_LAST_NOTIFIED_MS = "update_last_notified_ms"
         const val NOTIFY_INTERVAL_MS = 3L * 24 * 60 * 60 * 1000 // 3 days
 
-        /** A bare SHA-256, as it appears in a .sha256 file or a release note. */
-        private val SHA256_REGEX = Regex("""\b[0-9a-fA-F]{64}\b""")
+        private const val LATEST_RELEASE_URL =
+            "https://api.github.com/repos/gaborkukucska/NoSlop/releases/latest"
     }
 
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)
@@ -93,19 +82,29 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     }
 
     /**
-     * Fetches content.json and compares the embedded APK version against [BuildConfig.VERSION_NAME].
-     * Updates [updateInfo] and the persisted cache regardless of outcome (so a fixed update clears
-     * a stale banner). Safe to call repeatedly; network/parse errors are swallowed and logged.
+     * Reads the latest GitHub release and compares it against [BuildConfig.VERSION_NAME]. Updates
+     * [updateInfo] and the persisted cache (so a fixed update clears a stale banner). Safe to call
+     * repeatedly: unless [force] is set, a recent check is not repeated. Network and parse errors are
+     * logged, and the last known result stays.
+     *
+     * @param force asks now, for a user who just tapped to download.
      */
-    suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(force: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         if (!BuildConfig.ENABLE_IN_APP_UPDATER) {
             Logger.info(TAG, "In-app updates disabled for this build variant (managed by Google Play).")
             return@withContext null
         }
 
-        if (!HttpClientProvider.isAutoUpdateEnabled) {
+        if (!force && !HttpClientProvider.isAutoUpdateEnabled) {
             Logger.info(TAG, "Automatic update checks are disabled in settings.")
             return@withContext null
+        }
+
+        val known = _updateInfo.value
+        val lastCheckMs = appSettingDao.getSetting(KEY_LAST_CHECK_MS)?.toLongOrNull()
+        val waitingForChecksum = known != null && known.expectedSha256.isNullOrBlank()
+        if (!force && !UpdatePolicy.isCheckDue(lastCheckMs, System.currentTimeMillis(), waitingForChecksum)) {
+            return@withContext known
         }
 
         if (HttpClientProvider.useTorForClearnet) {
@@ -118,82 +117,43 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
         }
 
         try {
-            var apkUrl: String? = null
-            var latestVersion: String? = null
-            var expectedSha: String? = null
-
-            // 1. Try official website
-            try {
-                val request = Request.Builder().url(Constants.UPDATE_CHECK_URL).build()
-                val body = HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) response.body?.string() else null
-                }
-                if (body != null) {
-                    val content = com.noslop.app.util.Json.gson.fromJson(body, ContentJson::class.java)
-                    apkUrl = content.hero?.apkUrl
-                    expectedSha = content.hero?.apkSha256?.trim()?.lowercase()?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
-                    if (apkUrl != null) latestVersion = extractVersion(apkUrl)
-                }
-            } catch (e: Exception) {
-                Logger.warn(TAG, "noslop.me fetch failed: ${e.message}")
+            val release = fetchLatestRelease()
+            if (release == null) {
+                Logger.warn(TAG, "Could not read the latest release from GitHub.")
+                return@withContext null
             }
-
-            // 2. Fallback to GitHub API
-            if (apkUrl.isNullOrBlank() || latestVersion == null) {
-                Logger.info(TAG, "Falling back to GitHub API for update check...")
-                try {
-                    val request = Request.Builder().url("https://api.github.com/repos/gaborkukucska/NoSlop/releases/latest").build()
-                    val body = HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
-                        if (response.isSuccessful) response.body?.string() else null
-                    }
-                    if (body != null) {
-                        val release = com.noslop.app.util.Json.gson.fromJson(body, GithubRelease::class.java)
-                        latestVersion = release.tagName?.removePrefix("v")
-                        apkUrl = release.assets?.firstOrNull { it.browserDownloadUrl?.endsWith(".apk") == true }?.browserDownloadUrl
-
-                        // NOSLOP_RELEASE_CHECKSUM_V1 — prefer a .sha256 asset, then
-                        // a bare digest in the release notes.
-                        if (expectedSha == null) {
-                            val shaAssetUrl = release.assets
-                                ?.firstOrNull { it.name?.endsWith(".sha256") == true || it.browserDownloadUrl?.endsWith(".sha256") == true }
-                                ?.browserDownloadUrl
-                            if (shaAssetUrl != null) expectedSha = fetchChecksumFile(shaAssetUrl)
-                        }
-                        if (expectedSha == null && release.body != null) {
-                            expectedSha = SHA256_REGEX.find(release.body)?.value?.lowercase()
-                        }
-                    }
-                } catch (e: Exception) {
-                    Logger.error(TAG, "GitHub API fetch failed: ${e.message}")
+            val latestVersion = release.tagName?.removePrefix("v")
+            val files = UpdatePolicy.chooseFiles(
+                release.assets.orEmpty().mapNotNull { asset ->
+                    val name = asset.name ?: return@mapNotNull null
+                    val url = asset.browserDownloadUrl ?: return@mapNotNull null
+                    ReleaseFile(name, url)
                 }
-            }
-
-            if (apkUrl.isNullOrBlank() || latestVersion == null) {
-                Logger.warn(TAG, "Could not find apkUrl or version from either source.")
+            )
+            if (latestVersion.isNullOrBlank() || files == null) {
+                Logger.warn(TAG, "The latest release has no version tag or no APK.")
                 return@withContext null
             }
 
-            // 3. Last resort: a sibling <apk>.sha256 next to the download URL.
-            if (expectedSha == null) {
-                expectedSha = fetchChecksumFile("$apkUrl.sha256")
-            }
-
+            // NOSLOP_RELEASE_CHECKSUM_V1 — prefer a .sha256 asset, then a digest in the release notes.
+            val expectedSha = files.checksumUrl?.let { fetchChecksumFile(it) }
+                ?: release.body?.let { UpdatePolicy.digestIn(it) }
             if (expectedSha == null) {
                 Logger.warn(
                     TAG,
-                    "Release $latestVersion publishes no SHA-256. The installer will refuse it " +
-                        "unless the user explicitly opts in. Publish <apk>.sha256 or hero.apkSha256."
+                    "Release $latestVersion gave no SHA-256, so the download will be refused. " +
+                        "checksumFile=${files.checksumUrl != null}"
                 )
             }
 
             appSettingDao.insertSetting(AppSetting(KEY_LAST_CHECK_MS, System.currentTimeMillis().toString()))
 
             val currentVersion = BuildConfig.VERSION_NAME
-            val info = if (isNewer(latestVersion!!, currentVersion)) {
+            val info = if (isNewer(latestVersion, currentVersion)) {
                 UpdateInfo(
-                    latestVersion = latestVersion!!,
+                    latestVersion = latestVersion,
                     currentVersion = currentVersion,
-                    downloadUrl = apkUrl!!,
+                    downloadUrl = files.apkUrl,
                     expectedSha256 = expectedSha
                 )
             } else {
@@ -216,24 +176,45 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
         }
     }
 
-    /**
-     * Fetches a `.sha256` sidecar and pulls the digest out of it. Handles both a
-     * bare digest and the usual `<digest>  <filename>` sha256sum format. Returns
-     * null on any failure — a missing sidecar is normal, not an error.
-     */
-    private fun fetchChecksumFile(url: String): String? {
-        return try {
-            val request = Request.Builder().url(url).build()
-            HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val text = response.body?.string() ?: return null
-                if (text.length > 4096) return null // not a checksum file
-                SHA256_REGEX.find(text)?.value?.lowercase()
+    /** Each attempt has its own circuit: over Tor, an exit may have used up GitHub's allowance. */
+    private fun clientFor(attempt: Int) = HttpClientProvider.getOrCreateIsolatedMediaClient("update_check_$attempt")
+
+    private fun fetchLatestRelease(): GithubRelease? {
+        for (attempt in 1..UpdatePolicy.GITHUB_ATTEMPTS) {
+            try {
+                val request = Request.Builder().url(LATEST_RELEASE_URL).build()
+                clientFor(attempt).newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string()
+                        if (body != null) return com.noslop.app.util.Json.gson.fromJson(body, GithubRelease::class.java)
+                    }
+                    Logger.warn(TAG, "GitHub answered HTTP ${response.code} (attempt $attempt)")
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "GitHub API fetch failed (attempt $attempt): ${e.message}")
             }
-        } catch (e: Exception) {
-            Logger.debug(TAG, "No checksum sidecar at $url (${e.message})")
-            null
         }
+        return null
+    }
+
+    /** Fetches a `.sha256` release asset and pulls the digest out of it. Null if that can't be done. */
+    private fun fetchChecksumFile(url: String): String? {
+        for (attempt in 1..UpdatePolicy.GITHUB_ATTEMPTS) {
+            try {
+                val request = Request.Builder().url(url).build()
+                clientFor(attempt).newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val text = response.body?.string() ?: return null
+                        if (text.length > 4096) return null // not a checksum file
+                        return UpdatePolicy.digestIn(text)
+                    }
+                    Logger.warn(TAG, "Checksum file answered HTTP ${response.code} (attempt $attempt)")
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Checksum file fetch failed (attempt $attempt): ${e.message}")
+            }
+        }
+        return null
     }
 
     /** Whether at least [NOTIFY_INTERVAL_MS] has passed since the last "update available" notification. */
@@ -244,18 +225,6 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
 
     suspend fun markNotifiedNow() = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting(KEY_LAST_NOTIFIED_MS, System.currentTimeMillis().toString()))
-    }
-
-    /**
-     * Pulls a version string like "0.1.3-alpha" out of a URL such as
-     * ".../releases/download/v0.1.3-alpha/NoSlop.apk". Falls back to scanning the whole
-     * string for a dotted-number pattern if there's no "/vX.Y.Z/" path segment.
-     */
-    private fun extractVersion(url: String): String? {
-        val pathMatch = Regex("""/v?(\d+\.\d+\.\d+[\w.-]*)/""").find(url)
-        if (pathMatch != null) return pathMatch.groupValues[1]
-        val looseMatch = Regex("""(\d+\.\d+\.\d+[\w.-]*)""").find(url)
-        return looseMatch?.groupValues?.get(1)
     }
 
     /**

@@ -151,7 +151,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 // then saves it to Download; the user installs it from their Files app.
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     Button(
-                                        onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, expectedSha256 = updateInfo!!.expectedSha256) },
+                                        onClick = { UpdateManager.startDownload(context, updateInfo!!) },
                                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
                                     ) {
                                         Text("Download Update".tr, color = TextLight)

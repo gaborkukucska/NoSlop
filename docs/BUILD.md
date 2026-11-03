@@ -349,15 +349,14 @@ gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --tit
 * **Keep the version in the tag.** The app reads it from the tag (`v0.7.5-alpha`).
 * **Don't mark it as a pre-release or a draft.** The app asks GitHub for `/releases/latest`, which skips both.
 * **Upload one `.apk`.** The app takes the first one it finds.
-* **Upload the `.sha256`.** Without a published checksum, the app refuses the download unless the user opts in.
+* **Upload the `.sha256`.** Any name ending in `.sha256` works, and a file named after the APK wins. The app can also read a digest from the release notes. Without a checksum, it refuses the download.
 * Keep `app/build/outputs/mapping/githubRelease/mapping.txt` for this version.
 
-### 8.4 Update noslop.me
+### 8.4 noslop.me
 
-**The app checks `https://noslop.me/content.json` first, and asks GitHub only if that fails or has no usable `hero.apkUrl`.** So a new GitHub release isn't enough while `content.json` lists an older APK. In `content.json`:
+**The GitHub build takes updates from GitHub alone** (`NOSLOP_GITHUB_UPDATES_V1`), so a release reaches it without touching the website. It checks at most once an hour, plus a daily background check.
 
-* Point `hero.apkUrl` at the new APK. The version must be in that URL. The GitHub download URL works, since it has the tag in its path.
-* Set `hero.apkSha256` to the new digest, or publish `<apk>.sha256` next to the APK.
+**0.7.5 and older still read `https://noslop.me/content.json` first.** If `hero.apkUrl` there has a version in it, they don't ask GitHub for the release. For those apps, either set `hero.apkSha256` to the bare digest, or publish the checksum at exactly `<apk URL>.sha256`.
 
 If `docs/PRIVACY_POLICY.md` changed, update the copy at `https://noslop.me/privacy` too.
 

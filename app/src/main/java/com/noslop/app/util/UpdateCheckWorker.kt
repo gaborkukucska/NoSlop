@@ -8,7 +8,7 @@ import com.noslop.app.NoSlopApp
 import com.noslop.app.debug.Logger
 
 /**
- * Runs once a day (registered in [NoSlopApp]) to check noslop.com/content.json for a newer
+ * Runs once a day (registered in [NoSlopApp]) to check the latest GitHub release for a newer
  * APK than the one installed. If a newer version is found, the Settings tab will show a
  * permanent red banner ([UpdateChecker.updateInfo]); additionally, a system notification is
  * fired every [UpdateChecker.NOTIFY_INTERVAL_MS] (3 days) until the user updates.
