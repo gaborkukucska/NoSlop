@@ -19,7 +19,9 @@ object ReactionAnchor {
     private const val PREFIX = "clearnet_"
     private const val HEX_DIGITS = "0123456789abcdef"
     private const val BYTES_KEPT = 8
-    private const val MAX_CACHED = 8192
+    // Above the size of a long-used feed table (31,521 rows on a test device). A feed build walks the
+    // table in order, so with an LRU cache smaller than the table every lookup is a miss.
+    private const val MAX_CACHED = 65536
 
     private val cache: MutableMap<String, String> = Collections.synchronizedMap(
         object : LinkedHashMap<String, String>(512, 0.75f, true) {

@@ -15,6 +15,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -199,7 +203,7 @@ object PreloadManager {
         val existing = pendingTasks.putIfAbsent(rawUrl, deferred)
         if (existing != null) return // Already being pre-warmed
 
-        Logger.info("PRELOAD", "preWarm called for: $rawUrl")
+        Logger.info("PRELOAD", "preWarm called for: $rawUrl ${Logger.redact(rawUrl)}")
 
         val resolved = try {
             if (forcedResolvedUrl != null && forcedResolvedUrl != rawUrl) {
@@ -257,7 +261,14 @@ object PreloadManager {
                 finish(rawUrl, deferred)
             }
             is VideoSource.Unavailable -> {
-                Logger.warn("PRELOAD", "VideoSource is Unavailable, skipping warmUp for $rawUrl")
+                Logger.warn("PRELOAD", "VideoSource is Unavailable, skipping warmUp for $rawUrl ${Logger.redact(rawUrl)}")
+                // --- NOSLOP_DEAD_SLIDES_V1 ---
+                // YouTube said this cannot play over Tor, so the feed drops the slide before the user
+                // reaches it. A resolve that merely failed is not reported: it may work next time.
+                val videoId = com.noslop.app.feeds.api.YouTubeInternalClient.extractVideoId(rawUrl)
+                if (videoId != null && com.noslop.app.feeds.api.YouTubeInternalClient.isKnownUnplayable(videoId)) {
+                    _unplayableUrls.update { it + rawUrl }
+                }
                 finish(rawUrl, deferred)
             }
         }
@@ -448,7 +459,7 @@ object PreloadManager {
         val entry = preloadedPlayers[cacheKey]
 
         if (entry == null) {
-            Logger.warn("PRELOAD", "No preloaded player found for: $cacheKey - will create fresh player")
+            Logger.warn("PRELOAD", "No preloaded player found for: $cacheKey ${Logger.redact(rawUrl)} - will create fresh player")
             return null
         }
 
@@ -487,7 +498,7 @@ object PreloadManager {
         preloadedPlayers.remove(cacheKey)
         currentlyPlayingUrl = rawUrl
         lastNetworkByteTimeMs = System.currentTimeMillis()
-        Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey")
+        Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey ${Logger.redact(rawUrl)} state=${entry.player.playbackState} bufMs=${entry.player.totalBufferedDuration}")
         return entry.player
     }
 
@@ -563,6 +574,17 @@ object PreloadManager {
     /** Returns once a queued warm-up of [rawUrl] has run. [launchPreWarm]'s job ends when it is queued. */
     suspend fun awaitWarmUpFinished(rawUrl: String) {
         pendingTasks[rawUrl]?.await()
+    }
+
+    private val _unplayableUrls = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Slides YouTube has refused to play over Tor. The Live Feed leaves them out. */
+    val unplayableUrls: StateFlow<Set<String>> = _unplayableUrls.asStateFlow()
+
+    fun isUnplayable(rawUrl: String): Boolean = rawUrl in _unplayableUrls.value
+
+    fun clearUnplayable() {
+        _unplayableUrls.value = emptySet()
     }
 
     /** Whether a warm player is waiting for [rawUrl]. Main thread only. */

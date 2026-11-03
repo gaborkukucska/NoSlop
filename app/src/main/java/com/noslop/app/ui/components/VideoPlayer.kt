@@ -120,6 +120,8 @@ private val sourceCache = ConcurrentHashMap<String, CachedSource>(64)
 fun invalidateAllOnRouteTransition() {
     sourceCache.clear()
     PreloadManager.evictAll()
+    YouTubeInternalClient.forgetUnplayable()
+    PreloadManager.clearUnplayable()
     try {
         // U10: Cancel active clearnet calls and shut down prior Coil loader
         HttpClientProvider.rawClearnetClient.dispatcher.cancelAll()
@@ -263,13 +265,13 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
     when (val r = resolved) {
         is VideoSource.Direct -> Logger.info(
             PLAYBACK_DIAG_TAG,
-            "resolved DIRECT in ${elapsedMs}ms ${describeStreamUrl(r.url)} | $rawUrl"
+            "resolved DIRECT in ${elapsedMs}ms ${describeStreamUrl(r.url)} | $rawUrl ${Logger.redact(rawUrl)}"
         )
         is VideoSource.Embed -> Logger.info(
             PLAYBACK_DIAG_TAG, "resolved EMBED in ${elapsedMs}ms | $rawUrl"
         )
         is VideoSource.Unavailable -> Logger.warn(
-            PLAYBACK_DIAG_TAG, "resolved UNAVAILABLE in ${elapsedMs}ms | $rawUrl"
+            PLAYBACK_DIAG_TAG, "resolved UNAVAILABLE in ${elapsedMs}ms | $rawUrl ${Logger.redact(rawUrl)}"
         )
     }
     return resolved
@@ -745,7 +747,7 @@ private fun VideoPlayerContent(
             return@LaunchedEffect
         }
         com.noslop.app.ui.PreloadManager.isVideoActive = true
-        Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
+        Logger.info("VIDEO", "Resolving source for: $url ${Logger.redact(url)} (retry: $retryTrigger)")
         val resolvedSource = resolveSource(url, forceRefresh = forceRefresh, context = context)
         source = resolvedSource
         Logger.info("VIDEO", "Resolved source for $url → ${resolvedSource.javaClass.simpleName}")

@@ -14,9 +14,9 @@ class PreloadTargetsTest {
     private val dataFor: (String) -> PreloadTarget? = { if (it.startsWith("v")) target(it) else null }
 
     @Test
-    fun picksTheNextTwoMediaSlidesSkippingOthers() {
-        val t = selectPreloadTargets(listOf("v0", "a1", "v2", "a3", "v4", "v5"), 0, dataFor)
-        assertEquals(listOf(target("v2"), target("v4")), t.forward)
+    fun picksTheNextThreeMediaSlidesSkippingOthers() {
+        val t = selectPreloadTargets(listOf("v0", "a1", "v2", "a3", "v4", "v5", "v6"), 0, dataFor)
+        assertEquals(listOf(target("v2"), target("v4"), target("v5")), t.forward)
         assertEquals(target("v0"), t.current)
         assertNull(t.previous)
     }

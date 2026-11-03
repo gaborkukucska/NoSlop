@@ -36,8 +36,20 @@ class ReactionAnchorTest {
     fun staysCorrectPastTheCacheLimit() {
         val first = "https://example.com/evicted"
         val expected = ReactionAnchor.forUrl(first)
-        for (i in 0 until 9000) ReactionAnchor.forUrl("https://example.com/fill/$i")
+        for (i in 0 until 70_000) ReactionAnchor.forUrl("https://example.com/fill/$i")
         assertEquals(expected, ReactionAnchor.forUrl(first))
+    }
+
+    @Test
+    fun theCacheCoversALongUsedFeedTable() {
+        // The feed build walks the table in order, so an LRU cache smaller than the table never hits.
+        // The cap was 8192 and a test device had 31,521 rows.
+        val source = java.io.File(".").canonicalFile.let { root ->
+            listOf("src/main/java", "app/src/main/java").map { java.io.File(root, it) }.first { it.exists() }
+        }
+        val text = java.io.File(source, "com/noslop/app/data/ReactionAnchor.kt").readText()
+        val cap = Regex("""MAX_CACHED = (\d+)""").find(text)!!.groupValues[1].toInt()
+        org.junit.Assert.assertTrue("cache cap $cap is below the observed table size", cap > 31_521)
     }
 
     private fun oldImplementation(url: String): String {

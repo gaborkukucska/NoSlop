@@ -48,6 +48,18 @@ class FeedSmoothnessArchitectureTest {
     }
 
     @Test
+    fun aDeadSlideDoesNotStopTheTorLookahead() {
+        val tab = source("ui/UnifiedFeedTab.kt")
+        assertFalse("waiting for READY left everything behind a dead slide cold", tab.contains("awaitPlayerReady"))
+        assertTrue(tab.contains("warmInOrder("))
+    }
+
+    @Test
+    fun aFinishedStreamIsNotTreatedAsLive() {
+        assertFalse(source("feeds/api/YouTubeInternalClient.kt").contains("isLiveContent"))
+    }
+
+    @Test
     fun theForegroundNotificationDoesNotDestroyTheRunningActivity() {
         assertFalse(source("mesh/NoSlopForegroundService.kt").contains("FLAG_ACTIVITY_CLEAR_TASK"))
     }

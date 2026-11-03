@@ -229,6 +229,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var pendingAppendFilter: String? = null
     // Bumped each time a list is built from empty, so a batch for the list before it is dropped.
     private var feedListGeneration = 0
+    // Canonical keys by feed item id. Stable for an item, and read for every stored item on each build.
+    private val feedKeyCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun cachedFeedKey(item: FeedItem): String =
+        feedKeyCache.getOrPut(item.id) { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item)) }
     // E5s: paging of the active search (fetchNextSearchPage). The cursor belongs to one search, the
     // query and the search-modal filter in searchCursorKey. searchResultPage records the page each
     // result arrived on: the list shows earlier pages first, each newest first. searchExhaustedCount
@@ -1346,6 +1351,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val searchAtStart = activeSearchQuery
         viewModelScope.launch {
             val startedMs = System.currentTimeMillis()
+            var listGrew = false
             try {
                 val plan = withContext(Dispatchers.Default) { computeFeedBatch(actualFilter) }
                 val stale = currentFilterMode != actualFilter || activeSearchQuery != searchAtStart ||
@@ -1355,6 +1361,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     Logger.info("VM", "Dropped a feed batch: the list changed while it was being built")
                 } else if (plan != null) {
                     applyFeedBatch(plan, actualFilter, isInjection = false)
+                    listGrew = plan.batch.isNotEmpty()
                 }
                 Logger.info("VM", "Feed batch built off the main thread in ${System.currentTimeMillis() - startedMs}ms from ${allFeeds.size} stored items")
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1366,7 +1373,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
             val pending = pendingAppendFilter
             pendingAppendFilter = null
-            if (pending != null && pending == currentFilterMode) loadMoreFeedItems(pending)
+            // Several pages near the end ask at once. Once the list has grown they have their items, and
+            // a second build is seconds of CPU for nothing. A search still refills after each page.
+            val stillNeeded = !listGrew || activeSearchQuery.isNotBlank()
+            if (pending != null && pending == currentFilterMode && stillNeeded) loadMoreFeedItems(pending)
         }
     }
 
@@ -1404,7 +1414,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val readTitles = readOrHiddenFeeds
             .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
             .toSet()
-        val excludedFeedKeys = (readOrHiddenFeeds.map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) } + cachedViewedIds + cachedExcludedIds)
+        val excludedFeedKeys = (readOrHiddenFeeds.map { cachedFeedKey(it) } + cachedViewedIds + cachedExcludedIds)
             .toSet()
             
         val excludedMeshKeys = allMeshes.filter { it.id in readOrHiddenIds }
@@ -1414,8 +1424,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         var unseenFeeds = allFeeds.filter { 
             if (isPersistentList) {
                 it.id !in currentIds
+            } else if (it.isRead || it.isSaved || it.id in exclusionIds || it.id in cachedViewedIds ||
+                it.id in cachedExcludedIds || it.id in cachedReactedAnchorIds) {
+                // The cheap checks first: on a long-used device most stored items stop here, and
+                // the keys below are the expensive part of a build.
+                false
             } else {
-                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
+                val cKey = cachedFeedKey(it)
                 val normId = normalizeFeedItemId(it.id, it.url ?: "")
                 val anchor = getReactionAnchorIdForUrl(it.url ?: "")
                 !it.isRead && !it.isSaved &&

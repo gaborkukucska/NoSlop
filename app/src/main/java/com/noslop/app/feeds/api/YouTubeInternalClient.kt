@@ -59,6 +59,32 @@ object YouTubeInternalClient {
     private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val videoStreamNonces = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    // --- NOSLOP_DEAD_SLIDES_V1 ---
+    // Videos YouTube said cannot play over Tor, and until when to believe it. Not permanent: a premiere
+    // starts, a stream ends. Only preloads skip the request, so a tap on Retry always asks again.
+    private const val UNPLAYABLE_TTL_MS = 30 * 60_000L
+    private const val MAX_UNPLAYABLE_REMEMBERED = 500
+    private const val MAX_EXIT_ROTATIONS = 2
+    private const val MAX_PASSES_WITHOUT_STREAM = 2
+    private val unplayableUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    fun isKnownUnplayable(videoId: String): Boolean {
+        val until = unplayableUntil[videoId] ?: return false
+        if (until > System.currentTimeMillis()) return true
+        unplayableUntil.remove(videoId)
+        return false
+    }
+
+    private fun rememberUnplayable(videoId: String) {
+        if (unplayableUntil.size >= MAX_UNPLAYABLE_REMEMBERED) unplayableUntil.clear()
+        unplayableUntil[videoId] = System.currentTimeMillis() + UNPLAYABLE_TTL_MS
+    }
+
+    /** A route change: what cannot play over Tor may play on the new route. */
+    fun forgetUnplayable() {
+        unplayableUntil.clear()
+    }
+
     fun extractVideoId(url: String): String? {
         if (url.isBlank()) return null
         val trimmed = url.trim()
@@ -697,6 +723,10 @@ object YouTubeInternalClient {
     // longer spends 45s losing to the same exit twice over.
     private val playerResolveGate = kotlinx.coroutines.sync.Semaphore(3)
 
+    // --- NOSLOP_PRELOAD_TARGETS_V1 ---
+    // Preloads may hold two of those three slots, so the slide on screen always has one.
+    private val speculativeResolveGate = kotlinx.coroutines.sync.Semaphore(2)
+
     // --- NOSLOP_RESOLVE_BUDGET_V1 ---
     // The gate above is correct while the network works and actively harmful
     // when it does not. With a 60s connect timeout, one resolve could hold a
@@ -705,6 +735,7 @@ object YouTubeInternalClient {
     // work are now bounded: a slide either gets an answer promptly or gets a
     // clean "no", which the UI can show with a Retry button.
     private const val RESOLVE_QUEUE_WAIT_MS = 20_000L
+    private const val SPECULATIVE_WAIT_MS = 15_000L
 
     // --- NOSLOP_INNERTUBE_CLIENTS_V1 ---
     // Was 45s, sized for a two-client roster. Five clients need more headroom,
@@ -716,6 +747,24 @@ object YouTubeInternalClient {
     private const val RESOLVE_BUDGET_MS = 60_000L
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high", canRotateCircuit: Boolean = true): String? {
+        if (canRotateCircuit) return resolveWithPermit(videoId, quality, canRotateCircuit)
+        if (isKnownUnplayable(videoId)) return null
+        val gotSlot = kotlinx.coroutines.withTimeoutOrNull(SPECULATIVE_WAIT_MS) {
+            speculativeResolveGate.acquire()
+            true
+        } ?: false
+        if (!gotSlot) {
+            Logger.info(TAG, "Preload slots busy, skipping ${Logger.redact(videoId)} for now")
+            return null
+        }
+        try {
+            return resolveWithPermit(videoId, quality, canRotateCircuit)
+        } finally {
+            speculativeResolveGate.release()
+        }
+    }
+
+    private suspend fun resolveWithPermit(videoId: String, quality: String, canRotateCircuit: Boolean): String? {
         val waitTimeoutMs = if (!canRotateCircuit) 15000L else RESOLVE_QUEUE_WAIT_MS
         val gotPermit = kotlinx.coroutines.withTimeoutOrNull(waitTimeoutMs) {
             playerResolveGate.acquire()
@@ -810,12 +859,15 @@ object YouTubeInternalClient {
         var streamNonce = videoStreamNonces.getOrPut(videoId) { 0 }
         var attempt = 0
         val maxAttempts = if (isTor) 6 else 1
+        var exitRotations = 0
+        var passesWithoutStream = 0
 
         while (attempt < maxAttempts) {
             attempt++
             val currentStreamId = if (isTor) "yt_${videoId}_$streamNonce" else videoId
             val activePlayerClient = playerClient(currentStreamId)
             var refusedThisAttempt = 0
+            var answeredWithoutStream = 0
             for (config in configs) {
                 if (!kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive.let { it == null || it }) {
                     Logger.info(TAG, "resolveStreamUrl cancelled for ${Logger.redact(videoId)} (slide swiped away)")
@@ -849,14 +901,23 @@ object YouTubeInternalClient {
                             val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
                             
                             val reason = root.getAsJsonObject("playabilityStatus")?.get("reason")?.asString ?: ""
-                            val isAgeOrPrivate = reason.contains("age", ignoreCase = true) || 
-                                reason.contains("inappropriate", ignoreCase = true) || 
-                                reason.contains("private", ignoreCase = true)
-                            val isLiveStream = root.getAsJsonObject("videoDetails")?.get("isLive")?.asBoolean == true ||
-                                root.getAsJsonObject("videoDetails")?.get("isLiveContent")?.asBoolean == true ||
-                                root.getAsJsonObject("playabilityStatus")?.has("liveStreamability") == true
+                            val isAgeOrPrivate = YouTubePlayability.isAgeOrPrivate(reason)
+                            val isLiveStream = YouTubePlayability.isBroadcastingNow(
+                                isLive = root.getAsJsonObject("videoDetails")?.get("isLive")?.asBoolean == true,
+                                hasLiveStreamability = root.getAsJsonObject("playabilityStatus")?.has("liveStreamability") == true
+                            )
+                            // --- NOSLOP_DEAD_SLIDES_V1 ---
+                            // "Not available in your country" is about this exit, not the video.
+                            if (isTor && playability == "UNPLAYABLE" && YouTubePlayability.isExitDependent(reason) && exitRotations < MAX_EXIT_ROTATIONS) {
+                                exitRotations++
+                                Logger.info(TAG, "Exit refused ${Logger.redact(videoId)} ($reason) — trying another circuit")
+                                response.close()
+                                streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
+                                break
+                            }
                             if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE" || isAgeOrPrivate || (isTor && isLiveStream)) {
                                 Logger.warn(TAG, "Video ${Logger.redact(videoId)} is unplayable over Tor ($playability / $reason / isLive=$isLiveStream). Bailing immediately.")
+                                if (isTor) rememberUnplayable(videoId)
                                 response.close()
                                 return@withContext null
                             }
@@ -870,6 +931,7 @@ object YouTubeInternalClient {
                                     return@withContext url
                                 } else {
                                     Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
+                                    answeredWithoutStream++
                                 }
                             } else if ((playability == "LOGIN_REQUIRED" || playability == "UNPLAYABLE" || playability == "ERROR") && isTor) {
                                 Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Circuit $currentStreamId likely blocked.")
@@ -912,6 +974,20 @@ object YouTubeInternalClient {
                         break
                     }
                 }
+            }
+
+            // --- NOSLOP_DEAD_SLIDES_V1 ---
+            // Clients said OK but offered nothing playable (adaptive formats only, say). Repeating that on
+            // the same circuit used up the whole 60 s budget on one video. Ask from one other circuit,
+            // and if the answer is the same it is the video, not the exit.
+            if (isTor && answeredWithoutStream > 0) {
+                passesWithoutStream++
+                if (passesWithoutStream >= MAX_PASSES_WITHOUT_STREAM) {
+                    Logger.warn(TAG, "No playable stream for ${Logger.redact(videoId)} from two circuits. Treating it as unplayable.")
+                    rememberUnplayable(videoId)
+                    return@withContext null
+                }
+                streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
             }
         }
         

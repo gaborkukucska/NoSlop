@@ -788,11 +788,20 @@ fun UnifiedFeedTab(
 
     var restoreItemId by remember { mutableStateOf<String?>(null) }
     val openCommentsState by viewModel.openCommentsState.collectAsState()
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, showOldMeshPosts, restoreItemId, openCommentsState) {
+    val unplayableUrls by com.noslop.app.ui.PreloadManager.unplayableUrls.collectAsState()
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, showOldMeshPosts, restoreItemId, openCommentsState, unplayableUrls) {
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
         val targetNavId = restoreItemId ?: openCommentsState?.first
         val filtered = unifiedFeed.filter { item ->
+            // --- NOSLOP_DEAD_SLIDES_V1 ---
+            // A video YouTube will not serve over Tor is left out of the Live Feed before the user
+            // reaches it. Only for this session, and never the slide on screen. Search and the other
+            // lists still show it, because there the user asked for it.
+            if (unplayableUrls.isNotEmpty() && filterMode == "Live Feed" && searchQuery.isBlank() && item.id != lastSettledItemId) {
+                val rawUrl = getPreloadDataFromItem(item, context)?.first
+                if (rawUrl != null && rawUrl in unplayableUrls) return@filter false
+            }
             val isOwnPost = item is UnifiedItem.Mesh && (item.post.authorPublicKeyB64 == localKeys?.publicKeyB64 || item.post.authorPublicKeyB64 == viewModel.burnableKeys.value?.publicKeyB64)
             val isTargetNavPost = targetNavId != null && item.id == targetNavId
             if (filterMode == "My Content") {
@@ -1003,9 +1012,9 @@ fun UnifiedFeedTab(
         // budget. Over clearnet that is cheap. Over Tor it is the scarcest resource in the app, and the
         // visible video competes for it with speculative work it does not need yet.
         //
-        // Under Tor: nothing behind, and the next slide first. The slide after it starts only once the
-        // next one can play, so a user who swipes quickly is not met by a cold slide, and two speculative
-        // resolves never compete. Over clearnet: one behind and two ahead, as before.
+        // Under Tor: nothing behind, and three ahead, nearest first, so a user who swipes quickly is not
+        // met by a cold slide. Speculative resolves are held to two slots, leaving one for the visible
+        // slide (YouTubeInternalClient). Over clearnet: one behind and two ahead, as before.
         val preloader = com.noslop.app.ui.PreloadManager
         val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         // Not before the saved position is restored: the first compositions see an empty list or page 0,
@@ -1015,30 +1024,26 @@ fun UnifiedFeedTab(
         }
         fun warm(target: PreloadTarget) = preloader.launchPreWarm(preloadScope, context, target.rawUrl, target.forcedUrl)
 
-        val first = preloadTargets.forward.firstOrNull()
-        val second = preloadTargets.forward.getOrNull(1)
         if (!overTor) {
             preloadTargets.previous?.let { warm(it) }
             kotlinx.coroutines.delay(50L)
-            first?.let { warm(it) }
+            preloadTargets.forward.getOrNull(0)?.let { warm(it) }
             kotlinx.coroutines.delay(250L)
-            second?.let { warm(it) }
+            preloadTargets.forward.getOrNull(1)?.let { warm(it) }
             return@LaunchedEffect
         }
 
-        if (first == null) return@LaunchedEffect
-        kotlinx.coroutines.delay(50L)
-        warm(first).join()
-        preloader.awaitWarmUpFinished(first.rawUrl)
-        if (!preloader.hasWarmPlayer(first.rawUrl)) {
-            // Usually a lost exit lottery, which a fresher circuit a moment later wins.
-            kotlinx.coroutines.delay(TOR_PRELOAD_RETRY_DELAY_MS)
-            warm(first).join()
-            preloader.awaitWarmUpFinished(first.rawUrl)
-        }
-        if (second != null && preloader.awaitPlayerReady(first.rawUrl, TOR_PRELOAD_CHAIN_WAIT_MS)) {
-            warm(second)
-        }
+        warmInOrder(
+            targets = preloadTargets.forward,
+            headStartMs = TOR_PRELOAD_HEAD_START_MS,
+            retryDelayMs = TOR_PRELOAD_RETRY_DELAY_MS,
+            warm = { target ->
+                warm(target).join()
+                preloader.awaitWarmUpFinished(target.rawUrl)
+            },
+            isWarm = { preloader.hasWarmPlayer(it.rawUrl) },
+            isDead = { preloader.isUnplayable(it.rawUrl) }
+        )
     }
 
     LaunchedEffect(settledItemId, hasRestoredInitialPosition) {
@@ -2164,7 +2169,7 @@ fun UnifiedFeedTab(
 }
 
 private const val TOR_PRELOAD_RETRY_DELAY_MS = 2_500L
-private const val TOR_PRELOAD_CHAIN_WAIT_MS = 20_000L
+private const val TOR_PRELOAD_HEAD_START_MS = 6_000L
 
 private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.Context): Pair<String, String?>? {
     return when (item) {
