@@ -6,10 +6,12 @@
 *   **Tor Connection**: Ensure Tor is connected. Check the status indicator at the top of the feed.
 *   **Refresh**: Pull down to refresh or use the "Refresh Feed" button in the search modal.
 *   **API Keys**: Some sources like Pexels or NewsAPI require an API key in Settings. Wikimedia and NASA do not.
+*   **Old items disappear**: NoSlop removes stored feed items after about 75 days, or sooner past 10,000 unread items. Saved items stay. Search can still find older items.
 
 ### Media Playback Issues
-*   **Videos not playing**: Some video sources (especially YouTube via Invidious) can be unreliable. Try swiping to the next item or refreshing.
-*   **Audio buffering**: Clearnet audio (your aggregated feed) is fetched directly and is usually fast; audio or media attached to **mesh posts/DMs** is fetched chunk-by-chunk from a peer over Tor and may take longer to buffer, especially on a slow or freshly-built circuit.
+*   **Videos not playing**: With "Route Clearnet via Tor" on, YouTube refuses many Tor exits. NoSlop tries other circuits by itself, which can take several seconds. Videos that can't play over Tor at all drop out of the Live Feed for that session. If a slide still shows an error, tap Retry or swipe on.
+*   **Video stops when you leave the app**: Turn on **Background Playback** and **Foreground Service** in Settings.
+*   **Audio buffering**: Clearnet audio (your aggregated feed) comes from its source, over Tor when "Route Clearnet via Tor" is on, so it can take a few seconds to start; audio or media attached to **mesh posts/DMs** is fetched chunk-by-chunk from a peer over Tor and may take longer to buffer, especially on a slow or freshly-built circuit.
 
 ### Mesh Connectivity
 *   **Adding Peers**: Use the QR scan feature to exchange identity details with friends.

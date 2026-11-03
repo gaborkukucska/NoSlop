@@ -1,7 +1,7 @@
 # Debugging NoSlop Android
 
 NoSlop includes an offline-first, local-only logging architecture designed for decentralized node debugging. There are no analytics trackers, telemetry SDKs, or central reporting backends. All diagnostics write to:
-1.  An in-memory **500-entry ring buffer** (`Logger.kt`'s `MAX_ENTRIES`) for real-time viewing in the Settings tab.
+1.  An in-memory **2,000-entry ring buffer** (`Logger.kt`'s `MAX_ENTRIES`) for real-time viewing in the Settings tab.
 2.  A local, persistent, newline-delimited text log file on the device.
 
 This document describes how to access, filter, and share these diagnostic details.
@@ -69,6 +69,17 @@ Download the entire `.log` file to your active working directory on your persona
 adb exec-out run-as com.noslop.app cat files/noslop-debug.log > ./noslop-debug.log
 ```
 
+### 4.3 Capturing Logcat
+
+Everything `Logger.kt` writes also goes to logcat, tagged `NoSlop/<MODULE>`. Capture it unfiltered, so the Tor daemon's own output is included, and search it afterwards:
+```bash
+adb logcat -c
+adb logcat -v time > noslop.log
+grep -E 'NoSlop/(JANK|VIDEO_AWAY|VIDEO|PLAYBACK_DIAG|PRELOAD|YT_INTERNAL_API|VM|FEED)' noslop.log
+```
+
+The commands in 4.1 and 4.2 use the `github` flavour's package. For a Play build, use `com.noslop.me.app`.
+
 ---
 
 ## 5. Key Modules and What They Reveal
@@ -82,6 +93,14 @@ Filters are applied in the logger to help isolate specific subsystem issues:
 *   **`FEED`**: Audits RSS/Atom XML parsing, HTML sanitization, API pipeline fetches (Jamendo, YouTube, Archive.org), and database insertions.
 *   **`FIREWALL`**: Audits our strict mesh packet filter rules. It lists sender pubkeys and drops packets that are not explicitly trusted.
 *   **`REPOSITORY` / `DATABASE`**: Audits CRUD actions, Room transactions, and synchronization locks.
+*   **`JANK`**: The main thread was silent for 600 ms or more. The line carries its stack, so it names the code that froze the app. Any `JANK` line is a bug.
+*   **`VIDEO_AWAY`**: A video while the app is in the background: `App left`, `App returned`, and any recovery in place.
+*   **`VIDEO` / `PLAYBACK_DIAG`**: Resolves, stalls, first frames and buffer samples for the video on screen.
+*   **`PRELOAD`**: Warm-ups and claims. `Claimed preloaded video` means a swipe landed on a warm player.
+*   **`YT_INTERNAL_API`**: YouTube resolves over Tor. It shows circuits refused, rotations and which client won.
+*   **`VM`**: `Feed batch built off the main thread` gives how long a batch took.
+
+[TECHNICAL_REFERENCE.md §16.28](TECHNICAL_REFERENCE.md) lists which lines to look for in what order. Read a capture before you post it: some lines carry the URL of what was playing.
 
 ---
 

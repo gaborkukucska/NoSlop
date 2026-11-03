@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.0--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.4--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
@@ -25,7 +25,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 ## ⚡ Why Stop the Slop?
 
-* 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked.
+* 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked. A video that stalls while you're away recovers in place, at the same position.
 * 🚫 **100% Ad & Tracker-Free** — Pure tracker-free client (using offline ZXing barcode scanning, no Google telemetry SDKs). Zero banners or sponsored interruptions.
 * 🎯 **Total Feed Sovereignty** — Non-algorithmic curation. You choose your mix quotas, sources, and categories with chronological history and optional Random Discover mode.
 * 🕸️ **Decentralized Social Mesh** — Direct peer-to-peer communication across Tor hidden services with multi-hop gossip relay.
@@ -42,7 +42,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 
-* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with dynamic ahead-of-time Tor preloading.
+* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with Tor preloading that warms up to three slides ahead, so the next video is usually already playing when you swipe.
 * 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
 * 📖 **Segmented Article Reader** — Multi-page horizontal book-style reader with asynchronous OpenGraph lead image resolution and full Markdown support.
 * 🎛️ **Non-Algorithmic Interleaved Curation** — Balanced mix quotas interleaving favorite creators, selected topics, and discovery items without opaque recommendation algorithms.
@@ -84,7 +84,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🛡️ **Default Tor Routing** — Outbound feed fetches, media streams, API requests, and mesh packets route through an embedded local Tor daemon.
 * 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns separate circuits to distinct media streams. That keeps each stream on the same exit and reduces Google IP-lock stalls.
 * 🔁 **Graceful Exit Hopping** — Nonce-bumping hops Tor exits upon provider blocks without process-wide circuit disruption.
-* 📲 **Peerless OTA Updates** — Background update checking over Tor with SHA-256 checksum verification and pre-install same-signer certificate matching.
+* 📲 **Peerless OTA Updates** — Background update checking over Tor. The GitHub build verifies the SHA-256 checksum and signing certificate, then saves the update to your Download folder for you to install.
 
 ---
 

@@ -1,4 +1,4 @@
-# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-10-13)
+# NoSlop — Mesh Wire Protocol Reference (Current State, 2026-11-03)
 
 **Scope**: This is the single, complete reference for NoSlop's HAI-Net mesh
 wire protocol — envelope format, the full packet-type catalog, every
@@ -282,7 +282,7 @@ Every payload class in `Packets.kt`, with wire (`snake_case`) field names.
 | `author_name` | String | Display name |
 | `author_public_key` | String | Base64 Ed25519 identity key |
 | `author_avatar_b64`? | String | Base64-encoded small avatar image, if set |
-| `origin_node`? | String | Network node where post originated |
+| `origin_node`? | String | Network node where post originated. Unsigned: a receiver uses it only if it is the author's own onion (§7.1) |
 | `content` | String | Text content of the post |
 | `timestamp` | Long | Epoch time in milliseconds |
 | `privacy` | String | `"public"` (default), `"friends"`, or `"private"` |
@@ -1137,6 +1137,20 @@ format (this table is the canonical list).
 
 ---
 
+### 7.1 Receiver rules for signed fields (2026-10-30)
+
+Nothing signed or sent changed. These are the rules a receiver applies, and a
+new client must apply them too.
+
+| Packet | Rule |
+|---|---|
+| `COMMENT`, `EDIT_COMMENT`, synced comments | Same author, not deleted or tombstoned, and a strictly newer timestamp wins. A delete leaves an author-scoped tombstone, which also covers a delete arriving before its create |
+| Reactions and votes (post, comment, chat, synced) | An add or remove applies only if its signed timestamp is newer than the newest known one, a row or a removal tombstone |
+| `ANNOUNCE_DISCOVERABLE` | Refused unless the onion derives from `authorId` (`CryptoService.isOnionOf`) |
+| `POST`, `EDIT_POST`, sync | An unsigned `origin_node` or `originNode` counts only if it is the author's own onion. Otherwise the stored peer onion is used (for sync, the responder's), and the value isn't passed on in download metadata |
+| `MEDIA_CHUNK` | Dropped unless the sender is the key addressed at the peer's onion, or the key that onion derives from, the offset matches a requested range, and the data is no longer than requested and within the metadata size |
+| Any packet | The dedup key is `type|id|payloadDigest`, so a packet reusing another packet's id doesn't burn it. Relayed copies of one packet still dedup |
+
 ## 8. Things Intentionally Not Covered Here
 
 The following remain accurately described by `docs/TECHNICAL_REFERENCE.md`
@@ -1157,7 +1171,7 @@ and are not duplicated in this document:
 ---
 
 **Related docs**: [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) for
-everything outside the wire protocol · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for
+everything outside the wire protocol · [GAP_ANALYSIS.md](archived/GAP_ANALYSIS.md) for
 the feature backlog this protocol surface was built against ·
 [PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
 log.

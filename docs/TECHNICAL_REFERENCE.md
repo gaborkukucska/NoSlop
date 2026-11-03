@@ -2,8 +2,8 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.7.0-alpha`, Room schema version 19 — see §10, compileSdk/targetSdk
-36, minSdk 24). It is intended to complement — not replace — `README.md` and
+versionName `0.7.4-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
+targetSdk 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
 data flow, constants).
@@ -1070,6 +1070,52 @@ and continue using natural trending/hot sorting.
   thumbnail/description extraction without the YouTube Data API.
 - Extracts the first content image for article previews (milestone 36).
 
+### 7.6 Feed item retention (`NOSLOP_FEED_RETENTION_V1`, `data/FeedRetention.kt`)
+
+`feed_items` only ever grew. A test device reached 31,521 rows, and every row
+was reloaded after each write and walked again for each feed batch.
+
+NoSlop has no server to ask what a user has seen, so the device must remember
+it. The windows are ordered to keep that memory intact:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `FRESHNESS_MAX_AGE_MS` | 60 days | What the Live Feed will show |
+| `RETENTION_MS` | 75 days | How long a dated item stays stored, seen or not |
+| `ENGAGEMENT_RETENTION_MS` | 90 days | How long the viewed and swiped records last |
+| `FETCH_GRACE_MS` | 7 days | Nothing leaves this soon after being fetched |
+| `MAX_UNREAD_ITEMS` | 10,000 | Unread items kept at most, oldest fetched removed first |
+| `RUN_INTERVAL_MS` | 1 day | Minimum gap between runs (`feed_retention_last_run` in `app_settings`) |
+
+An item can't leave storage while it is still young enough to be served, and
+the viewed and swiped records outlive the item. `FETCH_GRACE_MS` exists because
+search can bring in older items.
+
+`FeedRepository.pruneFeedItemsIfDue` runs four `FeedDao` queries in order:
+
+1. `deleteStaleItems`: dated items past `RETENTION_MS` and past the fetch grace,
+   skipping `ARCHIVAL_SOURCES`.
+2. `deleteStaleUnreadItems`: unread items fetched more than `RETENTION_MS` ago, from
+   any source. This is what clears undated and archival rows nobody opened.
+3. `getRemovableUnreadCount`, then `deleteOldestUnreadItems` for anything over
+   the cap, ordered by `createdAt`, then `publishedAt`.
+
+Every query exempts `isSaved` rows and ids in `viewed_history`, which the
+History tab needs. A `viewed_history` row lasts `ENGAGEMENT_RETENTION_MS`, and after
+that its item is treated like any other. Undated items and `ARCHIVAL_SOURCES` have no age filter, so
+a refetch can bring them back at any time. For those the stored read flag is
+the memory, so a read row stays.
+
+It runs 45 s after the view model starts and after each `FeedSyncWorker` sync.
+`FeedRetention.isDue` also treats a clock set backwards as due. A run logs one
+`FEED` line:
+
+```
+Feed retention: 31538 rows, removed 3416 stale, 3030 unread and 4011 over the cap, 21081 left, in 1115ms
+```
+
+Tests: `FeedRetentionTest`.
+
 ---
 
 ## 8. Clearnet-to-Mesh Bridge
@@ -1263,11 +1309,11 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 
 ## 11. Background Work
 
-- **`NoSlopForegroundService`** (`mesh/NoSlopForegroundService.kt`): an Android 8+ compliant Foreground Service bound to `TorService`. It posts an ongoing "Mesh Sync" notification to prevent the OS from aggressively killing the Tor daemon and mesh networking listeners when the app goes into the background.
-- **`FeedSyncWorker`** (`feeds/FeedSyncWorker.kt`, 20 LOC): a `CoroutineWorker`
+- **`NoSlopForegroundService`** (`mesh/NoSlopForegroundService.kt`): an Android 8+ compliant Foreground Service bound to `TorService`. It posts an ongoing "Mesh Sync" notification to prevent the OS from aggressively killing the Tor daemon and mesh networking listeners when the app goes into the background. Its content intent uses `FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_SINGLE_TOP`, so returning through the notification reaches the running activity rather than recreating the task (§16.33).
+- **`FeedSyncWorker`** (`feeds/FeedSyncWorker.kt`): a `CoroutineWorker`
   registered via `WorkManager` as a `PeriodicWorkRequest` with a **15-minute**
   interval, constrained to `NetworkType.CONNECTED`. Calls
-  `repository.refreshFeeds()`.
+  `repository.refreshFeeds()`, then `pruneFeedItemsIfDue()` (§7.6).
 - Mesh listener (`MeshTransport.startListening()`) and
   `MediaProxyService.start()` are started once from `NoSlopApp.onCreate()` as
   application-lifetime singletons (milestone 17 — previously these were
@@ -1281,9 +1327,9 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | Setting | Value |
 |---|---|
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
-| `compileSdk` / `targetSdk` | 36 |
+| `compileSdk` / `targetSdk` | 37.1 (`release(37) { minorApiLevel = 1 }`, required by `tor-android` 0.4.9.13+) / 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 70 / `0.7.0-alpha` |
+| `versionCode` / `versionName` | 74 / `0.7.4-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
@@ -1294,13 +1340,11 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 
 ### Key Dependencies
 
-- **Tor**: `info.guardianproject:tor-android:0.4.8.16` (jtorctl and netcipher
+- **Tor**: `info.guardianproject:tor-android:0.4.9.14` (jtorctl and netcipher
   were removed, C24; control goes through `TorControlChannel`, §17.1)
 - **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1` (Lazysodium and JNA were removed, C13)
-- **Networking**: `okhttp:4.10.0` (`gradle/libs.versions.toml`),
-  `okhttp-dnsoverhttps:4.12.0` (hardcoded in `app/build.gradle.kts`) — this is
-  a genuine, currently-real minor version mismatch between the two OkHttp
-  artifacts (confirmed by reading both files directly), `gson:2.10.1`
+- **Networking**: `okhttp` and `okhttp-dnsoverhttps` 4.12.0, both from
+  `gradle/libs.versions.toml` (§14 item 8), `gson:2.10.1`
 - **Media**: `androidx.media3` **1.11.1** (`exoplayer`, `transformer`,
   `effect`, `exoplayer-hls`, `exoplayer-dash`, `ui`, `datasource-okhttp`; all
   seven on one version, round E5). Since 1.4 the player calls the
@@ -1339,7 +1383,7 @@ whitelisted cleartext exceptions (milestone 8).
 
 While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes).
 
-In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md); Phases 1 and 2 (Headless Deployment, Authentication, and Active-Passive Tor Routing) are fully implemented:
+In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](archived/HUB_INTEGRATION_PLAN.md); Phases 1 and 2 (Headless Deployment, Authentication, and Active-Passive Tor Routing) are fully implemented:
 - **Active-Passive Identity**: NoSlop dynamically disables its local Tor hidden service when a Hub is linked, falling back to treating its embedded Tor daemon purely as an outbound SOCKS5 proxy to reach the Hub's persistent `.onion` API endpoint (`invokeHubApi`).
 - **Intelligent Edge Relay**: The Hub is *not* a dumb buffer. NoSlop periodically pushes its Contacts list to the Hub (`sync_push_peers`). The Hub listens on Port 9999, runs incoming traffic through its native `GossipEngine` and `TrustFirewall` (dropping spam and expired TTLs at the edge), and holds only valid packets in memory for the mobile app to securely poll (`sync_pull_packets`).
 - **Phase 3 (Active)**: SQLite persistence is now active on the Hub (`social.db`). NoSlop performs bi-directional sync, pushing live mesh packets and pulling historical DMs, Posts, and Contacts down to the mobile client on connect. The mobile app automatically injects an `Admin AI` peer contact mapped to the Hub's node ID, allowing seamless E2EE interaction with the Hub's persona agent.
@@ -1348,7 +1392,7 @@ In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **H
 
 ## 14. Known Discrepancies Between Documentation and Code
 
-(Cross-referenced in more detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).)
+(Cross-referenced in more detail in [GAP_ANALYSIS.md](archived/GAP_ANALYSIS.md).)
 
 Several discrepancies previously tracked here have since been **resolved in
 the code or in the relevant doc** — kept below, struck through, so the fix
@@ -1429,11 +1473,11 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 ### 15.1 Cloudflare Worker API Proxy (`yt-proxy.megadreamland.workers.dev`)
 - **Purpose**: API clients (`YouTubeInternalClient`, `RedditApiClient`, `JamendoApiClient`) send search/metadata requests to `https://yt-proxy.megadreamland.workers.dev` to prevent API providers from blocking Tor exit node IP ranges.
 - **Dynamic HMAC Request Signing**: Standard requests generate dynamic HTTP headers `X-Proxy-Timestamp` and `X-Proxy-Signature` (`HMAC-SHA256(timestamp:payload, PROXY_SECRET)`), eliminating reliance on raw static secrets.
-- **Tor Circuit Cycling & Fallbacks**: If proxy requests return HTTP 403 or 429 rate limit responses over Tor, `YouTubeInternalClient` triggers `TorService.requestNewCircuit()` (`SIGNAL NEWNYM`). When `useTorForClearnet = true`, all direct fallbacks strictly execute through `activeClearnetClient` (routed over Tor SOCKS5).
+- **Tor Circuit Cycling & Fallbacks**: If proxy requests return HTTP 403 or 429 rate limit responses over Tor, `YouTubeInternalClient` moves to a new circuit by bumping the video's stream nonce (§18.3). No process-wide `SIGNAL NEWNYM` is sent. When `useTorForClearnet = true`, all direct fallbacks strictly execute through `activeClearnetClient` (routed over Tor SOCKS5).
 - **API Metadata vs. Media Stream Bytes**: Cloudflare Worker only proxies API JSON queries. Actual video/audio stream playback bytes (`googlevideo.com`, `jamendo.com`, `v.redd.it`) bypass `yt-proxy` and are fetched directly via `activeMediaClient` (`activeClearnetClient`).
 
 ### 15.2 OTA Update Check & Release Integrity Validation
-- **Integrity Checks**: `UpdateManager.kt` computes the full SHA-256 digest of the downloaded APK before calling `launchInstaller()`, verifying file checksums before triggering `ACTION_VIEW` package installation.
+- **Integrity Checks**: `UpdateManager.kt` verifies the full SHA-256 digest and the signing certificate of the downloaded APK in private cache. Only a verified file is copied to the public Download folder (`saveToDownloads`, `NOSLOP_SAVE_TO_DOWNLOADS_V1`), and the user installs it from there. The app no longer holds `REQUEST_INSTALL_PACKAGES`. Only the `github` flavour has the updater (`ENABLE_IN_APP_UPDATER`).
 - **Network Path & Tor Routing**: `UpdateChecker.kt` and `UpdateManager.kt` use `HttpClientProvider.activeClearnetClient` (routed over Tor SOCKS5 when "Route Clearnet via Tor" is enabled, after waiting for Tor bootstrap).
 - **User Toggle**: An "Automatic Update Checks" switch in Settings allows users to completely disable automatic update checking.
 
@@ -1541,6 +1585,12 @@ be resolved to a direct stream is correctly surfaced as unavailable (and, per
 
 ### 16.4 The resolver must not sabotage the player
 
+> **Superseded (2026-09-06).** The app no longer sends `SIGNAL NEWNYM`, and
+> `TorService.requestNewCircuit` is gone. Each stream has its own SOCKS
+> credentials and circuit (§18), and a resolve moves to another circuit by
+> bumping its stream nonce, which disturbs nothing else. The constraint on
+> concurrent resolves below still holds. This section stays as the record of why.
+
 `SIGNAL NEWNYM` is process-wide. It discards **every** circuit, including
 the one ExoPlayer is currently streaming through. A capture on 2026-08-31
 showed eighteen rotations in sixty-three seconds, and every stalled video in
@@ -1562,7 +1612,7 @@ Three constraints now hold, and **new callers must respect them**:
 |---|---|---|
 | One rotation at a time, process-wide | `TorService.requestNewCircuit` | mutex, non-blocking `tryLock` |
 | Minimum gap between rotations | `TorService.NEWNYM_MIN_INTERVAL_MS` | 60s |
-| Concurrent InnerTube player resolves | `YouTubeInternalClient.playerResolveGate` | 2 |
+| Concurrent InnerTube player resolves | `YouTubeInternalClient.playerResolveGate` | 3, of which preloads may hold 2 (§16.31) |
 
 `requestNewCircuit()` returning `false` is a normal outcome, not an error: it
 means "this route is what you have, try something else". Do not loop on it.
@@ -1883,10 +1933,15 @@ with nothing in the middle, stop looking at client identities (§16.15) and
 look at the exit. The client roster only explains failures that vary *by
 client*.
 
-`resolveStreamUrl` now stops after `EXIT_BLOCKED_THRESHOLD` (2) refusals in
-one attempt and tries to rotate instead.
+Since 2026-11-03 one refusal from the first client is enough to move on for
+the first six attempts, and `EXIT_BLOCKED_THRESHOLD` (4) applies after that
+(§16.32). The capture above is why: a later client has never rescued a circuit.
 
 ### 16.17 Rotation is gated on live media, not on the clock (`NOSLOP_ADAPTIVE_ROTATION_V1`)
+
+> **Superseded by §18.** This gate went with `SIGNAL NEWNYM`. Changing a
+> resolve's circuit can't touch a stream now. `TorService.noteMediaProgress()`
+> remains, but all it does is clear the Tor-blocked message once bytes arrive.
 
 §16.4 rate-limited `requestNewCircuit()` to once per 60s after a rotation
 storm destroyed the circuit a visible video was streaming on. That was right
@@ -1909,6 +1964,9 @@ runs on every sample of every visible video.
 circuit out from under it.
 
 ### 16.18 Rotation is shared, so its result is shared (`NOSLOP_COOPERATIVE_ROTATION_V1`)
+
+> **Superseded by §18.** Circuits are per stream now, so there is nothing to
+> share. Kept as a warning about any process-wide control signal.
 
 `SIGNAL NEWNYM` is process-wide: a rotation by any caller moves **every**
 subsequent connection onto new circuits. The rate limit in §16.4 and §16.17
@@ -1948,6 +2006,10 @@ Exactly one attempt — if it fails again the exit is not the problem and the
 button is the honest answer.
 
 ### 16.20 Retrying only helps if something changed
+
+> **The rule below still holds, the mechanism has moved.** A resolve now
+> changes route by bumping its stream nonce (§18.3, §16.32). The Invidious
+> failover runs only with Tor off: public instances are dead or blocked over Tor.
 
 `requestNewCircuit()` is rate limited (§16.4) and returns `false` when it
 refuses. Retrying a YouTube resolve after a refused rotation re-asks the
@@ -2014,7 +2076,7 @@ On app cold start, the first video frequently experienced a visible delay where 
 3. **Cold-Start Feed Synchronization De-Contention (`NoSlopViewModel.kt`, `FeedRepository.kt`)**: On cold launch, `NoSlopViewModel.init` previously called `refreshFeeds()` the millisecond Tor reached `READY`, firing Phase 1 Ramp-Up (4 creator queries, trending requests, and RSS feeds). These parallel requests saturated Tor's local SOCKS daemon while Slide 1's ExoPlayer was attempting its HTTP Range request. Gated Phase 1 Ramp-Up to empty databases only (`!hasExistingItems`), and deferred cold-start feed synchronization in `init` by 12 seconds so 100% of Tor bandwidth is dedicated to Slide 1 playback.
 4. **Tor Cold-Start Stall Watchdog Tuning (`VideoPlayer.kt`)**: The stall watchdog previously used `if (bufPos <= 0L) 4` (8 seconds) and `stalledSamples >= 6` (12 seconds) on Tor. Because SOCKS5 circuit allocation, TLS handshakes, and Range requests deep into video files (e.g. 627s resume position) take 12–15s on Tor networks, the watchdog aborted valid connections at 8s or 12.1s right as bytes were arriving. Raised the Tor stall threshold to 22s (11 samples) and continuous buffering threshold to 30s (15 samples), and reset `stalledSamples` whenever `delta > 0L`.
 
-### 16.23 Diagnosing from logs
+### 16.28 Diagnosing from logs
 
 Capture unfiltered — `adb logcat -c && adb logcat -v time > noslop.log` — and
 uninstall whichever build variant is not under test (§16.10). Filtering by
@@ -2026,6 +2088,7 @@ fixing the wrong layer.
 
 | Step | Question | Where to look |
 |---|---|---|
+| 0 | Is it the UI and not the stream? | A swipe that stops part way is the main thread: `NoSlop/JANK` (§16.29) |
 | 1 | Is anything reaching the network at all? | §16.7 — `.onion` peers *and* clearnet both timing out means no path; stop here |
 | 2 | Did Tor actually finish bootstrapping? | `Tor bootstrap NN%` (§16.9). "Tor is ON" is not proof |
 | 3 | Are resolves succeeding? | count `Resolved direct video stream using X` — **never** playability status (§16.15) |
@@ -2038,9 +2101,15 @@ Signals worth knowing by sight:
 
 | Line | Means |
 |---|---|
-| `N clients refused on the same circuit` | exit lottery lost; a rotation was attempted (§16.16) |
-| `Not rotating — another caller rotated Ns ago` | cooperative rotation working (§16.18) |
-| `Skipping NEWNYM ... because a video is streaming` | §16.17 protecting a live stream — correct, not a problem |
+| `N clients refused on circuit ...` | exit lottery lost; the resolve moved to a new circuit (§16.16, §16.32) |
+| `Exit refused ... — trying another circuit` | a country-style refusal that depends on the exit (§16.31) |
+| `is unplayable over Tor`, `Treating it as unplayable` | the video is remembered as dead for 30 minutes (§16.31) |
+| `Main thread blocked for Nms at: ...` | `JANK`: the stack shows what held the main thread (§16.29) |
+| `Feed batch built off the main thread in Nms` | how long an append took; it no longer touches the swipe (§16.29) |
+| `Claimed preloaded video: ... state= bufMs=` | a swipe landed on a warm player (§16.30) |
+| `App left:`, `App returned:` | `VIDEO_AWAY`: player state on each trip away (§16.33) |
+| `Recovering in place while away`, `Swapped in a fresh stream` | §16.33 keeping a player alive in the background |
+| `Feed retention: N rows, removed ...` | the daily pruning run (§7.6) |
 | `Auto-retrying unavailable resolve` | §16.19 doing what a user would otherwise have to tap |
 | `Gave up waiting 20s for a resolve slot` | the §16.8 gate is too tight for current conditions |
 | `offered only adaptiveFormats` | §16.12 correctly refusing a video-only stream |
@@ -2051,6 +2120,187 @@ diagnoses do not depend on that — a gated exit refuses you identically on
 fibre — but treat the durations as an upper bound, and be sceptical of any
 conclusion that rests on absolute latency rather than on a ratio or a
 pattern.
+
+### 16.29 A swipe must not wait on the main thread (`NOSLOP_FEED_BUILD_OFF_MAIN_V1`, `NOSLOP_SMOOTH_TEARDOWN_V1`)
+
+**Symptom:** the slide stopped part way up for seconds while its video kept
+playing. Audio and video decode off the main thread, so the video carried on
+while the pager, which is on the main thread, couldn't move.
+
+**Cause 1, feed batches.** `beyondViewportPageCount = 2` composes pages near
+the end of the list on the first frames of a swipe, and that fired
+`loadMoreFeedItems`. The batch walked every stored row on the main thread:
+3.2–3.9 s with 31,521 rows.
+
+| Piece | Thread | Notes |
+|---|---|---|
+| `loadMoreFeedItems` | Main | Dispatches, and holds a request made during a build in `pendingAppendFilter` |
+| `computeFeedBatch` | `Dispatchers.Default` for an append | Returns a `FeedBatchPlan`. **It must not change list state** |
+| `applyFeedBatch` | Main | Publishes the plan |
+
+An append is dropped if the mode, the search or `feedListGeneration` changed
+while it was built, or if the list went empty. A list built from empty stays
+synchronous, or the empty state would flash. History, Saved and Author stay
+synchronous too (see Work Remaining in `PROJECT_STATUS.md`). A second build
+runs only if the list didn't grow, or for a search.
+
+What a background build reads is safe to read there: `@Volatile` on the caches,
+`allFeeds`, `allMeshes`, `activeSearchQuery` and `currentFilterMode`, and
+concurrent `sessionLoadedIds` and `allSearchResultItemIds`.
+
+**An LRU smaller than a sequential scan has a 0% hit rate.** `ReactionAnchor`
+is walked over every row, so `MAX_CACHED` must stay above the row count. It is
+65,536, and `FeedRetention.MAX_UNREAD_ITEMS` keeps the table well under that.
+
+**Cause 2, player teardown.** ExoPlayer blocks the main thread for up to 2 s to
+detach a surface (`DEFAULT_DETACH_SURFACE_TIMEOUT_MS`) and up to 500 ms in
+`release()`, while `stop()` doesn't block. So a slide leaving the screen goes
+through three steps:
+
+| Step | When | Constant |
+|---|---|---|
+| Pause | At once | |
+| `player.stop()` | After 200 ms | `PLAYER_STOP_DELAY_MS` |
+| Unmount | After 450 ms | `PLAYER_UNMOUNT_DELAY_MS` (`rememberHeldTrue`) |
+
+`PreloadManager.retire` stops a player now and releases it 1.2 s later.
+
+**`MainThreadStallMonitor`** (`debug/`) pings the main thread every 200 ms
+between `onStart` and `onStop`. After 600 ms of silence it logs `JANK` with the
+main thread's stack, and logs again when it is free. Treat any `JANK` line as a
+bug: it names the code that froze the app.
+
+Tests: `FeedSmoothnessArchitectureTest`, `ReactionAnchorTest`, `PlaybackPolicyTest`.
+
+### 16.30 Preload lookahead over Tor (`NOSLOP_PRELOAD_TARGETS_V1`, `NOSLOP_TOR_PRELOAD_BUDGET_V1`)
+
+**Key the preload on what is wanted, not on a page number.** `selectPreloadTargets`
+in `UnifiedFeedTab.kt` gives the current slide, the previous one and up to
+`FORWARD_LIMIT` (3) slides ahead, looking `FORWARD_WINDOW` (10) slides on. The
+effect is keyed on that value, so a list that changes under a still pager warms
+the next slide. Keyed on the page, that slide stayed cold until the next swipe.
+
+**Never wait for a slide to be ready.** Round 1 did, and one dead or slow slide
+left everything behind it cold: "only 2 to 3 videos are preloaded". `warmInOrder`
+gives each target a head start, then moves on whether it worked or not:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `TOR_PRELOAD_HEAD_START_MS` | 6 s | Time a slide has before the next one starts |
+| `TOR_PRELOAD_RETRY_DELAY_MS` | 2.5 s | Before a target that hasn't warmed is tried again |
+| `MAX_PRELOAD` | 4 | Warm players held at once |
+
+Other rules:
+
+* `retainOnly` evicts what the settled slide no longer wants. It runs only after
+  `hasRestoredInitialPosition` and with a non-empty list, because the first
+  composition is empty and would evict the player warmed behind the splash screen.
+* The current slide is in the keep set. Its preload may be half way through the
+  resolve the slide is waiting for.
+* Warm-ups wait up to 1.5 s while `isFeedScrolling`.
+* `warm().join()` returns before a queued warm-up has run, so `warmInOrder` waits
+  on `awaitWarmUpFinished`.
+
+Tests: `PreloadTargetsTest`, `TorLookaheadTest`.
+
+### 16.31 Dead slides (`NOSLOP_DEAD_SLIDES_V1`)
+
+Some videos can't play over Tor at all: live broadcasts, age-gated or private
+videos, and videos that no longer exist. Each one used to cost a full resolve,
+then again on every pass.
+
+`YouTubePlayability` sorts the answers:
+
+| Function | Means | Action |
+|---|---|---|
+| `isAgeOrPrivate` | No exit will help | Unplayable |
+| `isExitDependent` | "Not available in your country" is about the exit | Try another circuit, up to `MAX_EXIT_ROTATIONS` (2) |
+| `isBroadcastingNow` | Live, no progressive stream | Unplayable |
+
+Two more routes lead to unplayable. Clients answering `OK` with nothing playable
+on `MAX_PASSES_WITHOUT_STREAM` (2) circuits means it is the video, not the exit.
+So does `ERROR` from the first client on `MAX_ERROR_CIRCUITS` (2) circuits, once
+the other clients have failed too.
+
+**What happens to an unplayable video:**
+
+* `unplayableUntil` remembers it for 30 minutes, up to 500 ids. It isn't permanent,
+  since a premiere starts and a stream ends. Only preloads skip the request, so a
+  tap on Retry always asks again.
+* `PreloadManager.unplayableUrls` drops it from the Live Feed for the session.
+  It never drops the settled slide (the pager must not jump) and never touches
+  search, where the user asked for it.
+* `invalidateAllOnRouteTransition` forgets all of this. What can't play over Tor
+  may play on the new route.
+
+**Preloads can't take every resolve slot.** `speculativeResolveGate` holds them to
+two of the three `playerResolveGate` permits, so the slide on screen always has one.
+
+Tests: `YouTubePlayabilityTest`.
+
+### 16.32 Fast exit rotation (`NOSLOP_FAST_EXIT_ROTATION_V1`)
+
+Round 2's capture had 40 circuits: 15 answered `OK` on the first client, 25 were
+fully refused, and no later client rescued any of them. The whole app log had
+131 circuits, and ANDROID won 54 of 54 resolves. Asking every client on a blocked
+exit is wasted time, as §16.16 predicted.
+
+* `winnerFirst` puts the client that last produced a stream first
+  (`lastWinningClient`).
+* `refusalsBeforeRotating` allows one refusal for the first
+  `FAST_ROTATION_ATTEMPTS` (6) attempts, then `EXIT_BLOCKED_THRESHOLD` (4), in
+  case the winning client itself broke.
+* `maxAttempts` is 8 over Tor, since a circuit that fails on the first client
+  costs about 3 s, not a full client walk.
+
+Measured on device: three rotations at about 3.1 s each, resolved in 11.3 s.
+Clean resolves took 1.8–2.6 s.
+
+Tests: `YouTubePlayabilityTest`.
+
+### 16.33 Playing while away (`NOSLOP_AWAY_RECOVERY_V1`)
+
+**Compose recomposes after `ON_STOP`.** Since 2023 only `withFrameNanos` pauses,
+and layout doesn't run. An early theory that composition froze in the background
+was wrong: effects and the stall sampler keep running, which is why they could
+do damage there.
+
+Three things turned a healthy background video into "Finding stream" on return:
+
+1. **False stalls.** READY with `playWhenReady` on and `isPlaying` off means
+   playback is suppressed, usually by a short audio focus loss. A full buffer
+   rightly downloads nothing, so the sampler called it a stall. `canCountAsStall`
+   now requires a player that wants to play and has run out of media.
+2. **The normal retry clears `source`,** which releases the player. Over Tor a
+   re-resolve can take a minute, and a user coming back in that time met
+   "Finding stream".
+3. **The URL changed under a playing slide.** While an item is on screen it keeps
+   the URL it started with (`NOSLOP_HELD_PLAYBACK_URL_V1`). A retry key is handled
+   once (`NOSLOP_RETRY_ONCE_V1`).
+
+**Recovery in place.** While the app is away, `recoverWhileAway` keeps the player,
+re-resolves, and calls `setMediaSource(src, resumeAtMs)` then `prepare()`.
+`decideAwayRecovery` decides:
+
+| Decision | When |
+|---|---|
+| `NOT_AWAY` | The app is started; use the normal retry |
+| `ALREADY_RUNNING` | A recovery is in progress |
+| `START` | Away, with attempts left |
+| `GIVE_UP` | `MAX_AWAY_RECOVERIES` (3) used; a retry runs on return |
+
+Attempts that find no stream wait `AWAY_RECOVERY_RETRY_DELAY_MS` (4 s).
+`mediaClientFor` keeps a running player on the client its URL needs.
+
+Other rules: `isVideoActive` is cleared on dispose only if `currentlyPlayingUrl`
+is null, and `ERROR_CODE_TIMEOUT` from `StuckPlayerDetector` counts as recoverable.
+
+**Reading a capture:** `VIDEO_AWAY App left:` and `App returned:` give
+`state`, `playing`, `wants`, `suppressed` and `userPaused`, and the position
+should move with the clock between them. The log can't show whether a return
+used the notification.
+
+Tests: `PlaybackPolicyTest`.
 
 ## 17. Audit and Hardening Pass (2026-09-02)
 
@@ -2538,7 +2788,7 @@ Implemented standard SOCKS5 Username/Password authentication (RFC 1928 / RFC 192
 4. `TorDns` prevents local DNS resolution by handing dummy `InetAddress` records to OkHttp, ensuring all hostname lookups occur remotely at the Tor exit node via SOCKS5 `ATYP 0x03` (DOMAINNAME).
 
 ### 18.3 Nonce-Bumping Circuit Hopping
-When YouTube returns `LOGIN_REQUIRED` across 2 client configs (`ANDROID` and `TVHTML5`), `YouTubeInternalClient` increments `streamNonce` in `videoStreamNonces[videoId]`. The subsequent attempt automatically opens a SOCKS connection under `yt_${videoId}_1`, causing Tor to assign a brand new exit node without invoking `SIGNAL NEWNYM`. Active streams and other preloaded players are completely unaffected.
+When YouTube returns `LOGIN_REQUIRED` (from one client for the first six attempts, §16.32), `YouTubeInternalClient` increments `streamNonce` in `videoStreamNonces[videoId]`. The subsequent attempt automatically opens a SOCKS connection under `yt_${videoId}_1`, causing Tor to assign a brand new exit node without invoking `SIGNAL NEWNYM`. Active streams and other preloaded players are completely unaffected.
 
 ### 18.4 Egress Region Parameter Retention
 Removed obsolete code that discarded stream URLs carrying `gcr=` country tags over Tor. With SOCKS5 stream isolation, both the resolution request and the media chunk requests originate from the same exit node IP, making regional parameters (`gcr=ir`, `gcr=ro`, `gcr=us`) valid and preventing false `Unavailable` failures.
@@ -2589,7 +2839,7 @@ Previously, swiping away a slide only invoked `markItemViewed` if a 4-second dwe
 - The 4 s dwell effect is keyed on the settled item id as well. It no longer marks an item that was replaced at the same page, and a list shift that keeps the same item on screen isn't a new slide for `onSlideViewed`.
 - Tested (unit: `FeedSwipeMarkingTest`).
 - `EngagementRepository.recordSwipe()` writes the raw `itemId`, normalized ID (`normId`), and canonical key (`canonicalKey`) into `swipe_tracker`.
-- `NoSlopViewModel.loadMoreFeedItems()` filters candidates against `cachedExcludedIds` across raw, normalized, and canonical keys, ensuring swiped items are permanently excluded from the Live Feed.
+- `NoSlopViewModel.loadMoreFeedItems()` filters candidates against `cachedExcludedIds` across raw, normalized, and canonical keys, ensuring swiped items are permanently excluded from the Live Feed. Since 2026-11-03 that walk is in `computeFeedBatch`, off the main thread for appends (§16.29).
 
 ### 20.2 Cold-Start Slide Position Persistence & Race Condition Elimination
 `UnifiedFeedTab.kt` previously initialized `hasRestoredInitialPosition = true` on the first frame if `savedTargetId` was null. Because `NoSlopViewModel` loads `saved_feed_active_id` asynchronously from Room on `Dispatchers.IO`, `savedTargetId` was momentarily null during early composition. Additionally, Room's initial empty emission on cold start caused `NoSlopViewModel` to fall into `else { loadMoreFeedItems() }`, discarding `saved_feed_list`.
@@ -2642,7 +2892,7 @@ Previously, using the History filter presented several severe defects:
 
 ### 20.7 Mesh Tab Instant Empty State & Position Restoration on Return
 Previously, toggling to the Mesh tab checked `if (isRefreshing)` before checking for Mesh empty state. Because background clearnet feed sync was running over Tor, `isRefreshing` remained true for up to a minute, displaying "Curating your feed..." over the Mesh tab despite no clearnet feeds belonging to Mesh mode. Additionally, `loadMoreFeedItems()` in `NoSlopViewModel` triggered `refreshFeeds()` whenever `unseenFeeds.isEmpty()`, which was always true on the Mesh tab.
-- `NoSlopViewModel.loadMoreFeedItems()` restricts `isUsingFallback` to feed modes (`actualFilter == "Live Feed" || actualFilter == "Random"`), preventing Mesh switches from firing clearnet sync.
+- `computeFeedBatch` starts a refresh only in feed modes (`isFeedMode`: Live Feed or Random) and only when nothing unseen is left, preventing Mesh switches from firing clearnet sync.
 - `UnifiedFeedTab.kt` prioritizes `filterMode == "Mesh"` in the empty state container, instantly rendering the "Nothing New Here" card by default with zero delay.
 - The "See Old Posts" button on the "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts == true`.
 - The tab-switching restore mechanism uses a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)` independent of the one-time cold-start flag, restoring the exact slide position when returning to "All".
@@ -2664,7 +2914,7 @@ Previously, using the History filter presented several severe defects:
 - `viewedHistoryRecords` uses `SharingStarted.Eagerly` in `NoSlopViewModel.kt`, guaranteeing that history records are immediately active and fresh in memory even without UI subscribers.
 - Real-time search query filtering is integrated into `loadHistoryBatch`, allowing users to search their viewed history by keyword across titles, authors, excerpts, and content.
 - `unconsumed` checks `com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys` and performs a clean return when empty, preventing duplicate re-appending or loopback to slide 0 when scrolling past slide 30.
-- Viewed items (`isRead = 1`) in `feed_items` are protected from deletion in `deleteYouTubeItems`, `deleteExpiredItems`, and `clearUnsavedItems`.
+- Viewed items (`isRead = 1`) in `feed_items` are protected from deletion in `deleteYouTubeItems` and `clearUnsavedItems`. Retention has its own rules (§7.6): it keeps saved items and anything in `viewed_history`.
 - `loadHistoryBatch` automatically reconstructs historical YouTube items on the fly from their `yt_VIDEO_ID` stored in `viewed_history` if their rows were purged in earlier versions, enabling continuous infinite scrolling through all historical content.
 - In `UnifiedFeedTab.kt`, `recordItemSwiped` and dwell-time `markItemViewed` are guarded with `if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked")`. Merely browsing historical items does not mutate timestamps or displace active pager items.
 - Dismissing filter chips and clearing modal filters calls `syncFilterMode("Live Feed", forceRefresh = false)`, immediately restoring `cachedDefaultFeed` and scrolling to `savedFeedItemId` with zero delay.
@@ -2680,11 +2930,11 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 - Unified media detection helpers (`isAudioFeedItem`, `isVideoFeedItem`, `isImageFeedItem`, `isArticleFeedItem`) in `NoSlopViewModel.kt`, ensuring audio tracks (MP3/FLAC/AAC) and images are recognized consistently across the entire pipeline.
 - Raised batch size for all specific filters (`Videos`, `Audio`, `Images`, `Articles`, `Mesh`, `History`, `Liked`, `Saved`) from 3 to 30, unblocking infinite scrolling past slide 27.
 - Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
-- Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
+- *(Replaced: the Live Feed now never brings back items the user saw, swiped or reacted to.)* Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
 
 ### 20.10 Tor Resolve Priority & Bandwidth De-Contention
 - **Resolve Permit Priority**: In `YouTubeInternalClient.kt`, background preloads (`isPreload = true`) now use a 2-second timeout on `playerResolveGate` and yield immediately if permits are busy, preventing speculative preloads from locking out the active on-screen video.
-- **Bandwidth Concentration**: Reduced `MAX_PRELOAD` from 4 to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe.
+- **Bandwidth Concentration**: Reduced `MAX_PRELOAD` from 4 to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe. *(It is back at 4, with lookahead paced as §16.30 describes.)*
 
 ## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)
 
@@ -2805,14 +3055,74 @@ To maintain sovereign identity separation between personal direct messages and p
 * Aligned creator setting lookup to `"is_creator_enabled"` so incoming connection requests are automatically accepted on creator nodes.
 * Fixed `handleAnnounceDiscoverable` to preserve `isTemporary = peer.isTemporary`, preventing temporary contacts from flipping to permanent upon presence heartbeats.
 
+## 24. P1 Security Fixes (2026-10-30)
+
+Merged from `security/p1-fixes`. Nothing signed or sent on the wire changes. The
+receiver rules are also in `WIRE_PROTOCOL_REFERENCE.md` §7.1.
+
+### 24.1 Tor HTTP tunnel port
+`tor-android`'s `setDefaultProxyPorts()` writes `HTTPTunnelPort 8118|auto` into
+torrc-defaults. NoSlop overrode only `SocksPort`, which left an unauthenticated
+HTTP CONNECT proxy into Tor on loopback for any local app. The torrc now sets
+`HTTPTunnelPort 0`. Its content moved into the pure
+`TorControlChannel.buildTorrc`, and bootstrap at 100% logs
+`GETINFO net/listeners/{socks,httptunnel}`, so a device run can confirm the
+listener is gone. Tests: `TorrcTest`.
+
+### 24.2 SSH first-connect host keys
+JSch under `StrictHostKeyChecking=yes` throws "reject HostKey", never
+"UnknownHostKey", so the old probe never reached the confirmation dialog, and a
+new host failed after three tries. Both passes now use `ask`: the probe captures
+the fingerprint and answers no, and after the user confirms, the pinning pass
+answers yes only for exactly that fingerprint, once. A changed key is refused, as
+is a key swapped between the passes. A rejection without a fingerprint, or a
+deploy with no confirmation callback, fails closed. Logic: `SshHostKeyPolicy`.
+Tests: `SshHostKeyPolicyTest`.
+
+### 24.3 Replay and origin
+* **Comments.** `CommentDao.insertCommentSafely` (same author, not deleted, strictly
+  newer wins), `editCommentSafely` and `deleteCommentWithTombstone` (an author-scoped
+  tombstone in `app_settings`, which also covers a delete arriving before its create).
+* **Reactions and votes.** `EngagementOrdering` applies an add or remove only if
+  the signed timestamp is newer than the newest known one, a row or a removal
+  tombstone. No schema change.
+* **Discoverable.** `ANNOUNCE_DISCOVERABLE` is refused unless the onion derives from
+  `authorId` (`CryptoService.isOnionOf`).
+* **Origin.** An unsigned `origin_node` is used only if it is the author's own onion.
+
+Tests: `ReplayAndOriginP1Test`.
+
+### 24.4 Gossip
+* `flushFirewallBuffer` replayed buffered `MESSAGE` packets through `processIncoming`,
+  which never dispatches, so they were marked processed and lost. Replay now goes
+  through `handleIncomingPacket`, with a single-use release token.
+* Per-sender lists change only inside `ConcurrentHashMap` compute calls. Caps: 256
+  buffered senders, 4,096 entries per rate-limit table (prune, then fail closed for
+  new senders).
+* The dedup key is `type|id|EnvelopeAuth.payloadDigest(payload)`, so a packet reusing
+  a victim's id can't burn it. Relayed copies of one packet still dedup.
+
+Tests: `GossipServiceTest`.
+
+### 24.5 Media
+* A public, friends or private `POST` or `COMMENT` `media_owner` row authorizes only if
+  its author matches every restricted row (`DM`, `GROUP`, private) for that media id.
+* `handleMediaChunk` drops a chunk unless it comes from the addressed sender, at a
+  requested offset (`inflightLengths`), and is no longer than requested.
+* `finishDownload` checks SHA-256 on the part file before renaming it. A mismatch
+  deletes it and restarts from zero.
+
+Tests: `MediaOwnershipAndChunkSecurityTest`.
+
 ---
+
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
 the complete, authoritative wire-protocol detail (packet catalog, payload
 JSON shapes, signed-string formats) that supersedes §4/§5 here ·
-[GAP_ANALYSIS.md](GAP_ANALYSIS.md) for the feature backlog vs. gChat/HAI-Net ·
+[GAP_ANALYSIS.md](archived/GAP_ANALYSIS.md) for the feature backlog vs. gChat/HAI-Net ·
 [PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
-log · [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for §13's planned
+log · [HUB_INTEGRATION_PLAN.md](archived/HUB_INTEGRATION_PLAN.md) for §13's planned
 HUB-client transition in full detail.
 

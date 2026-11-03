@@ -1,5 +1,133 @@
 # Project Status - NoSlop
 
+## Feed Playback Rounds 1–3 (2026-11-03): Summary and Work Remaining (v0.7.4-alpha)
+
+These rounds fix the three reports in `isues.txt`, all on the legacy Android app: a swipe that stopped part way for a few seconds while the video kept playing, clearnet video that wasn't ready with Route Clearnet via Tor on, and video that stopped on "Finding stream" after leaving the app and coming back. The MVP is out of scope. No packet, Room schema or archive format changes. The version stays 0.7.4-alpha. Each round has its own entry below, newest first. Design notes: `docs/TECHNICAL_REFERENCE.md` §7.6 and §16.29–§16.33.
+
+* **Verified on device** (owner's phone, with Route Clearnet via Tor, Foreground Service and Background Playback on). Owner sign-off, 2026-11-03: "Working well."
+  * **Swipes.** No `JANK` line in the round 1 or round 3 capture. Feed batches took 2.4–4.9 s with about 31,500 stored rows. They now run off the main thread, so they can't hold up a swipe.
+  * **Preload.** Round 2 capture: 12 of 12 slides were warm when claimed, 11 of them with 21–45 s buffered. First frames came in 103–581 ms.
+  * **Leaving the app.** Round 3 capture: four trips away (36 s, 4 s, 17 s, 59 s). The video kept playing, its position moved with the clock, and there was no "Finding stream" and no stall.
+  * **Retention.** First run on the test device: 31,538 rows down to 21,081 in 1.1 s.
+  * **Exit rotation.** One blocked circuit now costs about 3 s. A video that needed three rotations resolved in 11.3 s; clean resolves took 1.8–2.6 s.
+* **Not yet verified.**
+  * **The Gradle unit test run for these rounds** (`./gradlew testGithubDebugUnitTest testPlayDebugUnitTest --rerun-tasks`). Maven and Google were out of reach where these rounds were written, so the pure logic and its new tests were compiled and run with `kotlinc` and stubs. The app itself was compiled on the owner's machine. Until that run passes, the entries below say "New tests", not "Tested".
+  * **Coming back through the notification.** The log doesn't show which way a user returned, so the four trips above don't prove this path separately.
+  * **Feed batch time after retention.** The round 3 capture has no `Feed batch built` line.
+  * Everything under "Verify before release" below.
+* **Owner decisions recorded (2026-11-03).**
+  * **Retention.** NoSlop has no server, so the device must keep knowing what the user has seen and swiped away. Stored items last a little longer than the two months the Live Feed will show: 75 days. The viewed and swiped records last 90.
+  * **Hub.** No Hub is deployed or linked. That repo still needs work, and the focus stays on the app.
+
+### Work Remaining
+
+This is the full list of open work on the legacy app as of 2026-11-03. Older entries further down may say "still open" about items that are closed since; this list wins.
+
+**Feed and playback**
+
+* **History and Saved still build on the main thread.** Round 1 moved Live Feed and filter appends off it, not `loadHistoryBatch` or the Saved path. A very long list there can still hold up a swipe.
+* **Every `feed_items` write reloads the whole table,** `fullContent` included. Retention cut the table by a third, but the reload remains.
+* **`setImmersiveFullscreen` runs on every slide** rather than on a change.
+* **`AudioPlayer` has no recovery path.** It no longer tears down mid-swipe, but it doesn't re-resolve in place while the app is away the way `VideoPlayer` does (§16.33).
+* **A dead slide that reaches the screen still shows the unavailable card.** Dead slides leave the Live Feed once a preload finds them, for that session only (§16.31). A fast swipe can get there first.
+* **Slow resolves remain when several exits in a row are blocked.** About 3 s per blocked circuit (§16.32). This is the exit lottery itself; no setting removes it.
+* **Log noise.** Repeated send failures to offline mesh peers, and exhausted Invidious "channel joined date" lookups.
+
+**Mesh and security** (all re-checked against the code on 2026-11-03)
+
+* **Packets pulled from a Hub skip the envelope check.** See Known Gaps in the Review Round 2 summary below.
+* **The Hub's onion address is not checked against its key.**
+* **Clocks must agree to within 1 hour** (`EnvelopeAuth.MAX_SKEW_MS`).
+* **A group catch-up answer can reach non-members.** `handleGroupQuery` still broadcasts when the asking member has no stored onion address.
+* **Users invited by a member get group catch-up late** (G1).
+* **`mediaDigestFor` can block a same-revision v2 upgrade** of someone else's media that was downloaded unverified (D08). Nothing wrong is accepted; the post keeps its older signature.
+* **Hub relaying (D04).** A linked Hub relays by its own rules.
+* **Deferred by the owner:** C27 (persistent per-peer connections) and R4d (handshake budget).
+
+**Search**
+
+* **Older downvotes still show.** Those made before E5s were stored only as swipes.
+* **Search quality** works, but needs more work later.
+
+**Verify before release**
+
+* The Gradle unit test run above.
+* A minified release build, using `docs/RELEASE_SMOKE_TEST.md` (E5). Its media section now covers these rounds.
+* Backup export and import on a device (E3).
+* The findings the matrix still marks as not device-verified: C06, C07, C11, D05, D09 and D10.
+* The P1 security fixes on a device: `GETINFO net/listeners/httptunnel` empty at bootstrap, the first-connect SSH host-key dialog, and two-device replay of comments and reactions. The commits were tested by unit tests; no device result is recorded here.
+
+**Owner to check**
+
+* `docs/PRIVACY_POLICY.md` says "App: NoSlop (iOS)" in its header, although the text describes the Android app. Left as it is, since a policy's header is the owner's call.
+
+---
+
+## Completed Changes (2026-11-03) — Feed Playback Round 3: Feed Retention, Faster Exit Rotation (v0.7.4-alpha)
+
+The device had 31,521 feed rows and the table only ever grew. Round 2's capture also showed 25 of 40 circuits fully refused, none of them rescued by a later client. New tests: `FeedRetentionTest`, and additions to `YouTubePlayabilityTest`. On device: see the summary above.
+
+* **Feed retention** (`NOSLOP_FEED_RETENTION_V1`, `data/FeedRetention.kt`, §7.6). Runs at most once a day, 45 s after the view model starts and after each background sync.
+  * The windows are ordered so the device's memory stays intact: the Live Feed shows up to 60 days, a dated item stays stored for 75, and the viewed and swiped records last 90.
+  * An item fetched in the last 7 days stays, so older items a search brought in aren't removed under the user.
+  * Unread items are capped at 10,000, oldest fetched first.
+  * Saved items are never removed. Anything in `viewed_history` stays for as long as its record does, which is 90 days.
+  * Undated items and items from archival sources have no age filter, so a refetch can bring them back. For those a read row is the memory, and it stays.
+  * `FeedDao` gains `deleteStaleItems`, `deleteStaleUnreadItems`, `getRemovableUnreadCount` and `deleteOldestUnreadItems`. `EngagementRepository` and the view model take their windows from `FeedRetention`.
+* **Faster exit rotation** (`NOSLOP_FAST_EXIT_ROTATION_V1`, §16.32). ANDROID won 54 of 54 resolves in the app log, and no other client ever rescued a refused circuit. So for the first six attempts, one refusal from the first client moves to the next circuit, and the last client that won goes first. The budget rises to eight attempts over Tor.
+* **A video that no longer exists stops sooner.** `ERROR` from the first client on two circuits, with the other clients unable to play it, counts as unplayable (`MAX_ERROR_CIRCUITS`). One such video took six circuits and 30 s.
+* **`VIDEO_AWAY` logs** add `wants`, `suppressed` and `userPaused`, so a capture shows why a player isn't moving.
+
+## Completed Changes (2026-11-03) — Feed Playback Round 2: Preload Lookahead, Dead Slides (v0.7.4-alpha)
+
+Owner's report on round 1: only 2 to 3 videos were preloaded, and the following 2 to 3 needed buffering or "Finding stream". That was a design flaw in round 1. New tests: `TorLookaheadTest`, `YouTubePlayabilityTest`.
+
+* **Lookahead no longer waits on a slide** (`NOSLOP_TOR_PRELOAD_BUDGET_V1`, §16.30). Round 1 waited for each slide to be ready, so one dead or slow slide left everything behind it cold. `warmInOrder` gives each slide a 6 s head start instead, ready or not, and up to three slides ahead are warmed.
+* **Dead slides** (`NOSLOP_DEAD_SLIDES_V1`, §16.31).
+  * `YouTubeInternalClient` remembers videos that can't play over Tor for 30 minutes, so preloads skip them. A tap on Retry always asks again.
+  * The Live Feed drops them for the session. It never drops the slide on screen, and it never touches search.
+  * A route change forgets all of this.
+  * `YouTubePlayability` tells age-gated or private videos from exit-dependent refusals. An exit-dependent refusal tries another circuit, up to twice.
+  * Clients that answer `OK` with nothing playable on two circuits count as unplayable.
+* **Preloads can't take every resolve slot.** `speculativeResolveGate` holds them to two of the three permits, so the slide on screen always has one.
+* **`ReactionAnchor` cache (a round 1 bug).** Its cap of 8,192 was below the 31,521 rows it was walked over, and an LRU smaller than a sequential scan hits 0% of the time. `MAX_CACHED` is now 65,536.
+* **Less work on an append.** `feedKeyCache` keeps canonical keys, cheap rejections run first, and a second build is skipped once the list has grown.
+* **Logs.** Preload lines redact tags, and the claim line reports state and buffered time.
+
+## Completed Changes (2026-11-03) — Feed Playback Round 1: Swipes, Teardown, Coming Back to the App (v0.7.4-alpha)
+
+Closes the three reports in `isues.txt` as first diagnosed. New tests: `ReactionAnchorTest`, `PreloadTargetsTest`, `PlaybackPolicyTest`, `FeedSmoothnessArchitectureTest`.
+
+* **Swipes no longer wait on feed batches** (`NOSLOP_FEED_BUILD_OFF_MAIN_V1`, §16.29). `beyondViewportPageCount = 2` composes pages near the end of the list on the first frames of a swipe, which fired `loadMoreFeedItems` on the main thread. With 31,521 rows, that took over 3 s. The pager froze while the video kept playing, since its decoder doesn't need the main thread. `loadMoreFeedItems` now dispatches `computeFeedBatch` to `Dispatchers.Default` for appends, and `applyFeedBatch` publishes the result on the main thread after a staleness check. A list built from empty stays synchronous, so there's no empty-state flash. History, Saved and Author stay synchronous too.
+* **Player teardown no longer blocks** (`NOSLOP_SMOOTH_TEARDOWN_V1`). `release()` can block the main thread for up to 500 ms and a surface detach for up to 2 s. A slide leaving the screen pauses, stops after 200 ms and unmounts after 450 ms. `PreloadManager.retire` stops a player now and releases it 1.2 s later.
+* **Preload follows the list, not the page** (`NOSLOP_PRELOAD_TARGETS_V1`). `selectPreloadTargets` is keyed on the items and the settled page, so a list that changes under a still pager warms the next slide. Warm-ups wait up to 1.5 s while the feed scrolls.
+* **Coming back to the app** (`NOSLOP_AWAY_RECOVERY_V1`, §16.33).
+  * A player that stalls or fails while the app is away is kept, and a fresh stream is swapped in at the same position, up to three times. The normal retry clears `source`, which released the player and stopped the sound.
+  * `canCountAsStall` stops suppressed playback (READY, `playWhenReady` on, not playing) counting as a stall. Those samples were tearing down healthy players.
+  * A visible slide keeps the URL it started with (`NOSLOP_HELD_PLAYBACK_URL_V1`), and a retry key is handled once (`NOSLOP_RETRY_ONCE_V1`).
+  * `ERROR_CODE_TIMEOUT` counts as recoverable, and `isVideoActive` survives a slide's dispose while another video is playing.
+* **Returning from the notification** no longer recreates the task: `NoSlopForegroundService` uses `FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_SINGLE_TOP`. `AndroidManifest.xml` extends `configChanges` so more configuration changes keep the activity.
+* **Diagnostics.** `MainThreadStallMonitor` logs `JANK` when the main thread is silent for 600 ms, while the app is started. `VIDEO_AWAY` logs each trip away.
+* **Reaction anchors** moved to `data/ReactionAnchor.kt`. The IDs it produces are unchanged.
+* **Threading.** `@Volatile` on the view model's caches and concurrent sets for what a background build reads. `viewedHistoryIds` flows on `Dispatchers.Default`.
+
+## Completed Changes (2026-10-21 – 2026-10-30) — Versions 0.7.1 to 0.7.4, P1 Security Fixes (v0.7.4-alpha)
+
+Added to this file on 2026-11-03 from the commit log. The status file had no entries for this work. Detail: `docs/TECHNICAL_REFERENCE.md` §24.
+
+* **0.7.1-alpha (2026-10-21).** Version bump.
+* **0.7.2-alpha (2026-10-29).** `tor-android` 0.4.8.16 → 0.4.9.11: the end-of-life daemon exited on a new consensus and killed the app about 10 s after start. `compileSdk` 36 → 37, which 0.4.9.x needs. Adds `scripts/pull_noslop_crash.py`.
+* **0.7.3-alpha (2026-10-29).** `tor-android` 0.4.9.11 → 0.4.9.14, since Play Protect flagged the 0.4.9.11 build. `compileSdk` 37.1, which 0.4.9.13+ needs. `targetSdk` stays 36.
+* **0.7.4-alpha (2026-10-29).** The `github` flavour saves a verified update to the Download folder instead of installing it, and drops `REQUEST_INSTALL_PACKAGES`: Play Protect flagged the in-app installer (`NOSLOP_SAVE_TO_DOWNLOADS_V1`). The D1 note further down in this file predates this.
+* **P1 security fixes (merged 2026-10-30).** New tests: `TorrcTest`, `SshHostKeyPolicyTest`, `ReplayAndOriginP1Test`, `MediaOwnershipAndChunkSecurityTest`, additions to `GossipServiceTest`. Nothing signed or sent on the wire changes.
+  * **Tor.** `HTTPTunnelPort 0` closes the unauthenticated HTTP CONNECT proxy that `tor-android` opened on loopback for any local app.
+  * **SSH deploy.** The first-connect host-key dialog now appears. A changed key is refused, and with no confirmation callback the deploy fails closed.
+  * **Comments and reactions.** A replayed packet can't restore a deleted comment, roll back an edit or undo a newer reaction or vote.
+  * **Origin.** `ANNOUNCE_DISCOVERABLE` is refused unless the onion derives from `authorId`, and an unsigned `origin_node` counts only if it is the author's own onion.
+  * **Gossip.** Packets buffered by the firewall now reach their handler. Before, they were marked processed and lost. Per-sender state is locked and capped, and dedup includes the payload digest, so a reused id can't burn a real packet.
+  * **Media.** An ACL row authorizes only if its author matches every restricted row for that media id. Chunks must come from the addressed sender, at a requested offset. The hash is checked before the part file is renamed, which closes the "any offset" item from Round B.
+* **Fork merge.** The iOS port and upstream merges are under `mvp/` and out of scope here.
+
 ## Review Round 2 Follow-up (Rounds E1–E5, E5s, E5s2, 2026-10-13): Summary and Known Gaps (v0.7.0-alpha)
 
 These rounds close what was still open from review round 2 (`isues.txt`: D11, D12 and the C-findings they carry) and the leftovers of D04. The legacy Android app only; the MVP is out of scope. Each round has its own entry below, newest first.
@@ -3545,6 +3673,9 @@ The following tasks have been aggregated from all historical gap analyses, audit
 *   Further optimize preloading for diverse media types.
 
 ### 7. Known Gaps after the Review Round 2 Follow-up (2026-10-13)
+
+*The current list is **Work Remaining** at the top of this file.*
+
 *   **Hub-pulled packets skip the envelope check** (C09): Hub pulls and Hub web-UI DMs never cross the mesh socket, where `EnvelopeAuth` is applied.
 *   **The Hub's onion address is not checked against its key** (S2 covers peers only).
 *   **Clocks must agree to within 1 hour**, or packets are dropped as stale (`EnvelopeAuth.MAX_SKEW_MS`).

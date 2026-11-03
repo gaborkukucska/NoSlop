@@ -47,8 +47,11 @@ Mark each item as passed, or write down what happened.
 - [ ] Send an image and a video in a DM. They arrive and play.
 
 ### Media (Media3 / ExoPlayer)
-- [ ] Feed: swipe through at least ten videos. Each starts, and the next one starts quickly
-  (preloaded).
+- [ ] Feed: swipe through at least ten videos with Route Clearnet via Tor on. Each starts, and the
+  next one starts quickly (preloaded). No swipe stops part way.
+- [ ] Turn on Background Playback and Foreground Service. Leave the app while a video plays, for
+  about a minute. It keeps playing. Come back through the launcher, then repeat through the
+  notification. No "Finding stream" either way.
 - [ ] Seek back 20 seconds in a playing video. It doesn't rebuffer (60 s back buffer).
 - [ ] An audio post plays, pauses and seeks.
 - [ ] Attach a video to a post. Compression shows progress, finishes, and the post plays.
@@ -86,6 +89,12 @@ not implemented
 (`not implemented` is what Media3's LoadControl throws when a pre-1.4 method is reached.)
 
 Then run `retrace` against `mapping.txt` on any obfuscated stack trace you find.
+
+Two more searches, which don't depend on R8:
+
+* `NoSlop/JANK`: there should be no matches. Each one names code that froze the main thread.
+* `Feed retention:`: at most one line a day, and it should report rows removed or none, with no
+  `Feed retention failed`. Note the `Feed batch built` times too.
 
 ## 4. Record the result
 
