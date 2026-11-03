@@ -480,6 +480,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val hasMeshPosts: Boolean get() = allMeshes.any { it.authorPublicKeyB64 != localKeys.value?.publicKeyB64 }
 
     val updateInfo: StateFlow<com.noslop.app.util.UpdateInfo?> = NoSlopApp.updateChecker.updateInfo
+    val savedUpdate: StateFlow<com.noslop.app.util.SavedUpdate?> = NoSlopApp.updateChecker.savedUpdate
 
     val notificationSettings: StateFlow<com.noslop.app.data.NotificationSettings> = repository.notificationSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.noslop.app.data.NotificationSettings())

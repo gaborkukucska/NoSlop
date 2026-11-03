@@ -30,6 +30,10 @@ internal object UpdatePolicy {
         waitingForChecksum || lastCheckMs == null || nowMs < lastCheckMs ||
             nowMs - lastCheckMs >= MIN_CHECK_INTERVAL_MS
 
+    /** Whether the file already in the Download folder is the update on offer. */
+    fun isReadyToInstall(savedVersion: String?, latestVersion: String?): Boolean =
+        savedVersion != null && savedVersion == latestVersion
+
     /** The first APK, with the checksum named after it, or else any checksum in the release. */
     fun chooseFiles(files: List<ReleaseFile>): ReleaseFiles? {
         val apk = files.firstOrNull { it.name.endsWith(".apk") } ?: return null

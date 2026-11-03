@@ -39,6 +39,8 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
     val mediaSettings by viewModel.mediaSettings.collectAsState()
     val isEncryptionActive by viewModel.isEncryptionActive.collectAsState()
     val updateInfo by viewModel.updateInfo.collectAsState()
+    val savedUpdate by viewModel.savedUpdate.collectAsState()
+    val readyUpdate = savedUpdate?.takeIf { com.noslop.app.util.UpdatePolicy.isReadyToInstall(it.version, updateInfo?.latestVersion) }
     val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
     val context = LocalContext.current
 
@@ -135,7 +137,11 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                        Text(
+                                            if (readyUpdate != null) "Update Ready to Install".tr else "Update Available".tr,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextLight
+                                        )
                                         Text(
                                             "Version {latest} is out (you have {current}).".tr
                                                 .replace("{latest}", updateInfo!!.latestVersion)
@@ -149,12 +155,34 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 
                                 // NOSLOP_SAVE_TO_DOWNLOADS_V1: NoSlop downloads and verifies the update,
                                 // then saves it to Download; the user installs it from their Files app.
+                                readyUpdate?.let { ready ->
+                                    if (ready.checksumVerified) {
+                                        com.noslop.app.ui.components.UpdateChecksumBadge()
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                    }
+                                    com.noslop.app.ui.components.UpdateReadyMessage(ready)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                }
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    Button(
-                                        onClick = { UpdateManager.startDownload(context, updateInfo!!) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                                    ) {
-                                        Text("Download Update".tr, color = TextLight)
+                                    if (readyUpdate == null) {
+                                        Button(
+                                            onClick = { UpdateManager.startDownload(context, updateInfo!!) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                                        ) {
+                                            Text("Download Update".tr, color = TextLight)
+                                        }
+                                    } else {
+                                        TextButton(onClick = { UpdateManager.startDownload(context, updateInfo!!) }) {
+                                            Text("Download Again".tr, color = TextLight)
+                                        }
+                                        if (UpdateManager.canOpenDownloads) {
+                                            Button(
+                                                onClick = { UpdateManager.openDownloads(context) },
+                                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                            ) {
+                                                Text("Open Downloads".tr, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
                                     }
                                 }
                             }

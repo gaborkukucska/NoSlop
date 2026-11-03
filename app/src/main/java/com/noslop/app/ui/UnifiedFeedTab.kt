@@ -599,6 +599,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     // Update Available Dialog
     val updateInfo by viewModel.updateInfo.collectAsState()
+    val savedUpdate by viewModel.savedUpdate.collectAsState()
     var updatePopupDismissed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
 
     // --- NOSLOP_TOR_GATE_UI_V1 --- drawn above the tab content
@@ -632,7 +633,9 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         }
     }
 
-    if (updateInfo != null && !updatePopupDismissed) {
+    // An update already in the Download folder has its own prompt (UpdateReadyPrompt).
+    val updateAlreadySaved = com.noslop.app.util.UpdatePolicy.isReadyToInstall(savedUpdate?.version, updateInfo?.latestVersion)
+    if (updateInfo != null && !updatePopupDismissed && !updateAlreadySaved) {
         AlertDialog(
             onDismissRequest = { updatePopupDismissed = true },
             containerColor = SurfaceDark,

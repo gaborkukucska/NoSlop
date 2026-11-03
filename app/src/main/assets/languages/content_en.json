@@ -960,5 +960,11 @@
   "Choose File": "Choose File",
   "Import Creator Identity": "Import Creator Identity",
   "Enter the passphrase the file was saved with.": "Enter the passphrase the file was saved with.",
-  "Import and Replace": "Import and Replace"
+  "Import and Replace": "Import and Replace",
+  "Update Ready to Install": "Update Ready to Install",
+  "Checksum verified": "Checksum verified",
+  "The file matches its published SHA-256 checksum.": "The file matches its published SHA-256 checksum.",
+  "Open Downloads": "Open Downloads",
+  "Download Again": "Download Again",
+  "Could not open Downloads. Open your Files app instead.": "Could not open Downloads. Open your Files app instead."
 }

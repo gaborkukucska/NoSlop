@@ -46,6 +46,17 @@ private data class GithubAsset(
 )
 
 /**
+ * A verified update waiting in the Download folder. [checksumVerified] records that this exact file
+ * was compared against the checksum published with the release.
+ */
+@Keep
+data class SavedUpdate(
+    val version: String,
+    val fileName: String,
+    val checksumVerified: Boolean
+)
+
+/**
  * Checks the latest GitHub release for a newer APK than the one installed (see [UpdatePolicy]), and
  * tracks when the user was last notified about it.
  *
@@ -60,6 +71,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     companion object {
         private const val KEY_LAST_CHECK_MS = "update_last_check_ms"
         private const val KEY_LAST_NOTIFIED_MS = "update_last_notified_ms"
+        private const val KEY_SAVED_UPDATE = "update_saved_info"
         const val NOTIFY_INTERVAL_MS = 3L * 24 * 60 * 60 * 1000 // 3 days
 
         private const val LATEST_RELEASE_URL =
@@ -71,8 +83,40 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     /** Null when up to date (or not yet checked); set when a newer version is available. */
     val updateInfo: StateFlow<UpdateInfo?> = _updateInfo.asStateFlow()
 
+    private val _savedUpdate = MutableStateFlow<SavedUpdate?>(null)
+
+    /** The update already in the Download folder, if there is one. Survives a restart. */
+    val savedUpdate: StateFlow<SavedUpdate?> = _savedUpdate.asStateFlow()
+
+    private val _showReadyPrompt = MutableStateFlow(false)
+    val showReadyPrompt: StateFlow<Boolean> = _showReadyPrompt.asStateFlow()
+
+    fun dismissReadyPrompt() {
+        _showReadyPrompt.value = false
+    }
+
+    suspend fun markSaved(update: SavedUpdate) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting(KEY_SAVED_UPDATE, com.noslop.app.util.Json.gson.toJson(update)))
+        _savedUpdate.value = update
+        _showReadyPrompt.value = true
+    }
+
     /** Re-hydrate [updateInfo] from the last persisted check result, without hitting the network. */
     suspend fun loadCachedState() = withContext(Dispatchers.IO) {
+        val savedJson = appSettingDao.getSetting(KEY_SAVED_UPDATE)
+        if (!savedJson.isNullOrBlank()) {
+            try {
+                val saved = com.noslop.app.util.Json.gson.fromJson(savedJson, SavedUpdate::class.java)
+                if (saved != null && isNewer(saved.version, BuildConfig.VERSION_NAME)) {
+                    _savedUpdate.value = saved
+                    _showReadyPrompt.value = true
+                } else {
+                    appSettingDao.insertSetting(AppSetting(KEY_SAVED_UPDATE, ""))
+                }
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Saved update record unreadable: ${e.message}")
+            }
+        }
         val json = appSettingDao.getSetting("update_available_info")
         if (!json.isNullOrBlank()) {
             try {

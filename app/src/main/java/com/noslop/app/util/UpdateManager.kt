@@ -57,6 +57,30 @@ object UpdateManager {
 
     private const val APK_MIME = "application/vnd.android.package-archive"
 
+    /** Android 9 and older save to the app's own folder, which the Downloads screen doesn't show. */
+    val canOpenDownloads: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+
+    /**
+     * --- NOSLOP_UPDATE_READY_V1 ---
+     * Opens the system Downloads screen, not the APK. Android refuses to open its installer for an app
+     * without REQUEST_INSTALL_PACKAGES, and that permission is what Play Protect flagged.
+     */
+    fun openDownloads(context: Context) {
+        try {
+            context.startActivity(
+                android.content.Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (e: android.content.ActivityNotFoundException) {
+            Logger.warn(TAG, "No app opens the Downloads screen: ${e.message}")
+            Toast.makeText(
+                context,
+                LanguageManager.translate("Could not open Downloads. Open your Files app instead."),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     /**
      * Starts the download for [info]. A check can finish without the checksum, if fetching it failed
      * over Tor say, so one more is tried before the download is refused.
@@ -257,9 +281,10 @@ object UpdateManager {
 
                 val message = LanguageManager.translate("{file} is in your Download folder. Open it from your Files app to install.")
                     .replace("{file}", savedAs)
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-                }
+                // NOSLOP_UPDATE_READY_V1 — normalisedExpected is set only if the digest above matched.
+                com.noslop.app.NoSlopApp.updateChecker.markSaved(
+                    SavedUpdate(version, savedAs, checksumVerified = normalisedExpected != null)
+                )
                 NotificationHelper.showNotification(
                     context = appContext,
                     title = LanguageManager.translate("Update downloaded"),

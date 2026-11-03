@@ -62,6 +62,14 @@ class UpdatePolicyTest {
     }
 
     @Test
+    fun theSavedFileCountsOnlyForTheUpdateOnOffer() {
+        assertTrue(UpdatePolicy.isReadyToInstall("0.7.6-alpha", "0.7.6-alpha"))
+        assertFalse("a newer release is out", UpdatePolicy.isReadyToInstall("0.7.6-alpha", "0.7.7-alpha"))
+        assertFalse("nothing saved", UpdatePolicy.isReadyToInstall(null, "0.7.6-alpha"))
+        assertFalse("nothing on offer", UpdatePolicy.isReadyToInstall("0.7.6-alpha", null))
+    }
+
+    @Test
     fun aDigestIsFoundInEveryFormItIsPublishedIn() {
         assertEquals(digest, UpdatePolicy.digestIn(digest))
         assertEquals(digest, UpdatePolicy.digestIn("$digest  NoSlop-0.7.6-alpha.apk\n"))

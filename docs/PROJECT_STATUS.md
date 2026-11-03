@@ -76,7 +76,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 **Verify before release**
 
 * The Gradle unit test run above.
-* The GitHub update check on a device with Route Clearnet via Tor on.
+* The GitHub update check on a device with Route Clearnet via Tor on, and **Open Downloads** on several phones.
 * A minified release build, using `docs/BUILD.md` §8.2 (E5). Its media section now covers these rounds.
 * Backup export and import on a device (E3).
 * The findings the matrix still marks as not device-verified: C06, C07, C11, D05, D09 and D10.
@@ -96,6 +96,7 @@ Not released yet: this follows 0.7.5-alpha and needs a version bump to reach tes
   * Over Tor, each call gets three tries on separate circuits, since GitHub limits by exit IP.
   * A check runs at most once an hour rather than on every return to the app, unless a known update still has no checksum.
   * A tap on a known update with no checksum tries once more before refusing.
+  * A finished download now shows a message that stays until dismissed, with a green shield for the verified checksum and an **Open Downloads** button (`NOSLOP_UPDATE_READY_V1`). The Settings banner remembers the saved file across restarts, so it stops offering the same download as new. The install itself stays manual, because Play Protect flagged the in-app installer.
   * `Constants.UPDATE_CHECK_URL` and the URL version parsing are gone.
 
 ## Completed Changes (2026-11-03) — Release 0.7.5-alpha, Documentation Reorganised (v0.7.5-alpha)

@@ -13,6 +13,9 @@
 *   **Video stops when you leave the app**: Turn on **Background Playback** and **Foreground Service** in Settings.
 *   **Audio buffering**: Clearnet audio (your aggregated feed) comes from its source, over Tor when "Route Clearnet via Tor" is on, so it can take a few seconds to start; audio or media attached to **mesh posts/DMs** is fetched chunk-by-chunk from a peer over Tor and may take longer to buffer, especially on a slow or freshly-built circuit.
 
+### Installing an Update
+NoSlop checks the downloaded update against its published checksum, then saves it to your Download folder. It can't start the install itself. Tap **Open Downloads**, then tap the NoSlop APK. The Settings banner keeps these steps until the update is installed.
+
 ### Mesh Connectivity
 *   **Adding Peers**: Use the QR scan feature to exchange identity details with friends.
 *   **Tor v3 Addresses**: Mesh communication depends on Tor hidden services. If Tor is not ready, you won't be able to send or receive mesh posts.

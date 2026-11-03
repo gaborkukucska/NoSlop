@@ -206,6 +206,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         MainScreen(viewModel = viewModel, initialRoute = targetRoute)
+                        com.noslop.app.ui.components.UpdateReadyPrompt()
                     }
                 } else {
                     OnboardingScreen(

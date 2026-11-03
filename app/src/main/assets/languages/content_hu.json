@@ -777,5 +777,11 @@
   "Joined • Open Chat": "Csatlakozva • Csevegés megnyitása",
   "Loading group chat...": "Csoportos csevegés betöltése...",
   "Back to DMs": "Vissza az Üzenetekhez",
-  "No permanent trusted contacts available. Temporary connections filtered out.": "Nincsenek állandó megbízható kapcsolatok. Az ideiglenes kapcsolatok kiszűrve."
+  "No permanent trusted contacts available. Temporary connections filtered out.": "Nincsenek állandó megbízható kapcsolatok. Az ideiglenes kapcsolatok kiszűrve.",
+  "Update Ready to Install": "A frissítés telepítésre kész",
+  "Checksum verified": "Ellenőrzőösszeg rendben",
+  "The file matches its published SHA-256 checksum.": "A fájl megegyezik a közzétett SHA-256 ellenőrzőösszeggel.",
+  "Open Downloads": "Letöltések megnyitása",
+  "Download Again": "Letöltés újra",
+  "Could not open Downloads. Open your Files app instead.": "A Letöltések nem nyitható meg. Nyisd meg a Fájlok alkalmazást."
 }
