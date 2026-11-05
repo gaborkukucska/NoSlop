@@ -40,6 +40,37 @@ internal fun rememberHeldTrue(active: Boolean, holdMs: Long, key: Any?): Boolean
     return active || held
 }
 
+// --- NOSLOP_WARM_START_SYNC_V1 ---
+// Longest a claimed warm player keeps its sound back. A warm READY player shows its first frame within
+// a few frames of getting a surface; past this, something is wrong and silence would not help.
+internal const val WARM_FIRST_FRAME_WAIT_MS = 1_500L
+
+/**
+ * Whether a warm player a slide has just claimed keeps its sound back until its first frame is on
+ * the slide's surface.
+ *
+ * A warm player is prepared with no surface, so it is the one way of starting where sound could lead
+ * the picture. A player built for a slide has the surface first, and doesn't reach READY until a
+ * frame is on it. This gives a warm player that same order.
+ *
+ * Nothing to wait for means no hold: a stream with no video track, a player that has failed, or an
+ * app in the background, where there is no surface to draw on. A warm player still BUFFERING is held
+ * because its tracks may not be known yet; READY ends the hold if it turns out to have no picture.
+ */
+internal fun holdsAudioForFirstFrame(
+    playbackState: Int,
+    hasVideoTrack: Boolean,
+    hasError: Boolean,
+    appOnScreen: Boolean
+): Boolean {
+    if (hasError || !appOnScreen) return false
+    return when (playbackState) {
+        Player.STATE_READY -> hasVideoTrack
+        Player.STATE_BUFFERING -> true
+        else -> false
+    }
+}
+
 // --- NOSLOP_AWAY_RECOVERY_V1 ---
 // Resolves tried for one stall or error while the app is in the background, before waiting for the
 // user to come back. Reset by stable playback.

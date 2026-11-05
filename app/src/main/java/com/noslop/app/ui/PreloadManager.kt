@@ -358,9 +358,17 @@ object PreloadManager {
             isForeground = { currentlyPlayingUrl == rawUrl }
         )
 
+        // --- NOSLOP_WARM_START_SYNC_V1 ---
+        // A video gets the attributes a fresh player gets. They have to be right from here: changing
+        // them at the claim makes ExoPlayer flush the AudioTrack and lose the audio already written.
+        val isAudioFile = listOf(".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac")
+            .any { resolvedUrl.endsWith(it, ignoreCase = true) }
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
-            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .setContentType(
+                if (isAudioFile) androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC
+                else androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE
+            )
             .build()
 
         val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality.ifBlank { "medium" }
@@ -397,6 +405,7 @@ object PreloadManager {
         }
         val mediaItem = MediaItem.Builder().setUri(resolvedUrl).setMimeType(mimeType).build()
 
+        com.noslop.app.ui.components.AvSyncDiagnostics.attach(player, "warm", rawUrl)
         player.setMediaItem(mediaItem)
         val resumeMs = com.noslop.app.ui.components.PlaybackPositionStore.resumePositionFor(rawUrl)
         if (resumeMs >= 8000L) {
@@ -499,6 +508,8 @@ object PreloadManager {
         currentlyPlayingUrl = rawUrl
         lastNetworkByteTimeMs = System.currentTimeMillis()
         Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey ${Logger.redact(rawUrl)} state=${entry.player.playbackState} bufMs=${entry.player.totalBufferedDuration}")
+        com.noslop.app.ui.components.AvSyncDiagnostics.of(entry.player)
+            ?.onHandedOver(entry.player.playbackState, entry.player.totalBufferedDuration)
         return entry.player
     }
 

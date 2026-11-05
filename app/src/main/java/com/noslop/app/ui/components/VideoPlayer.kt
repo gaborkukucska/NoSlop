@@ -1113,6 +1113,9 @@ private fun ExoVideoPlayer(
     // A pause the user asked for. onRenderedFirstFrame fires again whenever a surface comes back, and
     // used to restart a video the user had paused before leaving the app.
     var userPaused by remember(url, retryKey) { mutableStateOf(false) }
+    // --- NOSLOP_WARM_START_SYNC_V1 ---
+    // True from the claim of a warm player until its first frame is on this slide. See holdsAudioForFirstFrame.
+    var warmStartHeld by remember(url, retryKey) { mutableStateOf(false) }
 
     // --- NOSLOP_AWAY_RECOVERY_V1 ---
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -1209,7 +1212,7 @@ private fun ExoVideoPlayer(
                     onReady()
                 }
             }
-            player.playWhenReady = isVisible && !userPaused
+            player.playWhenReady = isVisible && !userPaused && !warmStartHeld
             if (!isVisible) {
                 player.pause()
                 try {
@@ -1228,6 +1231,23 @@ private fun ExoVideoPlayer(
                 player.stop()
             }
         }
+    }
+
+    // --- NOSLOP_WARM_START_SYNC_V1 ---
+    // The first frame ends the hold. This is for a slide where it doesn't come, which must not stay silent.
+    LaunchedEffect(exoPlayer, warmStartHeld) {
+        val player = exoPlayer
+        if (player == null || !warmStartHeld) return@LaunchedEffect
+        kotlinx.coroutines.delay(WARM_FIRST_FRAME_WAIT_MS)
+        Logger.warn(AV_SYNC_TAG, "No first frame ${WARM_FIRST_FRAME_WAIT_MS}ms after the claim, starting anyway | ${Logger.redact(rawUrl)}")
+        warmStartHeld = false
+        player.playWhenReady = currentIsVisible && !userPaused
+    }
+
+    // --- NOSLOP_AV_SYNC_DIAG_V1 ---
+    LaunchedEffect(exoPlayer, isVisible) {
+        val player = exoPlayer
+        if (player != null && isVisible) AvSyncDiagnostics.of(player)?.sampleWhilePlaying(player)
     }
 
     // --- NOSLOP_AWAY_RECOVERY_V1 ---
@@ -1418,6 +1438,14 @@ private fun ExoVideoPlayer(
             preloaded.apply {
                 // Do not start audio immediately on claim: wait for SurfaceView attachment and first frame
                 playWhenReady = false
+                // --- NOSLOP_WARM_START_SYNC_V1 ---
+                // The line above only ever lasted until LaunchedEffect(isVisible, exoPlayer) ran.
+                warmStartHeld = holdsAudioForFirstFrame(
+                    playbackState = playbackState,
+                    hasVideoTrack = currentTracks.isTypeSelected(androidx.media3.common.C.TRACK_TYPE_VIDEO),
+                    hasError = playerError != null,
+                    appOnScreen = lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+                )
                 
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                 // Only seek preloaded video if user watched deeply (>= 8s); micro-seeks destroy the pre-warmed buffer
@@ -1438,6 +1466,7 @@ private fun ExoVideoPlayer(
                         if (playbackState == androidx.media3.common.Player.STATE_READY) {
                             val hasVideo = currentTracks.isTypeSelected(androidx.media3.common.C.TRACK_TYPE_VIDEO)
                             if (!hasVideo) {
+                                warmStartHeld = false
                                 onReady()
                                 if (currentIsVisible && !userPaused) play()
                             }
@@ -1449,6 +1478,7 @@ private fun ExoVideoPlayer(
                             PLAYBACK_DIAG_TAG,
                             "FIRST FRAME rendered +${System.currentTimeMillis() - diagStartMs}ms | $rawUrl"
                         )
+                        warmStartHeld = false
                         onReady()
                         if (currentIsVisible && !userPaused) {
                             play()
@@ -1610,6 +1640,7 @@ private fun ExoVideoPlayer(
                             }
                         }
                     })
+                    AvSyncDiagnostics.attach(this, "fresh", rawUrl)
                     prepare()
                     playWhenReady = isVisible
                 }

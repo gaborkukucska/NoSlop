@@ -10,6 +10,25 @@ import org.junit.Test
 class PlaybackPolicyTest {
 
     @Test
+    fun aWarmVideoKeepsItsSoundBackForItsPicture() {
+        assertTrue(holdsAudioForFirstFrame(Player.STATE_READY, hasVideoTrack = true, hasError = false, appOnScreen = true))
+    }
+
+    @Test
+    fun aWarmPlayerStillBufferingIsHeldUntilItsTracksAreKnown() {
+        assertTrue(holdsAudioForFirstFrame(Player.STATE_BUFFERING, hasVideoTrack = false, hasError = false, appOnScreen = true))
+    }
+
+    @Test
+    fun nothingToWaitForMeansNoHold() {
+        assertFalse("no picture is coming", holdsAudioForFirstFrame(Player.STATE_READY, hasVideoTrack = false, hasError = false, appOnScreen = true))
+        assertFalse("a failed player goes to the retry path", holdsAudioForFirstFrame(Player.STATE_READY, hasVideoTrack = true, hasError = true, appOnScreen = true))
+        assertFalse("no surface in the background", holdsAudioForFirstFrame(Player.STATE_READY, hasVideoTrack = true, hasError = false, appOnScreen = false))
+        assertFalse(holdsAudioForFirstFrame(Player.STATE_IDLE, hasVideoTrack = true, hasError = false, appOnScreen = true))
+        assertFalse(holdsAudioForFirstFrame(Player.STATE_ENDED, hasVideoTrack = true, hasError = false, appOnScreen = true))
+    }
+
+    @Test
     fun aSuppressedPlayerIsNotStalled() {
         // Transient audio focus loss: READY, wants to play, not playing, nothing downloading.
         assertFalse(canCountAsStall(Player.STATE_READY, playWhenReady = true, isPlaying = false))

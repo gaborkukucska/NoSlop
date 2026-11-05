@@ -65,6 +65,17 @@ class FeedSmoothnessArchitectureTest {
     }
 
     @Test
+    fun aWarmPlayerDoesNotStartItsSoundAheadOfItsPicture() {
+        val video = source("ui/components/VideoPlayer.kt")
+        assertTrue(
+            "the visibility effect used to start a claimed player before its first frame",
+            video.contains("player.playWhenReady = isVisible && !userPaused && !warmStartHeld")
+        )
+        assertFalse(video.contains("player.playWhenReady = isVisible && !userPaused\n"))
+        assertTrue("a warm video gets a fresh player's attributes", source("ui/PreloadManager.kt").contains("AUDIO_CONTENT_TYPE_MOVIE"))
+    }
+
+    @Test
     fun thePlayerIsKeptMountedThroughTheSwipe() {
         val video = source("ui/components/VideoPlayer.kt")
         assertTrue(video.contains("if (keepPlayerMounted) {"))
