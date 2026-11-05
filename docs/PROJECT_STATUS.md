@@ -28,10 +28,15 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **History and Saved still build on the main thread.** Round 1 moved Live Feed and filter appends off it, not `loadHistoryBatch` or the Saved path. A very long list there can still hold up a swipe.
 * **Every `feed_items` write reloads the whole table,** `fullContent` included. Retention cut the table by a third, but the reload remains.
 * **`setImmersiveFullscreen` runs on every slide** rather than on a change.
-* **`AudioPlayer` has no recovery path.** It no longer tears down mid-swipe, but it doesn't re-resolve in place while the app is away the way `VideoPlayer` does (§16.33).
+* **`AudioPlayer` has no recovery path.** It no longer tears down mid-swipe, but it doesn't re-resolve in place the way `VideoPlayer` does (§16.33, §16.35).
 * **A dead slide that reaches the screen still shows the unavailable card.** Dead slides leave the Live Feed once a preload finds them, for that session only (§16.31). A fast swipe can get there first.
 * **Slow resolves remain when several exits in a row are blocked.** About 3 s per blocked circuit (§16.32). This is the exit lottery itself; no setting removes it.
 * **A video can stop with no sign, and the cause isn't known.** Seen once, on 2026-11-03: no buffering, no pause icon, no error, and tapping didn't restart it. The app log shows the player made no state change for the 3.5 minutes before the owner's own tap and seek. It needs more testing: whether the sound stopped too, and a device logcat from when it happens.
+* **The cause of the out-of-sync sound isn't proven.** Round 4 fixed it on the owner's phone, but two changes shipped together and no capture from that build has been read (§16.34). If it returns, read `AV_SYNC` lines first, then try the soft re-sync described there.
+* **Decide whether `AV_SYNC` stays.** It writes roughly 15–20 lines per slide watched. It holds no video IDs or URLs apart from one redacted line per player. Keep it until a capture from these builds has been read.
+* **A warm player never gets the 60 s back buffer.** ExoPlayer reads the back-buffer settings once, when the player is built, and a warm player is built with none. So rewinding on a warm slide downloads again over Tor. The comment on `AdaptiveTorLoadControl` still says otherwise. Found in round 4, not changed.
+* **A warm neighbour can hide a stall.** `bytesDelta` in the stall sampler adds `PreloadManager.networkBytesReceivedInSession`, which counts every warm player. A neighbour preloading can make a stalled stream look alive. The same split means `bytesRecv` in `PLAYBACK_DIAG` samples stays at 0 for a claimed warm player.
+* **`NO PROGRESS for 10s` can be wrong.** It also fires when the buffer is creeping forward, as it did in the capture of 2026-11-03 at 12:39. Read `delta` in the samples rather than this line.
 * **Log noise.** Repeated send failures to offline mesh peers, and exhausted Invidious "channel joined date" lookups.
 
 **Mesh and security**
@@ -76,6 +81,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 **Verify before release**
 
 * The Gradle unit test run above.
+* A capture from rounds 4 and 5, from a release build through logcat, as `run-as` is refused there (`docs/SUPPORT.md` §4). Rounds 4 and 5 were signed off by watching, with no capture read.
 * The GitHub update check on a device with Route Clearnet via Tor on, and **Open Downloads** on several phones.
 * A minified release build, using `docs/BUILD.md` §8.2 (E5). Its media section now covers these rounds.
 * Backup export and import on a device (E3).
@@ -87,6 +93,24 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-05) — Feed Playback Round 5: Recovery in Place on Screen (v0.7.5-alpha)
+
+* **Report.** A video watched for a long time buffered, showed "Finding stream" for about a minute with no Retry card, then carried on from the same point.
+* **Cause.** A stall on screen released the player and resolved a new stream with nothing playing. It also waited 22–24 s to react, and a slow stream could avoid that limit altogether, because a few seconds of play reset the stall counters. The YouTube URL is tied to the exit's IP address, so getting off a bad circuit always needs a new URL.
+* **Evidence.** No capture of the owner's event exists. A release build refuses `run-as`, and the capture supplied was from 0.7.4 on 2026-11-03. Its last video shows the same failure: about 14 minutes of normal play, then 8 KB/s where the stream needed about 42 KB/s, then no data at all. Apart from light mesh traffic the app was idle. The owner's answers fit this path: no Retry card, and the same position afterwards.
+* **Fix.** A video that has played now recovers in place on screen, keeping its player and last frame. The old stream plays on while the new one resolves, and is kept if it has recovered. Over Tor, recovery starts after 12 s without progress, or 28 s of buffering in a 40 s window, which play bursts can't reset. Details in `docs/TECHNICAL_REFERENCE.md` §16.35.
+* **Verified on device.** Owner, 2026-11-06: "The recovery is quicker and does not look for the stream."
+* **Testing.** Tested (unit: `PlaybackPolicyTest`). The real `recoverInPlace` was also compiled in a harness and run through 14 scenarios.
+
+## Completed Changes (2026-11-05) — Feed Playback Round 4: A Warm Player Starts with Its Picture (v0.7.5-alpha)
+
+* **Report.** Many warm clearnet videos played with their sound out of sync. Swiping away and back reloaded the slide, and it was then in sync.
+* **Found.** The first-frame wait added in `c7d782c` never held: `LaunchedEffect(isVisible, exoPlayer)` set `playWhenReady` right after the claim. Warm players also used `AUDIO_CONTENT_TYPE_MUSIC`, and fresh ones `MOVIE`.
+* **Fix.** A warm video keeps its sound back until its first frame is on the slide, for at most 1.5 s, and uses `MOVIE`. `AV_SYNC` logging compares warm and fresh players. Details in `docs/TECHNICAL_REFERENCE.md` §16.34.
+* **Verified on device.** Owner, 2026-11-05: "the videos are now all play video and audio in sync."
+* **Not proven.** Both changes shipped together, so which one fixed it isn't known. Media3's own code shows nothing warm-specific that could leave the audio clock permanently off.
+* **Testing.** Tested (unit: `PlaybackPolicyTest`, `FeedSmoothnessArchitectureTest`).
 
 ## Completed Changes (2026-11-03) — GitHub-Only Update Check
 

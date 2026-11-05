@@ -285,10 +285,13 @@ Mark each item as passed, or write down what happened.
 - [ ] Turn on Background Playback and Foreground Service. Leave the app while a video plays, for
   about a minute. It keeps playing. Come back through the launcher, then repeat through the
   notification. No "Finding stream" either way.
-- [ ] Seek back 20 seconds in a playing video. It doesn't rebuffer (60 s back buffer).
+- [ ] Open a video from search, so it isn't a warm slide, and seek back 20 seconds. It doesn't
+  rebuffer (60 s back buffer). A slide reached by swiping is warm and does rebuffer: a known gap.
 - [ ] An audio post plays, pauses and seeks.
 - [ ] Attach a video to a post. Compression shows progress, finishes, and the post plays.
 - [ ] Pick a video with HLS in its URL (most YouTube results). It plays.
+- [ ] Swipe through several clearnet videos of people talking, with Route Clearnet via Tor on. Sound and picture stay in sync on warm slides, with no slower start.
+- [ ] Watch a long video until it stalls, if one does. The picture stays on screen with a spinner, the video carries on from the same point, and "Finding stream" doesn't appear.
 
 ##### Search and settings (Gson models)
 - [ ] Search "All" and "Videos": results appear, and more arrive as you swipe.

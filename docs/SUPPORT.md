@@ -10,6 +10,7 @@
 
 ### Media Playback Issues
 *   **Videos not playing**: With "Route Clearnet via Tor" on, YouTube refuses many Tor exits. NoSlop tries other circuits by itself, which can take several seconds. Videos that can't play over Tor at all drop out of the Live Feed for that session. If a slide still shows an error, tap Retry or swipe on.
+*   **Video pauses to buffer during a long watch**: The Tor circuit carrying it has slowed or failed. NoSlop moves the video to a new circuit by itself, at the same position, and the picture stays on screen. "Finding stream" only appears if that keeps failing.
 *   **Video stops when you leave the app**: Turn on **Background Playback** and **Foreground Service** in Settings.
 *   **Audio buffering**: Clearnet audio (your aggregated feed) comes from its source, over Tor when "Route Clearnet via Tor" is on, so it can take a few seconds to start; audio or media attached to **mesh posts/DMs** is fetched chunk-by-chunk from a peer over Tor and may take longer to buffer, especially on a slow or freshly-built circuit.
 
@@ -102,13 +103,15 @@ Download the entire `.log` file to your active working directory on your persona
 adb exec-out run-as com.noslop.app cat files/noslop-debug.log > ./noslop-debug.log
 ```
 
+4.1 and 4.2 use `run-as`, which only works on a debuggable build. A release build answers `run-as: package not debuggable`, so use 4.3 or the in-app **Copy Logs** there. Logcat works on both.
+
 #### 4.3 Capturing Logcat
 
 Everything `Logger.kt` writes also goes to logcat, tagged `NoSlop/<MODULE>`. Capture it unfiltered, so the Tor daemon's own output is included, and search it afterwards:
 ```bash
 adb logcat -c
 adb logcat -v time > noslop.log
-grep -E 'NoSlop/(JANK|VIDEO_AWAY|VIDEO|PLAYBACK_DIAG|PRELOAD|YT_INTERNAL_API|VM|FEED)' noslop.log
+grep -E 'NoSlop/(JANK|VIDEO_AWAY|AV_SYNC|VIDEO|PLAYBACK_DIAG|PRELOAD|YT_INTERNAL_API|VM|FEED)' noslop.log
 ```
 
 The commands in 4.1 and 4.2 use the `github` flavour's package. For a Play build, use `com.noslop.me.app`.
@@ -127,7 +130,8 @@ Filters are applied in the logger to help isolate specific subsystem issues:
 *   **`FIREWALL`**: Audits our strict mesh packet filter rules. It lists sender pubkeys and drops packets that are not explicitly trusted.
 *   **`REPOSITORY` / `DATABASE`**: Audits CRUD actions, Room transactions, and synchronization locks.
 *   **`JANK`**: The main thread was silent for 600 ms or more. The line carries its stack, so it names the code that froze the app. Any `JANK` line is a bug.
-*   **`VIDEO_AWAY`**: A video while the app is in the background: `App left`, `App returned`, and any recovery in place.
+*   **`VIDEO_AWAY`**: A video while the app is in the background: `App left`, `App returned`. Also any recovery in place, whether the app is away or on screen.
+*   **`AV_SYNC`**: Picture and sound timing for each player, as `warm#N` or `fresh#N`: decoders, when sound started, clock rate, and dropped or late frames. See [TECHNICAL_REFERENCE.md §16.34](TECHNICAL_REFERENCE.md).
 *   **`VIDEO` / `PLAYBACK_DIAG`**: Resolves, stalls, first frames and buffer samples for the video on screen.
 *   **`PRELOAD`**: Warm-ups and claims. `Claimed preloaded video` means a swipe landed on a warm player.
 *   **`YT_INTERNAL_API`**: YouTube resolves over Tor. It shows circuits refused, rotations and which client won.

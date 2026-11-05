@@ -25,7 +25,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 ## ⚡ Why Stop the Slop?
 
-* 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked. A video that stalls while you're away recovers in place, at the same position.
+* 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked. A video that stalls recovers in place, at the same position, whether you're watching or away.
 * 🚫 **100% Ad & Tracker-Free** — Pure tracker-free client (using offline ZXing barcode scanning, no Google telemetry SDKs). Zero banners or sponsored interruptions.
 * 🎯 **Total Feed Sovereignty** — Non-algorithmic curation. You choose your mix quotas, sources, and categories with chronological history and optional Random Discover mode.
 * 🕸️ **Decentralized Social Mesh** — Direct peer-to-peer communication across Tor hidden services with multi-hop gossip relay.

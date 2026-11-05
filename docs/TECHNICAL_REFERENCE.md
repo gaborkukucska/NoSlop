@@ -1355,7 +1355,9 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
   `getBackBufferDurationUs`, `retainBackBufferFromKeyframe`,
   `shouldContinueLoading`, `shouldStartPlayback`, `shouldContinuePreloading`):
   lifecycle calls go to both inner controls (preload and on-screen),
-  decisions to the active one; preload keeps no back buffer, on screen 60 s.
+  decisions to the active one. A player built on screen keeps 60 s of back
+  buffer and a preload keeps none. A claimed warm player stays at none, because
+  ExoPlayer reads both back-buffer settings once, when the player is built.
   Media3 1.9+ needs API 23; minSdk is 24. Tested (unit: `AdaptiveTorLoadControlE5Test`, `ReleaseBuildRulesE5Test`).
 - **Security**: `androidx.security.crypto` (alpha, per `libs.versions.toml`)
 - **Persistence**: Room (`runtime`, `ktx`, `ksp` compiler)
@@ -2100,6 +2102,8 @@ fixing the wrong layer.
 | 5 | Is the proxy the thing being refused? | `signedFor=` on a resolved URL: a Cloudflare address that gets `LOGIN_REQUIRED` is §16.14 |
 | 6 | Did we resolve something unplayable? | itag on `resolved DIRECT`. **18 is what you want.** 137/248/299/303 are DASH video-only (§16.12) |
 | 7 | Resolved but not playing? | `PLAYBACK_DIAG sample` — `delta=0` with a flat `bufPos` means no bytes; rising `bufPos` with no `FIRST FRAME` means container or codec |
+| 8 | Playing but out of sync? | `NoSlop/AV_SYNC`: compare `warm#N` with `fresh#N` (§16.34) |
+| 9 | Playing, then stuttering? | a low `delta` and `state=BUFFERING` again and again is a slow circuit; check for `Recovering in place` (§16.35) |
 
 Signals worth knowing by sight:
 
@@ -2112,7 +2116,9 @@ Signals worth knowing by sight:
 | `Feed batch built off the main thread in Nms` | how long an append took; it no longer touches the swipe (§16.29) |
 | `Claimed preloaded video: ... state= bufMs=` | a swipe landed on a warm player (§16.30) |
 | `App left:`, `App returned:` | `VIDEO_AWAY`: player state on each trip away (§16.33) |
-| `Recovering in place while away`, `Swapped in a fresh stream` | §16.33 keeping a player alive in the background |
+| `Recovering in place (app=...)`, `Swapped in a fresh stream at pos=` | keeping a player through a stall, away (§16.33) or on screen (§16.35) |
+| `No swap needed` | the old stream recovered while a new one resolved (§16.35) |
+| `No first frame 1500ms after the claim` | a warm player started without its picture (§16.34) |
 | `Feed retention: N rows, removed ...` | the daily pruning run (§7.6) |
 | `Auto-retrying unavailable resolve` | §16.19 doing what a user would otherwise have to tap |
 | `Gave up waiting 20s for a resolve slot` | the §16.8 gate is too tight for current conditions |
@@ -2282,16 +2288,16 @@ Three things turned a healthy background video into "Finding stream" on return:
    the URL it started with (`NOSLOP_HELD_PLAYBACK_URL_V1`). A retry key is handled
    once (`NOSLOP_RETRY_ONCE_V1`).
 
-**Recovery in place.** While the app is away, `recoverWhileAway` keeps the player,
-re-resolves, and calls `setMediaSource(src, resumeAtMs)` then `prepare()`.
-`decideAwayRecovery` decides:
+**Recovery in place.** `recoverInPlace` keeps the player, re-resolves, and calls
+`setMediaSource(src, resumeAtMs)` then `prepare()`. It began as the away path,
+and since round 5 it runs on screen too (§16.35). `decideRecovery` decides:
 
 | Decision | When |
 |---|---|
-| `NOT_AWAY` | The app is started; use the normal retry |
+| `NORMAL_RETRY` | On screen, and the video never played or the attempts are used up |
 | `ALREADY_RUNNING` | A recovery is in progress |
-| `START` | Away, with attempts left |
-| `GIVE_UP` | `MAX_AWAY_RECOVERIES` (3) used; a retry runs on return |
+| `START` | Away, or on screen after playing, with attempts left |
+| `GIVE_UP` | Away, with `MAX_IN_PLACE_RECOVERIES` (3) used; a retry runs on return |
 
 Attempts that find no stream wait `AWAY_RECOVERY_RETRY_DELAY_MS` (4 s).
 `mediaClientFor` keeps a running player on the client its URL needs.
@@ -2303,6 +2309,122 @@ is null, and `ERROR_CODE_TIMEOUT` from `StuckPlayerDetector` counts as recoverab
 `state`, `playing`, `wants`, `suppressed` and `userPaused`, and the position
 should move with the clock between them. The log can't show whether a return
 used the notification.
+
+Tests: `PlaybackPolicyTest`.
+
+### 16.34 A warm player starts with its picture (`NOSLOP_WARM_START_SYNC_V1`, `NOSLOP_AV_SYNC_DIAG_V1`)
+
+**Symptom:** many warm clearnet videos played with their sound out of sync.
+Swiping away and back reloaded the slide, and it was then in sync.
+
+**The cause isn't proven.** The two changes below shipped together, the owner
+confirmed the result by watching, and no capture from that build has been read.
+Media3 1.11.1 slaves video to the audio clock, and nothing in its renderer, sink
+or clock code could leave a warm player's audio permanently off. So a device or
+audio-route cause is possible. Don't remove either change without testing.
+
+| | Player built for the slide | Warm player before round 4 |
+|---|---|---|
+| Surface | Present while it prepares | Attached at the claim |
+| Sound starts | After READY, which needs a frame on the surface | As soon as the slide took it |
+| Audio content type | `MOVIE` | `MUSIC` |
+
+**The hold.** The first-frame wait from `c7d782c` set `playWhenReady = false` at
+the claim, and `LaunchedEffect(isVisible, exoPlayer)` undid that at once.
+`warmStartHeld` now covers that effect, and `onRenderedFirstFrame` ends it.
+`holdsAudioForFirstFrame` decides at the claim:
+
+| Claimed player | Hold |
+|---|---|
+| READY with a video track | Yes |
+| BUFFERING | Yes, as its tracks may not be known. READY with no video ends it |
+| READY with no video track | No |
+| Failed, IDLE or ENDED | No |
+| App in the background | No, there is no surface to draw on |
+
+`WARM_FIRST_FRAME_WAIT_MS` (1.5 s) ends a hold if no frame comes, so a slide
+can't stay silent. It should rarely fire, as a paused player does release its
+first frame: for the first period `mayRenderStartOfStream` is true.
+
+**The audio type.** A warm video gets `AUDIO_CONTENT_TYPE_MOVIE`. A URL ending
+in an audio extension stays `MUSIC`, as `AudioPlayer` claims warm players too.
+This has to be set when the player is built. `DefaultAudioSink` flushes when the
+attributes change, so changing them at the claim would lose audio already written
+to the `AudioTrack`.
+
+`setAllowedVideoJoiningTimeMs(0)` matters here. A surface that arrives after a
+player has started takes it back to BUFFERING, pausing the audio, until a frame
+is out.
+
+**If it comes back.** A seek to the current position would act as a soft
+re-sync. `DefaultAudioSink.flush()` releases the `AudioTrack`, and the decoder
+flushes on the real surface, with no network use. It isn't built.
+
+**Reading a capture.** `AV_SYNC` lines start with `warm#N` or `fresh#N` and the
+time since the slide took the player:
+
+| Line | Means |
+|---|---|
+| `video decoder`, `audio decoder` | The decoder chosen. `c2.android` is software, a fallback when hardware runs out |
+| `audio started, after first frame by Nms` | When sound really began. Negative means it led the picture |
+| `sample ... clock=` | Position against real time, about 1.000 when healthy |
+| `sample ... earlyMs=` | How early frames are against the audio clock. Steadily negative means the picture is behind |
+| `playWhenReady=false reason=1` | The user tapped pause |
+
+Samples run every 2 s, for up to 16 s, each time a slide becomes visible.
+
+Tests: `PlaybackPolicyTest`, `FeedSmoothnessArchitectureTest`.
+
+### 16.35 Recovery in place on screen (`NOSLOP_ONSCREEN_RECOVERY_V1`)
+
+**Symptom:** a long video buffered, showed "Finding stream" for about a minute,
+then carried on from the same point.
+
+**Why a reconnect can't fix it.** A googlevideo URL is tied to the exit's IP
+address (§18). A new circuit means a new exit, which needs a new URL. ExoPlayer's
+own retries use the same SOCKS identity, and `readTimeout` is 45 s.
+
+**What a bad stream looks like.** From the capture of 2026-11-03, a 71 MB video
+needing about 42 KB/s, after about 14 minutes of normal play:
+
+| Time | What happened |
+|---|---|
+| 12:38:59 | Speed fell to about 8 KB/s, a fifth of what it needed |
+| 12:39:01–12:39:57 | 6–20 s of buffering, then a few seconds of playing, over and over |
+| 12:40:07 | No data at all |
+
+Apart from light mesh traffic the app was idle, so the circuit, the exit or YouTube
+slowed down. The log can't say which. The old limit was never reached during the
+stutter, as each play burst reset `stalledSamples` and
+`continuousBufferingSamples`.
+
+**On screen, once a video has played.** `hasPlayed` is set by the stall sampler
+after a sample of real playback. A video that never played has nothing to keep,
+so it uses the normal retry.
+
+| Step | What happens |
+|---|---|
+| Trigger | `shouldRecoverEarly`, over Tor: `EARLY_STALL_SAMPLES` (12 s), or `RebufferWindow.isStarved` |
+| Resolve | On a fresh circuit, while the old stream plays on |
+| Check | `keepsCurrentStream`: playing with `RECOVERED_STREAM_BUFFER_MS` (10 s) buffered keeps the old stream |
+| Swap | `setMediaSource` at the position at that moment, then `prepare()` |
+| Out of attempts | `onRetry()`, which shows "Finding stream" |
+
+`RebufferWindow` holds the last `REBUFFER_WINDOW_SAMPLES` (20, or 40 s) and is
+starved at `REBUFFER_STARVED_SAMPLES` (14, or 28 s). A pause, a suppressed player
+or a running recovery clears it.
+
+Details that matter:
+
+* `setKeepContentOnPlayerReset(true)` keeps the last frame through the swap.
+  Without it the `PlayerView` shutter closes when the tracks clear.
+* A player stopped by an error reports no buffering, so `recoverInPlace` sets
+  `isBuffering` itself, or the frame would freeze with no sign of life.
+* `streamCanRecover` is false for an error `isRecoverablePlaybackError` rejects.
+  On screen that stays on the normal error path. Away is unchanged.
+* The slide may have left by the time the resolve ends, so a swap also needs
+  `currentIsVisible`.
+* The old limits stay as the backstop for the normal retry.
 
 Tests: `PlaybackPolicyTest`.
 
