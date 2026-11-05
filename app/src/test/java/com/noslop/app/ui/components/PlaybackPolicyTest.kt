@@ -47,23 +47,77 @@ class PlaybackPolicyTest {
     }
 
     @Test
-    fun onScreenPlaybackKeepsTheNormalRetryPath() {
-        assertEquals(AwayRecoveryDecision.NOT_AWAY, decideAwayRecovery(appStarted = true, recoveryRunning = false, attemptsUsed = 0))
-        assertEquals(AwayRecoveryDecision.NOT_AWAY, decideAwayRecovery(appStarted = true, recoveryRunning = false, attemptsUsed = 99))
+    fun aVideoThatNeverPlayedKeepsTheNormalRetryPath() {
+        assertEquals(RecoveryDecision.NORMAL_RETRY, decideRecovery(appStarted = true, hasPlayed = false, recoveryRunning = false, attemptsUsed = 0))
+    }
+
+    @Test
+    fun onScreenPlaybackRecoversInPlaceUntilAttemptsRunOut() {
+        for (attempts in 0 until MAX_IN_PLACE_RECOVERIES) {
+            assertEquals(RecoveryDecision.START, decideRecovery(appStarted = true, hasPlayed = true, recoveryRunning = false, attemptsUsed = attempts))
+        }
+        assertEquals(RecoveryDecision.NORMAL_RETRY, decideRecovery(appStarted = true, hasPlayed = true, recoveryRunning = false, attemptsUsed = MAX_IN_PLACE_RECOVERIES))
     }
 
     @Test
     fun awayPlaybackRecoversInPlaceUntilAttemptsRunOut() {
-        for (attempts in 0 until MAX_AWAY_RECOVERIES) {
-            assertEquals(AwayRecoveryDecision.START, decideAwayRecovery(appStarted = false, recoveryRunning = false, attemptsUsed = attempts))
+        for (attempts in 0 until MAX_IN_PLACE_RECOVERIES) {
+            assertEquals(RecoveryDecision.START, decideRecovery(appStarted = false, hasPlayed = false, recoveryRunning = false, attemptsUsed = attempts))
         }
-        assertEquals(AwayRecoveryDecision.GIVE_UP, decideAwayRecovery(appStarted = false, recoveryRunning = false, attemptsUsed = MAX_AWAY_RECOVERIES))
+        assertEquals(RecoveryDecision.GIVE_UP, decideRecovery(appStarted = false, hasPlayed = true, recoveryRunning = false, attemptsUsed = MAX_IN_PLACE_RECOVERIES))
     }
 
     @Test
     fun aRunningRecoveryOwnsThePlayerEvenAfterTheAppReturns() {
-        assertEquals(AwayRecoveryDecision.ALREADY_RUNNING, decideAwayRecovery(appStarted = false, recoveryRunning = true, attemptsUsed = 1))
-        assertEquals(AwayRecoveryDecision.ALREADY_RUNNING, decideAwayRecovery(appStarted = true, recoveryRunning = true, attemptsUsed = 1))
+        assertEquals(RecoveryDecision.ALREADY_RUNNING, decideRecovery(appStarted = false, hasPlayed = true, recoveryRunning = true, attemptsUsed = 1))
+        assertEquals(RecoveryDecision.ALREADY_RUNNING, decideRecovery(appStarted = true, hasPlayed = true, recoveryRunning = true, attemptsUsed = 1))
+    }
+
+    @Test
+    fun theStutterFromTheNovember3CaptureCountsAsStarved() {
+        // 12:39:01 on: about 20 s buffering, 6 s playing, 16 s buffering, each sample 2 s apart.
+        val window = RebufferWindow()
+        repeat(10) { window.record(buffering = true) }
+        repeat(3) { window.record(buffering = false) }
+        repeat(3) { window.record(buffering = true) }
+        assertFalse(window.isStarved)
+        window.record(buffering = true)
+        assertTrue("14 of the last 20 samples, reached 34 s in", window.isStarved)
+    }
+
+    @Test
+    fun anOrdinaryRebufferIsNotStarved() {
+        val window = RebufferWindow()
+        repeat(4) {
+            repeat(3) { window.record(buffering = true) }
+            repeat(7) { window.record(buffering = false) }
+        }
+        assertFalse(window.isStarved)
+    }
+
+    @Test
+    fun theWindowForgetsOnReset() {
+        val window = RebufferWindow()
+        repeat(REBUFFER_WINDOW_SAMPLES) { window.record(buffering = true) }
+        assertTrue(window.isStarved)
+        window.reset()
+        assertFalse(window.isStarved)
+    }
+
+    @Test
+    fun earlyRecoveryIsOnlyForAVideoThatHasPlayed() {
+        assertTrue(shouldRecoverEarly(hasPlayed = true, attemptsUsed = 0, stalledSamples = EARLY_STALL_SAMPLES, starved = false))
+        assertTrue(shouldRecoverEarly(hasPlayed = true, attemptsUsed = 0, stalledSamples = 0, starved = true))
+        assertFalse("a slow first start is normal over Tor", shouldRecoverEarly(hasPlayed = false, attemptsUsed = 0, stalledSamples = 99, starved = true))
+        assertFalse(shouldRecoverEarly(hasPlayed = true, attemptsUsed = 0, stalledSamples = EARLY_STALL_SAMPLES - 1, starved = false))
+        assertFalse(shouldRecoverEarly(hasPlayed = true, attemptsUsed = MAX_IN_PLACE_RECOVERIES, stalledSamples = 99, starved = true))
+    }
+
+    @Test
+    fun aRecoveredStreamIsKept() {
+        assertTrue(keepsCurrentStream(isPlaying = true, bufferedMs = RECOVERED_STREAM_BUFFER_MS))
+        assertFalse("still short of buffer", keepsCurrentStream(isPlaying = true, bufferedMs = 4_000L))
+        assertFalse("buffer with no playback is a stuck player", keepsCurrentStream(isPlaying = false, bufferedMs = 60_000L))
     }
 
     @Test

@@ -72,14 +72,48 @@ internal fun holdsAudioForFirstFrame(
 }
 
 // --- NOSLOP_AWAY_RECOVERY_V1 ---
-// Resolves tried for one stall or error while the app is in the background, before waiting for the
-// user to come back. Reset by stable playback.
-internal const val MAX_AWAY_RECOVERIES = 3
+// Resolves tried for one stall or error before leaving it to the normal retry, or to the user's return
+// if the app is in the background. Reset by stable playback.
+internal const val MAX_IN_PLACE_RECOVERIES = 3
 internal const val AWAY_RECOVERY_RETRY_DELAY_MS = 4_000L
 
-internal enum class AwayRecoveryDecision {
-    /** The app is on screen: the normal retry path applies, with its visible loading state. */
-    NOT_AWAY,
+// --- NOSLOP_ONSCREEN_RECOVERY_V1 ---
+// The stall sampler runs every 2 s. A stream that stops for good used to get 22 s before anything
+// happened, and a slow one got nothing: each few seconds of play reset the stall counters, so a stream
+// at a fifth of the speed it needed stuttered until it died. The 2026-11-03 12:39 capture did that
+// for over a minute. The old stream plays on while the new one resolves, so looking early is cheap.
+internal const val EARLY_STALL_SAMPLES = 6
+internal const val REBUFFER_WINDOW_SAMPLES = 20
+internal const val REBUFFER_STARVED_SAMPLES = 14
+
+// Past this much buffer while playing, the old stream has recovered and is better than a new one.
+internal const val RECOVERED_STREAM_BUFFER_MS = 10_000L
+
+/** How much of the last [REBUFFER_WINDOW_SAMPLES] samples went on buffering. Play bursts can't reset it. */
+internal class RebufferWindow {
+    private val samples = ArrayDeque<Boolean>()
+
+    val isStarved: Boolean get() = samples.count { it } >= REBUFFER_STARVED_SAMPLES
+
+    fun record(buffering: Boolean) {
+        samples.addLast(buffering)
+        if (samples.size > REBUFFER_WINDOW_SAMPLES) samples.removeFirst()
+    }
+
+    fun reset() = samples.clear()
+}
+
+/** Whether to look for a new stream before the stall limit. Only for a video that has been playing. */
+internal fun shouldRecoverEarly(hasPlayed: Boolean, attemptsUsed: Int, stalledSamples: Int, starved: Boolean): Boolean =
+    hasPlayed && attemptsUsed < MAX_IN_PLACE_RECOVERIES && (stalledSamples >= EARLY_STALL_SAMPLES || starved)
+
+/** Whether a new stream, once found, should be dropped because the old one has recovered. */
+internal fun keepsCurrentStream(isPlaying: Boolean, bufferedMs: Long): Boolean =
+    isPlaying && bufferedMs >= RECOVERED_STREAM_BUFFER_MS
+
+internal enum class RecoveryDecision {
+    /** Nothing on screen worth keeping, or attempts used up: the normal retry, with its loading state. */
+    NORMAL_RETRY,
 
     /** A recovery is already running. It owns the player until it finishes, even if the app returns. */
     ALREADY_RUNNING,
@@ -91,12 +125,12 @@ internal enum class AwayRecoveryDecision {
     GIVE_UP
 }
 
-internal fun decideAwayRecovery(appStarted: Boolean, recoveryRunning: Boolean, attemptsUsed: Int): AwayRecoveryDecision =
+internal fun decideRecovery(appStarted: Boolean, hasPlayed: Boolean, recoveryRunning: Boolean, attemptsUsed: Int): RecoveryDecision =
     when {
-        recoveryRunning -> AwayRecoveryDecision.ALREADY_RUNNING
-        appStarted -> AwayRecoveryDecision.NOT_AWAY
-        attemptsUsed >= MAX_AWAY_RECOVERIES -> AwayRecoveryDecision.GIVE_UP
-        else -> AwayRecoveryDecision.START
+        recoveryRunning -> RecoveryDecision.ALREADY_RUNNING
+        appStarted && (!hasPlayed || attemptsUsed >= MAX_IN_PLACE_RECOVERIES) -> RecoveryDecision.NORMAL_RETRY
+        attemptsUsed >= MAX_IN_PLACE_RECOVERIES -> RecoveryDecision.GIVE_UP
+        else -> RecoveryDecision.START
     }
 
 /**
