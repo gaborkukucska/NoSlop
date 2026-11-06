@@ -5,7 +5,7 @@
 ### Feed is Empty
 *   **Tor Connection**: Ensure Tor is connected. Check the status indicator at the top of the feed.
 *   **Refresh**: Pull down to refresh or use the "Refresh Feed" button in the search modal.
-*   **API Keys**: Some sources like Pexels or NewsAPI require an API key in Settings. Wikimedia and NASA do not.
+*   **API Keys**: Some sources, such as Pexels and Vimeo, need a free key of your own. Go to Settings, Content, API Keys and tap Configure Key to see how to get one. Most sources need no key.
 *   **Old items disappear**: NoSlop removes stored feed items after about 75 days, or sooner past 10,000 unread items. Saved items stay. Search can still find older items.
 
 ### Media Playback Issues

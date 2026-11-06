@@ -1009,24 +1009,52 @@ exceptions so one client failure doesn't block the others. Results are
 (`Search Videos`, `Search Audio`, `Search Images`, `Search Articles`, and
 the `else` fallback) pass `recentOnly = true` to their respective API
 clients, applying native date filters (YouTube: this year via protobuf
-`params`; Reddit: `t=year`; NewsAPI/Guardian: last 3 months via date
+`params`; Reddit: `t=year`; Guardian: last 3 months via date
 params). Category-based feeds (Technology, Science, etc.) are unaffected
 and continue using natural trending/hot sorting.
 
 | Client | Auth | Notes |
 |---|---|---|
 | `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Marked `requiresUserKey = false` in `ApiKeyRepository.SERVICES` (InnerTube proxy & direct fallbacks). Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
-| `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool. Routed through the Tor SOCKS proxy whenever `HttpClientProvider.useTorForClearnet` is set (`probeClientTor`), falling back to a direct client only when the user has turned Tor routing off. Instances are **raced**, not walked: batches of `RACE_WIDTH` (4) are queried in parallel and the first usable answer wins. Losing racers are cancelled through OkHttp `enqueue`/`Call.cancel` so their Tor circuits are released immediately rather than pinned until the read timeout, and a cancelled racer is not marked failed — otherwise every race would blacklist three healthy instances. |
-| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)` — decodes `&amp;` preview URLs and preserves article classification for link/text posts |
-| `InternetArchiveClient` | none | `getPopularVideos()`, `getPopularAudio()`, `searchAudio(query)` — supports keyless MP3/FLAC music and podcast browsing |
+| `InvidiousApiClient` | none | Last-resort stream resolver on a direct connection: `resolveStreamUrl` races Piped and Invidious instances when YouTube's own clients could not play a video. Not used over Tor. Searches through it were removed on 2026-11-06, because no public instance answered them. |
+| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)`, `searchRedditPage`. Reddit refuses its JSON listings on direct and Tor connections, so `fetchRss` reads the same listing's RSS address (`rssUrlOf`, `parseRssListing`): posts, links, images and thumbnails, no video stream. JSON, with HLS video, is used only through a configured proxy. Reddit has flagged RSS as a scraping target, so this may need revisiting. |
+| `InternetArchiveClient` | none | `getPopularVideos()`, `getPopularAudio()`, `searchAudio(query)` — supports keyless MP3/FLAC music and podcast browsing. Each fetch has its own limit of 10 metadata lookups, and logs one INFO line: `fetched N of M results (dropped: reason count, ...)`. |
 | `OpenverseApiClient` | none | `searchAudio(query)`, `searchImages(query)` — CC-licensed audio and photography, 5 min rate-limit cooldown |
-| `NasaApiClient` | optional (DEMO_KEY works) | `fetchAPOD()`, `searchImageLibrary(query)` |
-| `JamendoApiClient` | none (public client ID) | `searchTracks(query)` — CC-licensed music |
-| `PexelsApiClient` | user key required | photos/videos, skipped silently if no key |
-| `NewsApiClient` | user key required | headlines + search, supports `language` and `recentOnly` params |
+| `NasaApiClient` | optional | `fetchAPOD()`, `searchImageLibrary(query)`. The image library needs no key. APOD uses the user's key, or `DEMO_KEY` on a direct connection; `DEMO_KEY` is blocked over Tor, so APOD is skipped there without a key. |
+| `JamendoApiClient` | user client ID required | `searchTracks(query)` — CC-licensed music. Its terms require crediting the artist and Jamendo and a link to each track's Jamendo page: `author`, the excerpt, the card's source label and `url` do that. |
+| `PexelsApiClient` | user key required | photos and videos, skipped silently if no key. Pexels Videos runs in Video Platforms and video search. Each item names the creator and links to its Pexels page, as Pexels asks. |
 | `GuardianApiClient` | user key required | `searchArticles(recentOnly)`, `searchSection` |
-| `VimeoApiClient` | user key required | `fetchFeatured` |
-| `PodcastIndexClient` | user key required | `searchEpisodes`, supports `language` param |
+| `VimeoApiClient` | user token required | `fetchFeatured(query, ...)`. Vimeo's video search requires a query. An Unauthenticated token is enough. |
+| `PodcastIndexClient` | user key and secret required | `searchEpisodes`, supports `language`. Search finds shows, which have no audio, so the latest 3 episodes of up to 5 shows are fetched next, one request per show. |
+
+`ApiKeyRepository.SERVICES` lists what each key unlocks, the sign-up page and the
+steps to get it. Settings → Content → API Keys shows them in a sheet
+(`ConfigureKeySheet`), with a Test key button (`ApiKeyTester`: one small real
+request, and an answer that tells a refused key from a limit, a network failure
+or a 403 that may just be Tor). Saving a key switches on the sources that use it
+(`FeedRepository.enableSourcesFor`). Podcast Index takes a key and a secret in
+two fields; the old combined `key:secret` form is still read. Keys left from
+retired services (NewsAPI, Instagram, TikTok) are cleared on start.
+
+**Saved sources (`data/SavedSources.kt`).** A `feed_sources` row holds its own
+copy of a built-in source's address, title, type and category. On start and
+before every sync, `savedSourceChanges` brings built-in rows in step with
+`SourceLibrary`, keeping `isActive`, and deletes rows in
+`SourceLibrary.retiredSourceIds`. Remove a source by moving its id to that list.
+Sources the user added have ids of their own and are left alone.
+
+**On and off.** A source runs only when it is on, in the feed and in searches
+(`withoutSwitchedOff`). `isActive = false` on a saved row is off, and a source with
+no row is not. Keyless sources used to run whatever their switch said, and the
+next sync switched them back on.
+
+**Hacker News search** is skipped when `useTorForClearnet` is set, because
+Algolia answers 403 to Tor exits. The Hacker News RSS feed is not affected.
+
+**Channel dates.** `ChannelMetadataResolver` gets a YouTube channel's id from
+search results (`rememberChannelId`) or a channel search (`findChannelId`), and
+the date from the feed-level `<published>` of the channel's Atom feed
+(`YouTubeInternalClient.channelCreatedAt`). Only YouTube items are looked up.
 
 ### 7.4 Feed Sync Pipeline (`NoSlopRepository.refreshFeeds`)
 
@@ -2658,7 +2686,7 @@ builds an 8-hex tag and the length (`#1a2b3c4d(len 9)`), the same for the same
 value within one run; builds that show sensitive logs keep the value
 (`LoggerRedactTest`). HTTP request labels never carry them, Reddit logs no
 URLs (they contain the query), YouTube logs no response bodies, and Jamendo
-and Invidious log no terms. `CodeHygieneArchitectureTest` fails on a log or
+logs no terms. `CodeHygieneArchitectureTest` fails on a log or
 request label that interpolates a search term or video id, on a coroutine
 scope without `SupervisorJob` and a logging handler, on a silent `catch` not
 on its per-file allow list, and on app code using Gson `TypeToken`.
@@ -2770,17 +2798,15 @@ Mechanism detail lives in the sections it changed:
   when the list has run out, instead of searching again with a random extra
   word. One page at a time per search.
   - `PublicApiService.SearchCursor` holds one search's place in each source
-    (YouTube continuation token, Invidious page, Reddit `after`, and per-source
+    (YouTube continuation token, Reddit `after`, and per-source
     pages from `feeds/api/SourcePage.kt`). A source is done when it reports the
     end, has no key, or failed 3 times in a row; a failed request keeps its
     place. A source page that has not arrived when the fetch's time is up is
     cancelled, and the same page is asked for next time.
   - Newest first where the source can sort by date (`SEARCH_NEWEST_FIRST`):
-    YouTube (upload date), Invidious (`sort_by=upload_date`, every date),
-    Reddit (`sort=new`), Hacker News, NewsAPI, the Guardian, the Internet
-    Archive. By relevance: Openverse, Wikimedia, Pexels, NASA, Wikipedia.
-    Podcast Index fills the first page only. NewsAPI stops after 5 pages (its
-    free plan serves 100 results).
+    YouTube (upload date), Reddit (`sort=new`), Hacker News, the Guardian, the
+    Internet Archive. By relevance: Openverse, Wikimedia, Pexels, NASA, Wikipedia.
+    Podcast Index and Pexels Videos fill the first page only.
   - Searches made outside the search window (background interest feeds) send
     the same requests as before; "All" searches have their own category
     (`userSearchCategory`).
@@ -3079,7 +3105,7 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 
 ### 23.13 Decentralized Group Directory Sync, Node Blacklisting & ProGuard Hardening (v0.5.8-alpha)
 * **Decentralized Group Member Directory Synchronization**: `GroupInvitePayload`, `GroupUpdatePayload`, and `GroupSyncPayload` carry `memberDetails: Map<String, GroupMemberInfo>` containing members' handles, onion addresses, and X25519 public keys (`encPublicKey`). Nodes store these as un-trusted group peers (`isTrusted = false`), enabling pairwise X25519 DM encryption for group messages without exposing peers as 1:1 DM contacts.
-* **Group Catchup & Multi-Candidate Verification**: Nodes issue `GROUP_QUERY` packets to resolve missing keys. Responding nodes generate `GROUP_SYNC` packets signed by the admin or sender. `HandshakePacketHandler` verifies signatures against all current group members and admin candidates.
+* **Group Catchup & Multi-Candidate Verification**: Nodes issue `GROUP_QUERY` packets to resolve missing keys. Responding nodes generate `GROUP_SYNC` packets signed by the admin or sender. `HandshakePacketHandler` verifies signatures against all current group members and admin candidates. Since 2026-11-06 the answer goes straight to the member who asked (WIRE_PROTOCOL_REFERENCE.md §3 GROUP_SYNC).
 * **Mesh Node Firewall Blacklisting**: `PreferencesRepository.BannedNode` stores blacklisted node keys. `GossipService.processIncoming` evaluates `repo.isNodeBanned(senderId)` and discards all incoming packets before deduplication or routing.
 * **ProGuard Reflection Safety**: Added `@Keep` across all `Packets.kt` payload models and configured `proguard-rules.pro` with `-keepattributes Signature,InnerClasses,EnclosingMethod` to safeguard Gson `TypeToken` generic types under R8 full minification.
 
@@ -3110,7 +3136,7 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 * **60-Day Freshness & All Creator Sourcing**: `FRESHNESS_MAX_AGE_MS` set to 60 days; `FeedRepository.kt` syncs all configured creators without sampling truncation.
 * **Creator Depletion Milestone Card**: Injects `UnifiedItem.CreatorDepletion` when creator content is depleted, prompting discovery search before delivering fresh random content.
 * **Mindful Break Reminders**: Enabled by default (time-based, 30-minute interval, with slide-counter mode). Scheduled directly into the Live Feed and rendered with 1-tap exit and continue options.
-* **Instagram & TikTok Definitions**: Registered in `SourceLibrary` and `ApiKeyRepository.SERVICES` for key-configured social clearnet ingestion.
+* **Instagram & TikTok Definitions**: Registered in `SourceLibrary` and `ApiKeyRepository.SERVICES` for key-configured social clearnet ingestion. (Removed on 2026-11-06: neither platform's rules allow an app like NoSlop to read its content.)
 
 ### 23.8 Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping & Video Timeline (v0.5.5-alpha)
 * **Tor v3 Handshake Pairing Latency**: Handshake connect timeout tuned to 28s with 2 attempts; removed spurious duplicate USER_HANDSHAKE broadcasts on directed delivery failure and decoupled inventory sync from initial handshake dispatch.

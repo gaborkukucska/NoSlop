@@ -37,11 +37,19 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **A warm player never gets the 60 s back buffer.** ExoPlayer reads the back-buffer settings once, when the player is built, and a warm player is built with none. So rewinding on a warm slide downloads again over Tor. The comment on `AdaptiveTorLoadControl` still says otherwise. Found in round 4, not changed.
 * **A warm neighbour can hide a stall.** `bytesDelta` in the stall sampler adds `PreloadManager.networkBytesReceivedInSession`, which counts every warm player. A neighbour preloading can make a stalled stream look alive. The same split means `bytesRecv` in `PLAYBACK_DIAG` samples stays at 0 for a claimed warm player.
 * **`NO PROGRESS for 10s` can be wrong.** It also fires when the buffer is creeping forward, as it did in the capture of 2026-11-03 at 12:39. Read `delta` in the samples rather than this line.
-* **Log noise.** Repeated send failures to offline mesh peers, and exhausted Invidious "channel joined date" lookups.
+* **Log noise.** Repeated send failures to offline mesh peers.
+* **Reddit gives no video.** Its RSS has no stream, so Reddit adds nothing to video search unless a proxy is configured. Reddit has also flagged RSS as a scraping target, so it could close.
+* **Why Internet Archive returned 0 isn't proven.** The counter fix may not be all of it. Read the first `fetched N of M results` line.
+* **Vimeo's playback route isn't checked against its terms.** `VideoPlayer` asks Vimeo's player config for a direct stream and falls back to the embedded player. Vimeo's current API terms couldn't be read while this was written.
+* **The Guardian's terms aren't confirmed.** The access page couldn't be read while this was written. The sheet states the limit found earlier, 500 requests a day.
+* **The channel date rests on one field.** No real channel feed could be fetched while this was written, so it needs checking on one.
+* **A NASA key over Tor is untested.**
 
 **Mesh and security**
 
-* **A group catch-up answer can reach non-members.** `handleGroupQuery` still broadcasts when the asking member has no stored onion address.
+* **Group records still spread from older builds.** They broadcast `GROUP_INVITE` and `GROUP_UPDATE` and gossip `GROUP_SYNC` until they update. New nodes don't pass them on.
+* **What the Hub does with a directed group packet isn't known.** Its source isn't in this repo, and no Hub is deployed.
+* **`GROUP_DELETE` and `GROUP_QUERY` are still broadcast.** They hold no member data, but they do show a group id and a key to contacts.
 * **Users invited by a member get group catch-up late** (G1).
 * **Clocks must agree to within 1 hour** (`EnvelopeAuth.MAX_SKEW_MS`).
 * **`mediaDigestFor` can block a same-revision v2 upgrade** of someone else's media that was downloaded unverified (D08). Nothing wrong is accepted; the post keeps its older signature.
@@ -93,6 +101,31 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-06) — Group Records Go Straight to Members, Source Overhaul, Guided API Keys (v0.7.5-alpha)
+
+The `GROUP_SYNC` change passed `GroupSyncDirectOnlyTest` on the owner's machine, after a fix to the test itself.
+
+* **Group records leaked to non-members.** `GROUP_SYNC`, `GROUP_INVITE` and `GROUP_UPDATE` hold member keys, handles and onion addresses in plain text.
+  * **Cause.** A `GROUP_SYNC` for a sender with no stored onion was broadcast, and any failed direct send was gossiped out to 6 hops. `GROUP_INVITE` and `GROUP_UPDATE` were broadcast on purpose so that offline members got them.
+  * **Fix.** Each member gets its own copy at its own onion address, derived from its key when none is stored. A failed invite or update waits in the outbox. Broadcast refuses these types and relays don't pass them on. A member just removed gets its copy, since that is how it learns.
+  * **What this gives up.** A member reachable only through a relay no longer gets these packets that way. A failed `GROUP_SYNC` waits for the member to ask again.
+* **Saved sources never followed the library.** A saved row keeps its own address, so an address fix never reached an existing install, and a removed source kept being fetched. Built-in rows now follow `SourceLibrary` on start and before every sync, and keep their switch. Retired ids are deleted.
+* **Source switches did nothing for keyless sources.** They ran whatever the switch said, the next sync switched them back on, and an empty category fell back to the whole library. Only sources that are on run now, in the feed and in searches.
+* **Sources removed and added, from the health check of 2026-11-05** (direct and over Tor).
+  * **Removed:** TikTok and Instagram (their rules exclude an app like NoSlop), YouTube Trending, NewsAPI, Invidious and Piped search, and the feeds of MotorTrend, Healthline, Mayo Clinic, 500px, Top Gear, Juxtapoz and FOSS Post. The Invidious and Piped stream fallback on direct connections stays.
+  * **Added:** WHO News, NPR Health, Jalopnik, Autocar, and The Guardian's World, Technology and Science RSS feeds.
+  * **Fixed:** r/selfhosted and r/homelab moved to `www.reddit.com`. Reddit listings and search read RSS, because the JSON listings answer 403. Hacker News search is skipped over Tor.
+* **Internet Archive returned nothing.** One metadata counter served the whole app and only searches reset it, so browsing fetches found it used up. Each fetch now has its own. That may not be the whole cause: the first run after a restart also returned 0, with no sign of a lookup. Every fetch now logs `fetched N of M results (dropped: ...)`, so one capture will show the rest.
+* **The Content Farm Cut-Off Filter's exact date depended on dead Invidious instances.** It now reads the channel's own YouTube feed, for YouTube items only.
+* **Guided API keys.** Configure Key opens a sheet with plain steps, a sign-up button, what the key unlocks and a Test key button. Saving a key switches its sources on.
+  * **Pexels Videos** was never called; it now runs in Video Platforms and video search.
+  * **Vimeo** sent no `query`, which its API requires, and didn't check the response.
+  * **Podcast Index** returned shows with no audio, and asked for a key and secret in two fields while reading only one. It now returns episodes.
+  * **Jamendo** was described as working without a key, which it doesn't. Tracks now credit Jamendo.
+  * **NASA** skips the shared demo key over Tor, where it is blocked.
+* **Testing.** Unit tests added: `GroupSyncDirectOnlyTest`, `SavedSourcesTest`, `InternetArchiveClientTest`, `ChannelDatesTest`, `GuidedKeysTest`, and Reddit RSS tests in `SearchPagingE5sTest`. Apart from the first, none has run under Gradle yet. All of `feeds/` was compiled against stub libraries, and the new pure logic was run there. `ApiKeysScreen`, `NoSlopViewModel` and the group senders in `NoSlopRepository` were not compiled until the owner's build.
+* **Not yet verified on device.** All of the above.
 
 ## Completed Changes (2026-11-05) — Feed Playback Round 5: Recovery in Place on Screen (v0.7.5-alpha)
 
@@ -215,7 +248,7 @@ These rounds close what was still open from review round 2 (`isues.txt`: D11, D1
   * **Packets pulled from a Hub skip the envelope check.** Hub pulls and Hub web-UI DMs are built inside the app and never cross the mesh socket, which is the only place the envelope is checked (`EnvelopeAuth` in `MeshTransport`).
   * **The Hub's onion address is not checked against its key.** Peers' announced onions are (S2), but the Hub's address is taken as configured.
   * **Clocks must agree to within 1 hour.** A packet whose envelope time is further from the receiver's clock is dropped as stale (`EnvelopeAuth.MAX_SKEW_MS`).
-  * **A group catch-up answer can reach non-members.** When the member asking (`GROUP_QUERY`) has no stored onion address, `handleGroupQuery` broadcasts the `GROUP_SYNC` answer. `GossipService.broadcast` sends it to every trusted contact and every group member, so friends who are not in the group receive its member keys, names and onion addresses. Found while writing these docs; not fixed yet.
+  * **A group catch-up answer could reach non-members** (closed 2026-11-06). When the member asking (`GROUP_QUERY`) has no stored onion address, `handleGroupQuery` broadcasts the `GROUP_SYNC` answer. `GossipService.broadcast` sends it to every trusted contact and every group member, so friends who are not in the group receive its member keys, names and onion addresses. Found while writing these docs; not fixed yet.
   * **Users invited by a member get group catch-up late.** A `GROUP_QUERY` is answered only for a key in the answering node's member list (G1). Someone invited by a member, not the admin, is answered only by members whose copy already lists them.
   * **Older downvotes still show in search.** Downvotes made before E5s were stored only as swipes and cannot be told apart, so they are not hidden.
   * **Search quality.** It works, but needs more work later (owner, 2026-10-13).

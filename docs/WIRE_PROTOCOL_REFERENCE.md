@@ -40,6 +40,10 @@ to look up any packet's shape.
 > and `GROUP_QUERY` is answered only for members (G1). Round E4: a
 > `GROUP_QUERY` keeps its sender on every copy.
 >
+> **2026-11-06: group records go straight to members.** `GROUP_INVITE`,
+> `GROUP_UPDATE` and `GROUP_SYNC` are no longer broadcast, gossiped or relayed
+> (§3 GROUP_SYNC). Formats are unchanged, and older builds still read them.
+>
 > **2026-10-07/08 additions** (no other envelope or payload changes):
 > the handshake reply path (§3.1), `media_metadata` on `CommentSyncData`
 > and v2 (media-hash) signature acceptance in `SYNC_RESPONSE` (§3, §4.3),
@@ -642,6 +646,9 @@ Rejected unless the signature verifies against `admin_public_key`, our own
 with this `group_id` — the admin key matches the stored one. An inbound
 packet can never reassign a group's admin.
 
+**Delivery (2026-11-06):** one copy per member, directed (see GROUP_SYNC,
+"Delivery"). The general `GROUP_INVITE` broadcasts are gone.
+
 ### GROUP_UPDATE
 
 **Type:** `GROUP_UPDATE` · class `GroupUpdatePayload`
@@ -687,6 +694,10 @@ the receiver does `addAll(added)` then `distinct()`.
 There is no signer field — see the note under §2 rows 21–23 for how the
 signer is recovered and what each role is permitted to change.
 
+**Delivery (2026-11-06):** one copy per member, directed (see GROUP_SYNC,
+"Delivery"). A member just removed gets a copy too, because that copy is how
+it learns. A leave goes to the other members and the admin.
+
 ### GROUP_DELETE
 **Type:** `GROUP_DELETE` · class `GroupDeletePayload`
 
@@ -710,17 +721,37 @@ signer is recovered and what each role is permitted to change.
 answer is the whole group record (member keys, names, onion addresses), so a
 node answers only when the envelope-authenticated `sender_id` is the
 `requester_id`, is in its member list or is the admin, and is not banned. The
-`GROUP_SYNC` goes to the sender's stored onion (the requester's address is no
-longer used). Before, groups that allow member invites answered anyone who
-knew the group id (former members included). **Open:** when the sender has no
-stored onion, the answer is broadcast, and `GossipService.broadcast` sends it
-to all trusted contacts as well as group members. A user invited by a member is answered only by members whose copy
+`GROUP_SYNC` goes straight to the sender (see GROUP_SYNC, "Delivery"). Before,
+groups that allow member invites answered anyone who knew the group id (former
+members included). A user invited by a member is answered only by members whose copy
 already lists them. **Sender (E4):** `GossipService.broadcast` sends a
 `GROUP_QUERY` unchanged (or as a relay that keeps its sender), never
 re-stamped per peer, so the requester always matches the sender. Tested (unit: `AnnouncePeerAndGroupQueryE2Test`, `IdentityLeftoversE4Test`).
 
 ### GROUP_SYNC
 **Type:** `GROUP_SYNC` · class `GroupSyncPayload`
+
+**Delivery (2026-11-06; `GossipService.isDirectOnly`).** `GROUP_SYNC`,
+`GROUP_INVITE` and `GROUP_UPDATE` hold a group's record in plain text: member
+keys, handles and onion addresses. Each goes straight to one member's onion
+address, with `target_user_id` set: the address we hold (`groupMemberOnion`), or
+else the one the member's key gives, since every identity's onion address is
+derived from its key.
+
+- `GossipService.broadcast` refuses these types, and no relay passes one on or
+  pushes one to its Hub. An older build may still gossip one: a new node reads a
+  copy meant for it, and a member still reads a `GROUP_SYNC` for its group.
+- When the direct send fails, a `GROUP_INVITE` or `GROUP_UPDATE` waits in the
+  outbox if the member has a peer row, and nothing is gossiped. A member with no
+  row catches up at its next start. A `GROUP_SYNC` isn't queued: the member
+  asks again at its next start, or when a member's key is missing, and every
+  member it reaches answers.
+- `GROUP_DELETE` and `GROUP_QUERY` hold no member data and are still broadcast.
+
+Before, these packets went to every trusted contact and every member of any
+group, and relays passed them on. A failed direct send gossiped the record out
+to 6 hops, and a `GROUP_SYNC` for a sender with no stored onion was broadcast.
+Tested (unit: `GroupSyncDirectOnlyTest`).
 
 | Field | Type | Description |
 |---|---|---|
