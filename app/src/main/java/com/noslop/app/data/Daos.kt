@@ -12,6 +12,9 @@ interface FeedDao {
     @Query("SELECT * FROM feed_sources WHERE isActive = 1")
     suspend fun getActiveSourcesList(): List<FeedSource>
 
+    @Query("SELECT * FROM feed_sources")
+    suspend fun getAllSourcesList(): List<FeedSource>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSource(source: FeedSource)
 

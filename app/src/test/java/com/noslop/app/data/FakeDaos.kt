@@ -28,6 +28,7 @@ class FakeFeedDao : FeedDao {
     var activeSources: List<FeedSource> = emptyList()
 
     override suspend fun getActiveSourcesList(): List<FeedSource> = activeSources
+    override suspend fun getAllSourcesList(): List<FeedSource> = activeSources
 
     override fun getAllSources(): Flow<List<FeedSource>> = flowOf(activeSources)
     override suspend fun insertSource(source: FeedSource) {

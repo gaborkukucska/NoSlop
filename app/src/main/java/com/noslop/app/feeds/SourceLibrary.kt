@@ -180,6 +180,16 @@ object SourceLibrary {
     )
 
     /**
+     * Built-in sources this library no longer has. A saved row with one of these ids is deleted on
+     * start, because nothing else stops it being fetched. Add an id here when removing it from [sources].
+     */
+    val retiredSourceIds = setOf(
+        "ap-top", "m-eff", "m-feditips", "m-mastodon", "reuters-world", "sci-daily", "selfhosted-hero",
+        "threatpost", "tt-khaby", "tt-mrbeast", "tt-zachking", "webmd", "yt-kurzgesagt", "yt-mkbhd",
+        "yt-smartereveryday", "yt-veritasium"
+    )
+
+    /**
      * Curated list of well-known creators, channels, YouTubers, podcasters, subreddits,
      * and content personalities per category. Used to seed the word-cloud suggestion UI
      * on the onboarding "Creator Filter" step and in the Settings preferences screen.

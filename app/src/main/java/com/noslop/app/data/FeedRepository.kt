@@ -224,11 +224,26 @@ class FeedRepository(
         true
     }
 
+    /** See [savedSourceChanges]. Runs on start and before every sync. */
+    private suspend fun syncSavedSources() {
+        val changes = savedSourceChanges(
+            feedDao.getAllSourcesList(),
+            com.noslop.app.feeds.SourceLibrary.sources,
+            com.noslop.app.feeds.SourceLibrary.retiredSourceIds
+        )
+        changes.updated.forEach { feedDao.updateSource(it) }
+        changes.retired.forEach { feedDao.deleteSource(it) }
+        if (changes.updated.isNotEmpty() || changes.retired.isNotEmpty()) {
+            Logger.info(TAG, "Saved sources: ${changes.updated.size} updated from the library, ${changes.retired.size} retired")
+        }
+    }
+
     /**
      * Ensures all keyless built-in API sources (such as YouTube InnerTube) are present in the
      * database's feed_sources table. Fixes issues where onboarding skipped keyless API sources.
      */
     suspend fun ensureDefaultApiSourcesExist() = withContext(Dispatchers.IO) {
+        syncSavedSources()
         val existing = feedDao.getActiveSourcesList().map { it.id }.toSet()
         val keylessApiSources = com.noslop.app.feeds.SourceLibrary.sources.filter { src ->
             if (src.feedType != "api") false
