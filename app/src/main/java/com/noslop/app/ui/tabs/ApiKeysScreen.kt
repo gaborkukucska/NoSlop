@@ -262,6 +262,7 @@ private fun KeyField(value: String, label: String, onValueChange: (String) -> Un
     )
 }
 
+@Composable
 private fun outcomeMessage(outcome: ApiKeyTester.Outcome): String = when (outcome) {
     ApiKeyTester.Outcome.WORKS -> "This key works."
     ApiKeyTester.Outcome.REFUSED -> "The service refused this key. Check it and try again."
