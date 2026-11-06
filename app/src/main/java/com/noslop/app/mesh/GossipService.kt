@@ -381,7 +381,17 @@ object GossipService {
     }
 
     /** Only push to Hub if the user actually has one configured */
+    /**
+     * --- NOSLOP_GROUP_SYNC_DIRECT_V1 ---
+     * A GROUP_SYNC holds a group's whole record in plain text: member keys, handles and onion addresses.
+     * Only the member who asked may see it, so it goes straight to that member's onion address and nobody
+     * passes it on: no broadcast, no gossip fallback when the send fails, no relay. Older builds can still
+     * gossip one, which is why relays check this as well.
+     */
+    internal fun isDirectOnly(type: String): Boolean = type == "GROUP_SYNC"
+
     private suspend fun pushToHubIfLinked(packet: NetworkPacket) {
+        if (isDirectOnly(packet.type)) return
         val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
             pushPacketToHub?.invoke(packet)
@@ -906,6 +916,10 @@ object GossipService {
      * Re-stamp sender_id to local node ID on forward (privacy preservation)
      */
     private suspend fun forwardPacket(packet: NetworkPacket, isFriendsOnly: Boolean = false) {
+        if (isDirectOnly(packet.type)) {
+            Logger.debug(TAG, "Not relaying ${packet.type} ${packet.id}: it only goes straight to its requester")
+            return
+        }
         val tx = transport ?: return
         val dao = peerDao ?: return
         
@@ -1043,6 +1057,10 @@ object GossipService {
      * Outbound broadcast originating from us
      */
     suspend fun broadcast(packet: NetworkPacket) {
+        if (isDirectOnly(packet.type)) {
+            Logger.warn(TAG, "Not broadcasting ${packet.type} ${packet.id}: it only goes straight to its requester")
+            return
+        }
         val tx = transport ?: return
         
         val hubStatus = tx.repository.getAppSetting("hub_deployment_status")

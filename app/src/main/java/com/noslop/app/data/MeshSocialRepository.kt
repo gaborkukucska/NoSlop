@@ -556,6 +556,8 @@ class MeshSocialRepository(
                                 meshTransport.repository.triggerDmSync()
                             }
                         }
+                    } else if (com.noslop.app.mesh.GossipService.isDirectOnly(packet.type)) {
+                        Logger.warn(TAG, "Direct send of ${packet.type} ${packet.id} to $onionAddress failed. It is not relayed.")
                     } else if (isDirected) {
                         Logger.warn(TAG, "Direct send to $onionAddress failed. Enqueueing in persistent outbox and gossip relaying ${packet.type} ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
@@ -577,6 +579,8 @@ class MeshSocialRepository(
                             // Outbox worker will retry delivery without flooding circuits
                         }
                     }
+                } else if (com.noslop.app.mesh.GossipService.isDirectOnly(packet.type)) {
+                    Logger.warn(TAG, "No onion address for ${packet.type} ${packet.id}. It is not relayed.")
                 } else {
                     Logger.warn(TAG, "No onion address for recipient of directed packet ${packet.id}. Falling back to gossip relay.")
                     // Even without a direct onion, we can still try to reach them via mesh gossip

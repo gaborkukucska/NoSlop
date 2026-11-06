@@ -383,6 +383,13 @@ object CryptoService {
         false
     }
 
+    /** The onion address derived from [publicKeyB64], or null when the key can't be read. */
+    fun onionOf(publicKeyB64: String): String? = try {
+        deriveOnionAddress(Base64.decode(publicKeyB64, Base64.DEFAULT))
+    } catch (_: Exception) {
+        null
+    }
+
     fun sign(payload: String, privateKeyB64: String): String {
         val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
         val privKeyParams = getEd25519PrivateKeyParams(bytes)

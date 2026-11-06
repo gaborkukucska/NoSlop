@@ -1265,12 +1265,13 @@ class HandshakePacketHandler(
             type = "GROUP_SYNC",
             payload = com.noslop.app.util.Json.gson.toJsonTree(syncPayload)
         )
-        val targetOnion = senderPeer?.onionAddress?.takeIf { it.isNotBlank() }
-        if (!targetOnion.isNullOrBlank()) {
-            repo.dispatchPacket(targetOnion, syncPacket)
-        } else {
-            GossipService.broadcast(syncPacket)
+        // The answer goes straight to the requester and to nobody else (GossipService.isDirectOnly).
+        val targetOnion = groupSyncDestination(packet.senderId, senderPeer?.onionAddress)
+        if (targetOnion == null) {
+            Logger.warn(TAG, "Not answering GROUP_QUERY ${query.groupId}: no address for ${packet.senderId.take(12)}")
+            return false
         }
+        repo.dispatchPacket(targetOnion, syncPacket)
         Logger.info(TAG, "Responded to GROUP_QUERY for group ${query.groupId} to ${packet.senderId}")
         return true
     }
@@ -1431,3 +1432,12 @@ internal fun groupQueryRefusal(
     if (!isMemberOrAdmin) return "the sender is not a member or the admin"
     return null
 }
+
+/**
+ * Where the answer to a GROUP_QUERY goes: the address we hold for the requester, or else the one its key
+ * gives. Members often hold no contact row for each other, and every identity's onion address is derived
+ * from its key, so an authenticated [senderId] can always be answered directly. Null only when the key
+ * can't be read.
+ */
+internal fun groupSyncDestination(senderId: String, storedOnion: String?): String? =
+    storedOnion?.takeIf { it.isNotBlank() } ?: CryptoService.onionOf(senderId)
