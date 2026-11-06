@@ -229,7 +229,10 @@ class BackupArchiveFormatE3Test {
         val c = BackupArchiveTestSupport.cbc(zip(large), words)
         assertEquals(Outcome.Refused("ConfirmLegacy"), read(c))
         assertEntries(large, read(c, legacy = true))
-        assertTrue(read(c, otherWords, legacy = true) is Outcome.ReadFailed)
+        // CBC has no tag: about 1 wrong key in 256 ends in valid padding and reads as an empty zip, which
+        // BackupManager refuses. Either way, nothing of the archive comes out.
+        val wrongKey = read(c, otherWords, legacy = true)
+        assertTrue("$wrongKey", wrongKey is Outcome.ReadFailed || wrongKey == Outcome.Entries(emptyMap()))
         assertTrue(read(c.copyOf(c.size - 3), legacy = true) is Outcome.ReadFailed)
     }
 }

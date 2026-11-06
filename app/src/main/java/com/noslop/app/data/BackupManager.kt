@@ -434,6 +434,7 @@ object BackupManager {
             val stageDir = File(context.noBackupFilesDir, "restore_stage_${System.currentTimeMillis()}").apply { mkdirs() }
             var hasPortableIdentity = false
             var hasStagedDb = false
+            var sawEntry = false
             var stagedGroupMessagesJson: String? = null
             var legacyRederivation: LegacyRederivation? = null
 
@@ -442,6 +443,7 @@ object BackupManager {
                     ZipInputStream(archive.plaintext).use { zis ->
                         var entry: ZipEntry?
                         while (zis.nextEntry.also { entry = it } != null) {
+                            sawEntry = true
                             val name = entry!!.name
                             when {
                                 name == "database.db" -> {
@@ -499,6 +501,16 @@ object BackupManager {
                     return ImportResult.Failed(rolledBack = true, reason = "Could not stage the backup on this device: ${e.message}")
                 } catch (e: Exception) {
                     Logger.error(TAG, "Import failed while reading the archive — wrong Word Cloud, or archive corrupt/modified: ${e.message}")
+                    return ImportResult.Failed(
+                        rolledBack = true,
+                        reason = if (archive.keyMnemonic == null) WORD_CLOUD_MISMATCH else ARCHIVE_DAMAGED
+                    )
+                }
+
+                // A CBC archive has no tag. About 1 wrong key in 256 still ends in valid padding, and the
+                // garbage then reads as a zip with no entries. Every real backup has at least one.
+                if (!sawEntry) {
+                    Logger.error(TAG, "Import failed: the archive holds no entries")
                     return ImportResult.Failed(
                         rolledBack = true,
                         reason = if (archive.keyMnemonic == null) WORD_CLOUD_MISMATCH else ARCHIVE_DAMAGED

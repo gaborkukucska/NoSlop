@@ -209,6 +209,13 @@ class BackupManagerTest {
     }
 
     @Test
+    fun testImport_refusesAnArchiveWithNothingInIt() {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
+        val archive = BackupArchiveTestSupport.nsg2(BackupArchiveTestSupport.zipFrom(emptyMap()), testMnemonic)
+        assertFalse(BackupManager.importData(context, testMnemonic, ByteArrayInputStream(archive), allowLegacyUnauthenticated = false))
+    }
+
+    @Test
     fun testExportAndImport_keepsBothPartsOfATwoPartKey() {
         val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
         val apiRepo = ApiKeyRepository(context)
