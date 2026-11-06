@@ -26,3 +26,9 @@ internal fun savedSourceChanges(
     }
     return SavedSourceChanges(updated, saved.filter { it.id !in byId && it.id in retiredIds })
 }
+
+/** [sourceIds] without the sources the user switched off. A source with no saved row is not off. */
+internal fun withoutSwitchedOff(sourceIds: List<String>, saved: List<FeedSource>): List<String> {
+    val off = saved.filterNot { it.isActive }.map { it.id }.toSet()
+    return sourceIds.filter { it !in off }
+}

@@ -41,6 +41,12 @@ class SavedSourcesTest {
     }
 
     @Test
+    fun aSourceSwitchedOffIsLeftOut_andOneNeverSavedIsNot() {
+        val saved = listOf(row("on", "u"), row("off", "u", isActive = false))
+        assertEquals(listOf("on", "never-saved"), withoutSwitchedOff(listOf("on", "off", "never-saved"), saved))
+    }
+
+    @Test
     fun noIdIsBothInTheLibraryAndRetired() {
         val ids = SourceLibrary.sources.map { it.id }.toSet()
         assertEquals(emptySet<String>(), ids intersect SourceLibrary.retiredSourceIds)

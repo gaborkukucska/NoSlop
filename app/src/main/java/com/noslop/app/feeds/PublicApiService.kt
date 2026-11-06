@@ -69,12 +69,7 @@ object PublicApiService {
 
         // E5s2: returns whether the source runs (it may be switched off, or need a key it does not have).
         fun fetchAsync(sourceId: String, block: suspend () -> List<FeedItem>): Boolean {
-            val isKeylessApiSource = sourceId.startsWith("api-archive") || sourceId.startsWith("api-openverse") ||
-                    sourceId.startsWith("api-yt") || sourceId.startsWith("api-invidious") ||
-                    sourceId.startsWith("api-jamendo") || sourceId.startsWith("api-reddit") ||
-                    sourceId.startsWith("api-wikipedia") || sourceId.startsWith("api-hackernews") ||
-                    sourceId.startsWith("api-nasa") || sourceId.startsWith("api-podcast")
-            if (activeApiSourceIds.contains(sourceId) || isKeylessApiSource) {
+            if (activeApiSourceIds.contains(sourceId)) {
                 deferredItems.add(async(Dispatchers.IO) {
                     try {
                         block()

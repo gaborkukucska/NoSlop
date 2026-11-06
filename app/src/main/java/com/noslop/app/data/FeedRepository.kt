@@ -190,7 +190,7 @@ class FeedRepository(
         val onboardingDone = isOnboardingComplete()
         if (!onboardingDone) return@withContext false
 
-        val existingSources = feedDao.getActiveSourcesList()
+        val existingSources = feedDao.getAllSourcesList()
         if (existingSources.isNotEmpty()) return@withContext false
 
         Logger.info(TAG, "Destructive migration detected: onboarding complete but 0 sources in Room. Re-seeding from SourceLibrary...")
@@ -244,7 +244,9 @@ class FeedRepository(
      */
     suspend fun ensureDefaultApiSourcesExist() = withContext(Dispatchers.IO) {
         syncSavedSources()
-        val existing = feedDao.getActiveSourcesList().map { it.id }.toSet()
+        // Every saved row, not just the active ones: a keyless source switched off used to be switched
+        // back on here by the next sync.
+        val existing = feedDao.getAllSourcesList().map { it.id }.toSet()
         val keylessApiSources = com.noslop.app.feeds.SourceLibrary.sources.filter { src ->
             if (src.feedType != "api") false
             else {
@@ -563,7 +565,10 @@ class FeedRepository(
 
             // Combine category specific fallbacks with ALL other active API sources
             // so cross-category plugins (like YouTube search) execute correctly
-            val allActiveIds = (explicitApiSources.map { it.id } + categoryApiSourceIds + com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" && (it.category == category || com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories.contains(it.category)) }.map { it.id }).distinct()
+            val allActiveIds = withoutSwitchedOff(
+                (explicitApiSources.map { it.id } + categoryApiSourceIds + com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" && (it.category == category || com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories.contains(it.category)) }.map { it.id }).distinct(),
+                feedDao.getAllSourcesList()
+            )
 
             val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                 category = category,
@@ -606,8 +611,12 @@ class FeedRepository(
 
         try {
             val apiKeyRepo = ApiKeyRepository(context)
-            // Use all built-in API sources for custom searches to ensure we search across all platforms
-            val activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
+            // Use all built-in API sources for custom searches to ensure we search across all platforms,
+            // except those the user switched off
+            val activeApiSourceIds = withoutSwitchedOff(
+                com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id },
+                feedDao.getAllSourcesList()
+            )
 
             val langPrefList = preferencesRepository.getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
             val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
@@ -679,8 +688,12 @@ class FeedRepository(
         Logger.info(TAG, "Search ${if (firstPage) "first page" else "next page"} for query: ${Logger.redact(query)} and filter: $filterMode")
         try {
             val apiKeyRepo = ApiKeyRepository(context)
-            // Use all built-in API sources for custom searches to ensure we search across all platforms
-            val activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
+            // Use all built-in API sources for custom searches to ensure we search across all platforms,
+            // except those the user switched off
+            val activeApiSourceIds = withoutSwitchedOff(
+                com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id },
+                feedDao.getAllSourcesList()
+            )
             val langPrefList = preferencesRepository.getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
             val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
 
