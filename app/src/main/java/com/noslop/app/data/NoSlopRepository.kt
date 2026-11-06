@@ -1834,6 +1834,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val oldP = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
                 if (oldP != null) peerDao.deletePeer(oldP)
             }
+            for (retiredKey in RETIRED_OFFICIAL_KEYS) {
+                postDao.deletePostsByAuthor(retiredKey)
+                peerDao.getPeerByPublicKey(retiredKey)?.let { peerDao.deletePeer(it) }
+            }
         } catch (e: Exception) {
             Logger.warn("REPOSITORY", "Startup peer maintenance failed: ${e.message}")
         }
@@ -2066,9 +2070,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             )
         }
 
-        const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEAK12RuYO4u9W6tuUc2Hr7ZkcYTuUs6QSR8P4ePGKKWXg="
-        const val OFFICIAL_CREATOR_ONION = "fnozdomdxc55lovw4uonq6x3mzdrqtxfftuqjepq7ypdyyuklf4i7cqd.onion"
-        const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAfFAMyI71qis42am7fyx0L8Th/giuitRXwFfSEmnX/Ws="
+        const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEA8EwKLIg/0T8GVlsgIje0hBP1Ratx/+gVcfLmuMhWO9Q="
+        const val OFFICIAL_CREATOR_ONION = "6bgauleih7it6bswlmqcen5uqqj7krnloh76qflr6ltlrscwhpknvmid.onion"
+        const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAMzpIr+ws90nVtvmco5OPCvWdgnc44osF7dRcIoYnpBI="
+
+        /**
+         * Keys of former official nodes. Their devices are gone, so nobody can say who holds the keys now.
+         * Each is refused like a banned node, but apart from the user's own list, so it can't be unbanned,
+         * and its row and posts are removed on start. The first went with a stolen tablet (2026-11-06).
+         */
+        internal val RETIRED_OFFICIAL_KEYS = setOf("MCowBQYDK2VwAyEAK12RuYO4u9W6tuUc2Hr7ZkcYTuUs6QSR8P4ePGKKWXg=")
 
         fun isPrivateLanAddress(ip: String?): Boolean {
             if (ip.isNullOrBlank()) return false
@@ -2235,7 +2246,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             ensureDefaultDiscoverableNode()
         }
     }
-    suspend fun isNodeBanned(publicKeyB64: String): Boolean = preferencesRepository.isNodeBanned(publicKeyB64)
+    suspend fun isNodeBanned(publicKeyB64: String): Boolean =
+        publicKeyB64 in RETIRED_OFFICIAL_KEYS || preferencesRepository.isNodeBanned(publicKeyB64)
 
     suspend fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) =
         preferencesRepository.saveChannelCutoffSettings(enabled, year, month)

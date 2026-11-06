@@ -124,7 +124,9 @@ The `GROUP_SYNC` change passed `GroupSyncDirectOnlyTest` on the owner's machine,
   * **Podcast Index** returned shows with no audio, and asked for a key and secret in two fields while reading only one. It now returns episodes.
   * **Jamendo** was described as working without a key, which it doesn't. Tracks now credit Jamendo.
   * **NASA** skips the shared demo key over Tor, where it is blocked.
-* **Testing.** Unit tests added: `GroupSyncDirectOnlyTest`, `SavedSourcesTest`, `InternetArchiveClientTest`, `ChannelDatesTest`, `GuidedKeysTest`, and Reddit RSS tests in `SearchPagingE5sTest`. Apart from the first, none has run under Gradle yet. All of `feeds/` was compiled against stub libraries, and the new pure logic was run there. `ApiKeysScreen`, `NoSlopViewModel` and the group senders in `NoSlopRepository` were not compiled until the owner's build.
+* **Backups.** Merging the Podcast Index key and secret into one service took the secret out of backups, which copied one value per service. The full test run caught it through a neighbouring failure, and backups now carry both.
+* **Official node changed.** The tablet running the official node was stolen, so its keys can't be trusted. The app now seeds a new node (`NoSlop.wskmrcks`, `6bgaul...`). The old key is refused like a banned node but kept off the user's banned list, so it can't be unbanned, and its row and posts are removed on start. Anyone connected to or following the old node has to connect to the new one.
+* **Testing.** Unit tests added: `GroupSyncDirectOnlyTest`, `SavedSourcesTest`, `InternetArchiveClientTest`, `ChannelDatesTest`, `GuidedKeysTest`, `OfficialNodeRotationTest`, and Reddit RSS tests in `SearchPagingE5sTest`. The full unit test suite passed on the owner's machine on 2026-11-06, before the official node change, and the GitHub build completed.
 * **Not yet verified on device.** All of the above.
 
 ## Completed Changes (2026-11-05) — Feed Playback Round 5: Recovery in Place on Screen (v0.7.5-alpha)

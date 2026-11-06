@@ -3192,7 +3192,7 @@ To maintain sovereign identity separation between personal direct messages and p
 * **Dual-Identity Targeted Broadcast Routing (`MeshSocialRepository.kt`, `GossipService.kt`)**: When `is_creator_enabled == true`, `composeAndBroadcastPost` authors posts using `getBurnableIdentity()`. During `GossipService.broadcast()`, packets are dynamically stamped with `senderId = burnable.publicKeyB64` for followers (`contact_identity_$peerPub == "burnable"`) and `main.publicKeyB64` for personal friends, allowing both peer types to pass firewall validation. *(Superseded 2026-10-09: §4.2 `outboundFor` and §3.7.1.)*
 
 ### 22.3 Official NoSlop Creator Node Seeding & In-App Browser Reader
-* In `NoSlopRepository.ensureDefaultDiscoverableNode()`, seeded the official NoSlop creator node into `PeerDao` using `OFFICIAL_CREATOR_PUBKEY` and `OFFICIAL_CREATOR_ONION` (`fnozdo...`), with dynamic tripcode derivation.
+* In `NoSlopRepository.ensureDefaultDiscoverableNode()`, seeded the official NoSlop creator node into `PeerDao` using `OFFICIAL_CREATOR_PUBKEY` and `OFFICIAL_CREATOR_ONION`, with dynamic tripcode derivation. The node's identity changed on 2026-11-06 (`6bgaul...`). A former node's key goes in `NoSlopRepository.RETIRED_OFFICIAL_KEYS`: it is refused like a banned node, and its row and posts are removed on start.
 * Excluded the creator's own device from rendering itself in "DISCOVERABLE NODES".
 * Cleared hardcoded Stripe links (`fundMeLink = null`) so donation links are populated dynamically from live `ANNOUNCE_DISCOVERABLE` broadcasts.
 * Added a clickable `$` coin badge and donation link across User Info modals opening `ArticleWebViewDialog`.
