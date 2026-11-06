@@ -32,9 +32,10 @@ object InternetArchiveClient {
     // Cap the number we resolve. Items past the cap are DROPPED rather than
     // emitted with the bare /download/<id> directory URL, which is a file
     // listing and will not play.
+    // The cap counts per fetch. It used to be one counter for the whole app, reset only by searches, so
+    // the browsing fetches (popular video, popular audio) found it used up and dropped everything.
     private const val MAX_METADATA_RESOLUTIONS = 10
 
-    private val metadataResolutions = java.util.concurrent.atomic.AtomicInteger(0)
     private val gson = com.noslop.app.util.Json.gson
 
     // --- NOSLOP_IMAGE_SOURCES_V1 ---
@@ -56,6 +57,23 @@ object InternetArchiveClient {
     }
 
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+
+    /** A search field: a bare string, or an array when the item has several values. */
+    internal fun firstText(field: com.google.gson.JsonElement?): String? = try {
+        when {
+            field == null || field.isJsonNull -> null
+            field.isJsonArray -> field.asJsonArray.firstOrNull()?.takeIf { !it.isJsonNull }?.asString
+            else -> field.asString
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** The log line of one fetch: how many results were kept, and why the others were dropped. */
+    internal fun fetchSummary(kept: Int, results: Int, drops: Map<String, Int>): String {
+        val why = drops.entries.sortedBy { it.key }.joinToString(", ") { "${it.key} ${it.value}" }
+        return "Internet Archive: fetched $kept of $results results" + if (why.isEmpty()) "" else " (dropped: $why)"
+    }
 
     /**
      * Search for videos on Internet Archive.
@@ -105,7 +123,6 @@ object InternetArchiveClient {
             "$queryPart AND -subject:youtube",
             "UTF-8"
         )
-        resetMetadataBudget()  // NOSLOP_ARCHIVE_BUDGET_V1
         val sort = if (newestFirst) "publicdate+desc" else "downloads+desc"
         val url = "https://archive.org/advancedsearch.php?" +
                 "q=$encodedQuery&" +
@@ -133,11 +150,6 @@ object InternetArchiveClient {
         return fetchAndParse(url, "audio", sourceId)
     }
 
-    /** NOSLOP_ARCHIVE_BUDGET_V1 — reset the per-search resolution budget. */
-    private fun resetMetadataBudget() {
-        metadataResolutions.set(0)
-    }
-
     /**
      * Get curated documentary/lecture videos.
      */
@@ -162,7 +174,6 @@ object InternetArchiveClient {
         sourceId: String,
         rows: Int
     ): List<FeedItem> {
-        resetMetadataBudget()  // NOSLOP_ARCHIVE_BUDGET_V1
         val url = "https://archive.org/advancedsearch.php?" +
                 "q=$encodedQuery&" +
                 "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
@@ -185,6 +196,7 @@ object InternetArchiveClient {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "Internet Archive API returned ${response.code}")
+                response.close()
                 return SourcePage.failed()
             }
 
@@ -193,13 +205,20 @@ object InternetArchiveClient {
             val responseObj = root.getAsJsonObject("response") ?: return SourcePage.END
             val docs = responseObj.getAsJsonArray("docs") ?: return SourcePage.END
 
+            val metadataLookups = java.util.concurrent.atomic.AtomicInteger(0)
+            val drops = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
+            fun dropped(reason: String): FeedItem? {
+                drops.getOrPut(reason) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet()
+                return null
+            }
+
             val items = coroutineScope {
                 docs.mapNotNull { doc ->
                     async(Dispatchers.IO) {
                         try {
                             val obj = doc.asJsonObject
-                            val identifier = obj.get("identifier")?.asString ?: return@async null
-                            val title = obj.get("title")?.asString ?: return@async null
+                            val identifier = firstText(obj.get("identifier")) ?: return@async dropped("no id")
+                            val title = firstText(obj.get("title")) ?: return@async dropped("no title")
 
                             // --- NOSLOP_IMAGE_SOURCES_V1 ---
                             // `subject` comes back as either a bare string or an
@@ -215,13 +234,13 @@ object InternetArchiveClient {
 
                             if (isLowValueUpload(identifier, title, subjectText)) {
                                 Logger.debug(TAG, "Filtered YouTube-mirror upload: $identifier")
-                                return@async null
+                                return@async dropped("YouTube mirror")
                             }
 
-                            val creator = try { obj.get("creator")?.asString } catch (_: Exception) { null }
-                            val description = try { obj.get("description")?.asString?.take(300) } catch (_: Exception) { null }
-                            val dateStr = try { obj.get("date")?.asString } catch (_: Exception) { null }
-                            val mediatype = try { obj.get("mediatype")?.asString } catch (_: Exception) { null }
+                            val creator = firstText(obj.get("creator"))
+                            val description = firstText(obj.get("description"))?.take(300)
+                            val dateStr = firstText(obj.get("date"))
+                            val mediatype = firstText(obj.get("mediatype"))
 
                             val resolvedMediaType = when (mediatype) {
                                 "movies" -> "video"
@@ -230,18 +249,19 @@ object InternetArchiveClient {
                             }
 
                             var archiveMediaUrl = "https://archive.org/download/$identifier"
+                            var noFileReason = "no playable file"
 
                             // Resolve actual playable file URLs from metadata for both audio and video
                             if (resolvedMediaType == "audio" || resolvedMediaType == "video") {
                                 // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
-                                if (metadataResolutions.incrementAndGet() > MAX_METADATA_RESOLUTIONS) {
+                                if (metadataLookups.incrementAndGet() > MAX_METADATA_RESOLUTIONS) {
                                     Logger.debug(TAG, "Metadata resolution cap reached; dropping $identifier")
-                                    return@async null
+                                    return@async dropped("over the lookup cap")
                                 }
                                 try {
                                     val metaUrl = "https://archive.org/metadata/$identifier/files"
                                     Logger.debug(TAG, "Fetching metadata for $identifier from: $metaUrl")
-                                    if (!isActive) return@async null
+                                    if (!isActive) return@async dropped("cancelled")
                                     val metaReq = Request.Builder().url(metaUrl).build()
                                     val metaRes = client.newCall(metaReq).execute()
                                     val metaBody = metaRes.body?.string()
@@ -302,14 +322,17 @@ object InternetArchiveClient {
                                             }
                                         } else {
                                             Logger.warn(TAG, "No 'result' array in metadata for $identifier")
+                                            noFileReason = "metadata lookup failed"
                                             if (resolvedMediaType == "audio") archiveMediaUrl = ""
                                         }
                                     } else {
                                         Logger.warn(TAG, "Empty metadata body for $identifier")
+                                        noFileReason = "metadata lookup failed"
                                         if (resolvedMediaType == "audio") archiveMediaUrl = ""
                                     }
                                 } catch (e: Exception) {
                                     Logger.warn(TAG, "Failed to resolve media file for $identifier: ${e.message}")
+                                    noFileReason = "metadata lookup failed"
                                     if (resolvedMediaType == "audio") archiveMediaUrl = ""
                                 }
                             }
@@ -318,7 +341,7 @@ object InternetArchiveClient {
                             var finalMediaType = resolvedMediaType
 
                             if (finalMediaUrl == null) {
-                                return@async null // Skip this item as it has no valid playable URL
+                                return@async dropped(noFileReason) // Skip this item as it has no valid playable URL
                             }
 
                             Logger.debug(TAG, "Final mediaUrl for $identifier ($finalMediaType): $finalMediaUrl")
@@ -338,13 +361,13 @@ object InternetArchiveClient {
                             )
                         } catch (e: Exception) {
                             Logger.debug(TAG, "Skipping malformed Archive item: ${e.message}")
-                            null
+                            dropped("malformed")
                         }
                     }
                 }.awaitAll().filterNotNull()
             }
 
-            Logger.info(TAG, "Internet Archive: fetched ${items.size} items")
+            Logger.info(TAG, fetchSummary(items.size, docs.size(), drops.mapValues { it.value.get() }))
             // numFound counts every match; start is where this page began.
             val numFound = responseObj.intField("numFound") ?: 0
             val start = responseObj.intField("start") ?: 0
