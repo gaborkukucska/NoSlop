@@ -94,7 +94,7 @@ class ApiKeyRepository(context: Context) {
         if (service.secretLabel != null) removeKey(secretSlot(service))
     }
 
-    private fun secretSlot(service: ServiceInfo) = service.id + "_secret"
+    private fun secretSlot(service: ServiceInfo) = secretSlotOf(service.id)
 
     fun removeKey(service: String): Boolean {
         val success = prefs.edit().remove("api_key_$service").commit()
@@ -222,6 +222,12 @@ class ApiKeyRepository(context: Context) {
                 keyLabel = "Proxy secret"
             )
         )
+
+        private fun secretSlotOf(serviceId: String) = serviceId + "_secret"
+
+        /** Every stored value a backup carries: each service's key, and the secret of those that have one. */
+        val BACKUP_SLOTS: List<String> =
+            SERVICES.map { it.id } + SERVICES.filter { it.secretLabel != null }.map { secretSlotOf(it.id) }
     }
 
     /** What a service needs from the user, and how to get it. An empty [signupUrl] means there is nothing to sign up for. */

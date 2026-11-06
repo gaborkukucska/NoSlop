@@ -187,23 +187,44 @@ class BackupManagerTest {
         val apiRepo = ApiKeyRepository(context)
 
         // Clear all keys before export
-        for (srv in ApiKeyRepository.SERVICES) {
-            apiRepo.setKey(srv.id, "")
+        for (slot in ApiKeyRepository.BACKUP_SLOTS) {
+            apiRepo.setKey(slot, "")
         }
 
         val outStream = ByteArrayOutputStream()
         assertTrue(BackupManager.exportData(context, testMnemonic, outStream, BackupMediaOption.NONE))
 
-        // Set a dummy key on destination
-        apiRepo.setKey("youtube", "destination-dummy-key")
-        assertEquals("destination-dummy-key", apiRepo.getKey("youtube"))
+        // Set dummy keys on destination
+        apiRepo.setKey("pexels", "destination-dummy-key")
+        apiRepo.setKey("podcastindex_secret", "destination-dummy-secret")
+        assertEquals("destination-dummy-key", apiRepo.getKey("pexels"))
 
         // Import empty backup
         val inStream = ByteArrayInputStream(outStream.toByteArray())
         assertTrue(BackupManager.importData(context, testMnemonic, inStream, allowLegacyUnauthenticated = false))
 
-        // S10: Destination key must be cleared by empty backup manifest
-        assertEquals("", apiRepo.getKey("youtube"))
+        // S10: Destination keys must be cleared by empty backup manifest
+        assertEquals("", apiRepo.getKey("pexels"))
+        assertEquals("", apiRepo.getKey("podcastindex_secret"))
+    }
+
+    @Test
+    fun testExportAndImport_keepsBothPartsOfATwoPartKey() {
+        val context: Context = org.robolectric.RuntimeEnvironment.getApplication()
+        val apiRepo = ApiKeyRepository(context)
+        apiRepo.setKey("podcastindex", "the-key")
+        apiRepo.setKey("podcastindex_secret", "the-secret")
+
+        val outStream = ByteArrayOutputStream()
+        assertTrue(BackupManager.exportData(context, testMnemonic, outStream, BackupMediaOption.NONE))
+
+        apiRepo.setKey("podcastindex", "")
+        apiRepo.setKey("podcastindex_secret", "")
+
+        val inStream = ByteArrayInputStream(outStream.toByteArray())
+        assertTrue(BackupManager.importData(context, testMnemonic, inStream, allowLegacyUnauthenticated = false))
+
+        assertEquals("the-key" to "the-secret", apiRepo.podcastIndexCredentials())
     }
 
     @Test

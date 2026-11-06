@@ -252,9 +252,9 @@ object BackupManager {
                 try {
                     val apiRepo = ApiKeyRepository(context)
                     val apiObj = org.json.JSONObject()
-                    for (srv in ApiKeyRepository.SERVICES) {
-                        val k = apiRepo.getKey(srv.id)
-                        if (!k.isNullOrBlank()) apiObj.put(srv.id, k)
+                    for (slot in ApiKeyRepository.BACKUP_SLOTS) {
+                        val k = apiRepo.getKey(slot)
+                        if (!k.isNullOrBlank()) apiObj.put(slot, k)
                     }
                     // C06: Stream API keys directly into zip without writing plaintext file to disk
                     zos.putNextEntry(ZipEntry("api_keys_backup.json"))
@@ -803,16 +803,16 @@ object BackupManager {
                     val apiRepo = ApiKeyRepository(context)
                     if (parsedApiObj != null) {
                         val obj = parsedApiObj
-                        for (srv in ApiKeyRepository.SERVICES) {
-                            if (obj.has(srv.id)) {
-                                apiRepo.setKey(srv.id, obj.getString(srv.id))
+                        for (slot in ApiKeyRepository.BACKUP_SLOTS) {
+                            if (obj.has(slot)) {
+                                apiRepo.setKey(slot, obj.getString(slot))
                             } else {
-                                apiRepo.setKey(srv.id, "")
+                                apiRepo.setKey(slot, "")
                             }
                         }
                     } else if (hasPortableIdentity) {
-                        for (srv in ApiKeyRepository.SERVICES) {
-                            apiRepo.setKey(srv.id, "")
+                        for (slot in ApiKeyRepository.BACKUP_SLOTS) {
+                            apiRepo.setKey(slot, "")
                         }
                     } else {
                         val stagedApiDir = File(stageDir, "api_keys")
