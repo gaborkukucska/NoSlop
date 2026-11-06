@@ -123,12 +123,14 @@ object PublicApiService {
                 "Video Platforms" -> {
                     if (query.isNotBlank() && !query.equals("Video Platforms", ignoreCase = true)) {
                         fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
+                        fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                     } else {
                         // Steer trending videos with user keywords/categories instead of generic 'trending latest' which is dominated by sports highlights
                         val topic = userKeywords.firstOrNull() ?: "technology science documentaries"
                         val trendingQuery = "$topic trending"
                         fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(trendingQuery, recentOnly = true) }
-                        fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
+                        fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(topic, apiKeyRepo) }
+                        fetchAsync("api-pexels-video") { PexelsApiClient.getPopularVideos(apiKeyRepo) }
                         fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                     }
                 }
@@ -145,7 +147,7 @@ object PublicApiService {
                 "Art", "Photography" -> {
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
-                    fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
+                    fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(query, apiKeyRepo) }
                     fetchAsync("api-wikimedia-featured") { 
                         val isGeneric = query.isBlank() || query.equals("Art", ignoreCase = true) || query.equals("Photography", ignoreCase = true)
                         val targetQuery = if (isGeneric) (userKeywords.firstOrNull() ?: "landscape architecture nature space") else query
@@ -179,10 +181,12 @@ object PublicApiService {
                     if (!nextPagesOnly) addLocal(mediaType = "video")  // NOSLOP_LOCAL_SEARCH_V1
                     if (searchCursor == null) {
                         fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                        fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                         fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
                     } else {
                         // E5s: paged, newest first, every date (see SearchCursor).
                         fetchAsync("api-yt-search") { youTubeSearchPage(query, searchCursor) }
+                        if (!nextPagesOnly) fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                         fetchAsync("api-reddit-hot") { redditSearchPage(query, searchCursor, "video") }
                     }
                 }

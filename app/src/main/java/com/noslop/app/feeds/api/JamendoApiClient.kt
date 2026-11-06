@@ -139,7 +139,7 @@ object JamendoApiClient {
                             title = title,
                             url = shareUrl,
                             author = artist,
-                            excerpt = "Genres: $genres",
+                            excerpt = "Genres: $genres · via Jamendo",
                             thumbnailUrl = image,
                             publishedAt = publishedAt,
                             mediaUrl = streamUrl,

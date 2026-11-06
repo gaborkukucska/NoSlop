@@ -9,13 +9,21 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.FeedParser
 import okhttp3.Request
 
-/** Vimeo API client — optional user access token. Embed URLs work in WebView without auth. */
+/**
+ * Vimeo API client, with the user's own access token. An Unauthenticated token is enough: this only reads
+ * public videos. Embed URLs work in WebView without auth.
+ */
 object VimeoApiClient {
     private const val TAG = "VIMEO_API"
     private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
+    /** Vimeo's video search requires a query; without one it refuses the request. */
+    internal fun featuredUrl(query: String, limit: Int): String =
+        "https://api.vimeo.com/videos?query=" + java.net.URLEncoder.encode(query, "UTF-8") + "&filter=trending&per_page=$limit"
+
     suspend fun fetchFeatured(
+        query: String,
         apiKeyRepo: ApiKeyRepository,
         sourceId: String = "api-vimeo-featured",
         limit: Int = 20
@@ -26,7 +34,7 @@ object VimeoApiClient {
             return emptyList()
         }
         return try {
-            val url = "https://api.vimeo.com/videos?filter=trending&per_page=$limit"
+            val url = featuredUrl(query, limit)
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "bearer $apiKey")
@@ -34,6 +42,11 @@ object VimeoApiClient {
                 .build()
 
             val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                Logger.warn(TAG, "Vimeo returned ${response.code}")
+                response.close()
+                return emptyList()
+            }
             val body = response.body?.string() ?: return emptyList()
             val root = gson.fromJson(body, JsonObject::class.java)
             val data = root.getAsJsonArray("data") ?: return emptyList()

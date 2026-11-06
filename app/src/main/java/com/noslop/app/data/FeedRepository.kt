@@ -273,6 +273,22 @@ class FeedRepository(
         }
     }
 
+    /** Switches on the built-in sources that use [serviceId], once the user has added its key. */
+    suspend fun enableSourcesFor(serviceId: String) = withContext(Dispatchers.IO) {
+        val saved = feedDao.getAllSourcesList().associateBy { it.id }
+        val sources = com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" && it.url.substringBefore(":") == serviceId }
+        for (src in sources) {
+            val row = saved[src.id]
+            if (row == null) {
+                feedDao.insertSource(
+                    FeedSource(id = src.id, url = src.url, title = src.title, feedType = src.feedType, category = src.category, isActive = true)
+                )
+            } else if (!row.isActive) {
+                feedDao.updateSource(row.copy(isActive = true))
+            }
+        }
+    }
+
     /**
      * Loops over active feed sources and parses them, storing items in Room database.
      * Then runs the public API pipeline for content enrichment.

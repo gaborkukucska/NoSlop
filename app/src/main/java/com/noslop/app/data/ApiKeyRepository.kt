@@ -75,6 +75,27 @@ class ApiKeyRepository(context: Context) {
 
     fun hasKey(service: String): Boolean = !getKey(service).isNullOrBlank()
 
+    /** The Podcast Index key and secret, or null when either is missing. */
+    fun podcastIndexCredentials(): Pair<String, String>? =
+        splitPodcastIndexCredentials(getKey(PODCASTINDEX), getKey(PODCASTINDEX_SECRET))
+
+    /** Saves what the setup sheet collected. A blank key removes the service's credentials. */
+    fun saveCredentials(service: ServiceInfo, key: String, secret: String?) {
+        if (key.isBlank()) {
+            removeCredentials(service)
+            return
+        }
+        setKey(service.id, key.trim())
+        if (service.secretLabel != null) setKey(secretSlot(service), secret.orEmpty().trim())
+    }
+
+    fun removeCredentials(service: ServiceInfo) {
+        removeKey(service.id)
+        if (service.secretLabel != null) removeKey(secretSlot(service))
+    }
+
+    private fun secretSlot(service: ServiceInfo) = service.id + "_secret"
+
     fun removeKey(service: String): Boolean {
         val success = prefs.edit().remove("api_key_$service").commit()
         if (service == "custom_proxy_url" || service == "custom_proxy_secret" || service == "jamendo") {
@@ -85,28 +106,134 @@ class ApiKeyRepository(context: Context) {
     }
 
     companion object {
+        private const val PODCASTINDEX = "podcastindex"
+        private const val PODCASTINDEX_SECRET = "podcastindex_secret"
+
+        /**
+         * The key and secret from their two slots. Older builds only worked with "key:secret" typed
+         * into the first slot, so that form is still read.
+         */
+        internal fun splitPodcastIndexCredentials(stored: String?, secretSlot: String?): Pair<String, String>? {
+            val value = stored?.trim().orEmpty()
+            val key = value.substringBefore(":").trim()
+            val secret = value.substringAfter(":", "").trim().ifBlank { secretSlot?.trim().orEmpty() }
+            return if (key.isBlank() || secret.isBlank()) null else key to secret
+        }
+
         /** Services the app no longer uses. A key left over from one is cleared on start. */
         private val RETIRED_SERVICES = listOf("newsapi", "instagram", "tiktok")
 
         /** All supported API services with their display names and whether they're required */
         val SERVICES = listOf(
-            ServiceInfo("youtube", "YouTube InnerTube API", false, "Keyless (InnerTube proxy)"),
-            ServiceInfo("pexels", "Pexels API", true, "pexels.com/api"),
-            ServiceInfo("guardian", "The Guardian API", true, "open-platform.theguardian.com/access"),
-            ServiceInfo("nasa", "NASA API", false, "api.nasa.gov (DEMO_KEY works without signup)"),
-            ServiceInfo("vimeo", "Vimeo API", true, "developer.vimeo.com"),
-            ServiceInfo("podcastindex", "Podcast Index API Key", true, "api.podcastindex.org"),
-            ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org"),
-            ServiceInfo("jamendo", "Jamendo Client ID", false, "developer.jamendo.com (Optional, defaults to public client)"),
-            ServiceInfo("custom_proxy_url", "Custom API Proxy URL", false, "Self-hosted Cloudflare Worker or reverse proxy URL"),
-            ServiceInfo("custom_proxy_secret", "Custom API Proxy Secret", false, "HMAC secret for your self-hosted proxy (Optional)")
+            ServiceInfo(
+                id = "pexels",
+                displayName = "Pexels",
+                requiresUserKey = true,
+                signupUrl = "https://www.pexels.com/api/",
+                unlocks = "Free photos and videos from Pexels in your feed and in search.",
+                steps = listOf(
+                    "Open the Pexels API page and sign in, or create a free Pexels account.",
+                    "Ask for an API key. Pexels gives you one straight away.",
+                    "Copy the key and paste it below."
+                ),
+                credit = "Free: 200 requests an hour. NoSlop names each creator and links every item to its page on Pexels."
+            ),
+            ServiceInfo(
+                id = "vimeo",
+                displayName = "Vimeo",
+                requiresUserKey = true,
+                signupUrl = "https://developer.vimeo.com/apps",
+                unlocks = "Trending Vimeo videos in your feed.",
+                steps = listOf(
+                    "Open the Vimeo developer page and sign in, or create a free Vimeo account.",
+                    "Create an app. Any name and description will do.",
+                    "Open the app and choose Generate Access Token, under Authentication in the left-hand menu.",
+                    "Choose Unauthenticated, then Generate. That kind of token can only read public videos.",
+                    "Copy the token and paste it below."
+                ),
+                keyLabel = "Access token"
+            ),
+            ServiceInfo(
+                id = "guardian",
+                displayName = "The Guardian",
+                requiresUserKey = true,
+                signupUrl = "https://open-platform.theguardian.com/access/",
+                unlocks = "Guardian articles in search and in your news sections. The Guardian's RSS feeds work without a key.",
+                steps = listOf(
+                    "Open the Guardian's access page and choose to register for a developer key.",
+                    "Fill in the short form.",
+                    "The Guardian emails you the key. Copy it and paste it below."
+                ),
+                credit = "Free developer key: 500 requests a day."
+            ),
+            ServiceInfo(
+                id = "podcastindex",
+                displayName = "Podcast Index",
+                requiresUserKey = true,
+                signupUrl = "https://api.podcastindex.org/",
+                unlocks = "Podcast episodes in your feed and in audio search.",
+                steps = listOf(
+                    "Open the Podcast Index API page and sign up with your email address.",
+                    "Podcast Index gives you an API key and a secret.",
+                    "Copy both and paste them below, the key first and then the secret."
+                ),
+                secretLabel = "API secret"
+            ),
+            ServiceInfo(
+                id = "jamendo",
+                displayName = "Jamendo",
+                requiresUserKey = true,
+                signupUrl = "https://devportal.jamendo.com/",
+                unlocks = "Free music from independent artists on Jamendo, in your feed and in search.",
+                steps = listOf(
+                    "Open the Jamendo developer portal and create a free account.",
+                    "Create an app. Any name will do.",
+                    "Copy the app's Client ID and paste it below."
+                ),
+                keyLabel = "Client ID",
+                credit = "Free for non-commercial use. NoSlop names each artist, credits Jamendo and links every track to its Jamendo page."
+            ),
+            ServiceInfo(
+                id = "nasa",
+                displayName = "NASA",
+                requiresUserKey = false,
+                signupUrl = "https://api.nasa.gov/",
+                unlocks = "NASA's Astronomy Picture of the Day. Without a key of your own this only runs when Route Clearnet via Tor is off, because NASA's shared demo key is blocked over Tor.",
+                steps = listOf(
+                    "Open the NASA API page.",
+                    "Under Generate API Key, enter your name and email address.",
+                    "NASA shows you the key and emails it to you. Copy it and paste it below."
+                )
+            ),
+            ServiceInfo(
+                id = "custom_proxy_url",
+                displayName = "Custom API Proxy URL",
+                requiresUserKey = false,
+                signupUrl = "",
+                unlocks = "Advanced: the address of your own Cloudflare Worker or reverse proxy for API requests.",
+                keyLabel = "Proxy URL"
+            ),
+            ServiceInfo(
+                id = "custom_proxy_secret",
+                displayName = "Custom API Proxy Secret",
+                requiresUserKey = false,
+                signupUrl = "",
+                unlocks = "Advanced: the HMAC secret of your own proxy, if it has one.",
+                keyLabel = "Proxy secret"
+            )
         )
     }
 
+    /** What a service needs from the user, and how to get it. An empty [signupUrl] means there is nothing to sign up for. */
     data class ServiceInfo(
         val id: String,
         val displayName: String,
         val requiresUserKey: Boolean,
-        val signupUrl: String
+        val signupUrl: String,
+        val unlocks: String,
+        val steps: List<String> = emptyList(),
+        val keyLabel: String = "API key",
+        val secretLabel: String? = null,
+        val credit: String? = null
     )
 }

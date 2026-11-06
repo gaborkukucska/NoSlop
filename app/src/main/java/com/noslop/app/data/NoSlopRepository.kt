@@ -1939,6 +1939,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun clearFeedData() = feedRepository.clearFeedData()
 
     suspend fun ensureDefaultApiSourcesExist() = feedRepository.ensureDefaultApiSourcesExist()
+    suspend fun enableSourcesFor(serviceId: String) = feedRepository.enableSourcesFor(serviceId)
 
     suspend fun ensureDefaultDiscoverableNode() = withContext(Dispatchers.IO) {
         // If the official node is banned by the user, do not re-seed it

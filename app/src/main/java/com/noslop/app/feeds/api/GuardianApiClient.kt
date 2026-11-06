@@ -9,7 +9,7 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.FeedParser
 import okhttp3.Request
 
-/** The Guardian API client — optional user key. 12 calls/sec, 5000/day free. */
+/** The Guardian API client — the user's own free developer key, 500 calls a day. */
 object GuardianApiClient {
     private const val TAG = "GUARDIAN_API"
     private val gson = com.noslop.app.util.Json.gson

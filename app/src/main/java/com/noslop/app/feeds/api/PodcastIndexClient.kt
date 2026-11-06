@@ -15,56 +15,89 @@ object PodcastIndexClient {
     private val gson = com.noslop.app.util.Json.gson
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
+    /** Shows looked at per search, and the latest episodes taken from each. */
+    private const val MAX_SHOWS = 5
+    private const val EPISODES_PER_SHOW = 3
+
+    /** One show from a search. */
+    internal data class Show(val id: Long, val title: String?, val image: String?)
+
+    /**
+     * Podcast Index search finds shows, which have no audio of their own, so the latest episodes of
+     * the shows found are fetched next, one request per show.
+     */
     suspend fun searchEpisodes(query: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-podcast-search", language: String = "en"): List<FeedItem> {
-        val credentials = apiKeyRepo.getKey("podcastindex")
-        if (credentials.isNullOrBlank() || !credentials.contains(":")) return emptyList()
-        val parts = credentials.split(":", limit = 2)
-        val apiKey = parts[0]
-        val apiSecret = parts[1]
-
-        val apiHeaderTime = (System.currentTimeMillis() / 1000L).toString()
-        val data4Hash = apiKey + apiSecret + apiHeaderTime
-        val hash = sha1(data4Hash)
-
+        val (apiKey, apiSecret) = apiKeyRepo.podcastIndexCredentials() ?: return emptyList()
         return try {
-            val url = "$BASE_URL/search/byterm?q=${java.net.URLEncoder.encode(query, "UTF-8")}&lang=$language"
-            val request = Request.Builder()
-                .url(url)
-                .header("X-Auth-Date", apiHeaderTime)
-                .header("X-Auth-Key", apiKey)
-                .header("Authorization", hash)
-                .header("User-Agent", "NoSlop-Android/1.0")
-                .build()
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) { Logger.warn(TAG, "Podcast Index returned ${response.code}"); return emptyList() }
-            val body = response.body?.string() ?: return emptyList()
-            val root = gson.fromJson(body, JsonObject::class.java)
-            val feedsArray = root.getAsJsonArray("feeds") ?: root.getAsJsonArray("items") ?: return emptyList()
-            val items = mutableListOf<FeedItem>()
-            for (element in feedsArray) {
-                try {
-                    val feed = element.asJsonObject
-                    val id = feed.get("id")?.asLong ?: continue
-                    val title = feed.get("title")?.asString ?: continue
-                    val desc = try { feed.get("description")?.asString?.take(300) } catch (_: Exception) { null }
-                    val image = try { feed.get("image")?.asString } catch (_: Exception) { null }
-                    val artwork = try { feed.get("artwork")?.asString } catch (_: Exception) { null }
-                    val author = try { feed.get("author")?.asString } catch (_: Exception) { null }
-                    val encUrl = try { feed.get("enclosureUrl")?.asString } catch (_: Exception) { null }
-                    val feedTitle = try { feed.get("feedTitle")?.asString } catch (_: Exception) { null }
-                    val datePub = try { feed.get("datePublished")?.asLong?.times(1000) } catch (_: Exception) { null }
-                    val link = try { feed.get("link")?.asString } catch (_: Exception) { null }
-                    val feedImage = try { feed.get("feedImage")?.asString } catch (_: Exception) { null }
-                    val ts = datePub ?: try { feed.get("lastUpdateTime")?.asLong?.times(1000) } catch (_: Exception) { null } ?: System.currentTimeMillis()
-                    items.add(FeedItem(id = "podcast_$id", sourceId = sourceId, title = title,
-                        url = link ?: encUrl ?: "https://podcastindex.org", author = feedTitle ?: author,
-                        excerpt = desc, thumbnailUrl = image ?: feedImage ?: artwork, publishedAt = ts,
-                        mediaUrl = encUrl, mediaType = "audio", apiSource = "podcast_index"))
-                } catch (e: Exception) { Logger.debug(TAG, "Skipping podcast item: ${e.message}") }
+            val term = java.net.URLEncoder.encode(query, "UTF-8")
+            val searchUrl = "$BASE_URL/search/byterm?q=$term&lang=$language&max=$MAX_SHOWS"
+            val shows = get(searchUrl, apiKey, apiSecret)?.let { parseShows(it) }.orEmpty().take(MAX_SHOWS)
+            val items = shows.flatMap { show ->
+                val url = "$BASE_URL/episodes/byfeedid?id=${show.id}&max=$EPISODES_PER_SHOW"
+                get(url, apiKey, apiSecret)?.let { parseEpisodes(it, show, sourceId) }.orEmpty()
             }
-            Logger.info(TAG, "Podcast Index: fetched ${items.size} items"); items
-        } catch (e: Exception) { Logger.error(TAG, "Podcast Index request failed", e.message); emptyList() }
+            Logger.info(TAG, "Podcast Index: fetched ${items.size} episodes from ${shows.size} shows")
+            items
+        } catch (e: Exception) {
+            Logger.error(TAG, "Podcast Index request failed", e.message)
+            emptyList()
+        }
     }
+
+    private fun get(url: String, apiKey: String, apiSecret: String): JsonObject? {
+        val request = signedRequest(url, apiKey, apiSecret, System.currentTimeMillis() / 1000L)
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Logger.warn(TAG, "Podcast Index returned ${response.code}")
+                return null
+            }
+            return gson.fromJson(response.body?.string() ?: return null, JsonObject::class.java)
+        }
+    }
+
+    internal fun signedRequest(url: String, apiKey: String, apiSecret: String, nowSeconds: Long): Request =
+        Request.Builder()
+            .url(url)
+            .header("X-Auth-Date", nowSeconds.toString())
+            .header("X-Auth-Key", apiKey)
+            .header("Authorization", sha1(apiKey + apiSecret + nowSeconds))
+            .header("User-Agent", "NoSlop-Android/1.0")
+            .build()
+
+    internal fun parseShows(root: JsonObject): List<Show> =
+        root.getAsJsonArray("feeds")?.mapNotNull { element ->
+            try {
+                val feed = element.asJsonObject
+                Show(feed.get("id")?.asLong ?: return@mapNotNull null, feed.str("title"), feed.str("image") ?: feed.str("artwork"))
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Skipping podcast show: ${e.message}")
+                null
+            }
+        }.orEmpty()
+
+    /** The episodes of [show] that have audio. */
+    internal fun parseEpisodes(root: JsonObject, show: Show, sourceId: String): List<FeedItem> =
+        root.getAsJsonArray("items")?.mapNotNull { element ->
+            try {
+                val episode = element.asJsonObject
+                val id = episode.get("id")?.asLong ?: return@mapNotNull null
+                val title = episode.str("title") ?: return@mapNotNull null
+                val audio = episode.str("enclosureUrl") ?: return@mapNotNull null
+                val published = try { episode.get("datePublished")?.asLong?.times(1000) } catch (_: Exception) { null }
+                FeedItem(
+                    id = "podcast_$id", sourceId = sourceId, title = title,
+                    url = episode.str("link") ?: audio,
+                    author = show.title ?: episode.str("feedTitle"),
+                    excerpt = episode.str("description")?.take(300),
+                    thumbnailUrl = episode.str("image") ?: episode.str("feedImage") ?: show.image,
+                    publishedAt = published ?: System.currentTimeMillis(),
+                    mediaUrl = audio, mediaType = "audio", apiSource = "podcast_index"
+                )
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Skipping podcast episode: ${e.message}")
+                null
+            }
+        }.orEmpty()
 
     private fun sha1(input: String): String {
         val md = MessageDigest.getInstance("SHA-1")

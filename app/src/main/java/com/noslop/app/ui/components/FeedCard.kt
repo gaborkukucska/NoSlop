@@ -45,6 +45,7 @@ private fun getSourceLabel(item: FeedItem): String {
         "youtube" -> "YouTube"
         "reddit" -> "Reddit"
         "pexels" -> "Pexels"
+        "jamendo" -> "Jamendo"
         "internet_archive" -> "Archive.org"
         "podcast_index" -> "Podcast"
         "newsapi" -> "News"

@@ -13,8 +13,8 @@ import okhttp3.Request
 /**
  * NASA API client.
  * - NASA Image & Video Library: NO API key required
- * - Astronomy Picture of the Day (APOD): uses DEMO_KEY by default (30 req/hour),
- *   user can optionally set a key for 1000 req/hour
+ * - Astronomy Picture of the Day (APOD): uses DEMO_KEY by default (30 req/hour), which is blocked
+ *   over Tor. The user can optionally set a key for 1000 req/hour.
  */
 object NasaApiClient {
 
@@ -33,7 +33,12 @@ object NasaApiClient {
         sourceId: String = "api-nasa-apod",
         count: Int = 10
     ): List<FeedItem> {
-        val apiKey = apiKeyRepo.getKey("nasa") ?: DEMO_KEY
+        val userKey = apiKeyRepo.getKey("nasa")?.takeIf { it.isNotBlank() }
+        if (userKey == null && com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+            Logger.debug(TAG, "APOD skipped: the shared demo key is blocked over Tor")
+            return emptyList()
+        }
+        val apiKey = userKey ?: DEMO_KEY
         val url = "https://api.nasa.gov/planetary/apod?count=$count&api_key=$apiKey"
 
         return try {

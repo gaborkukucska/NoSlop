@@ -2001,6 +2001,10 @@ fun toggleAggregator() {
         }
     }
 
+    fun enableSourcesFor(serviceId: String) {
+        viewModelScope.launch { repository.enableSourcesFor(serviceId) }
+    }
+
     fun toggleSource(source: com.noslop.app.data.FeedSource) {
         viewModelScope.launch {
             val updated = source.copy(isActive = !source.isActive)
