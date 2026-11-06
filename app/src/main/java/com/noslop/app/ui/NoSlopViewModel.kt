@@ -1556,7 +1556,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             // Proactively resolve channel creation dates in background for current candidate items
             val candidateItems = unseenFeeds.take(25)
             viewModelScope.launch(Dispatchers.IO) {
-                candidateItems.forEach { item ->
+                candidateItems.filter { it.apiSource == "youtube" }.forEach { item ->
                     item.author?.let { author ->
                         com.noslop.app.feeds.api.ChannelMetadataResolver.resolveCreationDate(author, item.publishedAt, cutoffMs)
                     }

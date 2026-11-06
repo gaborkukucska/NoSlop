@@ -15,6 +15,15 @@ object ChannelMetadataResolver {
     // Lowercase author name / handle -> Joined timestamp (ms)
     private val cache = ConcurrentHashMap<String, Long>()
 
+    // Lowercase author name -> YouTube channel id, as search results name them
+    private val channelIds = ConcurrentHashMap<String, String>()
+
+    /** Called with each YouTube result, so most channels need no search of their own. */
+    fun rememberChannelId(author: String?, channelId: String?) {
+        if (author.isNullOrBlank() || channelId.isNullOrBlank()) return
+        channelIds[author.lowercase().trim()] = channelId
+    }
+
     /**
      * Synchronously returns cached creation date in ms for author if available.
      */
@@ -42,7 +51,8 @@ object ChannelMetadataResolver {
 
         try {
             // Fallback: only query if no publishedAt is available
-            val joinedMs = InvidiousApiClient.getChannelJoinedTimestamp(key)
+            val channelId = channelIds[key] ?: YouTubeInternalClient.findChannelId(author)?.also { channelIds[key] = it }
+            val joinedMs = channelId?.let { YouTubeInternalClient.channelCreatedAt(it) }
             if (joinedMs != null && joinedMs > 0L) {
                 cache[key] = joinedMs
                 Logger.info(TAG, "Resolved exact creation date for $author: $joinedMs")

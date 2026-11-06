@@ -295,6 +295,15 @@ object YouTubeInternalClient {
             ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
             ?.get("text")?.asString ?: "YouTube"
 
+        ChannelMetadataResolver.rememberChannelId(
+            author,
+            videoRenderer.getAsJsonObject("ownerText")
+                ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
+                ?.getAsJsonObject("navigationEndpoint")
+                ?.getAsJsonObject("browseEndpoint")
+                ?.get("browseId")?.asString
+        )
+
         val thumbnails = videoRenderer.getAsJsonObject("thumbnail")?.getAsJsonArray("thumbnails")
         val bestThumb = if (thumbnails != null && thumbnails.size() > 0) {
             val thumbUrl = thumbnails.get(thumbnails.size() - 1).asJsonObject.get("url").asString
@@ -426,7 +435,43 @@ object YouTubeInternalClient {
         return VideoSearchPage(items.distinctBy { it.id }, next)
     }
 
-    suspend fun searchChannels(query: String, maxResults: Int = 10): List<String> = withContext(Dispatchers.IO) {
+    /** One channel in the results of a channel search. */
+    private data class ChannelResult(val title: String, val channelId: String?)
+
+    suspend fun searchChannels(query: String, maxResults: Int = 10): List<String> =
+        searchChannelResults(query, maxResults).map { it.title }
+
+    /** The id of the channel named exactly [name], from a channel search, or null. */
+    suspend fun findChannelId(name: String): String? =
+        searchChannelResults(name, 5).firstOrNull { it.title.equals(name.trim(), ignoreCase = true) }?.channelId
+
+    /** When a channel was created, from its own feed, or null when that can't be read. */
+    suspend fun channelCreatedAt(channelId: String): Long? = withContext(Dispatchers.IO) {
+        try {
+            val request = okhttp3.Request.Builder()
+                .url("https://www.youtube.com/feeds/videos.xml?channel_id=" + java.net.URLEncoder.encode(channelId, "UTF-8"))
+                .build()
+            com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute().use { res ->
+                if (res.isSuccessful) parseChannelCreated(res.body?.string().orEmpty()) else null
+            }
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Channel feed request failed: ${e.message}")
+            null
+        }
+    }
+
+    /** A channel's Atom feed carries the channel's creation time as the feed's own `published` date. */
+    internal fun parseChannelCreated(feed: String): Long? {
+        val raw = Regex("<published>([^<]+)</published>").find(feed.substringBefore("<entry>"))?.groupValues?.get(1)?.trim()
+            ?: return null
+        return try {
+            java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).parse(raw)?.time
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun searchChannelResults(query: String, maxResults: Int): List<ChannelResult> = withContext(Dispatchers.IO) {
         try {
             val payload = buildPayload(query)
             payload.addProperty("params", "EgIQAg==") 
@@ -442,7 +487,7 @@ object YouTubeInternalClient {
             if (bodyStr.isEmpty()) return@withContext emptyList()
             val root = gson.fromJson(bodyStr, JsonObject::class.java)
             
-            val channels = mutableListOf<String>()
+            val channels = mutableListOf<ChannelResult>()
             
             val primaryContents = root.getAsJsonObject("contents")
                 ?.getAsJsonObject("twoColumnSearchResultsRenderer")
@@ -462,7 +507,7 @@ object YouTubeInternalClient {
                         val title = channelRenderer.getAsJsonObject("title")
                             ?.get("simpleText")?.asString ?: continue
                             
-                        channels.add(title)
+                        channels.add(ChannelResult(title, channelRenderer.get("channelId")?.asString))
                         
                         if (channels.size >= maxResults) break
                     }

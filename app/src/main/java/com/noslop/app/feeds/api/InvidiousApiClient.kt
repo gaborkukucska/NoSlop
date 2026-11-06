@@ -338,20 +338,4 @@ object InvidiousApiClient {
         // Returning a soundless 1080p stream over Tor causes 10s buffering stalls. Only return muxed formatStreams.
         return null
     }
-
-    suspend fun getChannelJoinedTimestamp(authorIdOrName: String): Long? {
-        if (authorIdOrName.isBlank()) return null
-        val encoded = java.net.URLEncoder.encode(authorIdOrName, "UTF-8")
-        return raceInstances(
-            label = "channel joined date",
-            instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 3_000L,
-            urlFor = { "$it/api/v1/channels/$encoded" },
-            parse = { _, body ->
-                val root = com.google.gson.JsonParser.parseString(body).asJsonObject
-                val joinedSec = try { root.get("joined")?.asLong } catch (_: Exception) { null }
-                if (joinedSec != null && joinedSec > 0L) joinedSec * 1000L else null
-            }
-        )
-    }
 }
