@@ -58,6 +58,7 @@ object SourceLibrary {
         BuiltInSource("ars-rss", "Ars Technica", "https://feeds.arstechnica.com/arstechnica/index", "rss", "Technology"),
         BuiltInSource("verge-rss", "The Verge", "https://www.theverge.com/rss/index.xml", "atom", "Technology"),
         BuiltInSource("techcrunch", "TechCrunch", "https://techcrunch.com/feed/", "rss", "Technology"),
+        BuiltInSource("guardian-tech-rss", "The Guardian Technology", "https://www.theguardian.com/technology/rss", "rss", "Technology"),
 
         // Privacy & Security
         BuiltInSource("krebs-rss", "Krebs on Security", "https://krebsonsecurity.com/feed/", "rss", "Privacy & Security"),
@@ -65,8 +66,8 @@ object SourceLibrary {
         BuiltInSource("eff-rss", "EFF Deeplinks", "https://www.eff.org/rss/updates.xml", "rss", "Privacy & Security"),
 
         // Self-Hosting
-        BuiltInSource("r-selfhosted", "r/selfhosted", "https://old.reddit.com/r/selfhosted.rss", "rss", "Self-Hosting"),
-        BuiltInSource("r-homelab", "r/homelab", "https://old.reddit.com/r/homelab.rss", "rss", "Self-Hosting"),
+        BuiltInSource("r-selfhosted", "r/selfhosted", "https://www.reddit.com/r/selfhosted.rss", "rss", "Self-Hosting"),
+        BuiltInSource("r-homelab", "r/homelab", "https://www.reddit.com/r/homelab.rss", "rss", "Self-Hosting"),
 
         // Science
         BuiltInSource("nasa-news", "NASA News", "https://www.nasa.gov/news-release/feed/", "rss", "Science"),
@@ -75,6 +76,7 @@ object SourceLibrary {
         // replaced with Phys.org breaking news which covers the same topics reliably.
         BuiltInSource("science-news", "Science News", "https://www.sciencenews.org/feed", "rss", "Science"),
         BuiltInSource("nature", "Nature", "https://www.nature.com/nature.rss", "rss", "Science"),
+        BuiltInSource("guardian-science-rss", "The Guardian Science", "https://www.theguardian.com/science/rss", "rss", "Science"),
 
         // World News
         // NOTE: Associated Press discontinued feeds.apnews.com RSS feeds entirely
@@ -84,10 +86,10 @@ object SourceLibrary {
         BuiltInSource("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "rss", "World News"),
         BuiltInSource("bbc-world", "BBC World News", "https://feeds.bbci.co.uk/news/world/rss.xml", "rss", "World News"),
         BuiltInSource("npr-world", "NPR World News", "https://feeds.npr.org/1004/rss.xml", "rss", "World News"),
+        BuiltInSource("guardian-world-rss", "The Guardian World", "https://www.theguardian.com/world/rss", "rss", "World News"),
 
         // Open Source
         BuiltInSource("linux-foundation", "Linux Foundation", "https://www.linuxfoundation.org/blog/rss.xml", "rss", "Open Source"),
-        BuiltInSource("foss-post", "FOSS Post", "https://fosspost.org/feed/", "rss", "Open Source"),
         BuiltInSource("omg-ubuntu", "OMG! Ubuntu!", "https://feeds.feedburner.com/d0od", "rss", "Open Source"),
 
         // Video Platforms (Dynamically populated via API based on user genres)
@@ -115,23 +117,21 @@ object SourceLibrary {
         BuiltInSource("pcgamer", "PC Gamer", "https://www.pcgamer.com/rss/", "rss", "Gaming"),
 
         // Health
-        BuiltInSource("healthline", "Healthline", "https://www.healthline.com/feed", "rss", "Health"),
         // NOTE: rssfeeds.webmd.com was retired; replaced with Medical Xpress general health feed
         BuiltInSource("medicalxpress", "Medical Xpress", "https://medicalxpress.com/rss-feed/", "rss", "Health"),
-        BuiltInSource("mayo-clinic", "Mayo Clinic", "https://www.mayoclinic.org/rss/all-health-information-topics", "rss", "Health"),
+        BuiltInSource("who-news", "WHO News", "https://www.who.int/rss-feeds/news-english.xml", "rss", "Health"),
+        BuiltInSource("npr-health", "NPR Health", "https://feeds.npr.org/1128/rss.xml", "rss", "Health"),
 
         // Automotive
-        BuiltInSource("top-gear", "Top Gear", "https://www.topgear.com/feed", "rss", "Automotive"),
         BuiltInSource("car-and-driver", "Car and Driver", "https://www.caranddriver.com/rss/all.xml/", "rss", "Automotive"),
-        BuiltInSource("motor-trend", "MotorTrend", "https://www.motortrend.com/f/motortrend.xml", "rss", "Automotive"),
+        BuiltInSource("jalopnik", "Jalopnik", "https://www.jalopnik.com/feed/", "rss", "Automotive"),
+        BuiltInSource("autocar", "Autocar", "https://www.autocar.co.uk/rss", "rss", "Automotive"),
 
         // Art
         BuiltInSource("hi-fructose", "Hi-Fructose", "https://hifructose.com/feed/", "rss", "Art"),
-        BuiltInSource("juxtapoz", "Juxtapoz", "https://www.juxtapoz.com/feed/", "rss", "Art"),
         BuiltInSource("colossal", "Colossal", "https://www.thisiscolossal.com/feed/", "rss", "Art"),
 
         // Photography
-        BuiltInSource("500px-popular", "500px Popular", "https://500px.com/popular.rss", "rss", "Photography"),
         BuiltInSource("flickr-explore", "Flickr Explore", "https://www.flickr.com/services/feeds/photos_public.gne?format=rss_200", "rss", "Photography"),
         BuiltInSource("petapixel", "PetaPixel", "https://petapixel.com/feed/", "rss", "Photography"),
 
@@ -143,8 +143,7 @@ object SourceLibrary {
         // ──── API-backed sources (feedType = "api") ────
         // url field = API service identifier, not a URL
         // No-auth: Reddit, Internet Archive, NASA (work immediately)
-        // Optional-auth: YouTube, Pexels, NewsAPI, Guardian, Vimeo, Podcast Index (user configures own key)
-        BuiltInSource("api-yt-trending", "YouTube Trending", "youtube:trending", "api", "Video Platforms"),
+        // With the user's own key: Pexels, Guardian, Vimeo, Podcast Index, Jamendo
         BuiltInSource("api-yt-search", "YouTube Search", "youtube:search", "api", "Video Platforms"),
         BuiltInSource("api-reddit-hot", "Reddit Hot Posts", "reddit:multi", "api", "Reddit"),
         BuiltInSource("api-pexels-photo", "Pexels Photos", "pexels:photos", "api", "Art"),
@@ -162,13 +161,7 @@ object SourceLibrary {
         BuiltInSource("api-openverse-images", "Openverse Images", "openverse:images", "api", "Photography"),
         BuiltInSource("api-wikipedia-search", "Wikipedia", "wikipedia:search", "api", "Technology"),
         BuiltInSource("api-hackernews-search", "Hacker News", "hackernews:search", "api", "Technology"),
-        // api-invidious-search was called from two places in PublicApiService and
-        // was never registered either — the YouTube fallback has never once run.
-        BuiltInSource("api-invidious-search", "Invidious", "invidious:search", "api", "Video Platforms"),
-        BuiltInSource("api-tiktok", "TikTok Trending", "tiktok:trending", "api", "Video Platforms"),
-        BuiltInSource("api-instagram", "Instagram Feed", "instagram:recent", "api", "Social Clearnet"),
         BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
-        BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),
         BuiltInSource("api-nasa-apod", "NASA Picture of the Day", "nasa:apod", "api", "Science"),
         BuiltInSource("api-nasa-library", "NASA Image Library", "nasa:library", "api", "Science"),
@@ -186,7 +179,9 @@ object SourceLibrary {
     val retiredSourceIds = setOf(
         "ap-top", "m-eff", "m-feditips", "m-mastodon", "reuters-world", "sci-daily", "selfhosted-hero",
         "threatpost", "tt-khaby", "tt-mrbeast", "tt-zachking", "webmd", "yt-kurzgesagt", "yt-mkbhd",
-        "yt-smartereveryday", "yt-veritasium"
+        "yt-smartereveryday", "yt-veritasium",
+        "foss-post", "healthline", "mayo-clinic", "top-gear", "motor-trend", "juxtapoz", "500px-popular",
+        "api-yt-trending", "api-invidious-search", "api-tiktok", "api-instagram", "api-newsapi-headlines"
     )
 
     /**

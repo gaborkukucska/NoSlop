@@ -410,13 +410,6 @@ fun ContentPreferencesScreen(
                     .filter { it.isNotEmpty() }
                     .toSet()
 
-                // Pre-warm the Invidious instance cache so the first search is fast
-                LaunchedEffect(Unit) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        try { com.noslop.app.feeds.api.InvidiousApiClient.preWarmInstances() } catch (_: Exception) {}
-                    }
-                }
-
                 LaunchedEffect(channelSearchQuery) {
                     if (channelSearchQuery.isBlank()) {
                         searchedChannels = emptyList()

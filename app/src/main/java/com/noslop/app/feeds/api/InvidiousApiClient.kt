@@ -2,9 +2,7 @@
 package com.noslop.app.feeds.api
 
 import com.google.gson.Gson
-import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -19,8 +17,9 @@ import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Decentralized video stream resolver querying Invidious .onion hidden services
- * and Piped API instances in parallel over Tor.
+ * Last-resort video stream resolver: Invidious and Piped instances, tried in parallel on a direct
+ * connection when YouTube's own clients could not play a video. It no longer searches: public
+ * instances stopped answering searches, and YouTubeInternalClient covers them.
  */
 object InvidiousApiClient {
     private const val TAG = "INVIDIOUS_API"
@@ -82,13 +81,6 @@ object InvidiousApiClient {
 
     private fun markInstanceOk(instance: String) {
         instanceFailureTime.remove(instance)
-    }
-
-    fun preWarmInstances() {
-        com.noslop.app.util.AppScopes.io.launch {
-            // Proactively warm up healthy instances in background
-            healthyInvidiousInstances()
-        }
     }
 
     private const val RACE_WIDTH = 8
@@ -347,93 +339,6 @@ object InvidiousApiClient {
         return null
     }
 
-    private fun jsonArrayOrNull(body: String): JsonArray? {
-        return try {
-            val root = com.google.gson.JsonParser.parseString(body)
-            if (root.isJsonArray) root.asJsonArray else null
-        } catch (_: Exception) { null }
-    }
-
-    suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> =
-        searchVideosPage(query, sourceId = sourceId) ?: emptyList()
-
-    /**
-     * E5s: one page of a video search. The defaults are what [searchVideos] has always asked for (first
-     * page, by relevance, uploads of the last month). A user search asks for every date, newest first,
-     * and then for page 2, 3, ... Returns null when no instance answered with results: Invidious ends the
-     * results with an empty page, so null means "failed or no more", and the caller treats it as such.
-     */
-    suspend fun searchVideosPage(
-        query: String,
-        page: Int = 1,
-        newestFirst: Boolean = false,
-        lastMonthOnly: Boolean = true,
-        sourceId: String = "api-invidious-search"
-    ): List<FeedItem>? {
-        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        return raceInstances(
-            label = "search '${Logger.redact(query)}'" + (if (page > 1) " page $page" else ""),
-            instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 15_000L,
-            urlFor = { searchUrl(it, encodedQuery, page, newestFirst, lastMonthOnly) },
-            parse = { _, body ->
-                jsonArrayOrNull(body)
-                    ?.let { arr -> parseVideoArray(arr, sourceId) }
-                    ?.takeIf { it.isNotEmpty() }
-            }
-        )
-    }
-
-    /**
-     * E5s: the search URL. `sort` is the current API's name for the order and `sort_by` the one older
-     * instances still read; each ignores the other.
-     */
-    internal fun searchUrl(instance: String, encodedQuery: String, page: Int, newestFirst: Boolean, lastMonthOnly: Boolean): String =
-        buildString {
-            append("$instance/api/v1/search?q=$encodedQuery&type=video")
-            if (lastMonthOnly) append("&date=month")
-            if (newestFirst) append("&sort=date&sort_by=upload_date")
-            if (page > 1) append("&page=$page")
-        }
-
-    suspend fun getTrendingVideos(sourceId: String = "api-invidious-trending"): List<FeedItem> {
-        return raceInstances(
-            label = "trending",
-            instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 15_000L,
-            urlFor = { "$it/api/v1/trending?type=Video" },
-            parse = { _, body ->
-                jsonArrayOrNull(body)
-                    ?.let { arr -> parseVideoArray(arr, sourceId) }
-                    ?.takeIf { it.isNotEmpty() }
-            }
-        ) ?: emptyList()
-    }
-
-    suspend fun searchChannels(query: String): List<String> {
-        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        return raceInstances(
-            label = "channel search '${Logger.redact(query)}'",
-            instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 10_000L,
-            urlFor = { "$it/api/v1/search?q=$encodedQuery&type=channel" },
-            parse = { _, body ->
-                val array = jsonArrayOrNull(body) ?: return@raceInstances null
-                val channels = mutableListOf<String>()
-                for (element in array) {
-                    try {
-                        val v = element.asJsonObject
-                        val author = v.get("author")?.asString
-                        if (!author.isNullOrBlank()) {
-                            channels.add(author)
-                        }
-                    } catch (_: Exception) {}
-                }
-                channels.take(3).takeIf { it.isNotEmpty() }
-            }
-        ) ?: emptyList()
-    }
-
     suspend fun getChannelJoinedTimestamp(authorIdOrName: String): Long? {
         if (authorIdOrName.isBlank()) return null
         val encoded = java.net.URLEncoder.encode(authorIdOrName, "UTF-8")
@@ -448,50 +353,5 @@ object InvidiousApiClient {
                 if (joinedSec != null && joinedSec > 0L) joinedSec * 1000L else null
             }
         )
-    }
-
-    private fun parseVideoArray(array: JsonArray, sourceId: String): List<FeedItem> {
-        val items = mutableListOf<FeedItem>()
-        for (element in array) {
-            try {
-                val v = element.asJsonObject
-                val videoId = v.get("videoId")?.asString ?: continue
-                val title = v.get("title")?.asString ?: "Untitled"
-                val author = v.get("author")?.asString ?: "Unknown"
-                val desc = try { v.get("description")?.asString?.take(300) } catch (_: Exception) { null }
-                val published = try { v.get("published")?.asLong?.times(1000) } catch (_: Exception) { System.currentTimeMillis() }
-                val lengthSeconds = try { v.get("lengthSeconds")?.asInt } catch (_: Exception) { null }
-
-                val thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
-
-                val durationLabel = if (lengthSeconds != null && lengthSeconds > 0) {
-                    val m = lengthSeconds / 60
-                    val s = lengthSeconds % 60
-                    "${m}:${"%02d".format(s)}"
-                } else null
-
-                val excerpt = buildString {
-                    if (durationLabel != null) append("[$durationLabel] ")
-                    if (desc != null) append(desc)
-                }
-
-                val ytUrl = "https://www.youtube.com/watch?v=$videoId"
-
-                items.add(FeedItem(
-                    id = "yt_api_v2_$videoId",
-                    sourceId = sourceId,
-                    title = title,
-                    url = ytUrl,
-                    author = author,
-                    excerpt = excerpt,
-                    thumbnailUrl = thumbnailUrl,
-                    publishedAt = published ?: 0L,
-                    mediaUrl = ytUrl,
-                    mediaType = "video",
-                    apiSource = "youtube"
-                ))
-            } catch (_: Exception) {}
-        }
-        return items
     }
 }

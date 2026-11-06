@@ -6,8 +6,7 @@ import com.noslop.app.data.FeedItem
 
 /**
  * Search round, part 2 (E5s2): one page of results from a search source that numbers its pages
- * (Openverse, Wikimedia, Pexels, NASA, Internet Archive, Wikipedia, Hacker News, NewsAPI, Guardian,
- * Jamendo). [hasMore]: the source has a further page. [failed]: the request failed, so the same page
+ * (Openverse, Wikimedia, Pexels, NASA, Internet Archive, Wikipedia, Hacker News, Guardian, Jamendo). [hasMore]: the source has a further page. [failed]: the request failed, so the same page
  * is asked for again rather than the source being taken to have ended.
  */
 data class SourcePage(

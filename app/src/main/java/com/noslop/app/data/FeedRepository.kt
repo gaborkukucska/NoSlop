@@ -667,7 +667,7 @@ class FeedRepository(
     /**
      * E5s: a search from the search modal, one page at a time. [cursor] belongs to this search: the
      * [firstPage] call asks every source (and the local library) for its first page, each later call
-     * only the sources that page (YouTube, Invidious, Reddit) for their next one. Newest first, every
+     * only the sources that page (YouTube, Reddit) for their next one. Newest first, every
      * date. What it finds depends on [query] and the modal's [filterMode] only: never on the user's
      * categories, genres or keywords. Returns the ids of the stored results, in source order.
      */

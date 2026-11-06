@@ -11,7 +11,7 @@ import com.noslop.app.debug.Logger
  * Secure storage for optional API keys using EncryptedSharedPreferences.
  * Keys are stored under the namespace "api_key_<service>".
  *
- * Services: youtube, pexels, newsapi, guardian, nasa, vimeo, podcastindex, podcastindex_secret
+ * Services: see [SERVICES].
  */
 class ApiKeyRepository(context: Context) {
 
@@ -51,6 +51,7 @@ class ApiKeyRepository(context: Context) {
     }
 
     init {
+        RETIRED_SERVICES.filter { hasKey(it) }.forEach { removeKey(it) }
         syncRuntimeOverrides()
     }
 
@@ -84,18 +85,18 @@ class ApiKeyRepository(context: Context) {
     }
 
     companion object {
+        /** Services the app no longer uses. A key left over from one is cleared on start. */
+        private val RETIRED_SERVICES = listOf("newsapi", "instagram", "tiktok")
+
         /** All supported API services with their display names and whether they're required */
         val SERVICES = listOf(
             ServiceInfo("youtube", "YouTube InnerTube API", false, "Keyless (InnerTube proxy)"),
             ServiceInfo("pexels", "Pexels API", true, "pexels.com/api"),
-            ServiceInfo("newsapi", "NewsAPI", true, "newsapi.org/register"),
             ServiceInfo("guardian", "The Guardian API", true, "open-platform.theguardian.com/access"),
             ServiceInfo("nasa", "NASA API", false, "api.nasa.gov (DEMO_KEY works without signup)"),
             ServiceInfo("vimeo", "Vimeo API", true, "developer.vimeo.com"),
             ServiceInfo("podcastindex", "Podcast Index API Key", true, "api.podcastindex.org"),
             ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org"),
-            ServiceInfo("instagram", "Instagram Graph API User Token", true, "developers.facebook.com"),
-            ServiceInfo("tiktok", "TikTok Display API Client Key", true, "developers.tiktok.com"),
             ServiceInfo("jamendo", "Jamendo Client ID", false, "developer.jamendo.com (Optional, defaults to public client)"),
             ServiceInfo("custom_proxy_url", "Custom API Proxy URL", false, "Self-hosted Cloudflare Worker or reverse proxy URL"),
             ServiceInfo("custom_proxy_secret", "Custom API Proxy Secret", false, "HMAC secret for your self-hosted proxy (Optional)")

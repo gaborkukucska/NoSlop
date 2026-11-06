@@ -2,7 +2,6 @@ package com.noslop.app.feeds
 
 import com.google.gson.JsonParser
 import com.noslop.app.data.userSearchCategory
-import com.noslop.app.feeds.api.InvidiousApiClient
 import com.noslop.app.feeds.api.RedditApiClient
 import com.noslop.app.feeds.api.YouTubeInternalClient
 import com.noslop.app.ui.SearchPaging
@@ -23,7 +22,6 @@ import java.io.File
  *
  *  - YouTube: continuation tokens (first page and continuation responses).
  *  - Reddit: listing cursors (`after`), sort=new, and no search terms in the log.
- *  - Invidious: page numbers, every date, newest first, for user searches only.
  *  - PublicApiService.SearchCursor: where each source has got to, and when a search is exhausted.
  *  - "All" has its own search category.
  *  - SearchPaging: result order, the paging limits, and the stored downvotes.
@@ -144,17 +142,73 @@ class SearchPagingE5sTest {
         assertTrue(RedditApiClient.searchPageUrl("x", null, newestFirst = false).contains("&sort=relevance&"))
     }
 
-    // ------------------------------------------------------------------ Invidious
+    // ------------------------------------------------------------------ Reddit RSS
+
+    private val redditRss = """
+        <?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+        <category term="technology" label="r/technology"/><id>/r/technology.rss</id><title>technology</title>
+        <entry><author><name>/u/amy</name><uri>https://www.reddit.com/user/amy</uri></author>
+        <category term="technology" label="r/technology"/>
+        <content type="html">&#32; submitted by &#32; &lt;a href=&quot;https://www.reddit.com/user/amy&quot;&gt; /u/amy &lt;/a&gt; &lt;br/&gt; &lt;span&gt;&lt;a href=&quot;https://example.org/story?a=1&amp;amp;b=2&quot;&gt;[link]&lt;/a&gt;&lt;/span&gt; &lt;span&gt;&lt;a href=&quot;https://www.reddit.com/r/technology/comments/def/a_link/&quot;&gt;[comments]&lt;/a&gt;&lt;/span&gt;</content>
+        <id>t3_def</id><media:thumbnail url="https://preview.redd.it/thumb.jpg?width=140&amp;s=1"/>
+        <link href="https://www.reddit.com/r/technology/comments/def/a_link/" />
+        <updated>2026-11-06T01:02:03+00:00</updated><published>2026-11-06T01:02:03+00:00</published>
+        <title>A link &amp; more</title></entry>
+        <entry><author><name>/u/bob</name></author><category term="pics" label="r/pics"/>
+        <content type="html">&lt;span&gt;&lt;a href=&quot;https://i.redd.it/pic.jpg&quot;&gt;[link]&lt;/a&gt;&lt;/span&gt;</content>
+        <id>t3_abc</id><link href="https://www.reddit.com/r/pics/comments/abc/a_picture/" />
+        <published>2026-11-06T01:00:00+00:00</published><title>A picture</title></entry>
+        <entry><author><name>/u/cid</name></author><category term="selfhosted" label="r/selfhosted"/>
+        <content type="html">&lt;div class=&quot;md&quot;&gt;&lt;p&gt;My words&lt;/p&gt;&lt;/div&gt; &lt;span&gt;&lt;a href=&quot;https://www.reddit.com/r/selfhosted/comments/ghi/words/&quot;&gt;[link]&lt;/a&gt;&lt;/span&gt;</content>
+        <id>t3_ghi</id><link href="https://www.reddit.com/r/selfhosted/comments/ghi/words/" />
+        <published>2026-11-06T00:00:00+00:00</published><title>Words</title></entry>
+        </feed>
+    """.trimIndent()
 
     @Test
-    fun invidiousSearchUrl_unchangedByDefault_userSearchesEveryDateNewestFirstPaged() {
-        val legacy = InvidiousApiClient.searchUrl("https://inv.example", "q", page = 1, newestFirst = false, lastMonthOnly = true)
-        assertEquals("https://inv.example/api/v1/search?q=q&type=video&date=month", legacy)
-        val user = InvidiousApiClient.searchUrl("https://inv.example", "q", page = 3, newestFirst = true, lastMonthOnly = false)
-        assertFalse("no date limit", user.contains("date=month"))
-        assertTrue(user, user.contains("&sort=date&sort_by=upload_date"))
-        assertTrue(user, user.endsWith("&page=3"))
-        assertFalse(InvidiousApiClient.searchUrl("https://inv.example", "q", 1, true, false).contains("page="))
+    fun redditRss_readsPostsLinksAndImages() {
+        val page = RedditApiClient.parseRssListing(redditRss, "api-reddit-hot")
+        assertNotNull(page)
+        assertEquals(listOf("reddit_t3_def", "reddit_t3_abc", "reddit_t3_ghi"), page!!.items.map { it.id })
+        assertEquals("t3_ghi", page.after)
+
+        val link = page.items[0]
+        assertEquals("A link & more", link.title)
+        assertEquals("https://example.org/story?a=1&b=2", link.url)
+        assertEquals("u/amy", link.author)
+        assertEquals("r/technology · by u/amy", link.excerpt)
+        assertEquals("https://preview.redd.it/thumb.jpg?width=140&s=1", link.thumbnailUrl)
+        assertNull(link.mediaType)
+        assertEquals("reddit", link.apiSource)
+
+        val picture = page.items[1]
+        assertEquals("image", picture.mediaType)
+        assertEquals("https://i.redd.it/pic.jpg", picture.mediaUrl)
+        assertEquals("https://i.redd.it/pic.jpg", picture.thumbnailUrl)
+
+        val words = page.items[2]
+        assertEquals("a post on Reddit links to its own page", "https://www.reddit.com/r/selfhosted/comments/ghi/words/", words.url)
+        assertEquals("My words", words.excerpt)
+    }
+
+    @Test
+    fun redditRss_aPageThatDoesNotMoveOnEndsTheListing_andAnythingElseIsAFailure() {
+        assertNull(RedditApiClient.parseRssListing(redditRss, "api-reddit-hot", requestedAfter = "t3_ghi")!!.after)
+        assertNull(RedditApiClient.parseRssListing("""<feed xmlns="http://www.w3.org/2005/Atom"></feed>""", "x")!!.after)
+        assertNull(RedditApiClient.parseRssListing("<html>blocked</html>", "x"))
+    }
+
+    @Test
+    fun redditRss_addressFollowsTheJsonAddress() {
+        assertEquals(
+            "https://www.reddit.com/r/technology/hot.rss?limit=25",
+            RedditApiClient.rssUrlOf("https://www.reddit.com/r/technology/hot.json?limit=25&raw_json=1")
+        )
+        val search = RedditApiClient.searchPageUrl("gabor mate", after = "t3_next", newestFirst = true)
+        assertEquals(
+            "https://www.reddit.com/search.rss?q=gabor+mate&sort=new&limit=100&after=t3_next",
+            RedditApiClient.rssUrlOf(search)
+        )
     }
 
     // ------------------------------------------------------------------ SearchCursor
@@ -179,19 +233,6 @@ class SearchPagingE5sTest {
     }
 
     @Test
-    fun cursor_invidiousCountsPages_andAnEmptyAnswerIsTriedOnceMore() {
-        val c = PublicApiService.SearchCursor()
-        assertEquals(1, c.invidiousPage)
-        c.onInvidiousPage(20)
-        assertEquals(2, c.invidiousPage)
-        c.onInvidiousPage(null)
-        assertEquals(2, c.invidiousPage)
-        assertFalse(c.invidiousDone)
-        c.onInvidiousPage(0)
-        assertTrue(c.invidiousDone)
-    }
-
-    @Test
     fun cursor_redditFollowsItsCursor_andHasMoreDependsOnTheFilter() {
         val c = PublicApiService.SearchCursor()
         c.onRedditPage("t3_a", failed = false)
@@ -207,10 +248,9 @@ class SearchPagingE5sTest {
         assertFalse(c.hasMore("Search Images"))
         assertFalse(c.hasMore("Search Audio"))
         assertFalse(c.hasMore("Search Articles"))
-        assertTrue("YouTube and Invidious still have pages", c.hasMore("Search Videos"))
+        assertTrue("YouTube still has pages", c.hasMore("Search Videos"))
         assertTrue(c.hasMore("Search All"))
         c.onYouTubePage(null, failed = false)
-        c.onInvidiousPage(0); c.onInvidiousPage(0)
         assertFalse(c.hasMore("Search Videos"))
         assertFalse(c.hasMore("Search All"))
         assertFalse("not a paged search", c.hasMore("Technology"))

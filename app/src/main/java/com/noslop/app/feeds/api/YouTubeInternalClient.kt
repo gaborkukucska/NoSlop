@@ -479,10 +479,6 @@ object YouTubeInternalClient {
         }
     }
     
-    suspend fun getTrendingVideos(sourceId: String = "api-yt-trending"): List<FeedItem> {
-        return searchVideos("trending latest")
-    }
-
     data class InnerTubeClientConfig(
         val clientName: String,
         val clientId: String,

@@ -14,8 +14,8 @@ import java.io.File
 
 /**
  * Search round, part 2 (E5s2): every search source that numbers its pages pages as the user swipes
- * (Openverse, Wikimedia, Pexels, NASA, Internet Archive audio, Wikipedia, Hacker News, NewsAPI, the
- * Guardian, Jamendo), tracked per search in PublicApiService.SearchCursor.
+ * (Openverse, Wikimedia, Pexels, NASA, Internet Archive audio, Wikipedia, Hacker News, the Guardian,
+ * Jamendo), tracked per search in PublicApiService.SearchCursor.
  */
 class SearchPagingE5s2Test {
 
@@ -63,20 +63,6 @@ class SearchPagingE5s2Test {
     }
 
     @Test
-    fun newsApi_stopsAtThePagesTheFreePlanServes() {
-        val c = cursor
-        val s = PublicApiService.SearchCursor.NEWSAPI
-        assertEquals(5, PublicApiService.SearchCursor.maxPageFor(s))
-        assertEquals(Int.MAX_VALUE, PublicApiService.SearchCursor.maxPageFor(PublicApiService.SearchCursor.HACKERNEWS))
-        repeat(4) {
-            c.onNumberedPage(s, page(20))
-            assertFalse(c.isDone(s))
-        }
-        c.onNumberedPage(s, page(20))
-        assertTrue("five pages of 20: the first 100 results", c.isDone(s))
-    }
-
-    @Test
     fun hasMore_followsEverySourceOfTheFilter() {
         val c = cursor
         c.onRedditPage(null, failed = false)
@@ -92,7 +78,7 @@ class SearchPagingE5s2Test {
         assertTrue("NASA still pages", c.hasMore("Search Images"))
         c.markDone(images.last())
         assertFalse(c.hasMore("Search Images"))
-        assertTrue("Wikipedia, Hacker News, NewsAPI and the Guardian page articles", c.hasMore("Search Articles"))
+        assertTrue("Wikipedia, Hacker News and the Guardian page articles", c.hasMore("Search Articles"))
         assertTrue("Openverse and the Archive page audio", c.hasMore("Search Audio"))
         assertEquals(emptyList<String>(), PublicApiService.SearchCursor.NUMBERED_SOURCES.getValue("Search Videos"))
     }
@@ -127,7 +113,6 @@ class SearchPagingE5s2Test {
             "feeds/api/InternetArchiveClient.kt" to listOf("fun searchAudioPage(", "suspend fun searchAudio("),
             "feeds/api/WikipediaApiClient.kt" to listOf("fun searchArticlesPage(", "searchArticlesPage(query, 1,"),
             "feeds/api/HackerNewsApiClient.kt" to listOf("fun searchStoriesPage(", "searchStoriesPage(query, 1, newestFirst = false"),
-            "feeds/api/NewsApiClient.kt" to listOf("fun searchArticlesPage(", "suspend fun searchArticles("),
             "feeds/api/GuardianApiClient.kt" to listOf("fun searchArticlesPage(", "suspend fun searchArticles("),
             "feeds/api/JamendoApiClient.kt" to listOf("fun searchTracksPage(", "searchTracksPage(tags, 1, newestFirst = false"),
         )
