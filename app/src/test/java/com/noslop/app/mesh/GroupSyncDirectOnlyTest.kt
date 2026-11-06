@@ -70,6 +70,7 @@ class GroupSyncDirectOnlyTest {
         repo.stopPresenceHeartbeat()
         MeshTransport.sendInterceptorForTesting = null
         GossipService.resetForTesting()
+        NoSlopDatabase.closeInstance()
         db.close()
     }
 
@@ -157,8 +158,16 @@ class GroupSyncDirectOnlyTest {
     }
 
     @Test
-    fun aGroupSyncForSomeoneElseIsNotRelayed_whateverWeKnowOfTheGroup() = runBlocking<Unit> {
+    fun aGroupSyncForAGroupWeDoNotHold_isDroppedAndNotRelayed() = runBlocking<Unit> {
         assertFalse("not for us", GossipService.processIncoming(gossipedSync("other-group")))
+        delay(300)
+        assertEquals(emptyList<String>(), syncDestinations())
+    }
+
+    @Test
+    fun aFellowMembersCopy_isReadButNotRelayed() = runBlocking<Unit> {
+        // GossipService looks groups up in the app's shared database, not this test's in-memory one.
+        NoSlopDatabase.getDatabase(context).groupChatDao().insertGroupChat(group())
         assertTrue("a fellow member's copy is still read", GossipService.processIncoming(gossipedSync(GROUP_ID)))
         delay(300)
         assertEquals(emptyList<String>(), syncDestinations())
