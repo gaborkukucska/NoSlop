@@ -556,10 +556,10 @@ class MeshSocialRepository(
                                 meshTransport.repository.triggerDmSync()
                             }
                         }
-                    } else if (com.noslop.app.mesh.GossipService.isDirectOnly(packet.type)) {
-                        Logger.warn(TAG, "Direct send of ${packet.type} ${packet.id} to $onionAddress failed. It is not relayed.")
                     } else if (isDirected) {
-                        Logger.warn(TAG, "Direct send to $onionAddress failed. Enqueueing in persistent outbox and gossip relaying ${packet.type} ${packet.id}.")
+                        val directOnly = com.noslop.app.mesh.GossipService.isDirectOnly(packet.type)
+                        Logger.warn(TAG, "Direct send to $onionAddress failed for ${packet.type} ${packet.id}. " +
+                            if (directOnly) "It is not relayed." else "Enqueueing in persistent outbox and gossip relaying.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
                             val isCriticalOutboxType = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" ||
@@ -570,12 +570,14 @@ class MeshSocialRepository(
                             }
 
                             // Relay via mesh gossip with full hops
-                            val gossipPacket = packet.copy(
-                                id = UUID.randomUUID().toString(),
-                                hops = 6
-                            )
-                            com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
-                            
+                            if (!directOnly) {
+                                val gossipPacket = packet.copy(
+                                    id = UUID.randomUUID().toString(),
+                                    hops = 6
+                                )
+                                com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
+                            }
+
                             // Outbox worker will retry delivery without flooding circuits
                         }
                     }

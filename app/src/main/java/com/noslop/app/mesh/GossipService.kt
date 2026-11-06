@@ -383,12 +383,14 @@ object GossipService {
     /** Only push to Hub if the user actually has one configured */
     /**
      * --- NOSLOP_GROUP_SYNC_DIRECT_V1 ---
-     * A GROUP_SYNC holds a group's whole record in plain text: member keys, handles and onion addresses.
-     * Only the member who asked may see it, so it goes straight to that member's onion address and nobody
-     * passes it on: no broadcast, no gossip fallback when the send fails, no relay. Older builds can still
-     * gossip one, which is why relays check this as well.
+     * These packets hold a group's record in plain text: member keys, handles and onion addresses. Only
+     * members may see it, so each member gets its own copy at its own onion address and nobody passes one
+     * on: no broadcast, no gossip fallback when a send fails, no relay. A failed GROUP_INVITE or GROUP_UPDATE
+     * waits in the outbox, and a failed GROUP_SYNC waits for the member to ask again. Older builds can
+     * still gossip these, which is why relays check this as well.
      */
-    internal fun isDirectOnly(type: String): Boolean = type == "GROUP_SYNC"
+    internal fun isDirectOnly(type: String): Boolean =
+        type == "GROUP_SYNC" || type == "GROUP_INVITE" || type == "GROUP_UPDATE"
 
     private suspend fun pushToHubIfLinked(packet: NetworkPacket) {
         if (isDirectOnly(packet.type)) return
@@ -917,7 +919,7 @@ object GossipService {
      */
     private suspend fun forwardPacket(packet: NetworkPacket, isFriendsOnly: Boolean = false) {
         if (isDirectOnly(packet.type)) {
-            Logger.debug(TAG, "Not relaying ${packet.type} ${packet.id}: it only goes straight to its requester")
+            Logger.debug(TAG, "Not relaying ${packet.type} ${packet.id}: it only goes straight to its target")
             return
         }
         val tx = transport ?: return
@@ -1058,7 +1060,7 @@ object GossipService {
      */
     suspend fun broadcast(packet: NetworkPacket) {
         if (isDirectOnly(packet.type)) {
-            Logger.warn(TAG, "Not broadcasting ${packet.type} ${packet.id}: it only goes straight to its requester")
+            Logger.warn(TAG, "Not broadcasting ${packet.type} ${packet.id}: it only goes straight to its target")
             return
         }
         val tx = transport ?: return

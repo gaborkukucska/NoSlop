@@ -27,9 +27,9 @@ import org.robolectric.annotation.Config
 import java.util.UUID
 
 /**
- * A GROUP_SYNC holds a group's whole record in plain text, so it goes straight to the member who asked
- * and to nobody else (GossipService.isDirectOnly). Real repository and Room database; sends are captured
- * by MeshTransport.sendInterceptorForTesting.
+ * GROUP_SYNC, GROUP_INVITE and GROUP_UPDATE hold a group's record in plain text, so each goes straight to
+ * a member and to nobody else (GossipService.isDirectOnly). Real repository and Room database; sends are
+ * captured by MeshTransport.sendInterceptorForTesting.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -80,10 +80,11 @@ class GroupSyncDirectOnlyTest {
         relationship = PeerRelationship.ACCEPTED
     )
 
-    private fun group(id: String = GROUP_ID) = GroupChat(
-        groupId = id, title = "friends", adminPublicKeyB64 = alice.publicKeyB64,
-        membersJson = Json.gson.toJson(listOf(alice.publicKeyB64, bob.publicKeyB64))
-    )
+    private fun group(
+        id: String = GROUP_ID,
+        admin: String = alice.publicKeyB64,
+        members: List<String> = listOf(alice.publicKeyB64, bob.publicKeyB64)
+    ) = GroupChat(groupId = id, title = "friends", adminPublicKeyB64 = admin, membersJson = Json.gson.toJson(members))
 
     private fun query() = NetworkPacket(
         id = UUID.randomUUID().toString(), senderId = bob.publicKeyB64, type = "GROUP_QUERY",
@@ -97,7 +98,16 @@ class GroupSyncDirectOnlyTest {
         payload = Json.gson.toJsonTree(GroupSyncPayload(Json.gson.toJson(group(groupId)), emptyMap(), 1L, "sig"))
     )
 
-    private fun syncDestinations() = synchronized(sent) { sent.filter { it.second.type == "GROUP_SYNC" }.map { it.first } }
+    private fun destinationsOf(type: String) = synchronized(sent) { sent.filter { it.second.type == type }.map { it.first } }
+
+    private fun syncDestinations() = destinationsOf("GROUP_SYNC")
+
+    private fun distinctDestinationsOf(type: String) = destinationsOf(type).distinct().sorted()
+
+    private fun onionsOf(vararg keys: CryptoService.IdentityKeys) = keys.map { it.onionAddress }.sorted()
+
+    private suspend fun updateMembers(members: List<String>) =
+        repo.updateGroupChat(GROUP_ID, "friends", null, null, true, true, members)
 
     private suspend fun waitFor(what: String, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000
@@ -109,10 +119,10 @@ class GroupSyncDirectOnlyTest {
 
     @Test
     fun theStoredAddressComesFirst_elseTheKeyGivesIt() {
-        assertEquals("stored.onion", groupSyncDestination(bob.publicKeyB64, "stored.onion"))
-        assertEquals(bob.onionAddress, groupSyncDestination(bob.publicKeyB64, null))
-        assertEquals(bob.onionAddress, groupSyncDestination(bob.publicKeyB64, "  "))
-        assertNull("an unreadable key", groupSyncDestination("", ""))
+        assertEquals("stored.onion", groupMemberOnion(bob.publicKeyB64, "stored.onion"))
+        assertEquals(bob.onionAddress, groupMemberOnion(bob.publicKeyB64, null))
+        assertEquals(bob.onionAddress, groupMemberOnion(bob.publicKeyB64, "  "))
+        assertNull("an unreadable key", groupMemberOnion("", ""))
     }
 
     @Test
@@ -137,17 +147,15 @@ class GroupSyncDirectOnlyTest {
 
     @Test
     fun aDirectPacketThatMayBeGossiped_stillIs() = runBlocking<Unit> {
-        // The other side of the line: a failed GROUP_UPDATE keeps its fallback.
+        // The other side of the line: GROUP_DELETE holds no member data and keeps its fallback.
         db.peerDao().insertPeer(contact(bob))
         directSendsWork = false
-        val update = NetworkPacket(
+        val delete = NetworkPacket(
             id = UUID.randomUUID().toString(), senderId = alice.publicKeyB64, targetUserId = bob.publicKeyB64,
-            type = "GROUP_UPDATE", payload = JsonObject()
+            type = "GROUP_DELETE", payload = JsonObject()
         )
-        repo.dispatchPacket(bob.onionAddress, update)
-        waitFor("the fallback reaching a contact") {
-            synchronized(sent) { sent.any { it.first == carol.onionAddress && it.second.type == "GROUP_UPDATE" } }
-        }
+        repo.dispatchPacket(bob.onionAddress, delete)
+        waitFor("the fallback reaching a contact") { carol.onionAddress in destinationsOf("GROUP_DELETE") }
     }
 
     @Test
@@ -175,14 +183,81 @@ class GroupSyncDirectOnlyTest {
 
     @Test
     fun otherDirectedGroupPacketsAreStillRelayed() = runBlocking<Unit> {
-        val update = NetworkPacket(
+        val query = NetworkPacket(
             id = UUID.randomUUID().toString(), hops = 6, senderId = carol.publicKeyB64, targetUserId = bob.publicKeyB64,
-            type = "GROUP_UPDATE", payload = JsonObject()
+            type = "GROUP_QUERY", payload = JsonObject()
         )
-        assertFalse("not for us", GossipService.processIncoming(update))
-        waitFor("the relay to dave") {
-            synchronized(sent) { sent.any { it.first == dave.onionAddress && it.second.type == "GROUP_UPDATE" } }
+        assertFalse("not for us", GossipService.processIncoming(query))
+        waitFor("the relay to dave") { dave.onionAddress in destinationsOf("GROUP_QUERY") }
+    }
+
+    @Test
+    fun aNewGroupsInviteReachesItsMembersAndNoOtherContact() = runBlocking<Unit> {
+        db.peerDao().insertPeer(contact(bob))
+        repo.createGroupChat("friends", listOf(bob.publicKeyB64), allowMemberInvites = false)
+        waitFor("the invite") { destinationsOf("GROUP_INVITE").isNotEmpty() }
+        delay(300)
+        assertEquals(onionsOf(bob), distinctDestinationsOf("GROUP_INVITE"))
+    }
+
+    @Test
+    fun anUpdateReachesStayingAndRemovedMembersAndNoOtherContact() = runBlocking<Unit> {
+        // Bob is on record and is being removed. Erin stays, and we hold no address for her.
+        val erin = CryptoService.generateIdentity("erin")
+        db.peerDao().insertPeer(contact(bob))
+        db.groupChatDao().insertGroupChat(group(members = listOf(alice.publicKeyB64, bob.publicKeyB64, erin.publicKeyB64)))
+        updateMembers(listOf(alice.publicKeyB64, erin.publicKeyB64))
+        waitFor("both copies") { distinctDestinationsOf("GROUP_UPDATE").size >= 2 }
+        delay(300)
+        assertEquals(onionsOf(bob, erin), distinctDestinationsOf("GROUP_UPDATE"))
+    }
+
+    @Test
+    fun aMemberAddedLaterGetsAnInvite_theOthersAnUpdate_andNoOtherContactEither() = runBlocking<Unit> {
+        val erin = CryptoService.generateIdentity("erin")
+        db.peerDao().insertPeer(contact(erin))
+        updateMembers(listOf(alice.publicKeyB64, bob.publicKeyB64, erin.publicKeyB64))
+        waitFor("the invite and the update") {
+            destinationsOf("GROUP_INVITE").isNotEmpty() && destinationsOf("GROUP_UPDATE").isNotEmpty()
         }
+        delay(300)
+        assertEquals(onionsOf(erin), distinctDestinationsOf("GROUP_INVITE"))
+        assertEquals(onionsOf(bob), distinctDestinationsOf("GROUP_UPDATE"))
+    }
+
+    @Test
+    fun aFailedUpdateWaitsInTheOutbox_andIsNotGossiped() = runBlocking<Unit> {
+        db.peerDao().insertPeer(contact(bob))
+        directSendsWork = false
+        updateMembers(listOf(alice.publicKeyB64, bob.publicKeyB64))
+        waitFor("the update in the outbox") {
+            repo.meshSocialRepository.pendingOutboxFor(bob.publicKeyB64).any { it.type == "GROUP_UPDATE" }
+        }
+        delay(300)
+        assertEquals(onionsOf(bob), distinctDestinationsOf("GROUP_UPDATE"))
+    }
+
+    @Test
+    fun leavingReachesTheOtherMembersAndNoOtherContact() = runBlocking<Unit> {
+        val erin = CryptoService.generateIdentity("erin")
+        db.groupChatDao().insertGroupChat(
+            group(admin = bob.publicKeyB64, members = listOf(alice.publicKeyB64, bob.publicKeyB64, erin.publicKeyB64))
+        )
+        repo.leaveGroupChat(GROUP_ID)
+        waitFor("both copies") { distinctDestinationsOf("GROUP_UPDATE").size >= 2 }
+        delay(300)
+        assertEquals(onionsOf(bob, erin), distinctDestinationsOf("GROUP_UPDATE"))
+    }
+
+    @Test
+    fun anOlderBuildsGroupBroadcastIsReadButNotPassedOn() = runBlocking<Unit> {
+        val update = NetworkPacket(
+            id = UUID.randomUUID().toString(), hops = 6, senderId = carol.publicKeyB64, type = "GROUP_UPDATE",
+            payload = JsonObject()
+        )
+        assertTrue("read here", GossipService.processIncoming(update))
+        delay(300)
+        assertEquals(emptyList<String>(), destinationsOf("GROUP_UPDATE"))
     }
 
     private companion object {

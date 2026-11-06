@@ -1165,11 +1165,9 @@ class HandshakePacketHandler(
         if (isLocalAdmin && !isAdmin && removed.isNotEmpty()) {
             for (memberPub in currentMembers) {
                 if (memberPub == myLocalPub || memberPub == myBurnablePub || memberPub == signer) continue
-                val p = peerDao.getPeerByPublicKey(memberPub)
-                if (p != null && p.onionAddress.isNotBlank()) {
-                    val relayPacket = packet.copy(id = java.util.UUID.randomUUID().toString(), targetUserId = memberPub)
-                    repo.dispatchPacket(p.onionAddress, relayPacket)
-                }
+                val onion = groupMemberOnion(memberPub, peerDao.getPeerByPublicKey(memberPub)?.onionAddress) ?: continue
+                val relayPacket = packet.copy(id = java.util.UUID.randomUUID().toString(), targetUserId = memberPub)
+                repo.dispatchPacket(onion, relayPacket)
             }
         }
         return true
@@ -1266,7 +1264,7 @@ class HandshakePacketHandler(
             payload = com.noslop.app.util.Json.gson.toJsonTree(syncPayload)
         )
         // The answer goes straight to the requester and to nobody else (GossipService.isDirectOnly).
-        val targetOnion = groupSyncDestination(packet.senderId, senderPeer?.onionAddress)
+        val targetOnion = groupMemberOnion(packet.senderId, senderPeer?.onionAddress)
         if (targetOnion == null) {
             Logger.warn(TAG, "Not answering GROUP_QUERY ${query.groupId}: no address for ${packet.senderId.take(12)}")
             return false
@@ -1434,10 +1432,10 @@ internal fun groupQueryRefusal(
 }
 
 /**
- * Where the answer to a GROUP_QUERY goes: the address we hold for the requester, or else the one its key
- * gives. Members often hold no contact row for each other, and every identity's onion address is derived
- * from its key, so an authenticated [senderId] can always be answered directly. Null only when the key
- * can't be read.
+ * Where a group packet that holds member data goes (GossipService.isDirectOnly): the address we hold for
+ * the member, or else the one its key gives. Members often hold no contact row for each other, and every
+ * identity's onion address is derived from its key, so a member can always be reached directly. Null only
+ * when the key can't be read.
  */
-internal fun groupSyncDestination(senderId: String, storedOnion: String?): String? =
-    storedOnion?.takeIf { it.isNotBlank() } ?: CryptoService.onionOf(senderId)
+internal fun groupMemberOnion(memberPub: String, storedOnion: String?): String? =
+    storedOnion?.takeIf { it.isNotBlank() } ?: CryptoService.onionOf(memberPub)

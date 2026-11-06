@@ -876,15 +876,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             type = "GROUP_INVITE",
             payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
         )
-        com.noslop.app.mesh.GossipService.broadcast(packet)
 
         // Send targeted GROUP_INVITE packet to every member with identity alignment
         for (memberPub in allMembers) {
             if (memberPub == adminKeys.publicKeyB64 || memberPub == myMain.publicKeyB64) continue
-            val peer = db.peerDao().getPeerByPublicKey(memberPub)
-            val onion = peer?.onionAddress ?: ""
-            if (onion.isBlank()) continue
-
             val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
             val effectiveSenderId = if (allowMemberInvites || contactIdentity == "burnable") {
                 adminKeys.publicKeyB64
@@ -897,10 +892,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 senderId = effectiveSenderId,
                 targetUserId = memberPub
             )
-            meshSocialRepository.dispatchPacket(onion, memberPacket)
+            dispatchToGroupMember(memberPub, memberPacket)
             kotlinx.coroutines.delay(300L) // Stagger invites to prevent Tor circuit collision
         }
         Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members (admin=${adminKeys.publicKeyB64.take(8)}...)")
+    }
+
+    /**
+     * Sends a group packet that holds member data to one member, whose key [packet] names as its target
+     * (see GossipService.isDirectOnly). A failed send waits in the outbox when the member has a peer row;
+     * otherwise the member's catch-up at its next start covers it.
+     */
+    private suspend fun dispatchToGroupMember(memberPub: String, packet: com.noslop.app.mesh.NetworkPacket) {
+        val onion = com.noslop.app.mesh.groupMemberOnion(memberPub, peerDao.getPeerByPublicKey(memberPub)?.onionAddress)
+        if (onion == null) {
+            Logger.warn("REPOSITORY", "No address for group member ${memberPub.take(8)}...: ${packet.type} not sent")
+            return
+        }
+        meshSocialRepository.dispatchPacket(onion, packet)
     }
 
     suspend fun syncMemberPeers(memberDetails: Map<String, com.noslop.app.mesh.GroupMemberInfo>?) {
@@ -1302,19 +1311,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             type = "GROUP_UPDATE",
             payload = com.noslop.app.util.Json.gson.toJsonTree(updatePayload)
         )
-        com.noslop.app.mesh.GossipService.broadcast(packet)
 
-        // Send targeted GROUP_UPDATE packets to existing members to ensure retries if offline
-        for (memberPub in newMembers) {
+        // Each member gets its own copy, with retries if offline. So does a member just removed: its copy
+        // is how it learns.
+        for (memberPub in (newMembers + removedMembers + existing.adminPublicKeyB64).distinct()) {
             if (memberPub == myKeys.publicKeyB64 || memberPub == signingKey.publicKeyB64) continue
             if (addedMembers.contains(memberPub)) continue // New members get a GROUP_INVITE below
             val memberPacket = packet.copy(
                 id = java.util.UUID.randomUUID().toString(),
                 targetUserId = memberPub
             )
-            val peer = db.peerDao().getPeerByPublicKey(memberPub)
-            val onion = peer?.onionAddress ?: ""
-            meshSocialRepository.dispatchPacket(onion, memberPacket)
+            dispatchToGroupMember(memberPub, memberPacket)
         }
 
         // Newly added members don't have the group yet, so they need a full
@@ -1356,9 +1363,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             )
             for (addedPub in addedMembers) {
                 if (addedPub == myKeys.publicKeyB64) continue
-                val peer = db.peerDao().getPeerByPublicKey(addedPub)
-                val onion = peer?.onionAddress ?: ""
-                if (onion.isBlank()) continue
 
                 // R3: the admin invites as the admin identity (unchanged); a member as its member identity.
                 val effectiveSenderId = if (isAdmin) adminKeys.publicKeyB64 else signingKey.publicKeyB64
@@ -1370,19 +1374,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     type = "GROUP_INVITE",
                     payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
                 )
-                if (onion.isNotBlank()) {
-                    meshSocialRepository.dispatchPacket(onion, invitePacket)
-                }
+                dispatchToGroupMember(addedPub, invitePacket)
                 Logger.info("REPOSITORY", "Sent GROUP_INVITE for $groupId to newly added member ${addedPub.take(8)}... (senderId=${effectiveSenderId.take(8)})")
             }
-            // Also broadcast general GROUP_INVITE across the mesh so offline/indirect members receive it
-            val generalInvitePacket = com.noslop.app.mesh.NetworkPacket(
-                id = "group_invite_${groupId}_${System.currentTimeMillis()}",
-                senderId = signingKey.publicKeyB64,
-                type = "GROUP_INVITE",
-                payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
-            )
-            com.noslop.app.mesh.GossipService.broadcast(generalInvitePacket)
         }
 
         // If we removed ourselves from the group, delete the group locally
@@ -1473,12 +1467,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val allGroupPeers = (previousMembers + existing.adminPublicKeyB64).distinct()
         for (memberPub in allGroupPeers) {
             if (memberPub == signingKey.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
-            val p = peerDao.getPeerByPublicKey(memberPub)
-            if (p != null && p.onionAddress.isNotBlank()) {
-                meshSocialRepository.dispatchPacket(p.onionAddress, packet.copy(targetUserId = memberPub))
-            }
+            dispatchToGroupMember(memberPub, packet.copy(targetUserId = memberPub))
         }
-        com.noslop.app.mesh.GossipService.broadcast(packet)
 
         // 2. Delete group locally
         db.groupChatDao().deleteGroupChat(groupId)
@@ -1486,7 +1476,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // 3. Clean up ghost peers stored only for this group to prevent them appearing as Pending Requests
         cleanupOrphanedGroupPeers(allGroupPeers, excludedGroupId = groupId)
 
-        Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${signingKey.publicKeyB64.take(8)}... and cleaned up group peers")
+        Logger.info("REPOSITORY", "Left group $groupId: sent removal of ${signingKey.publicKeyB64.take(8)}... and cleaned up group peers")
     }
 
     suspend fun resendGroupInvites(groupId: String) {
@@ -1566,14 +1556,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             payload = com.noslop.app.util.Json.gson.toJsonTree(invitePayload)
         )
 
-        com.noslop.app.mesh.GossipService.broadcast(packet)
-
         for (memberPub in members) {
             if (memberPub == adminKeys.publicKeyB64 || memberPub == myKeys.publicKeyB64) continue
-            val peer = db.peerDao().getPeerByPublicKey(memberPub)
-            val onion = peer?.onionAddress ?: ""
-            if (onion.isBlank()) continue
-
             val contactIdentity = db.appSettingDao().getSetting("contact_identity_$memberPub")
             val effectiveSenderId = if (group.allowMemberInvites || contactIdentity == "burnable") {
                 adminKeys.publicKeyB64
@@ -1586,7 +1570,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 senderId = effectiveSenderId,
                 targetUserId = memberPub
             )
-            meshSocialRepository.dispatchPacket(onion, memberPacket)
+            dispatchToGroupMember(memberPub, memberPacket)
         }
         Logger.info("REPOSITORY", "Re-sent group invites for '${group.title}' ($groupId) to ${members.size} member(s)")
     }
