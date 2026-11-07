@@ -4,11 +4,11 @@ Straight answers to the questions people ask first. If something here is wrong o
 
 ## What is NoSlop, in a paragraph?
 
-An Android app for peer-to-peer chat and social sharing over Tor: end-to-end encrypted direct messages and group chats, friends-only sharing, and public broadcasts from creators on the mesh. Alongside it is a built-in, **tracker-free clearnet aggregator** that pulls in content from the open web, with no algorithm choosing for you. The aggregator is a temporary bridge: it keeps your feed full until creators join the mesh, and the goal is to outgrow it. You can turn it off.
+An Android app for peer-to-peer chat and social sharing over Tor: end-to-end encrypted direct messages and group chats, friends-only sharing, and public broadcasts from creators on the mesh. Alongside it is a built-in, **tracker-free clearnet aggregator** that pulls in content from the open web, with no algorithm choosing for you. It is there so you can read the open web in the same app, privately, and bring it to your friends. You can turn it off.
 
 ## Why does NoSlop have a clearnet aggregator at all?
 
-A social network with nothing in it isn't much use, and creators haven't joined the mesh yet. The aggregator is a temporary bridge: it brings content in from the open web, without trackers or an algorithm, so the app is worth opening on day one. The plan is to invite creators to share on the mesh once the app has been tested and scrutinised, and to let the mesh grow until the aggregator is no longer needed. It can be switched off at any time, and liking, commenting or sharing clearnet content moves that conversation onto the mesh.
+Because I wanted to read my own content without juggling other apps and without being tracked or profiled. The aggregator pulls from the open web with no trackers and no algorithm, and its requests go over Tor by default, the same as the mesh. It also gives a new install, or a small circle of friends, something worth opening on day one: liking, commenting or sharing clearnet content moves that conversation onto the mesh. The mesh is where I hope creators and readers will end up, in direct, unaltered contact. As it grows, the aggregator may be off by default and stay for public open sources. You can switch it off at any time, and anyone can add sources.
 
 ## Is it really serverless?
 
@@ -30,12 +30,12 @@ NoSlop is trying to be something broader than a messenger: a small, private soci
 
 It might. That is the honest risk of any peer-to-peer network, and anonymity improves with more people. What makes NoSlop worth using anyway:
 
-* The built-in aggregator gives you a full feed on day one, with no friends needed. It's the stopgap until creators join the mesh.
+* The built-in aggregator gives you a full feed on day one, with no friends needed, and you can bring what you read onto the mesh.
 * Small, trusted circles are the design. You connect with people you know, by QR code.
 * Creator broadcasts spread by gossip, up to six hops.
 * The optional Official Creator Node helps new installs find creators.
 
-If the mesh stays small, NoSlop still works as a tracker-free reader, but that isn't the goal: the goal is to outgrow the aggregator.
+If the mesh stays small, NoSlop still works as a tracker-free reader and a private messenger for the people you know. The aim is for the mesh to grow and carry more of the feed over time.
 
 ## Isn't it slow over Tor? What about battery?
 

@@ -976,7 +976,7 @@ compression of large files.
 
 ## 7. Clearnet Aggregator
 
-> **Role:** the aggregator is a temporary, built-in bridge that supplies content until creators join the mesh. The goal is to outgrow it. It can be switched off (`enable_aggregator`).
+> **Role:** the aggregator is a built-in, user-controlled way to read open-web content inside the same app (routed over Tor by default) and to bring it onto the mesh. It can be switched off (`enable_aggregator`). As creators join the mesh it may become off by default and remain for public open sources.
 
 ### 7.1 HTTP Client Separation (`net/HttpClientProvider.kt`)
 

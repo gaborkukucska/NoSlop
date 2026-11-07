@@ -15,11 +15,11 @@
 
 ## 💡 What is NoSlop?
 
-**NoSlop** is a sovereign, privacy-first Android app for **peer-to-peer chat and social sharing over [Tor](https://www.torproject.org/)**: end-to-end encrypted direct messages and group chats, friends-only sharing, and public broadcasts from creators on the mesh. Tor relays carry the traffic, but no server holds your identity, your data or your choices. Until creators join the mesh, a built-in, tracker-free **clearnet aggregator** brings content in from the open web, and the goal is to outgrow it.
+**NoSlop** is a sovereign, privacy-first Android app for **peer-to-peer chat and social sharing over [Tor](https://www.torproject.org/)**: end-to-end encrypted direct messages and group chats, friends-only sharing, and public broadcasts from creators on the mesh. Tor relays carry the traffic, but no server holds your identity, your data or your choices. Alongside it, a built-in, tracker-free **clearnet aggregator** lets you read the open web in the same app, with no algorithm, and bring what you find to your friends over the mesh.
 
 There are **no accounts**, **no emails**, **no phone numbers**, and **zero algorithmic slop**. Your identity is an Ed25519/X25519 cryptographic keypair generated on your device. Chatting and connecting with friends or creators happens directly through peer-to-peer Tor hidden services (`.onion`).
 
-**The mesh is the point; the clearnet aggregator is a bridge.** It is temporary scaffolding that keeps your feed full while the mesh is small and creators haven't joined yet. The goal is for the mesh to grow until you no longer need it. You can switch the aggregator off at any time.
+**The mesh is the point, and the aggregator is a way into it.** Chat, group chat, friends-only sharing and creator broadcasts are what NoSlop is for, and the mesh is where I hope the content people care about will live: a direct, unaltered link between creator and reader, controlled by both. The aggregator is built in because I wanted to read the open web without other apps and without trackers, and it gives a new install, or a small circle of friends, something worth opening on day one. As more creators join, I expect the mesh to carry more of the feed, and the aggregator may then be off by default and stay for public open sources. You can switch it off at any time.
 
 > 📖 **Deep Technical Details:** All cryptographic derivations, transport architectures, and protocol specifications live in [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) and [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
 
@@ -42,7 +42,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 📬 **Private Chat & Group Chat** — E2EE Direct Messages (v2 directional X25519 + ChaCha20-Poly1305 AEAD with AAD metadata binding and delivery ACKs) and pairwise encrypted group chats.
 * 👥 **Friends-Only Sharing & Public Broadcasts** — Share with the people you know, or publish public broadcasts to the mesh from a separate, burnable creator identity.
 * 🧅 **Tor-Routed Anonymity** — Default network traffic routes through an embedded Tor daemon with per-stream circuit isolation. Article WebViews and external browser links are gated with explicit Tor leak warnings.
-* 🌉 **A Temporary Bridge to the Clearnet** — A built-in, tracker-free aggregator fills your feed from the open web until creators join the mesh. It's chronological with no algorithm: you choose your mix quotas, sources and categories (with an optional Random Discover mode), and you can switch it off. The goal is to outgrow it.
+* 📰 **A Built-in Clearnet Aggregator** — Read the open web inside NoSlop with no trackers and no algorithm. You choose your mix quotas, sources and categories (with an optional Random Discover mode), requests go over Tor by default like the mesh, and you can switch it off. Liking, commenting or sharing clearnet content brings that conversation onto the mesh.
 * 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked. A video that stalls recovers in place, at the same position, whether you're watching or away.
 * 🚫 **100% Ad & Tracker-Free** — Pure tracker-free client (using offline ZXing barcode scanning, no Google telemetry SDKs). Zero banners or sponsored interruptions.
 * 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
@@ -86,9 +86,9 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 ---
 
-### 📱 The Feed and the Temporary Clearnet Aggregator
+### 📱 The Feed and the Clearnet Aggregator
 
-A vertically snapping feed purpose-built for clean signal-to-noise ratio. Its clearnet content comes from the built-in aggregator, a temporary bridge until creators join the mesh:
+A vertically snapping feed purpose-built for clean signal-to-noise ratio. Its clearnet content comes from the built-in aggregator:
 
 * 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with Tor preloading that warms up to three slides ahead, so the next video is usually already playing when you swipe.
 * 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
@@ -160,7 +160,7 @@ NoSlop is early software. Please read this before you rely on it:
 
 * **Alpha, Android first.** Expect rough edges. Releases are tested to the best of my ability, on many devices, but they stay marked alpha until qualified developers have contributed enough to the project. An iOS and desktop port is in progress under `mvp/`.
 * **Sideloaded.** There is no store listing: install the APK from the GitHub releases page and verify its SHA-256 checksum.
-* **The clearnet aggregator is temporary scaffolding.** It brings content in until creators join the mesh. The goal is to outgrow it, so it may shrink or go away as the mesh grows.
+* **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice, and the terms of some sources are still unchecked. More sources are welcome from the community.
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption.
@@ -176,7 +176,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 ## 🚀 Getting Started
 
 1. **Build from source** — Follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
-2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, then choose the topics and creators for the built-in clearnet aggregator (the temporary bridge) and tune your content mix.
+2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, then choose the topics and creators for the built-in clearnet aggregator and tune your content mix.
 3. **Connect with People You Know** — Scan or share a Contact Card QR code in person to start chatting and sharing with friends and family. Follow creators by their Creator ID as they join the mesh.
 
 ---
