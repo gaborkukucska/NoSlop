@@ -1,6 +1,6 @@
 # Contributing to NoSlop
 
-Thanks for looking. NoSlop is an alpha-stage Android app (with an iOS and desktop port growing in `mvp/`), built by one person, so small and focused contributions are the easiest to review.
+Thanks for looking. NoSlop is an alpha-stage Android app for peer-to-peer chat and sharing over Tor (with an iOS and desktop port growing in `mvp/`), built by one person, so small and focused contributions are the easiest to review.
 
 Much of the code was written with the help of several leading LLMs (see "How NoSlop Is Built" in the README). NoSlop stays alpha until qualified developers have contributed enough, so human review is the most valuable contribution there is: cryptography and protocol review, Kotlin and Android code review, security testing, and tests. If you use an AI tool for your own contribution, that's fine: say so in the pull request, and test what you submit.
 

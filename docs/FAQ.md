@@ -4,7 +4,11 @@ Straight answers to the questions people ask first. If something here is wrong o
 
 ## What is NoSlop, in a paragraph?
 
-An Android app with two halves. The core is a **social mesh**: posts, creators, direct messages and group chats that travel between phones over Tor. Alongside it is a **tracker-free aggregator** that fills your feed from the open web, with no algorithm choosing for you. The aggregator is secondary: it mostly keeps your feed full while the mesh is small, and you can turn it off.
+An Android app for peer-to-peer chat and social sharing over Tor: end-to-end encrypted direct messages and group chats, friends-only sharing, and public broadcasts from creators on the mesh. Alongside it is a built-in, **tracker-free clearnet aggregator** that pulls in content from the open web, with no algorithm choosing for you. The aggregator is a temporary bridge: it keeps your feed full until creators join the mesh, and the goal is to outgrow it. You can turn it off.
+
+## Why does NoSlop have a clearnet aggregator at all?
+
+A social network with nothing in it isn't much use, and creators haven't joined the mesh yet. The aggregator is a temporary bridge: it brings content in from the open web, without trackers or an algorithm, so the app is worth opening on day one. The plan is to invite creators to share on the mesh once the app has been tested and scrutinised, and to let the mesh grow until the aggregator is no longer needed. It can be switched off at any time, and liking, commenting or sharing clearnet content moves that conversation onto the mesh.
 
 ## Is it really serverless?
 
@@ -20,18 +24,18 @@ No server holds your identity (a keypair that lives on your phone), your message
 
 If all you need is a private messenger, use one of them, or Signal. They are more mature and have had far more scrutiny than NoSlop. I won't compare their designs point by point here, because I would probably get details wrong: read their own documentation.
 
-NoSlop is trying to be something different: a **feed**. Public broadcasts from creators you follow, sources you choose, in chronological order with no algorithm, plus direct messages and group chats in the same app. Messaging is part of NoSlop, not the point of it. Nothing stops you running NoSlop next to a dedicated messenger.
+NoSlop is trying to be something broader than a messenger: a small, private social network. Chat and group chat, friends-only sharing, and public broadcasts from creators you follow, all peer-to-peer over Tor, in chronological order with no algorithm. Dedicated messengers are more mature and more scrutinised, so if messaging alone is what you need, use one. Nothing stops you running NoSlop next to one.
 
 ## Won't a small network just stall?
 
 It might. That is the honest risk of any peer-to-peer network, and anonymity improves with more people. What makes NoSlop worth using anyway:
 
-* The aggregator gives you a full feed on day one, with no friends needed.
+* The built-in aggregator gives you a full feed on day one, with no friends needed. It's the stopgap until creators join the mesh.
 * Small, trusted circles are the design. You connect with people you know, by QR code.
 * Creator broadcasts spread by gossip, up to six hops.
 * The optional Official Creator Node helps new installs find creators.
 
-If the mesh stays small, NoSlop is still a tracker-free reader.
+If the mesh stays small, NoSlop still works as a tracker-free reader, but that isn't the goal: the goal is to outgrow the aggregator.
 
 ## Isn't it slow over Tor? What about battery?
 

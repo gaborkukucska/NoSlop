@@ -15,11 +15,11 @@
 
 ## 💡 What is NoSlop?
 
-**NoSlop** is a sovereign, privacy-first Android application that combines a **tracker-free content aggregator** with an **end-to-end encrypted social mesh** that runs entirely over [Tor](https://www.torproject.org/). Tor relays carry the traffic, but no server holds your identity, your data or your feed choices.
+**NoSlop** is a sovereign, privacy-first Android app for **peer-to-peer chat and social sharing over [Tor](https://www.torproject.org/)**: end-to-end encrypted direct messages and group chats, friends-only sharing, and public broadcasts from creators on the mesh. Tor relays carry the traffic, but no server holds your identity, your data or your choices. Until creators join the mesh, a built-in, tracker-free **clearnet aggregator** brings content in from the open web, and the goal is to outgrow it.
 
-There are **no accounts**, **no emails**, **no phone numbers**, and **zero algorithmic slop**. Your identity is an Ed25519/X25519 cryptographic keypair generated on your device. Consuming content from the open web and connecting with friends or creators happens directly through peer-to-peer Tor hidden services (`.onion`).
+There are **no accounts**, **no emails**, **no phone numbers**, and **zero algorithmic slop**. Your identity is an Ed25519/X25519 cryptographic keypair generated on your device. Chatting and connecting with friends or creators happens directly through peer-to-peer Tor hidden services (`.onion`).
 
-The mesh is the core of NoSlop. The clearnet aggregator is secondary: it mostly keeps your feed full while the mesh is still small, and you can turn it off.
+**The mesh is the point; the clearnet aggregator is a bridge.** It is temporary scaffolding that keeps your feed full while the mesh is small and creators haven't joined yet. The goal is for the mesh to grow until you no longer need it. You can switch the aggregator off at any time.
 
 > 📖 **Deep Technical Details:** All cryptographic derivations, transport architectures, and protocol specifications live in [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) and [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
 
@@ -38,12 +38,13 @@ The mesh is the core of NoSlop. The clearnet aggregator is secondary: it mostly 
 
 ## ⚡ Why Stop the Slop?
 
+* 🕸️ **Peer-to-Peer Over Tor** — Chat and share directly between phones across Tor hidden services, with multi-hop gossip relay. No accounts, and no server holds your identity, your data or your choices.
+* 📬 **Private Chat & Group Chat** — E2EE Direct Messages (v2 directional X25519 + ChaCha20-Poly1305 AEAD with AAD metadata binding and delivery ACKs) and pairwise encrypted group chats.
+* 👥 **Friends-Only Sharing & Public Broadcasts** — Share with the people you know, or publish public broadcasts to the mesh from a separate, burnable creator identity.
+* 🧅 **Tor-Routed Anonymity** — Default network traffic routes through an embedded Tor daemon with per-stream circuit isolation. Article WebViews and external browser links are gated with explicit Tor leak warnings.
+* 🌉 **A Temporary Bridge to the Clearnet** — A built-in, tracker-free aggregator fills your feed from the open web until creators join the mesh. It's chronological with no algorithm: you choose your mix quotas, sources and categories (with an optional Random Discover mode), and you can switch it off. The goal is to outgrow it.
 * 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked. A video that stalls recovers in place, at the same position, whether you're watching or away.
 * 🚫 **100% Ad & Tracker-Free** — Pure tracker-free client (using offline ZXing barcode scanning, no Google telemetry SDKs). Zero banners or sponsored interruptions.
-* 🎯 **Total Feed Sovereignty** — Non-algorithmic curation. You choose your mix quotas, sources, and categories with chronological history and optional Random Discover mode.
-* 🕸️ **Decentralized Social Mesh** — Direct peer-to-peer communication across Tor hidden services with multi-hop gossip relay.
-* 🔒 **Cryptographic Privacy** — E2EE Direct Messages (v2 directional X25519 + ChaCha20-Poly1305 AEAD with AAD metadata binding and delivery ACKs) and pairwise encrypted group chats.
-* 🧅 **Tor-Routed Anonymity** — Default network traffic routes through an embedded Tor daemon with per-stream circuit isolation. Article WebViews and external browser links are gated with explicit Tor leak warnings.
 * 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
 * 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery (800+ UI strings; a test enforces that every string has an English entry, and untranslated strings fall back to English).
 
@@ -51,32 +52,16 @@ The mesh is the core of NoSlop. The clearnet aggregator is secondary: it mostly 
 
 ## ✨ Core Features
 
-### 📱 Immersive Snapping Feed
-
-A vertically snapping feed purpose-built for clean signal-to-noise ratio:
-
-* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with Tor preloading that warms up to three slides ahead, so the next video is usually already playing when you swipe.
-* 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
-* 📖 **Segmented Article Reader** — Multi-page horizontal book-style reader with asynchronous OpenGraph lead image resolution and full Markdown support.
-* 🎛️ **Non-Algorithmic Interleaved Curation** — Balanced mix quotas interleaving favorite creators, selected topics, and discovery items without opaque recommendation algorithms.
-* 🏷️ **3-Tier Nuanced Reactions** — 20 expressive reactions categorized into **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫).
-* 🚫 **1-Tap Channel Banning** — React with 🚫 to immediately blacklist content creators and purge their slides from your feed.
-* 📅 **Content Farm Cut-Off Filter** — Exclude automated channels created after a set date (e.g. drop post-2022 AI content farms).
-* 🔖 **Saved & History Feeds** — Bookmark items with 1 tap; browse your full chronological history with instant full-text search.
-* 🔎 **Search That Keeps Going** — Results depend only on your search terms and filters. They're listed newest first and keep loading as you swipe. Blocked creators, banned channels and nodes, and anything you voted down stay hidden.
-* 🧘 **Mindful Exit & Break Reminders** — User-controlled wellbeing prompts injected at customizable intervals (time spent or slide count) with 1-tap exit and continue controls.
-
----
-
 ### 🕸️ Decentralized Social Mesh (HAI-Net)
 
-Direct peer-to-peer communication over the HAI-Net gossip network. Tor relays carry the traffic, and no server holds your identity, your data or your choices (fresh nodes bootstrap discoverability with an optional untrusted Official Creator Node):
+**This is the heart of NoSlop.** Direct peer-to-peer communication over the HAI-Net gossip network. Tor relays carry the traffic, and no server holds your identity, your data or your choices (fresh nodes bootstrap discoverability with an optional untrusted Official Creator Node):
 
 * 📬 **End-to-End Encrypted DMs** — Secure messaging via directional X25519 key agreement and ChaCha20-Poly1305 AEAD (v2) with AAD binding and delivery acknowledgments.
 * 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
+* 🤝 **Friends-Only Sharing** — Post to the people you've connected with. Friends-only posts stay with your personal identity, while public broadcasts go out under a separate creator identity.
 * 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish public broadcasts under a separate key and onion address; friends-only posts stay with the personal identity. The creator identity shows your profile unless you set a different name, bio or picture on the Studio page. Back it up to a passphrase-protected file, and import or restore it on another node with its followers, posts and media. Creator contacts are never sent the personal key or onion address. Reactions and votes on a creator post are made by the creator identity, and "Share Permanent Identity" in a temporary chat asks from your personal identity. A linked Hub relays on its own terms.
 * 🏠 **Home HUBs & Admin AI (in development)** — The app can link or auto-deploy an always-on home server over SSH as a master database and private LLM assistant, but the Hub side is still being built and no Hub is deployed yet. Treat this as experimental.
-* 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post.
+* 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post. This is how conversation about clearnet content moves onto the mesh.
 * 🛡️ **Gossip Firewall & Mesh Filters** — 6-hop flood routing with LRU deduplication, packet verification, and granular toggles for incoming and outgoing media types.
 * ✍️ **Every Packet Signed** — Each packet carries an Ed25519 envelope signature by its sender, so nobody can pose as one of your contacts. Unsigned, forged, replayed or badly out-of-date packets are dropped, so device clocks must be within an hour. Versions before v0.7.0-alpha can't connect to this one: both sides must update.
 
@@ -98,6 +83,23 @@ Direct peer-to-peer communication over the HAI-Net gossip network. Tor relays ca
 * 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns separate circuits to distinct media streams. That keeps each stream on the same exit and reduces Google IP-lock stalls.
 * 🔁 **Graceful Exit Hopping** — Nonce-bumping hops Tor exits upon provider blocks without process-wide circuit disruption.
 * 📲 **Peerless OTA Updates** — Background update checking over Tor. The GitHub build verifies the SHA-256 checksum and signing certificate, then saves the update to your Download folder for you to install.
+
+---
+
+### 📱 The Feed and the Temporary Clearnet Aggregator
+
+A vertically snapping feed purpose-built for clean signal-to-noise ratio. Its clearnet content comes from the built-in aggregator, a temporary bridge until creators join the mesh:
+
+* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with Tor preloading that warms up to three slides ahead, so the next video is usually already playing when you swipe.
+* 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
+* 📖 **Segmented Article Reader** — Multi-page horizontal book-style reader with asynchronous OpenGraph lead image resolution and full Markdown support.
+* 🎛️ **Non-Algorithmic Interleaved Curation** — Balanced mix quotas interleaving favorite creators, selected topics, and discovery items without opaque recommendation algorithms.
+* 🏷️ **3-Tier Nuanced Reactions** — 20 expressive reactions categorized into **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫).
+* 🚫 **1-Tap Channel Banning** — React with 🚫 to immediately blacklist content creators and purge their slides from your feed.
+* 📅 **Content Farm Cut-Off Filter** — Exclude automated channels created after a set date (e.g. drop post-2022 AI content farms).
+* 🔖 **Saved & History Feeds** — Bookmark items with 1 tap; browse your full chronological history with instant full-text search.
+* 🔎 **Search That Keeps Going** — Results depend only on your search terms and filters. They're listed newest first and keep loading as you swipe. Blocked creators, banned channels and nodes, and anything you voted down stay hidden.
+* 🧘 **Mindful Exit & Break Reminders** — User-controlled wellbeing prompts injected at customizable intervals (time spent or slide count) with 1-tap exit and continue controls.
 
 ---
 
@@ -158,6 +160,7 @@ NoSlop is early software. Please read this before you rely on it:
 
 * **Alpha, Android first.** Expect rough edges. Releases are tested to the best of my ability, on many devices, but they stay marked alpha until qualified developers have contributed enough to the project. An iOS and desktop port is in progress under `mvp/`.
 * **Sideloaded.** There is no store listing: install the APK from the GitHub releases page and verify its SHA-256 checksum.
+* **The clearnet aggregator is temporary scaffolding.** It brings content in until creators join the mesh. The goal is to outgrow it, so it may shrink or go away as the mesh grows.
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption.
@@ -173,8 +176,8 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 ## 🚀 Getting Started
 
 1. **Build from source** — Follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
-2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, select your favorite topics and creators, tune your content mix, and begin browsing!
-3. **Connect with Peers** — Share your Contact Card QR code or Creator ID to start building your mesh circle.
+2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, then choose the topics and creators for the built-in clearnet aggregator (the temporary bridge) and tune your content mix.
+3. **Connect with People You Know** — Scan or share a Contact Card QR code in person to start chatting and sharing with friends and family. Follow creators by their Creator ID as they join the mesh.
 
 ---
 

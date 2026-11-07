@@ -1,6 +1,6 @@
 # Building NoSlop Android
 
-This document outlines the steps to build, compile, and run **NoSlop** — a privacy-first Android application combining an immersive vertical media feed, clearnet content aggregation, and serverless encrypted social networking over Tor.
+This document outlines the steps to build, compile, and run **NoSlop** — a privacy-first Android application for peer-to-peer chat and social sharing over Tor, with a built-in clearnet content aggregator as a temporary bridge until creators join the mesh.
 
 ---
 
