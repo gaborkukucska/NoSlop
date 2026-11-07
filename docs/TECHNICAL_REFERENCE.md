@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.7.5-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
+versionName `0.7.7-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
 targetSdk 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1357,7 +1357,7 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
 | `compileSdk` / `targetSdk` | 37.1 (`release(37) { minorApiLevel = 1 }`, required by `tor-android` 0.4.9.13+) / 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 75 / `0.7.5-alpha` |
+| `versionCode` / `versionName` | 77 / `0.7.7-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
@@ -1509,7 +1509,9 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 ### 15.2 OTA Update Check & Release Integrity Validation
 - **Source (`NOSLOP_GITHUB_UPDATES_V1`)**: `UpdateChecker` reads `/repos/gaborkukucska/NoSlop/releases/latest` on the GitHub API and nothing else. Only the `github` flavour runs it. The website is not consulted: it runs on a laptop behind a 5G link, and while it listed the APK, the release's file list was never read. Pure rules are in `UpdatePolicy`. Tests: `UpdatePolicyTest`.
 - **Rate limits**: unauthenticated API calls are limited per IP, which an exit shares with everyone on it. Each call therefore gets up to three tries (`GITHUB_ATTEMPTS`), each on its own isolated circuit, and a check runs at most once an hour (`MIN_CHECK_INTERVAL_MS`) unless a known update still has no checksum.
-- **Missing checksum**: `UpdateManager.startDownload(context, info)` runs one forced check before it refuses the download.
+- **Fresh release and checksum on every download (`NOSLOP_FRESH_CHECKSUM_V1`)**: `UpdateManager.startDownload(context, info, destination)` ignores the `UpdateInfo` it is handed. It forces a new check (`checkForUpdate(force = true)`) and uses only the APK link and checksum that check returns. If the release or its checksum can't be read, the download is cancelled and the empty destination file is removed. A release replaced after the app read it, or a stale cached checksum, can't pair a good APK with the wrong digest. The release call, the checksum call and the APK download all send `CacheControl.FORCE_NETWORK`.
+- **Save-as picker (`NOSLOP_SAVE_AS_PICKER_V1`, `ui/components/UpdateStarter.kt`)**: on Android 10+ the Start Update, Download Update and Download Again buttons call `rememberUpdateStarter()`, which opens the system `CreateDocument` picker and starts the download once a place is chosen. NoSlop writes bytes into the file the system created (`saveToDownloads(..., destination)`). Cancelling the picker cancels the update. **Why:** a file NoSlop creates itself through MediaStore is recorded as NoSlop's. NoSlop has no `REQUEST_INSTALL_PACKAGES` on purpose, so the system installer refused to open that APK from the Files app, silently. Moving or renaming it in Files made it open. Android 9 and older keep the app-folder path and start straight away.
+- **Stale update notice (`NOSLOP_STALE_UPDATE_INFO_V1`)**: the cached "update available" result is used only while its version is still newer than `BuildConfig.VERSION_NAME`; otherwise it is cleared (`UpdateChecker.loadCachedState`, `checkForUpdate`). The ongoing notification (`NotificationHelper.cancelUpdateNotification`, id `UPDATE_NOTIFICATION_ID`) is cancelled on start when nothing is on offer, and by `UpdateCheckWorker` when a check finds nothing newer. Before this, an installed update left the banner and notification saying "you have 0.7.5" on 0.7.6 until the next check was due.
 - **After the download (`NOSLOP_UPDATE_READY_V1`)**: `UpdateChecker.markSaved` records a `SavedUpdate` in `app_settings`, so it survives a restart. `UpdateReadyPrompt` sits beside `MainScreen`, stays until dismissed, and shows a green shield when `checksumVerified` is set. It replaces the old toast, and the Settings banner stops offering the same download as new. **Open Downloads** opens the system Downloads screen (`ACTION_VIEW_DOWNLOADS`), not the APK, because Android won't open its installer for an app without `REQUEST_INSTALL_PACKAGES`. The checksum is compared against the same GitHub release, so the shield shows the file arrived intact, not who published it.
 - **Integrity Checks**: `UpdateManager.kt` verifies the full SHA-256 digest and the signing certificate of the downloaded APK in private cache. Only a verified file is copied to the public Download folder (`saveToDownloads`, `NOSLOP_SAVE_TO_DOWNLOADS_V1`), and the user installs it from there. The app no longer holds `REQUEST_INSTALL_PACKAGES`. Only the `github` flavour has the updater (`ENABLE_IN_APP_UPDATER`).
 - **Network Path & Tor Routing**: `UpdateChecker.kt` and `UpdateManager.kt` use `HttpClientProvider.activeClearnetClient` (routed over Tor SOCKS5 when "Route Clearnet via Tor" is enabled, after waiting for Tor bootstrap).

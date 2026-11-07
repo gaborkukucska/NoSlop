@@ -11,7 +11,7 @@ These rounds fix the three reports in `isues.txt`, all on the legacy Android app
   * **Retention.** First run on the test device: 31,538 rows down to 21,081 in 1.1 s.
   * **Exit rotation.** One blocked circuit now costs about 3 s. A video that needed three rotations resolved in 11.3 s; clean resolves took 1.8–2.6 s.
 * **Not yet verified.**
-  * **The Gradle unit test run for these rounds** (`./gradlew testGithubDebugUnitTest testPlayDebugUnitTest --rerun-tasks`). Maven and Google were out of reach where these rounds were written, so the pure logic and its new tests were compiled and run with `kotlinc` and stubs. The app itself was compiled on the owner's machine. Until that run passes, the entries below say "New tests", not "Tested".
+  * **The Gradle unit test run for these rounds** (passed on the owner's machine, 2026-11-07; the text in this bullet is the earlier state) (`./gradlew testGithubDebugUnitTest testPlayDebugUnitTest --rerun-tasks`). Maven and Google were out of reach where these rounds were written, so the pure logic and its new tests were compiled and run with `kotlinc` and stubs. The app itself was compiled on the owner's machine. Until that run passes, the entries below say "New tests", not "Tested".
   * **Coming back through the notification.** The log doesn't show which way a user returned, so the four trips above don't prove this path separately.
   * **Feed batch time after retention.** The round 3 capture has no `Feed batch built` line.
   * Everything under "Verify before release" below.
@@ -44,6 +44,13 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **The Guardian's terms aren't confirmed.** The access page couldn't be read while this was written. The sheet states the limit found earlier, 500 requests a day.
 * **The channel date rests on one field.** No real channel feed could be fetched while this was written, so it needs checking on one.
 * **A NASA key over Tor is untested.**
+
+**Updater**
+
+* **No unit tests cover the new updater paths** (`NOSLOP_SAVE_AS_PICKER_V1`, `NOSLOP_FRESH_CHECKSUM_V1`, `NOSLOP_STALE_UPDATE_INFO_V1`). `UpdatePolicyTest` covers the older rules only. The "still newer than the running version" rule could move into `UpdatePolicy` and be tested.
+* **Cancelling the Save-as picker cancels the update.** That is by design. Android 9 and older still use the app folder, a path these changes did not touch and nobody has rechecked.
+* **A forced check on every download means every download needs GitHub reachable.** Over Tor that is up to three tries on separate circuits, then the update is cancelled with a message rather than using the cached values.
+* **The published `v0.7.6-alpha` release does not have these fixes.** The tag points at the version bump (`3f328e8`). Devices on it keep the stale "update available" notice until they install 0.7.7-alpha.
 
 **Mesh and security**
 
@@ -88,7 +95,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 
 **Verify before release**
 
-* The Gradle unit test run above.
+* ~~The Gradle unit test run above.~~ Passed on the owner's machine, 2026-11-07.
 * A capture from rounds 4 and 5, from a release build through logcat, as `run-as` is refused there (`docs/SUPPORT.md` §4). Rounds 4 and 5 were signed off by watching, with no capture read.
 * The GitHub update check on a device with Route Clearnet via Tor on, and **Open Downloads** on several phones.
 * A minified release build, using `docs/BUILD.md` §8.2 (E5). Its media section now covers these rounds.
@@ -101,6 +108,19 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-07) — Built-in Updater Fixes, Stale Update Notice (v0.7.7-alpha)
+
+Three commits after `v0.7.6-alpha` was tagged: `f747063`, `d89787e` and `69ba549`. The tag points at the version bump (`3f328e8`) and so does not include them; they ship as 0.7.7-alpha (`versionCode` 77). No packet, Room schema or archive format changes. Design notes: `docs/TECHNICAL_REFERENCE.md` §15.2.
+
+* **A saved update couldn't be opened from the Files app** (`NOSLOP_SAVE_AS_PICKER_V1`, `f747063`).
+  * **Cause.** A file NoSlop creates through MediaStore is recorded as NoSlop's. NoSlop has no `REQUEST_INSTALL_PACKAGES` (removed in 0.7.4 because Play Protect flagged the in-app installer), so the system installer refused the APK, silently. Moving or renaming the file in Files made it open, because that gave it a record that wasn't NoSlop's.
+  * **Fix.** On Android 10+ the update buttons open the system "Save as" picker first (`rememberUpdateStarter`, `UpdateStarter.kt`). The system creates the file and NoSlop only writes into it. Cancelling the picker cancels the update, and an empty file left by a failed download is removed. Android 9 and older keep the app-folder path.
+* **Downloads used a cached release and checksum** (`NOSLOP_FRESH_CHECKSUM_V1`, `d89787e`). `startDownload` now forces a new check and uses only the link and checksum it returns, and the release call, the checksum call and the APK download all skip HTTP caches. If the release or checksum can't be read, the update is cancelled with "Could not fetch the latest release and its checksum. Update cancelled." (new string, English and Hungarian; other languages fall back to English).
+* **The "update available" notice outlived the update** (`NOSLOP_STALE_UPDATE_INFO_V1`, `69ba549`). After installing an update the banner and popup kept offering it (they said "you have 0.7.5" on 0.7.6) until the next check came due, up to an hour later, and the forced check made by the download had just reset that clock. A cached result is now used only while its version is newer than the running app, and the ongoing notification is cancelled when nothing is on offer.
+* **Housekeeping.** `*.patch` is ignored. The README badge, `docs/BUILD.md` examples and `docs/TECHNICAL_REFERENCE.md` version rows now name 0.7.7-alpha. `release-notes.md` is rewritten for 0.7.7-alpha; 0.7.6 had no notes of its own, so they also cover the 2026-11-06 changes.
+* **Testing.** The full unit test suite passed on the owner's machine on 2026-11-07. No new unit tests were added for these three changes (see Work Remaining, Updater).
+* **On device.** Owner, 2026-11-07: the app works well. **Not yet checked one by one:** the Save-as picker flow and opening the saved APK from Files on several phones, the Android 9 path, the cancelled-download cleanup, and the notice clearing after an update.
 
 ## Completed Changes (2026-11-06) — Group Records Go Straight to Members, Source Overhaul, Guided API Keys (v0.7.5-alpha)
 
