@@ -1,0 +1,27 @@
+name: Feature request
+description: An idea for NoSlop
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        NoSlop has no accounts, no trackers, and no algorithmic ranking, and that won't change. Ideas that need one of those won't fit. Everything else is welcome.
+
+        Check [docs/PROJECT_STATUS.md](https://github.com/gaborkukucska/NoSlop/blob/main/docs/PROJECT_STATUS.md) first: the open work is listed there.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or the missing piece, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like NoSlop to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you tried instead?

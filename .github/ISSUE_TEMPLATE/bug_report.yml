@@ -1,0 +1,59 @@
+name: Bug report
+description: Something in NoSlop doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security problem?** Don't post it here. See [SECURITY.md](https://github.com/gaborkukucska/NoSlop/blob/main/SECURITY.md) and report it privately.
+
+        **Logs can contain onion addresses and peer keys.** Read them before you paste them, and remove anything you don't want public.
+  - type: input
+    id: version
+    attributes:
+      label: NoSlop version
+      description: Shown in Settings, for example 0.7.7-alpha
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Which build?
+      options:
+        - GitHub release APK
+        - Play build
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      description: For example Pixel 7, Android 15
+    validations:
+      required: true
+  - type: dropdown
+    id: tor
+    attributes:
+      label: Route Clearnet via Tor
+      options:
+        - "On"
+        - "Off"
+        - Not sure
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: Settings, Structured Debug Logs, Copy Logs. See docs/SUPPORT.md section 7. Trim it to the part around the problem.
+      render: shell
