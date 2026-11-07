@@ -146,7 +146,7 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 
 ## 🤖 How NoSlop Is Built
 
-NoSlop is written with heavy help from several leading large language models (LLMs). I can't afford to hire developers, and in my experience these models write better code than many I could hire if I could, so I use them. I direct the work and test every release myself, on real devices. I've made it all open source in the hope that qualified developers will read it, check it and improve it.
+NoSlop is written with heavy help from several leading large language models (LLMs). I can't afford to hire developers, and in my experience these models write better code than many I could hire if I could, so I use them. For now I direct the work and test every release myself, on real devices. I've made it all open source in the hope that qualified developers will read it, check it and improve it.
 
 Releases are tested to the best of my ability, which is why they are marked **alpha**, and NoSlop stays alpha until it gets enough contributions from qualified developers. If you are one, start with [CONTRIBUTING.md](CONTRIBUTING.md). Review of the cryptography, the protocol and the Android code is the most valuable help there is.
 
@@ -162,7 +162,7 @@ NoSlop is early software. Please read this before you rely on it:
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption.
 * **Updates are checked, not authenticated.** The app verifies the APK's checksum and signing certificate, with no extra signature and no certificate pinning on the check.
-* **Not formally audited.** NoSlop uses standard cryptographic primitives, but the protocol built from them is its own, and no independent security professional has audited it. Read the [FAQ](docs/FAQ.md) before you trust it with anything sensitive.
+* **Never reviewed by a professional.** NoSlop uses standard cryptographic primitives, but the protocol built from them is its own, and no human professional has ever reviewed it. Read the [FAQ](docs/FAQ.md) before you trust it with anything sensitive.
 * **Back up your Word Cloud.** No server holds a copy of your identity, so there is no recovery.
 * **Only connect with people you know.** NoSlop has no central moderation. Anyone can run a discoverable creator node and publish anything, so treat creators you find as strangers: the app follows them with your secondary, burnable identity, not your permanent one. Keep your permanent identity for people you know. If a child uses NoSlop, a trusted adult should set it up and make sure they only connect with people they know.
 

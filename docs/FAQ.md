@@ -42,7 +42,7 @@ Tor adds delay, and an embedded Tor daemon plus background playback use more bat
 Yes, treat it that way.
 
 * NoSlop uses standard primitives from Bouncy Castle (Ed25519, X25519, ChaCha20-Poly1305, AES-GCM, SHA3-256, Argon2id and HKDF). There are no home-made ciphers.
-* The protocol that combines them is NoSlop's own. It has had repeated AI-assisted code reviews (kept in `docs/archived/`) and a lot of testing across devices, but no formal audit by an independent security professional. Review by someone qualified is very welcome: see [SECURITY.md](../SECURITY.md).
+* The protocol that combines them is NoSlop's own. It has had repeated AI-assisted code reviews (kept in `docs/archived/`) and a lot of testing across devices, but no human professional has ever reviewed it. Review by someone qualified is very welcome: see [SECURITY.md](../SECURITY.md).
 * Known gaps are listed in the [README](../README.md) (Alpha Status) and in [PROJECT_STATUS.md](PROJECT_STATUS.md): no forward secrecy for DMs yet, a database that is only partly encrypted, and update checks that are verified but not authenticated.
 
 So don't use NoSlop for anything where a mistake could put you, or someone else, in danger. Use a mature messenger for that. To lower the risk in everyday use, connect only with people you know, in person, and treat creators you discover as strangers.
@@ -61,7 +61,7 @@ One trade-off to know about: by default the secondary identity shows the same na
 
 ## Was NoSlop written by AI?
 
-Largely, yes. It is written with heavy help from several leading LLMs. I can't afford to hire developers, and in my experience these models write better code than many I could hire if I could. I direct the work and test every release myself, on real devices. I've made it all open source in the hope that qualified developers will read it, check it and improve it.
+Largely, yes. It is written with heavy help from several leading LLMs. I can't afford to hire developers, and in my experience these models write better code than many I could hire if I could. For now I direct the work and test every release myself, on real devices. I've made it all open source in the hope that qualified developers will read it, check it and improve it.
 
 Releases are tested to the best of my ability, which is why they are marked **alpha**. NoSlop stays alpha until it gets enough contributions from qualified developers.
 
