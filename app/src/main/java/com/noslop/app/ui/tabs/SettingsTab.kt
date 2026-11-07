@@ -43,6 +43,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
     val readyUpdate = savedUpdate?.takeIf { com.noslop.app.util.UpdatePolicy.isReadyToInstall(it.version, updateInfo?.latestVersion) }
     val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
     val context = LocalContext.current
+    val startUpdate = rememberUpdateStarter()
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
     val isCreatorEnabled by viewModel.isCreatorEnabled.collectAsState()
@@ -166,13 +167,13 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     if (readyUpdate == null) {
                                         Button(
-                                            onClick = { UpdateManager.startDownload(context, updateInfo!!) },
+                                            onClick = { startUpdate(updateInfo!!) },
                                             colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
                                         ) {
                                             Text("Download Update".tr, color = TextLight)
                                         }
                                     } else {
-                                        TextButton(onClick = { UpdateManager.startDownload(context, updateInfo!!) }) {
+                                        TextButton(onClick = { startUpdate(updateInfo!!) }) {
                                             Text("Download Again".tr, color = TextLight)
                                         }
                                         if (UpdateManager.canOpenDownloads) {

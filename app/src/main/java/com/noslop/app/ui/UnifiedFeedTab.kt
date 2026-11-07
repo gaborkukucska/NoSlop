@@ -634,6 +634,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     }
 
     // An update already in the Download folder has its own prompt (UpdateReadyPrompt).
+    val startUpdate = com.noslop.app.ui.components.rememberUpdateStarter()
     val updateAlreadySaved = com.noslop.app.util.UpdatePolicy.isReadyToInstall(savedUpdate?.version, updateInfo?.latestVersion)
     if (updateInfo != null && !updatePopupDismissed && !updateAlreadySaved) {
         AlertDialog(
@@ -653,7 +654,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 Button(
                     onClick = {
                         updatePopupDismissed = true
-                        com.noslop.app.util.UpdateManager.startDownload(context, updateInfo!!)
+                        startUpdate(updateInfo!!)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) { Text("Start Update".tr, fontWeight = FontWeight.Bold) }

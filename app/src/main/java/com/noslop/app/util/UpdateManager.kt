@@ -4,6 +4,9 @@ package com.noslop.app.util
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -31,6 +34,14 @@ import java.security.MessageDigest
  * Play Protect check. The download still goes over Tor and is still verified
  * (checksum + signing certificate) before it is saved; a file that fails
  * either check is deleted and never reaches the Download folder.
+ *
+ * --- NOSLOP_SAVE_AS_PICKER_V1 ---
+ * A file NoSlop creates itself through MediaStore is recorded as owned by NoSlop. NoSlop has no
+ * REQUEST_INSTALL_PACKAGES (on purpose, see above), and the system installer then refuses to open that
+ * APK from the Files app, silently: tapping it does nothing. Moving or renaming the file in Files made
+ * it launch, because that gives it a record that isn't NoSlop's. So on Android 10+ the destination is
+ * created by the system "Save as" picker (see [needsSavePicker], UpdateStarter.kt) and NoSlop only
+ * writes bytes into it. Android 9 and older keep the app-folder path.
  *
  * --- NOSLOP_RELEASE_CHECKSUM_V1 ---
  * The digest is compared against the checksum published with the release
@@ -60,6 +71,14 @@ object UpdateManager {
     /** Android 9 and older save to the app's own folder, which the Downloads screen doesn't show. */
     val canOpenDownloads: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
+    /** NOSLOP_SAVE_AS_PICKER_V1 — Android 10+ saves through the system picker, not MediaStore. */
+    val needsSavePicker: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+
+    /** MIME type for the picker, so it keeps the .apk extension. */
+    const val SAVE_MIME = APK_MIME
+
+    fun suggestedFileName(version: String): String = "NoSlop_$version.apk"
+
     /**
      * --- NOSLOP_UPDATE_READY_V1 ---
      * Opens the system Downloads screen, not the APK. Android refuses to open its installer for an app
@@ -85,9 +104,9 @@ object UpdateManager {
      * Starts the download for [info]. A check can finish without the checksum, if fetching it failed
      * over Tor say, so one more is tried before the download is refused.
      */
-    fun startDownload(context: Context, info: UpdateInfo) {
+    fun startDownload(context: Context, info: UpdateInfo, destination: Uri? = null) {
         if (!info.expectedSha256.isNullOrBlank()) {
-            startDownload(context, info.downloadUrl, info.latestVersion, expectedSha256 = info.expectedSha256)
+            startDownload(context, info.downloadUrl, info.latestVersion, expectedSha256 = info.expectedSha256, destination = destination)
             return
         }
         val appContext = context.applicationContext
@@ -95,7 +114,7 @@ object UpdateManager {
         AppScopes.io.launch {
             val fresh = com.noslop.app.NoSlopApp.updateChecker.checkForUpdate(force = true) ?: info
             withContext(Dispatchers.Main) {
-                startDownload(appContext, fresh.downloadUrl, fresh.latestVersion, expectedSha256 = fresh.expectedSha256)
+                startDownload(appContext, fresh.downloadUrl, fresh.latestVersion, expectedSha256 = fresh.expectedSha256, destination = destination)
             }
         }
     }
@@ -111,13 +130,15 @@ object UpdateManager {
         url: String,
         version: String,
         expectedSha256: String? = null,
-        allowUnverified: Boolean = false
+        allowUnverified: Boolean = false,
+        destination: Uri? = null
     ) {
         val appContext = context.applicationContext
 
         // NOSLOP_RELEASE_CHECKSUM_V1 — refuse before spending the bandwidth.
         if (expectedSha256.isNullOrBlank() && !allowUnverified) {
             Logger.error(TAG, "Refusing update $version: the release publishes no SHA-256 checksum")
+            discardDestination(appContext, destination)
             Toast.makeText(
                 context,
                 LanguageManager.translate("This release publishes no checksum, so NoSlop cannot verify the download. Update cancelled."),
@@ -137,6 +158,8 @@ object UpdateManager {
         Logger.info(TAG, "Starting update download for version $version")
 
         AppScopes.io.launch {
+            // NOSLOP_SAVE_AS_PICKER_V1 — the picker has already created an empty file; it goes if we don't fill it.
+            var saved = false
             try {
                 if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                     Logger.info(TAG, "Waiting for Tor bootstrap before downloading update...")
@@ -273,10 +296,11 @@ object UpdateManager {
 
                 // NOSLOP_SAVE_TO_DOWNLOADS_V1 — hand the verified file to the user, not the installer.
                 val savedAs = try {
-                    saveToDownloads(appContext, tmpFile, fileName)
+                    saveToDownloads(appContext, tmpFile, fileName, destination)
                 } finally {
                     tmpFile.delete()
                 }
+                saved = true
                 Logger.info(TAG, "Verified update saved for manual install: $savedAs")
 
                 val message = LanguageManager.translate("{file} is in your Download folder. Open it from your Files app to install.")
@@ -297,7 +321,19 @@ object UpdateManager {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, LanguageManager.translate("Download failed: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
+            } finally {
+                if (!saved) discardDestination(appContext, destination)
             }
+        }
+    }
+
+    /** Removes the empty file the Save-as picker created when the download didn't end in a saved update. */
+    private fun discardDestination(context: Context, destination: Uri?) {
+        if (destination == null) return
+        try {
+            DocumentsContract.deleteDocument(context.contentResolver, destination)
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Could not remove the empty placeholder: ${e.message}")
         }
     }
 
@@ -308,7 +344,16 @@ object UpdateManager {
      * folder needs a storage permission NoSlop doesn't have, it goes to the app's
      * own Download folder and the full path is returned instead.
      */
-    private fun saveToDownloads(context: Context, source: File, fileName: String): String {
+    private fun saveToDownloads(context: Context, source: File, fileName: String, destination: Uri?): String {
+        // NOSLOP_SAVE_AS_PICKER_V1 — the system created the file, so it isn't recorded as NoSlop's.
+        if (destination != null) {
+            val resolver = context.contentResolver
+            val out = resolver.openOutputStream(destination, "wt") ?: throw IOException("could not open the chosen file")
+            out.use { o -> source.inputStream().use { it.copyTo(o) } }
+            return resolver.query(destination, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                ?: fileName
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: throw IOException("external storage unavailable")
