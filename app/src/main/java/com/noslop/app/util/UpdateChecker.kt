@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import okhttp3.CacheControl
 import okhttp3.Request
 
 /**
@@ -226,7 +227,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     private fun fetchLatestRelease(): GithubRelease? {
         for (attempt in 1..UpdatePolicy.GITHUB_ATTEMPTS) {
             try {
-                val request = Request.Builder().url(LATEST_RELEASE_URL).build()
+                val request = Request.Builder().url(LATEST_RELEASE_URL).cacheControl(CacheControl.FORCE_NETWORK).build()
                 clientFor(attempt).newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
                         val body = response.body?.string()
@@ -245,7 +246,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     private fun fetchChecksumFile(url: String): String? {
         for (attempt in 1..UpdatePolicy.GITHUB_ATTEMPTS) {
             try {
-                val request = Request.Builder().url(url).build()
+                val request = Request.Builder().url(url).cacheControl(CacheControl.FORCE_NETWORK).build()
                 clientFor(attempt).newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
                         val text = response.body?.string() ?: return null

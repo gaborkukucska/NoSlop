@@ -783,5 +783,6 @@
   "The file matches its published SHA-256 checksum.": "A fájl megegyezik a közzétett SHA-256 ellenőrzőösszeggel.",
   "Open Downloads": "Letöltések megnyitása",
   "Download Again": "Letöltés újra",
-  "Could not open Downloads. Open your Files app instead.": "A Letöltések nem nyitható meg. Nyisd meg a Fájlok alkalmazást."
+  "Could not open Downloads. Open your Files app instead.": "A Letöltések nem nyitható meg. Nyisd meg a Fájlok alkalmazást.",
+  "Could not fetch the latest release and its checksum. Update cancelled.": "Nem sikerült lekérni a legfrissebb kiadást és annak ellenőrzőösszegét. A frissítés megszakítva."
 }

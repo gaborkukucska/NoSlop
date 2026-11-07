@@ -101,20 +101,33 @@ object UpdateManager {
     }
 
     /**
-     * Starts the download for [info]. A check can finish without the checksum, if fetching it failed
-     * over Tor say, so one more is tried before the download is refused.
+     * Starts the download for [info].
+     *
+     * --- NOSLOP_FRESH_CHECKSUM_V1 ---
+     * Every download first asks GitHub again for the latest release, its APK link and its published
+     * checksum, and uses only those. [info] (and the checksum cached inside it) is never trusted for
+     * the download itself: a release can be replaced after the app read it, and a stale checksum makes
+     * a good APK fail, or worse a stale pair look valid. If the release or its checksum can't be read
+     * now, the download is cancelled rather than falling back to the cached values.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun startDownload(context: Context, info: UpdateInfo, destination: Uri? = null) {
-        if (!info.expectedSha256.isNullOrBlank()) {
-            startDownload(context, info.downloadUrl, info.latestVersion, expectedSha256 = info.expectedSha256, destination = destination)
-            return
-        }
         val appContext = context.applicationContext
         Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
         AppScopes.io.launch {
-            val fresh = com.noslop.app.NoSlopApp.updateChecker.checkForUpdate(force = true) ?: info
+            val fresh = com.noslop.app.NoSlopApp.updateChecker.checkForUpdate(force = true)
             withContext(Dispatchers.Main) {
-                startDownload(appContext, fresh.downloadUrl, fresh.latestVersion, expectedSha256 = fresh.expectedSha256, destination = destination)
+                if (fresh == null) {
+                    Logger.error(TAG, "Could not read the latest release and its checksum — cancelling the update download")
+                    discardDestination(appContext, destination)
+                    Toast.makeText(
+                        appContext,
+                        LanguageManager.translate("Could not fetch the latest release and its checksum. Update cancelled."),
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    startDownload(appContext, fresh.downloadUrl, fresh.latestVersion, expectedSha256 = fresh.expectedSha256, destination = destination)
+                }
             }
         }
     }
@@ -175,7 +188,7 @@ object UpdateManager {
 
                 if (tmpFile.exists()) tmpFile.delete()
 
-                val request = okhttp3.Request.Builder().url(url).build()
+                val request = okhttp3.Request.Builder().url(url).cacheControl(okhttp3.CacheControl.FORCE_NETWORK).build()
                 val response = com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute()
 
                 if (!response.isSuccessful) {

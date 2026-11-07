@@ -1012,5 +1012,6 @@
   "The file matches its published SHA-256 checksum.": "The file matches its published SHA-256 checksum.",
   "Open Downloads": "Open Downloads",
   "Download Again": "Download Again",
-  "Could not open Downloads. Open your Files app instead.": "Could not open Downloads. Open your Files app instead."
+  "Could not open Downloads. Open your Files app instead.": "Could not open Downloads. Open your Files app instead.",
+  "Could not fetch the latest release and its checksum. Update cancelled.": "Could not fetch the latest release and its checksum. Update cancelled."
 }
