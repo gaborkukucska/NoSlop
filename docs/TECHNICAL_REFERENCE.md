@@ -977,6 +977,8 @@ compression of large files.
 ## 7. Clearnet Aggregator
 
 > **Role:** the aggregator is a built-in, user-controlled way to read open-web content inside the same app (routed over Tor by default) and to bring it onto the mesh. It can be switched off (`enable_aggregator`). As creators join the mesh it may become off by default and remain for public open sources.
+>
+> **Planned:** upgrades to the aggregator (proxy secret, official-API routes, source terms, default policy) are listed under "Clearnet aggregator" in `docs/PROJECT_STATUS.md`, Work Remaining.
 
 ### 7.1 HTTP Client Separation (`net/HttpClientProvider.kt`)
 

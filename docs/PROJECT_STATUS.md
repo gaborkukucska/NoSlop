@@ -45,6 +45,17 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **The channel date rests on one field.** No real channel feed could be fetched while this was written, so it needs checking on one.
 * **A NASA key over Tor is untested.**
 
+**Clearnet aggregator** (from the feature and code review of 2026-11-07; the aggregator is a permanent built-in feature, and these are upgrades to it)
+
+* **Replace the default proxy secret.** The secret in `BuildConfig.PROXY_SECRET` can be extracted from the APK. Options to decide between: no shipped default (each user or community runs its own Worker and sets its secret in Settings), or a per-install token with per-token rate limits in the Worker. Either way the Worker needs its own rate limits (audit item 9). The proxy exists because YouTube, Reddit and Jamendo block many Tor exits.
+* **Add an official-API route for each source that has one, using the user's own key.** `ApiKeyRepository` already does this for Pexels, Guardian, Jamendo, Vimeo, Podcast Index and NASA. YouTube's Data API is not used; search and playback go through the unofficial InnerTube client (`feeds/api/YouTubeInternalClient.kt`, about 1,100 lines), with an Invidious client beside it. Whether official APIs work reliably over Tor is untested: key-based calls tie requests to the key, and anonymous endpoints are the most likely to be blocked on Tor exits. Test before promising anything.
+* **Plan for YouTube InnerTube breaking or being blocked.** It is the most useful source and the least stable one. Decide the fallback order (Invidious, official API with the user's key, the Worker) and add a visible "this source is failing" state rather than an empty slot in the mix.
+* **Check every source's terms and record the result.** Vimeo and Guardian are listed above. Not yet looked at: YouTube InnerTube, Reddit RSS and the other ~55 RSS sources in `SourceLibrary`. Record the outcome next to each source so a contributor can see it.
+* **Decide the long-term default.** Owner direction (2026-11-07): the mesh is expected to carry more of the feed as creators join, and the aggregator may then be off by default for new installs while staying for public open sources. No criteria set yet (number of creators, mesh content share). Until then it stays on by default.
+* **Check what a fresh install shows with the aggregator off.** With `enable_aggregator` false the clearnet feed is empty (`feedItems` is forced to an empty list in `NoSlopViewModel`); only mesh content shows. Walk through that first run and decide whether it needs an empty-state message pointing at Connect and Creators.
+* **Tell contributors how to add a source.** `SourceLibrary` and the `feeds/api/` clients are the natural place for community help, but `CONTRIBUTING.md` has no "add a source" section yet. Include the terms check above.
+* **Source list is a starter set.** Owner: the current list is a random starting selection and the community is expected to extend it. Consider letting users add their own RSS feed URL in Settings (not built).
+
 **Updater**
 
 * **No unit tests cover the new updater paths** (`NOSLOP_SAVE_AS_PICKER_V1`, `NOSLOP_FRESH_CHECKSUM_V1`, `NOSLOP_STALE_UPDATE_INFO_V1`). `UpdatePolicyTest` covers the older rules only. The "still newer than the running version" rule could move into `UpdatePolicy` and be tested.
@@ -73,6 +84,8 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 **Architecture**
 
 * **`NoSlopViewModel` (3,782 lines) and `NoSlopRepository` (2,759 lines)** still span several domains. The plan is to split them along existing boundaries (Hub, chat, feed, DMs).
+* **Audit the `runBlocking` calls.** They are in `IdentityRepository` (line ~110) and `BackupManager` (lines ~136, 290, 793, 1024). Not yet checked which thread each runs on; any that can run on the main thread should become suspend calls.
+* **Test depth where review will look first.** By file count there are 4 test files under `crypto/` against 31 under `mesh/` and 25 under `data/`, and only 2 instrumented tests. Some crypto behaviour is covered from `mesh/` and `data/`, so count assertions before adding any. Candidates: known-answer vectors for the DM AEAD and the envelope signature, negative cases for tampered or replayed packets, and backup-format round trips.
 
 **Hub** (not started: no Hub is deployed or linked, and the app comes first)
 
