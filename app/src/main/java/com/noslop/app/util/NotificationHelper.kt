@@ -50,6 +50,17 @@ object NotificationHelper {
         notificationManager.notify(notificationId, builder.build())
     }
 
+    private const val UPDATE_NOTIFICATION_ID = 918274
+
+    /**
+     * NOSLOP_STALE_UPDATE_INFO_V1 — the "update available" notification is ongoing, so nothing but
+     * this removes it. Call it whenever no update is on offer any more.
+     */
+    fun cancelUpdateNotification(context: Context) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(UPDATE_NOTIFICATION_ID)
+    }
+
     fun showOngoingUpdateNotification(context: Context, title: String, message: String, downloadUrl: String, version: String) {
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         val intent = (launchIntent ?: Intent(context, MainActivity::class.java)).apply {
@@ -70,6 +81,6 @@ object NotificationHelper {
             .setAutoCancel(false)
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(918274, builder.build())
+        notificationManager.notify(UPDATE_NOTIFICATION_ID, builder.build())
     }
 }

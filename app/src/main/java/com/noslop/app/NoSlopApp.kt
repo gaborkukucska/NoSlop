@@ -108,7 +108,13 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         val db = NoSlopDatabase.getDatabase(this)
         repository = NoSlopRepository(this, db)
         updateChecker = com.noslop.app.util.UpdateChecker(db.appSettingDao())
-        repositoryScope.launch { updateChecker.loadCachedState() }
+        repositoryScope.launch {
+            updateChecker.loadCachedState()
+            // NOSLOP_STALE_UPDATE_INFO_V1 — an "update available" notice left from before the update was installed.
+            if (updateChecker.updateInfo.value == null) {
+                com.noslop.app.util.NotificationHelper.cancelUpdateNotification(this@NoSlopApp)
+            }
+        }
 
         com.noslop.app.util.NotificationHelper.createNotificationChannel(this)
 

@@ -73,6 +73,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
         private const val KEY_LAST_CHECK_MS = "update_last_check_ms"
         private const val KEY_LAST_NOTIFIED_MS = "update_last_notified_ms"
         private const val KEY_SAVED_UPDATE = "update_saved_info"
+        private const val KEY_UPDATE_AVAILABLE_INFO = "update_available_info"
         const val NOTIFY_INTERVAL_MS = 3L * 24 * 60 * 60 * 1000 // 3 days
 
         private const val LATEST_RELEASE_URL =
@@ -118,10 +119,21 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
                 Logger.debug(TAG, "Saved update record unreadable: ${e.message}")
             }
         }
-        val json = appSettingDao.getSetting("update_available_info")
+        // NOSLOP_STALE_UPDATE_INFO_V1 — the cached "update available" result was true for the version
+        // that wrote it. After the user installs that update it is stale, but nothing re-checked it:
+        // the banner and popup kept claiming "you have 0.7.5" on 0.7.6 until a check came due (up to
+        // an hour later, and the forced check made by the download itself had just reset that clock).
+        // A cached result is used only while its version is still newer than the running app.
+        val json = appSettingDao.getSetting(KEY_UPDATE_AVAILABLE_INFO)
         if (!json.isNullOrBlank()) {
             try {
-                _updateInfo.value = com.noslop.app.util.Json.gson.fromJson(json, UpdateInfo::class.java)
+                val cached = com.noslop.app.util.Json.gson.fromJson(json, UpdateInfo::class.java)
+                if (cached != null && isNewer(cached.latestVersion, BuildConfig.VERSION_NAME)) {
+                    _updateInfo.value = cached.copy(currentVersion = BuildConfig.VERSION_NAME)
+                } else {
+                    Logger.info(TAG, "Cached update ${cached?.latestVersion} is no longer newer than ${BuildConfig.VERSION_NAME}; clearing it")
+                    appSettingDao.insertSetting(AppSetting(KEY_UPDATE_AVAILABLE_INFO, ""))
+                }
             } catch (_: Exception) { /* ignore corrupt cache */ }
         }
     }
@@ -145,7 +157,9 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
             return@withContext null
         }
 
-        val known = _updateInfo.value
+        // NOSLOP_STALE_UPDATE_INFO_V1 — never hand back a result the running version has already caught up with.
+        val known = _updateInfo.value?.takeIf { isNewer(it.latestVersion, BuildConfig.VERSION_NAME) }
+        if (known == null && _updateInfo.value != null) _updateInfo.value = null
         val lastCheckMs = appSettingDao.getSetting(KEY_LAST_CHECK_MS)?.toLongOrNull()
         val waitingForChecksum = known != null && known.expectedSha256.isNullOrBlank()
         if (!force && !UpdatePolicy.isCheckDue(lastCheckMs, System.currentTimeMillis(), waitingForChecksum)) {
@@ -207,7 +221,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
 
             _updateInfo.value = info
             appSettingDao.insertSetting(
-                AppSetting("update_available_info", if (info != null) com.noslop.app.util.Json.gson.toJson(info) else "")
+                AppSetting(KEY_UPDATE_AVAILABLE_INFO, if (info != null) com.noslop.app.util.Json.gson.toJson(info) else "")
             )
             Logger.info(
                 TAG,

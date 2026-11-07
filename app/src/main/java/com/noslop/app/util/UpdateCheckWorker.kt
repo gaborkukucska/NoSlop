@@ -19,6 +19,11 @@ class UpdateCheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorke
             val updateChecker = NoSlopApp.updateChecker
             val info = updateChecker.checkForUpdate()
 
+            if (info == null) {
+                // NOSLOP_STALE_UPDATE_INFO_V1 — up to date (or nothing to offer): drop the ongoing notice.
+                NotificationHelper.cancelUpdateNotification(applicationContext)
+            }
+
             if (info != null && updateChecker.shouldNotifyNow()) {
                 NotificationHelper.showOngoingUpdateNotification(
                     context = applicationContext,
