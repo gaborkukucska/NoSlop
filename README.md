@@ -15,11 +15,24 @@
 
 ## 💡 What is NoSlop?
 
-**NoSlop** is a sovereign, privacy-first Android application that combines a **tracker-free content aggregator** with a **serverless, end-to-end encrypted social mesh** running entirely over [Tor](https://www.torproject.org/).
+**NoSlop** is a sovereign, privacy-first Android application that combines a **tracker-free content aggregator** with an **end-to-end encrypted social mesh** that runs entirely over [Tor](https://www.torproject.org/). Tor relays carry the traffic, but no server holds your identity, your data or your feed choices.
 
 There are **no accounts**, **no emails**, **no phone numbers**, and **zero algorithmic slop**. Your identity is an Ed25519/X25519 cryptographic keypair generated on your device. Consuming content from the open web and connecting with friends or creators happens directly through peer-to-peer Tor hidden services (`.onion`).
 
+The mesh is the core of NoSlop. The clearnet aggregator is secondary: it mostly keeps your feed full while the mesh is still small, and you can turn it off.
+
 > 📖 **Deep Technical Details:** All cryptographic derivations, transport architectures, and protocol specifications live in [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) and [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
+
+---
+
+<!-- screenshots:start -->
+## 📸 Screenshots
+
+<table>
+<tr><td align="center"><img src="docs/screenshots/v0.6.3-alpha/01_Welcome.png" width="190" alt="Welcome"><br><sub>Welcome</sub></td><td align="center"><img src="docs/screenshots/v0.6.3-alpha/03_Identity.png" width="190" alt="Identity"><br><sub>Identity</sub></td><td align="center"><img src="docs/screenshots/v0.6.3-alpha/04_Onboarding_ContentMix.png" width="190" alt="Content mix"><br><sub>Content mix</sub></td><td align="center"><img src="docs/screenshots/v0.6.3-alpha/05_Feed.png" width="190" alt="Feed"><br><sub>Feed</sub></td></tr>
+<tr><td align="center"><img src="docs/screenshots/v0.6.3-alpha/06_SearchFilter.png" width="190" alt="Search filters"><br><sub>Search filters</sub></td><td align="center"><img src="docs/screenshots/v0.6.3-alpha/07_DirectMessaging.png" width="190" alt="Direct messages"><br><sub>Direct messages</sub></td><td align="center"><img src="docs/screenshots/v0.6.3-alpha/08_Settings_Content.png" width="190" alt="Content settings"><br><sub>Content settings</sub></td><td align="center"><img src="docs/screenshots/v0.6.3-alpha/08_Settings_Network.png" width="190" alt="Network settings"><br><sub>Network settings</sub></td></tr>
+</table>
+<!-- screenshots:end -->
 
 ---
 
@@ -55,9 +68,9 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 
 ---
 
-### 🕸️ Serverless Social Mesh (HAI-Net)
+### 🕸️ Decentralized Social Mesh (HAI-Net)
 
-Direct peer-to-peer communication over the HAI-Net gossip network — no central server (fresh nodes bootstrap discoverability with an optional untrusted Official Creator Node):
+Direct peer-to-peer communication over the HAI-Net gossip network. Tor relays carry the traffic, and no server holds your identity, your data or your choices (fresh nodes bootstrap discoverability with an optional untrusted Official Creator Node):
 
 * 📬 **End-to-End Encrypted DMs** — Secure messaging via directional X25519 key agreement and ChaCha20-Poly1305 AEAD (v2) with AAD binding and delivery acknowledgments.
 * 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
@@ -131,17 +144,27 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 
 ---
 
+## 🤖 How NoSlop Is Built
+
+NoSlop is written with heavy help from several leading large language models (LLMs). I can't afford to hire developers, and in my experience these models write better code than many I could hire if I could, so I use them. I direct the work and test every release myself, on real devices. I've made it all open source in the hope that qualified developers will read it, check it and improve it.
+
+Releases are tested to the best of my ability, which is why they are marked **alpha**, and NoSlop stays alpha until it gets enough contributions from qualified developers. If you are one, start with [CONTRIBUTING.md](CONTRIBUTING.md). Review of the cryptography, the protocol and the Android code is the most valuable help there is.
+
+---
+
 ## ⚠️ Alpha Status & Known Limitations
 
 NoSlop is early software. Please read this before you rely on it:
 
-* **Alpha, Android first.** Expect rough edges. An iOS and desktop port is in progress under `mvp/`.
+* **Alpha, Android first.** Expect rough edges. Releases are tested to the best of my ability, on many devices, but they stay marked alpha until qualified developers have contributed enough to the project. An iOS and desktop port is in progress under `mvp/`.
 * **Sideloaded.** There is no store listing: install the APK from the GitHub releases page and verify its SHA-256 checksum.
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption.
 * **Updates are checked, not authenticated.** The app verifies the APK's checksum and signing certificate, with no extra signature and no certificate pinning on the check.
-* **Back up your Word Cloud.** There is no server and no recovery.
+* **Not formally audited.** NoSlop uses standard cryptographic primitives, but the protocol built from them is its own, and no independent security professional has audited it. Read the [FAQ](docs/FAQ.md) before you trust it with anything sensitive.
+* **Back up your Word Cloud.** No server holds a copy of your identity, so there is no recovery.
+* **Only connect with people you know.** NoSlop has no central moderation. Anyone can run a discoverable creator node and publish anything, so treat creators you find as strangers: the app follows them with your secondary, burnable identity, not your permanent one. Keep your permanent identity for people you know. If a child uses NoSlop, a trusted adult should set it up and make sure they only connect with people they know.
 
 The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). To report a security problem, see [SECURITY.md](SECURITY.md).
 
@@ -164,6 +187,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 * 🛡️ **[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — User privacy expectations, data sovereignty, and security posture.
 * 🔐 **[SECURITY.md](SECURITY.md)** — How to report a vulnerability privately, what is in scope, and the known limitations.
 * 🤝 **[CONTRIBUTING.md](CONTRIBUTING.md)** — Translations, bug reports and code changes: how to help and the project's rules.
+* ❓ **[docs/FAQ.md](docs/FAQ.md)** — Straight answers: how NoSlop compares to Briar and SimpleX, which servers are involved, safety, Tor speed, and how it is built.
 * 🧭 **[docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md](docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md)** — Proposed creator discovery, community mirroring and Home HUB work (not implemented).
 * 📱 **[docs/migration/](docs/migration/README.md)** — The iOS and desktop port in `mvp/`.
 * 🏠 **[docs/archived/HUB_INTEGRATION_PLAN.md](docs/archived/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.
@@ -175,7 +199,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 
 ## ⚖️ User Responsibilities
 
-* 📦 **Decentralized & Serverless** — There is no central server, corporate account, or cloud backup. Always back up your 12-word Word Cloud.
+* 📦 **Decentralized, No Central Servers** — No server holds your identity, your data or your feed choices, and there is no corporate account or cloud backup. Tor relays carry the traffic between peers, and the Official Creator Node is optional and untrusted. Always back up your 12-word Word Cloud.
 * 🤝 **Bring Your Own Network** — NoSlop does not maintain public user directories. Direct peer connections are formed deliberately by exchanging QR codes or onion addresses.
 * 📲 **Direct Installation** — Because NoSlop bypasses centralized app stores, you must allow installation of unknown apps on Android.
 
@@ -183,7 +207,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 
 ## 💖 Support the Vision
 
-NoSlop is 100% free, open-source, tracker-free, and advertisement-free. If you find value in serverless, sovereign communication, consider supporting independent development:
+NoSlop is 100% free, open-source, tracker-free, and advertisement-free. If you find value in sovereign communication with no central servers, consider supporting independent development:
 
 🪙 ☕ 🍱 **[Toss me a coin or buy me a meal](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00)**
 

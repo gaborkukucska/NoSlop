@@ -39,6 +39,7 @@ Several weaknesses are already known and written down, so you don't have to redi
 * Updates are checked against a SHA-256 checksum and the signing certificate, but there is no extra signature and no certificate pinning on the update check.
 * Packets pulled from a Hub skip the envelope signature check.
 * Rate limits are fixed per sender, and the default proxy secret ships inside the APK.
+* **No formal independent audit.** The primitives are standard ones from Bouncy Castle, but the protocol built from them is NoSlop's own. It has had repeated AI-assisted code reviews (kept in `docs/archived/`) and a lot of device testing, not a professional audit. Review by someone qualified is very welcome.
 
 A new angle on any of these is welcome. A report that only restates one is still useful as a vote for fixing it sooner.
 
