@@ -138,7 +138,9 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
   * the Worker sees the search terms in the requests it carries, not, over Tor, who sent them.
   * The privacy policy said "We operate no servers and receive no data", "Your private key never leaves your device" and that the camera is only used for QR codes. It is rewritten in full.
 
-## Completed Changes (2026-11-11) — Feed Position, Fresh Lists, Feed Types, Liked, Phone Notifications, HUB Build Switch, Type Filters (v0.7.7-alpha)
+## Completed Changes (2026-11-11) — Feed Position, Fresh Lists, Feed Types, Liked, Phone Notifications, HUB Build Switch, Type Filters (v0.7.8-alpha)
+
+Ships as 0.7.8-alpha (`versionCode` 78); 0.7.7-alpha was already released. `release-notes.md` is rewritten for 0.7.8-alpha.
 
 Seven patches for the seven reports in `isues.txt`, all on the legacy Android app (the MVP is out of scope). No packet or archive format changes and no Room schema change: the new DAO calls are queries on existing tables. Design notes: `docs/TECHNICAL_REFERENCE.md` §16.36–§16.41.
 

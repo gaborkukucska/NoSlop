@@ -232,7 +232,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ### 8.1 Bump the version
 
-In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.7.7-alpha`). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
+In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.7.8-alpha`). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
 
 Then run the unit tests:
 
@@ -351,14 +351,14 @@ passed, and any failures and their stack traces.
 Sign with the same keystore as every earlier release. Android refuses an update signed with another key, and so does the app's own certificate check.
 
 ```bash
-VERSION=0.7.7-alpha
+VERSION=0.7.8-alpha
 ./gradlew clean :app:assembleGithubRelease
 cp app/build/outputs/apk/github/release/NoSlop-github-release.apk NoSlop-$VERSION.apk
 sha256sum NoSlop-$VERSION.apk > NoSlop-$VERSION.apk.sha256
 gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --title "NoSlop $VERSION" --notes-file release-notes.md
 ```
 
-* **Keep the version in the tag.** The app reads it from the tag (`v0.7.7-alpha`).
+* **Keep the version in the tag.** The app reads it from the tag (`v0.7.8-alpha`).
 * **Don't mark it as a pre-release or a draft.** The app asks GitHub for `/releases/latest`, which skips both.
 * **Upload one `.apk`.** The app takes the first one it finds.
 * **Upload the `.sha256`.** Any name ending in `.sha256` works, and a file named after the APK wins. The app can also read a digest from the release notes. Without a checksum, it refuses the download.
