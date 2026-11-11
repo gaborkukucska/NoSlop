@@ -392,8 +392,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     @Volatile
     private var activeSearchQuery: String = ""
+    // NOSLOP_TYPE_FILTER_REFILL_V1 — declared first: the setter below uses it. Its limits count per visit.
+    private val typeRefill = TypeFilterRefill.Session()
     @Volatile
     private var currentFilterMode: String = "Live Feed"
+        set(value) {
+            if (field != value) typeRefill.newVisit()
+            field = value
+        }
 
     @Volatile
     private var allFeeds = emptyList<FeedItem>()
@@ -1484,7 +1490,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val cacheAsDefaultFeed: Boolean = false,
         val addedCreatorDepletion: Boolean = false,
         val fetchNextSearchPage: Boolean = false,
-        val searchListIsWaiting: Boolean = false
+        val searchListIsWaiting: Boolean = false,
+        val fetchTypeRefill: Boolean = false
     )
 
     /**
@@ -1499,9 +1506,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val isOwnAuthor = { pub: String -> pub == localPubKey || (burnablePubKey != null && pub == burnablePubKey) }
         val isSearchActive = activeSearchQuery.isNotBlank()
         
+        // NOSLOP_TYPE_FILTER_REFILL_V1 — Videos, Audio, Images and Articles skip what was already seen,
+        // like the Live Feed, and search for more of their type when the stored items run out.
+        val isTypeFilter = !isSearchActive && actualFilter in TypeFilterRefill.TYPE_FILTERS
         val isPersistentList = isSearchActive || actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
-                               actualFilter == "My Content" || actualFilter == "Videos" || actualFilter == "Audio" ||
-                               actualFilter == "Images" || actualFilter == "Articles" || (actualFilter == "Mesh" && _showOldMeshPosts.value)
+                               actualFilter == "My Content" || (actualFilter == "Mesh" && _showOldMeshPosts.value)
         
         val exclusionIds = currentIds + sessionLoadedIds
         val readOrHiddenIds = cachedViewedIds + cachedExcludedIds + exclusionIds
@@ -1657,15 +1666,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // In feed-centric modes (Live Feed & Random), also exclude viewed items and swiped mesh posts
-        // so the feed feels fresh. NOT applied in specific filter tabs (Audio, Images, Articles, Videos) so users can browse all content.
-        if (!isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || (actualFilter == "Mesh" && !_showOldMeshPosts.value))) {
+        // In feed-centric modes (Live Feed & Random) and the type filters (Audio, Images, Articles,
+        // Videos), also exclude viewed items and swiped mesh posts so the list feels fresh.
+        if (!isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || (actualFilter == "Mesh" && !_showOldMeshPosts.value) || isTypeFilter)) {
             val hiddenIds = cachedViewedIds + cachedExcludedIds
             if (hiddenIds.isNotEmpty()) {
                 unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
                 unseenMeshes = unseenMeshes.filter { it.id !in hiddenIds }
             }
-            if (actualFilter == "Live Feed" || actualFilter == "Random") {
+            if (actualFilter == "Live Feed" || actualFilter == "Random" || isTypeFilter) {
                 unseenFeeds = unseenFeeds.filter { !it.isRead }
             }
         }
@@ -1685,6 +1694,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             // ("review", "vlog", ...), which drifted away from what the user asked for.
             return if (isSearchActive) {
                 FeedBatchPlan(emptyList(), isInitialLoad = false, fetchNextSearchPage = true, searchListIsWaiting = true)
+            } else if (isTypeFilter) {
+                FeedBatchPlan(emptyList(), isInitialLoad = false, fetchTypeRefill = true, searchListIsWaiting = true)
             } else {
                 null
             }
@@ -1740,6 +1751,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             
             val batch = mutableListOf<UnifiedItem>()
             var needNextSearchPage = false
+            var needTypeRefill = false
             
             if (actualFilter == "Liked" || actualFilter == "Saved") {
                 val savedFeeds = allFeeds.filter { it.isSaved }
@@ -1785,10 +1797,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val sortedMeshes = specificMeshes.sortedByDescending { it.timestamp }
                     batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
                     batch.addAll(sortedMeshes.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
+                    // Keep more of this type coming while the user is still swiping through these.
+                    if (isTypeFilter) needTypeRefill = sortedSpecificFeeds.size + sortedMeshes.size - batch.size < specificNeeded
                 }
             }
             
-            return FeedBatchPlan(batch, isInitialLoad, fetchNextSearchPage = needNextSearchPage)
+            return FeedBatchPlan(
+                batch, isInitialLoad, fetchNextSearchPage = needNextSearchPage,
+                fetchTypeRefill = needTypeRefill, searchListIsWaiting = needTypeRefill && batch.isEmpty()
+            )
         }
 
         // --- SMART INTERLEAVING ALGORITHM (Live Feed & Random) ---
@@ -2030,6 +2047,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     /** Publishes what [computeFeedBatch] decided. Main thread only. */
     private fun applyFeedBatch(plan: FeedBatchPlan, actualFilter: String, isInjection: Boolean) {
         if (plan.fetchNextSearchPage) fetchNextSearchPage(actualFilter, listIsWaiting = plan.searchListIsWaiting)
+        if (plan.fetchTypeRefill) fetchTypeRefill(actualFilter, listIsWaiting = plan.searchListIsWaiting)
         val batch = plan.batch
         if (batch.isEmpty() && plan.searchListIsWaiting) return
         sessionLoadedIds.addAll(batch.map { it.id })
@@ -2714,6 +2732,78 @@ fun toggleAggregator() {
             // Refill the list. If the page added nothing it can show, this asks for the following page,
             // within the limits above.
             loadMoreFeedItems(filter, isInjection = false)
+        }
+    }
+
+    /**
+     * NOSLOP_TYPE_FILTER_REFILL_V1 — the stored items of a type filter (Videos, Audio, Images, Articles)
+     * are running out: search the network for more of that type with one of the user's interest
+     * keywords (TypeFilterRefill.keywordPool). [listIsWaiting]: the list has nothing left to show, so the
+     * spinner shows and the list is refilled when the results land; otherwise this is a prefetch and its
+     * results join the pool the next batch draws from. One search at a time, within the limits of a
+     * visit (TypeFilterRefill.Session). Never while a typed search is active: that pages itself.
+     */
+    private fun fetchTypeRefill(filter: String, listIsWaiting: Boolean) {
+        if (filter !in TypeFilterRefill.TYPE_FILTERS || activeSearchQuery.isNotBlank()) return
+        val session = typeRefill
+        if (session.inFlight) {
+            // A search is already on its way: it refills the list when it lands.
+            if (listIsWaiting) {
+                session.listWaiting = true
+                _isRefreshingFeeds.value = true
+            }
+            return
+        }
+        if (!session.mayFetch()) return
+        session.inFlight = true
+        if (listIsWaiting) {
+            session.listWaiting = true
+            _isRefreshingFeeds.value = true
+        }
+        viewModelScope.launch {
+            try {
+                val interests = _selectedInterests.value
+                val pool = withContext(Dispatchers.IO) {
+                    TypeFilterRefill.keywordPool(
+                        filter,
+                        interests,
+                        interests.associateWith { repository.getUserKeywordsForCategory(it) },
+                        if (filter == "Audio") repository.getSelectedMusicGenres() else emptyList(),
+                        if (filter == "Videos") repository.getSelectedVideoGenres() else emptyList()
+                    )
+                }
+                val keyword = session.nextKeyword(filter, pool)
+                if (keyword == null) {
+                    session.recordFailure()
+                } else {
+                    val ids = repository.searchCustomFeedPage(keyword, filter, com.noslop.app.feeds.PublicApiService.SearchCursor(), firstPage = true)
+                    val fresh = session.recordRound(ids)
+                    Logger.info("VM", "$filter refill: ${ids.size} results, $fresh new")
+                    if (session.listWaiting && fresh > 0) {
+                        // As for a search page: give the database a moment to deliver the new items.
+                        val idSet = ids.toSet()
+                        var waitCount = 0
+                        while (waitCount < 15 && allFeeds.none { it.id in idSet }) {
+                            kotlinx.coroutines.delay(100)
+                            waitCount++
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                session.recordFailure()
+                Logger.warn("VM", "$filter refill failed: ${e.message}")
+            } finally {
+                session.inFlight = false
+            }
+            if (!session.listWaiting) return@launch
+            session.listWaiting = false
+            _isRefreshingFeeds.value = false
+            // Refill whichever type filter is open now. If this search added nothing it can show, that
+            // asks for the next one, within the limits of the visit.
+            val mode = currentFilterMode
+            if (mode in TypeFilterRefill.TYPE_FILTERS && activeSearchQuery.isBlank()) loadMoreFeedItems(mode, isInjection = false)
         }
     }
 
