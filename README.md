@@ -140,7 +140,7 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 | **Media** | Media3 / ExoPlayer, Coil, Android System WebView (fallback) |
 | **Networking** | Embedded Tor daemon (`tor-android`), OkHttp, SOCKS5 Stream Isolation |
 | **Cryptography** | Ed25519 (Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
-| **Persistence** | Room (SQLite; Keystore AES-256-GCM group message encryption at rest; database files protected by Android file-based encryption), EncryptedSharedPreferences (hardware Keystore with AES-GCM fallback) |
+| **Persistence** | Room (SQLite; Keystore AES-256-GCM group message encryption at rest; database files protected by Android file-based encryption), EncryptedSharedPreferences (Android Keystore). Fallback: AES-GCM under a separate Keystore key, or, with no working Keystore, under a device-derived key that only obscures; the app warns |
 | **Hardware** | CameraX (QR scanning & media capture), ZXing (tracker-free) |
 | **Background** | Android WorkManager & Foreground Services |
 
@@ -163,7 +163,8 @@ NoSlop is early software. Please read this before you rely on it:
 * **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice, and the terms of some sources are still unchecked. More sources are welcome from the community.
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
-* **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption.
+* **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption. Photos, videos and audio you send or receive are ordinary files in the app's own storage folder.
+* **Some requests pass through servers I run.** Search requests for YouTube, Reddit and Jamendo go through a Cloudflare Worker (source in [`proxy/`](proxy/)), which sees the search terms but, over Tor, not who sent them. Settings › Report an Issue goes through a relay at noslop.me and becomes a public GitHub issue. See the [FAQ](docs/FAQ.md).
 * **Updates are checked, not authenticated.** The app verifies the APK's checksum and signing certificate, with no extra signature and no certificate pinning on the check.
 * **Never reviewed by a professional.** NoSlop uses standard cryptographic primitives, but the protocol built from them is its own, and no human professional has ever reviewed it. Read the [FAQ](docs/FAQ.md) before you trust it with anything sensitive.
 * **Back up your Word Cloud.** No server holds a copy of your identity, so there is no recovery.

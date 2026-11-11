@@ -106,7 +106,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
 
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(
-                text = "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.".tr,
+                text = "Help us improve NoSlop. Your report goes through our relay to a public GitHub issue, so leave out anything private. For a security problem, email noslop.me@proton.me instead.".tr,
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted,
                 modifier = Modifier.padding(bottom = 16.dp)

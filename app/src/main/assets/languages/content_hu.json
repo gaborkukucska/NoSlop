@@ -309,7 +309,7 @@
   "Hardware-backed encryption is unavailable. Your keys are stored in plaintext.": "A hardveres titkosítás nem érhető el. A kulcsaid titkosítatlanul vannak tárolva.",
   "Health": "Egészség",
   "Help Development": "Fejlesztés támogatása",
-  "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.": "Segítsen a NoSlop fejlesztésében. Jelentése biztonságos közvetítőn keresztül kerül feladásra a GitHubra.",
+  "Help us improve NoSlop. Your report goes through our relay to a public GitHub issue, so leave out anything private. For a security problem, email noslop.me@proton.me instead.": "Segítsen a NoSlop fejlesztésében. Jelentése közvetítőn keresztül nyilvános GitHub-bejelentés lesz, ezért ne írjon bele semmi személyeset. Biztonsági problémát a noslop.me@proton.me címre küldjön.",
   "Hip-Hop": "Hip-Hop",
   "History": "Előzmények",
   "Hub IP Address": "HUB IP-címe",

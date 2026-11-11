@@ -1,6 +1,6 @@
 # Privacy Policy — NoSlop
 
-**Effective date:** 2026-11-03
+**Effective date:** 2026-11-11
 **App:** NoSlop (Android)
 **Developer:** NoSlop (open-source project)
 **Source code:** publicly available and auditable
@@ -10,7 +10,7 @@
 
 ## The short version
 
-NoSlop is designed so that you are in control of everything. The app does not collect, store, or transmit any personal data to us or any third party. There is no server we run, no account to create, and nothing we can see.
+NoSlop has no accounts and no analytics. Your identity, messages, contacts and feed choices stay on your phone, and nobody can recover them for you. Two small servers run by the developer are involved, and this policy says exactly what each one sees: a proxy that carries some search requests, and a relay for bug reports you choose to send. Everything else goes between you and your peers over Tor, or between you and the sites you read.
 
 ---
 
@@ -18,11 +18,17 @@ NoSlop is designed so that you are in control of everything. The app does not co
 
 ### Identity and cryptographic keys
 
-NoSlop generates a public/private key pair on your device during onboarding. Your private key never leaves your device. Your public key is shared only with peers you explicitly invite, via a QR code you show them directly.
+NoSlop generates your key pairs on your device during onboarding. Your private keys stay on your device, except:
+
+- inside a backup file you export, which is encrypted with a key derived from your 12-word Word Cloud;
+- inside a creator-identity backup you export, which is protected by a passphrase you choose;
+- in builds that include the HAI-Net Home Hub (not the default), when you deploy a Hub to your own server (see below).
+
+Your public keys and onion address go to the peers you connect with, and they are part of every packet you sign. A creator identity is public by design: anyone who follows it sees its public key and onion address.
 
 ### Content you create
 
-Posts, direct messages, and any other content you create are stored locally in a SQLite database on your device. Group chat message bodies are encrypted at rest using an AES-256-GCM key bound to the Android Keystore, and 1:1 direct messages store encrypted ciphertext. Content is shared only with the peers you choose to connect with, over the encrypted mesh network. Nothing is sent to any server operated by NoSlop.
+Posts, direct messages and other content you create are stored on your device. 1:1 direct messages are stored as the encrypted ciphertext they arrived in, and group chat message bodies are encrypted at rest with an AES-256-GCM key held by the Android Keystore. Feed items, history, peers and settings are stored in the app's database, protected by Android's file encryption but not encrypted by NoSlop itself. Photos, videos and audio you send or receive are stored as ordinary files in the app's own storage folder. Content is shared only with the peers you choose, over the encrypted mesh network.
 
 ### What the app remembers about your feed
 
@@ -30,64 +36,97 @@ The app keeps a record of what you have viewed and swiped away, so it doesn't sh
 
 ### Mesh network and peer connections
 
-When you connect to peers, your device exchanges messages directly with theirs (peer-to-peer). The IP address your device uses on the local network or over Tor is visible to the peers you connect to, just as in any network communication. NoSlop does not log or retain this data.
+Peers reach each other only through Tor onion services. The peers you connect with see your onion address and public keys, not your IP address. NoSlop does not log or keep network addresses.
 
 ### Tor
 
-If you use the Tor routing option, your traffic is routed through the Tor network. Tor is a third-party anonymity network; its privacy properties and limitations are described at [torproject.org](https://www.torproject.org/about/privacy-policy/). NoSlop does not control or monitor Tor.
+Mesh traffic always goes over Tor. Clearnet requests (feeds, searches, update checks) go over Tor too while **Route Clearnet via Tor** is on, which is the default. If you turn it off, the sites you read and the proxy below see your IP address. Tor is a third-party anonymity network; its privacy properties and limitations are described at [torproject.org](https://www.torproject.org/about/privacy-policy/). NoSlop does not control or monitor Tor.
 
-### Home Hub Deployment
+### Home Hub deployment (only in builds that include the Hub)
 
-When you deploy a HAI-Net Home Hub via SSH from NoSlop, your cryptographic identity (including Ed25519 and X25519 keys) is transmitted to your local server over SSH to allow your node to operate 24/7. First-time SSH connections prompt you to verify and pin the remote server's host key fingerprint.
+Builds include the HAI-Net Home Hub only when made with `NOSLOP_ENABLE_HUB=true`; the default builds don't. In such a build, when you deploy a Home Hub over SSH, your cryptographic identity (including the Ed25519 and X25519 keys) is sent to your own server over SSH so your node can run around the clock. The first SSH connection asks you to check and pin the server's host key fingerprint.
 
-### Content feeds and API proxies
+---
 
-NoSlop displays content from third-party sources (RSS/Atom feeds, public APIs).
-- **API Proxy**: To bypass IP blocks on Tor exit nodes, search and metadata requests for YouTube, Reddit, and Jamendo pass through an open-source Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`). When "Route clearnet through Tor" is enabled (default), these requests arrive at the proxy over Tor; when disabled, requests reach the proxy via your direct ISP connection.
-- **Media Streaming**: Video and audio media bytes (e.g. `googlevideo.com`, `jamendo.com`) are streamed directly from source content delivery networks (CDNs).
-- **Update Checks**: In-app OTA update checks against the GitHub Releases API and APK downloads execute through your selected network route (routed over Tor when "Route Clearnet via Tor" is enabled, after Tor bootstraps). A verified update is saved to your Download folder, and you choose whether to install it. Users can also turn off automatic update checks altogether in Settings.
+## Servers involved
 
-### Camera (QR scanning)
+### The proxy Worker (run by the developer)
 
-The camera is used only to scan QR codes for peer invites. No images or video are stored or transmitted.
+YouTube, Reddit and Jamendo block many Tor exits, so search requests for those three go through a Cloudflare Worker run by the developer (`yt-proxy.megadreamland.workers.dev`; source in the repository's `proxy/` folder). It sees:
 
-### No analytics, no crash reporting, no advertising
+- the search terms, subreddit names and tags in those requests, which come from your interests and searches;
+- over Tor, a Tor exit's address, not yours. With Route Clearnet via Tor off, it sees your IP address.
 
-NoSlop does not include any analytics SDK, crash-reporting service, advertising framework, or tracking library. We receive no telemetry from your device.
+It does not see who you are: the requests carry no account, key or device identifier. Its code forwards only these requests, writes no logs, and caches answers for a few minutes. Cloudflare, which runs the Worker, can see the same requests under its own [privacy policy](https://www.cloudflare.com/privacypolicy/). Video and audio bytes never go through it.
+
+You can point the app at your own Worker in Settings, or switch the aggregator off.
+
+### The bug-report relay (run by the developer)
+
+**Settings › Report an Issue** sends your report to a relay at `noslop.me`, which posts it as a **public** issue on the NoSlop GitHub repository. A report holds what you type, the name you give (if any), and, if you leave those switches on, your phone model, Android version and app version, and the last 25 warnings and errors from the app's log, with onion addresses and keys masked. Nothing is sent unless you press send. If the relay can't be reached, the app opens GitHub in your browser instead. Don't use it for security problems; email [noslop.me@proton.me](mailto:noslop.me@proton.me).
+
+### The Official Creator Node
+
+A fresh install lists the official NoSlop node so there is somewhere to discover creators. It is an ordinary NoSlop node run by the developer, and it is untrusted. Connecting to it is your choice. If you do, it sees what any peer sees: your secondary identity's public key and onion address.
+
+### Content sources and update checks
+
+- **Content sources**: the aggregator reads RSS and Atom feeds and public APIs you choose. Those sites see requests from a Tor exit (or from your IP with Route Clearnet via Tor off).
+- **Media streaming**: video and audio are streamed directly from the source's servers (for example `googlevideo.com`, `jamendo.com`).
+- **Update checks**: in the GitHub build, update checks go to the GitHub Releases API, and the APK is downloaded from GitHub, over your chosen route. A verified update is saved to your Download folder, and you choose whether to install it. You can turn automatic update checks off in Settings.
+
+---
+
+## Camera and microphone
+
+The camera scans QR codes for contact invites, and takes photos and videos when you choose to send one. The microphone records only while you record a video or audio clip to send. QR scans are not stored or sent.
+
+---
+
+## No analytics, no crash reporting, no advertising
+
+NoSlop includes no analytics SDK, automatic crash-reporting service, advertising framework or tracking library. The app sends no telemetry. The only report that reaches the developer is one you send yourself, as described above.
 
 ---
 
 ## Data we collect
 
-**None.** We operate no servers and receive no data from users.
+- **Bug reports you send**, published as public GitHub issues.
+- **Search requests passing through the proxy**, which the Worker forwards and does not keep beyond a few minutes of cache.
+- **Messages you send to the official node**, if you connect to it, as with any peer.
+
+Nothing else. We have no account system, no user database and no copy of your identity.
 
 ---
 
 ## Data shared with third parties
 
-We do not sell, rent, or share your data. The only data that leaves your device is:
+We do not sell or rent data. The data that leaves your device is:
 
-- Messages and content you intentionally send to peers you have connected with.
-- Network requests your device makes to content sources you have chosen.
-- Tor traffic, routed through the Tor network if you enable it.
+- messages and content you send to peers you have connected with;
+- requests to the content sources you have chosen, some of them through the proxy above;
+- bug reports you choose to send;
+- Tor traffic, through the Tor network.
 
 ---
 
 ## Children
 
-NoSlop does not knowingly collect data from anyone, including children. Because we collect no data at all, no special provisions for children are required beyond this statement.
+NoSlop isn't built or vetted for children, and we don't knowingly collect data from anyone. If a child uses it, a trusted adult should set it up. See the [FAQ](FAQ.md).
 
 ---
 
 ## Open source and auditability
 
-NoSlop is fully open-source. You do not need to take our word for any of the above — the complete source code is publicly available for inspection. If you find anything that contradicts this policy, please open an issue in the repository.
+NoSlop is fully open source, including the proxy Worker. You don't need to take our word for any of the above: the complete source code is public. If you find anything that contradicts this policy, please open an issue in the repository.
 
 ---
 
 ## Changes to this policy
 
-If we change this policy, we will update the effective date above and note the change in the repository. Because we collect no data, changes are unlikely to affect your privacy in practice.
+If we change this policy, we will update the effective date above and note the change in the repository.
+
+**2026-11-11:** names the proxy Worker and the bug-report relay as servers run by the developer and says what each sees; private keys can leave the device in backups you export and in Hub deployments; peers see your onion address, not your IP address; the camera is also used for photos and videos you send; media files and most of the database are not encrypted by NoSlop itself.
 
 ---
 

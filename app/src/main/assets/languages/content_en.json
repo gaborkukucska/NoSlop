@@ -358,7 +358,7 @@
   "Hardware-backed encryption is unavailable. Your keys are stored in plaintext.": "Hardware-backed encryption is unavailable. Your keys are stored in plaintext.",
   "Health": "Health",
   "Help Development": "Help Development",
-  "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.": "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.",
+  "Help us improve NoSlop. Your report goes through our relay to a public GitHub issue, so leave out anything private. For a security problem, email noslop.me@proton.me instead.": "Help us improve NoSlop. Your report goes through our relay to a public GitHub issue, so leave out anything private. For a security problem, email noslop.me@proton.me instead.",
   "Hip-Hop": "Hip-Hop",
   "History": "History",
   "Hub IP Address": "Hub IP Address",

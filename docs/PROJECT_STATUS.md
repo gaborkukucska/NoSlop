@@ -47,7 +47,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 
 **Clearnet aggregator** (from the feature and code review of 2026-11-07; the aggregator is a permanent built-in feature, and these are upgrades to it)
 
-* **Replace the default proxy secret.** The secret in `BuildConfig.PROXY_SECRET` can be extracted from the APK. Options to decide between: no shipped default (each user or community runs its own Worker and sets its secret in Settings), or a per-install token with per-token rate limits in the Worker. Either way the Worker needs its own rate limits (audit item 9). The proxy exists because YouTube, Reddit and Jamendo block many Tor exits.
+* **Replace the default proxy secret.** The secret in `BuildConfig.PROXY_SECRET` can be extracted from the APK. Since 2026-11-11 the Worker (`proxy/`) forwards only the app's own calls and has rate limits (audit item 9), once the owner deploys it. Still to decide: no shipped default (each user or community runs its own Worker and sets its secret in Settings), or a per-install token with per-token limits. The Workers Free plan allows 100,000 requests a day, which a few hundred active installs can use up. The proxy exists because YouTube, Reddit and Jamendo block many Tor exits.
 * **Add an official-API route for each source that has one, using the user's own key.** `ApiKeyRepository` already does this for Pexels, Guardian, Jamendo, Vimeo, Podcast Index and NASA. YouTube's Data API is not used; search and playback go through the unofficial InnerTube client (`feeds/api/YouTubeInternalClient.kt`, about 1,100 lines), with an Invidious client beside it. Whether official APIs work reliably over Tor is untested: key-based calls tie requests to the key, and anonymous endpoints are the most likely to be blocked on Tor exits. Test before promising anything.
 * **Plan for YouTube InnerTube breaking or being blocked.** It is the most useful source and the least stable one. Decide the fallback order (Invidious, official API with the user's key, the Worker) and add a visible "this source is failing" state rather than an empty slot in the mix.
 * **Check every source's terms and record the result.** Vimeo and Guardian are listed above. Not yet looked at: YouTube InnerTube, Reddit RSS and the other ~55 RSS sources in `SourceLibrary`. Record the outcome next to each source so a contributor can see it.
@@ -75,9 +75,10 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **Signatures still accept the old pipe form.** `COMMENT`, `EDIT_COMMENT`, `DELETE_COMMENT`, `FOLLOW`, `PEER_REMOVED`, `CONNECTION_REJECTED` and sync check `encodeForSigning` and the pipe string. There is no single versioned encoder yet.
 * **The database isn't fully encrypted.** DM and group bodies are. Feed items, history, peers and settings are plain SQLite under Android's file encryption. SQLCipher isn't added.
 * **OTA updates are checked, not authenticated.** The APK's checksum and signing certificate are verified, but there's no Ed25519 signature over it and no certificate pinning on the update check. Don't describe OTA as MITM-resistant until that lands.
-* **Key storage falls back to plain SharedPreferences** if the hardware Keystore is genuinely unavailable. A PIN-derived AES-GCM fallback isn't built.
+* **The key-storage fallback is weak without a Keystore.** When EncryptedSharedPreferences can't be opened, secrets are AES-GCM encrypted under a separate Keystore key; with no working Keystore, under a key derived from `ANDROID_ID`, which only obscures them (`IdentityRepository.secureFallbackWrite`). A PIN-derived key isn't built.
+* **Media files are not encrypted.** Photos, videos and audio sent or received are plain files under the app's external files folder (`MediaManager`).
 * **Rate limits are fixed, per sender.** The adaptive token bucket across all packet types isn't built.
-* **The default proxy secret ships in the APK.** Users can set their own proxy and secret, but the default can be extracted, so the Worker needs its own rate limits (audit item 9).
+* **The default proxy secret ships in the APK.** Users can set their own proxy and secret, but the default can be extracted. The Worker in `proxy/` limits what it forwards and how often (see the aggregator list above).
 * **Groups have one admin.** Bans exist; a list of admins doesn't.
 * **Deferred by the owner:** C27 (persistent per-peer connections) and R4d (handshake budget).
 
@@ -121,6 +122,21 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-11) — Proxy Worker Hardening, Privacy and Security Claims Checked (v0.7.8-alpha)
+
+* **The proxy Worker is in the repository** (`proxy/`). The FAQ and privacy policy called it open-source, but its source wasn't here. The new version, still to be deployed by the owner:
+  * **No built-in fallback secret.** The deployed Worker fell back to a fixed key when `PROXY_SECRET` was unset; now it refuses everything. `PROXY_SECRET_PREVIOUS` is also accepted, so the key can change without breaking installed builds.
+  * **Allow list.** Only the calls the app makes are forwarded: POST `/youtubei/v1/search` and `/player`, GET `/reddit/r/<sub>/<sort>.json` and `/reddit/search.json`, GET `/jamendo/v3.0/tracks/`. Anything else is 404 or 405, so the key that ships in the APK can't turn the Worker into a general proxy.
+  * **Rate limits.** Workers Rate Limiting bindings per client address and route (120 a minute) and per route (600 a minute in each Cloudflare location), set in `proxy/wrangler.toml`. Over a limit the answer is 429; every client already falls back to a direct request on a failed proxy call (`RedditApiClient.fetchListing`, `JamendoApiClient`, `YouTubeInternalClient.executeSearchRequest`).
+  * **Smaller things.** POST bodies over 16 KB are refused, the raw-secret header is no longer accepted, Reddit gets the app's own User-Agent, and YouTube search is cached like player. The Cache API only works on a custom domain; on `*.workers.dev` every lookup misses.
+  * **Tested** with `node proxy/test_worker.mjs` (23 checks against stubbed fetch, cache and limiters). Not yet deployed or checked on Cloudflare.
+* **Privacy and security claims checked against the code.** README, SECURITY.md, FAQ and this file now say:
+  * photos, videos and audio sent or received are plain files in the app's storage folder (`MediaManager`, `getExternalFilesDir`);
+  * when EncryptedSharedPreferences can't be opened, secrets are AES-GCM encrypted with a separate Keystore key, or, with no working Keystore, with a key derived from `ANDROID_ID`, which only obscures them (`IdentityRepository.secureFallbackWrite`). The app shows a warning then. This file said "plain SharedPreferences";
+  * the bug-report relay at `noslop.me` is one of the servers involved, and Report an Issue creates a public GitHub issue (the screen now says so; its logs are the last 25 warnings and errors, scrubbed by `Logger`);
+  * the Worker sees the search terms in the requests it carries, not, over Tor, who sent them.
+  * The privacy policy said "We operate no servers and receive no data", "Your private key never leaves your device" and that the camera is only used for QR codes. It is rewritten in full.
 
 ## Completed Changes (2026-11-11) — Feed Position, Fresh Lists, Feed Types, Liked, Phone Notifications, HUB Build Switch, Type Filters (v0.7.7-alpha)
 

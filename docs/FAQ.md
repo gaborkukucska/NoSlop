@@ -16,7 +16,8 @@ No server holds your identity (a keypair that lives on your phone), your message
 
 * **Tor relays** carry traffic between peers and, by default, your clearnet requests. They are run by volunteers and don't hold your identity, data or choices.
 * **The Official Creator Node** is optional and untrusted. It exists so a fresh install has somewhere to discover creators. It is an ordinary NoSlop node.
-* **A proxy Worker.** Search and metadata requests for YouTube, Reddit and Jamendo pass through an open-source Cloudflare Worker, because those sites block many Tor exits. Over Tor (the default) the Worker never sees your IP address; with *Route Clearnet via Tor* off, it does. Video and audio bytes don't go through it. See the [privacy policy](PRIVACY_POLICY.md).
+* **A proxy Worker.** Search requests for YouTube, Reddit and Jamendo pass through a Cloudflare Worker that I run (source in [`proxy/`](../proxy/)), because those sites block many Tor exits. It sees the search terms, which come from your interests. Over Tor (the default) it never sees your IP address; with *Route Clearnet via Tor* off, it does. Video and audio bytes don't go through it. See the [privacy policy](PRIVACY_POLICY.md).
+* **A bug-report relay** at noslop.me, which I also run. Settings › Report an Issue sends what you write there, and, if you leave them on, your phone model, Android and app version, and the last 25 warnings and errors from the app's log (with onion addresses and keys masked). The relay turns it into a **public** GitHub issue. If it can't be reached, the app opens GitHub in your browser instead.
 * **GitHub**, for update checks, in the GitHub build only.
 * **The sites you read**, when the aggregator is on.
 
