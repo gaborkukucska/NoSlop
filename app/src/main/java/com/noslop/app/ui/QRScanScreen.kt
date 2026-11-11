@@ -109,6 +109,12 @@ fun QRScanScreen(
                 try {
                     val authJson = org.json.JSONObject(raw)
                     if (authJson.optString("type") == "hainet_auth") {
+                        // NOSLOP_HUB_BUILD_SWITCH_V1 — no Hub web login in a build without the HUB.
+                        if (!com.noslop.app.HubFeature.enabled) {
+                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("HUB support is not part of this build."), Toast.LENGTH_SHORT).show()
+                            scannedRawData = null
+                            return@LaunchedEffect
+                        }
                         val sessionId = authJson.optString("session")
                         val ip = authJson.optString("ip")
                         

@@ -3729,6 +3729,7 @@ fun toggleAggregator() {
 fun clearLogFile() { Logger.clearLog() }
 
     fun handleQrLogin(sessionId: String, ip: String) {
+        if (!com.noslop.app.HubFeature.enabled) return // NOSLOP_HUB_BUILD_SWITCH_V1
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 var targetIp = ip

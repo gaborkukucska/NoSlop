@@ -1,6 +1,8 @@
 // FILE: app/src/main/java/com/noslop/app/data/NoSlopRepository.kt
 package com.noslop.app.data
 
+import com.noslop.app.HubFeature
+
 import android.content.Context
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
@@ -1687,7 +1689,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     // --- Identity Delegation ---
     suspend fun putAppSetting(key: String, value: String) { appSettingDao.insertSetting(AppSetting(key, value)) }
-    suspend fun getAppSetting(key: String): String? { return appSettingDao.getSetting(key) }
+    suspend fun getAppSetting(key: String): String? {
+        // NOSLOP_HUB_BUILD_SWITCH_V1 — without the HUB built in, no Hub is linked. The stored value stays.
+        if (key == HubFeature.STATUS_KEY && !HubFeature.enabled) return null
+        return appSettingDao.getSetting(key)
+    }
     
     suspend fun getAppLanguage(): String = appSettingDao.getSetting("app_language") ?: "en"
     suspend fun setAppLanguage(lang: String) = appSettingDao.insertSetting(AppSetting("app_language", lang))

@@ -196,6 +196,8 @@ private fun TorStatusOverlay(message: String, onRetry: () -> Unit) {
 @Composable
 fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     var selectedTab by remember { mutableStateOf(0) }
+    // NOSLOP_HUB_BUILD_SWITCH_V1 — false unless the build was made with NOSLOP_ENABLE_HUB=true.
+    val hubEnabled = com.noslop.app.HubFeature.enabled
     var showComposeDialog by remember { mutableStateOf(false) }
     var initialScanMode by remember { mutableStateOf<String?>(null) }
 
@@ -267,7 +269,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     LaunchedEffect(Unit) {
         viewModel.navigationTabEvent.collect { tab ->
-            selectedTab = tab
+            selectedTab = if (tab == 2 && !hubEnabled) 0 else tab
         }
     }
 
@@ -310,7 +312,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 selectedTab = 4
             } else if (routeClean == "settings") {
                 selectedTab = 3
-            } else if (routeClean == "hubs-deploy") {
+            } else if (routeClean == "hubs-deploy" && hubEnabled) {
                 selectedTab = 2
                 initialScanMode = "deploy"
             }
@@ -389,7 +391,9 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 
                 if (selectedTab == 0) {
                     Spacer(modifier = Modifier.weight(1f))
-                } else {
+                }
+                // Without a HUBs item, Alerts takes its place on the Feed page too.
+                if (selectedTab != 0 || !hubEnabled) {
                     NavigationBarItem(
                         selected = selectedTab == 4,
                         onClick = { selectedTab = 4 },
@@ -415,6 +419,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     )
                 }
 
+                if (hubEnabled) {
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
@@ -428,6 +433,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         indicatorColor = PrimaryBlack
                     )
                 )
+                }
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
@@ -512,8 +518,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     )
                 }
                 if (selectedTab == 1) DMsTab(viewModel)
-                if (selectedTab == 2) HaiNetTab(viewModel, initialScanMode)
-                if (selectedTab == 3) SettingsTab(viewModel, onNavigateToHubs = { selectedTab = 2 })
+                if (selectedTab == 2 && hubEnabled) HaiNetTab(viewModel, initialScanMode)
+                if (selectedTab == 3) SettingsTab(viewModel, onNavigateToHubs = { if (hubEnabled) selectedTab = 2 })
                 if (selectedTab == 4) {
                     com.noslop.app.ui.tabs.NotificationsScreen(
                         viewModel = viewModel,
@@ -1300,18 +1306,23 @@ fun UnifiedFeedTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Notifications Icon (Top Left)
-            IconButton(
-                onClick = { if (isActiveTab) onTabChange(4) },
-                modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
-            ) {
-                BadgedBox(
-                    badge = {
-                        if (unreadNotifs > 0) Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
-                    }
+            // Notifications Icon (Top Left). NOSLOP_HUB_BUILD_SWITCH_V1 — without the HUB it lives in the
+            // bottom menu; an empty slot of the same size keeps the All/Mesh switch where it was.
+            if (com.noslop.app.HubFeature.enabled) {
+                IconButton(
+                    onClick = { if (isActiveTab) onTabChange(4) },
+                    modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
                 ) {
-                    Icon(Icons.Default.Notifications, contentDescription = "Notifications".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
+                    BadgedBox(
+                        badge = {
+                            if (unreadNotifs > 0) Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
+                        }
+                    ) {
+                        Icon(Icons.Default.Notifications, contentDescription = "Notifications".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
+                    }
                 }
+            } else {
+                Spacer(modifier = Modifier.size(40.dp))
             }
 
             // Quick "All / Mesh" Switch (Center) — hidden when a custom filter chip/search is active

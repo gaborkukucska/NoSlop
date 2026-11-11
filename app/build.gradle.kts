@@ -63,6 +63,14 @@ android {
             "PROXY_SEND_LEGACY_SECRET",
             (project.findProperty("NOSLOP_PROXY_LEGACY_SECRET") ?: "false").toString()
         )
+
+        // NOSLOP_HUB_BUILD_SWITCH_V1
+        // The HAI-Net HUB page and its functions are built in only with NOSLOP_ENABLE_HUB=true, as an
+        // environment variable or a Gradle property (-PNOSLOP_ENABLE_HUB=true). Off by default.
+        val enableHub = (System.getenv("NOSLOP_ENABLE_HUB")
+            ?: project.findProperty("NOSLOP_ENABLE_HUB")?.toString() ?: "false")
+            .trim().equals("true", ignoreCase = true)
+        buildConfigField("boolean", "ENABLE_HUB", enableHub.toString())
     }
 
     flavorDimensions += "distribution"

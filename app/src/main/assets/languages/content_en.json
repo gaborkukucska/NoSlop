@@ -282,6 +282,8 @@
   "Embed unavailable": "Embed unavailable",
   "Enable & Save": "Enable & Save",
   "Enable Anyway": "Enable Anyway",
+  "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive.": "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive.",
+  "HUB support is not part of this build.": "HUB support is not part of this build.",
   "Enable Background Mesh?": "Enable Background Mesh?",
   "Enable Cut-Off Date Filter": "Enable Cut-Off Date Filter",
   "Enable Media": "Enable Media",

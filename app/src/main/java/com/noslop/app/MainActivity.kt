@@ -173,7 +173,8 @@ class MainActivity : ComponentActivity() {
                         var showRestoreHubPrompt by rememberSaveable { mutableStateOf(prefs.getBoolean("prompt_hub_after_restore", false)) }
                         val hubStatus by viewModel.hubDeploymentStatus.collectAsState()
 
-                        if (showRestoreHubPrompt && hubStatus.isNullOrBlank()) {
+                        // NOSLOP_HUB_BUILD_SWITCH_V1 — no Hub prompt in a build without the HUB.
+                        if (com.noslop.app.HubFeature.enabled && showRestoreHubPrompt && hubStatus.isNullOrBlank()) {
                             androidx.compose.material3.AlertDialog(
                                 onDismissRequest = { 
                                     prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()

@@ -42,12 +42,15 @@ class OnionAddressUpdateTest {
         db = Room.inMemoryDatabaseBuilder(context, NoSlopDatabase::class.java).allowMainThreadQueries().build()
         repo = NoSlopRepository(context, db)
         repo.saveLocalIdentity("alice", alice, "mnemonic test word cloud phrase")
+        // This test drives the Hub push path, which only a build with the HUB has (NOSLOP_HUB_BUILD_SWITCH_V1).
+        com.noslop.app.HubFeature.enabled = true
         repo.putAppSetting("hub_deployment_status", "deployed")
         GossipService.pushPacketToHub = { packet -> pushed.add(packet); true }
     }
 
     @After
     fun tearDown() {
+        com.noslop.app.HubFeature.enabled = com.noslop.app.BuildConfig.ENABLE_HUB
         repo.stopPresenceHeartbeat()
         GossipService.resetForTesting()
         db.close()

@@ -215,7 +215,14 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         }
 
         // Daily automated encrypted identity & DB backup push to Home Hub
-        try {
+        // NOSLOP_HUB_BUILD_SWITCH_V1 — a build without the HUB drops the job an earlier Hub build queued.
+        if (!HubFeature.enabled) {
+            try {
+                WorkManager.getInstance(this).cancelUniqueWork("hub_backup_sync_daily")
+            } catch (e: Exception) {
+                Logger.warn("APP", "Failed to cancel WorkManager Hub sync: ${e.message}")
+            }
+        } else try {
             val hubSyncRequest = PeriodicWorkRequestBuilder<com.noslop.app.data.HubSyncWorker>(1, TimeUnit.DAYS)
                 .setConstraints(
                     Constraints.Builder()

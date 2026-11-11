@@ -406,20 +406,31 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     containerColor = SurfaceDark,
                                     title = { Text("Enable Background Mesh?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                                     text = { 
+                                        // NOSLOP_HUB_BUILD_SWITCH_V1 — recommend a HUB only when this build has one.
                                         Text(
-                                            "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive. We strongly recommend deploying a HAI-Net Home HUB instead, which handles this 24/7 without draining your phone.".tr,
+                                            if (com.noslop.app.HubFeature.enabled) "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive. We strongly recommend deploying a HAI-Net Home HUB instead, which handles this 24/7 without draining your phone.".tr
+                                            else "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive.".tr,
                                             color = TextMuted
                                         ) 
                                     },
                                     confirmButton = {
-                                        Button(
-                                            onClick = {
+                                        if (com.noslop.app.HubFeature.enabled) {
+                                            Button(
+                                                onClick = {
+                                                    showForegroundWarning = false
+                                                    onNavigateToHubs()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                            ) {
+                                                Text("Deploy HUB".tr, fontWeight = FontWeight.Bold)
+                                            }
+                                        } else {
+                                            TextButton(onClick = {
                                                 showForegroundWarning = false
-                                                onNavigateToHubs()
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                                        ) {
-                                            Text("Deploy HUB".tr, fontWeight = FontWeight.Bold)
+                                                viewModel.setForegroundServiceEnabled(true)
+                                            }) {
+                                                Text("Enable Anyway".tr, color = DestructiveRed)
+                                            }
                                         }
                                     },
                                     dismissButton = {
@@ -427,11 +438,13 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             TextButton(onClick = { showForegroundWarning = false }) {
                                                 Text("Cancel".tr, color = TextMuted)
                                             }
-                                            TextButton(onClick = { 
-                                                showForegroundWarning = false
-                                                viewModel.setForegroundServiceEnabled(true)
-                                            }) {
-                                                Text("Enable Anyway".tr, color = DestructiveRed)
+                                            if (com.noslop.app.HubFeature.enabled) {
+                                                TextButton(onClick = {
+                                                    showForegroundWarning = false
+                                                    viewModel.setForegroundServiceEnabled(true)
+                                                }) {
+                                                    Text("Enable Anyway".tr, color = DestructiveRed)
+                                                }
                                             }
                                         }
                                     }

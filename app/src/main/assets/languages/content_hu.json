@@ -233,6 +233,8 @@
   "Embed unavailable": "A beágyazás nem érhető el",
   "Enable & Save": "Engedélyezés és Mentés",
   "Enable Anyway": "Engedélyezés Mégis",
+  "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive.": "A NoSlop folyamatos háttérben futtatása gyorsabban meríti az akkumulátort és extra adatforgalmat használ a mesh hálózat életben tartásához.",
+  "HUB support is not part of this build.": "Ez a verzió nem tartalmaz HUB támogatást.",
   "Enable Background Mesh?": "Háttér Mesh engedélyezése?",
   "Enable Cut-Off Date Filter": "Létrehozási dátum szűrő engedélyezése",
   "Enable Media": "Média engedélyezése",
