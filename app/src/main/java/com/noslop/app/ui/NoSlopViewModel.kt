@@ -223,10 +223,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * saved item, or page 0 of a fresh list (NOSLOP_FRESH_LIST_TOP_V1). [page] is the settled page.
      */
     fun isRestoringFeedPositionAwayFrom(itemId: String?, page: Int = -1): Boolean =
-        feedPositionRestore.isAwayFrom(itemId, page)
+        feedPositionRestore.isAwayFrom(itemId, page, topId = _unifiedFeed.value.firstOrNull()?.id) // NOSLOP_FRESH_LIST_TOP_V2
 
     /** The pager has reached [itemId] on [page]; a wait for it is done. */
-    fun onFeedPositionRestored(itemId: String?, page: Int = -1) = feedPositionRestore.reached(itemId, page)
+    fun onFeedPositionRestored(itemId: String?, page: Int = -1) =
+        feedPositionRestore.reached(itemId, page, topId = _unifiedFeed.value.firstOrNull()?.id)
     private val _savedActiveItemId = MutableStateFlow<String?>(null)
     val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
     private val _isSavedPositionLoaded = MutableStateFlow(false)

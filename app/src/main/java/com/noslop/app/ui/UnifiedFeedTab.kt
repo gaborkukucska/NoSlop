@@ -938,9 +938,11 @@ fun UnifiedFeedTab(
         if (!target.isNullOrEmpty() && unifiedItems.isNotEmpty()) {
             val index = unifiedItems.indexOfFirst { it.id == target }
             if (index >= 0) {
-                pagerState.scrollToPage(index)
+                // NOSLOP_FRESH_LIST_TOP_V2 — recorded before the jump: the swipe-past effect for the new
+                // page can run before scrollToPage returns, and would count every page in between.
                 lastSettledItemId = target
                 lastSettledListIds = unifiedItems.map { it.id }
+                pagerState.scrollToPage(index)
                 restoreItemId = null // Consumed
                 viewModel.onFeedPositionRestored(target) // NOSLOP_FEED_POSITION_RESTORE_V2
             }
@@ -954,9 +956,10 @@ fun UnifiedFeedTab(
             if (!target.isNullOrEmpty()) {
                 val index = unifiedItems.indexOfFirst { it.id == target }
                 if (index >= 0) {
-                    pagerState.scrollToPage(index)
+                    // NOSLOP_FRESH_LIST_TOP_V2 — before the jump, as above.
                     lastSettledItemId = target
                     lastSettledListIds = unifiedItems.map { it.id }
+                    pagerState.scrollToPage(index)
                 }
             }
             hasRestoredInitialPosition = true

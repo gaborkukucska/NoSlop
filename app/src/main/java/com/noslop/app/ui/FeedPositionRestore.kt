@@ -47,25 +47,32 @@ internal class FeedPositionRestore(
     /**
      * True while a restore is pending and the pager is not at its target: [itemId] for a restore to an
      * item, page 0 for a fresh list ([page] is the pager's settled page, -1 when not known).
+     *
+     * NOSLOP_FRESH_LIST_TOP_V2 — [topId] is the first item of the list the ViewModel holds. When given,
+     * a fresh list's top is page 0 showing that item: the old list, still on screen for a frame after
+     * the new one is published, can be on page 0 too.
      */
-    fun isAwayFrom(itemId: String?, page: Int = -1): Boolean {
+    fun isAwayFrom(itemId: String?, page: Int = -1, topId: String? = null): Boolean {
         if (target == null && !toTop) return false
         if (now() - startedAtMs > maxWaitMs) {
             target = null
             toTop = false
             return false
         }
-        return if (toTop) page != 0 else itemId != target
+        return if (toTop) !isTop(itemId, page, topId) else itemId != target
     }
 
     /** The pager reached [itemId] on [page]: a restore waiting for it is done. */
-    fun reached(itemId: String?, page: Int = -1) {
+    fun reached(itemId: String?, page: Int = -1, topId: String? = null) {
         if (toTop) {
-            if (page == 0) toTop = false
+            if (isTop(itemId, page, topId)) toTop = false
         } else if (target != null && target == itemId) {
             target = null
         }
     }
+
+    private fun isTop(itemId: String?, page: Int, topId: String?): Boolean =
+        page == 0 && (topId == null || itemId == topId)
 
     companion object {
         const val MAX_WAIT_MS = 2_000L

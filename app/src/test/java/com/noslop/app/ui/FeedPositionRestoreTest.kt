@@ -97,4 +97,24 @@ class FeedPositionRestoreTest {
         restore.reached("saved", page = 5)
         assertTrue("reaching that item does not end a jump to the top", restore.isAwayFrom("saved", page = 5))
     }
+
+    @Test
+    fun aFreshList_isNotEndedByTheOldListsFirstPage() {
+        // NOSLOP_FRESH_LIST_TOP_V2: the old list can still be on screen, at page 0, for a frame.
+        restore.beginTop()
+        restore.reached("oldFirst", page = 0, topId = "newFirst")
+        assertTrue("still waiting for the new list", restore.isAwayFrom("newSixth", page = 5, topId = "newFirst"))
+        assertTrue(restore.isAwayFrom("oldFirst", page = 0, topId = "newFirst"))
+        assertFalse(restore.isAwayFrom("newFirst", page = 0, topId = "newFirst"))
+        restore.reached("newFirst", page = 0, topId = "newFirst")
+        assertFalse("swipes count again", restore.isAwayFrom("newSixth", page = 5, topId = "newFirst"))
+    }
+
+    @Test
+    fun theListsFirstItem_doesNotChangeARestoreToAnItem() {
+        restore.begin("saved")
+        assertTrue(restore.isAwayFrom("first", page = 0, topId = "first"))
+        restore.reached("saved", page = 7, topId = "first")
+        assertFalse(restore.isAwayFrom("first", page = 0, topId = "first"))
+    }
 }

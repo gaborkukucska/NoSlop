@@ -2486,6 +2486,13 @@ current page is read, viewed and swiped). Both used to act on that frame.
 
 Returning to the Live Feed also clears a leftover `forceScrollToTop`.
 
+`NOSLOP_FRESH_LIST_TOP_V2`: the ViewModel's wrappers pass the first item of the
+list it holds (`topId`), and a fresh list's wait ends only on page 0 showing
+that item. With the main thread blocked, the old list can still be on screen
+at page 0 when the jump runs. The restore handlers (a restore event, the cold
+start) set `lastSettledItemId` to the target before `scrollToPage`, so a jump
+is never read as a swipe.
+
 Tests: `FeedPositionRestoreTest`, `FeedSmoothnessArchitectureTest`.
 
 ### 16.37 Photo streams, Reddit and article text (`NOSLOP_FEED_TYPES_V1`, `NOSLOP_ARTICLE_DESCRIPTION_V1`)

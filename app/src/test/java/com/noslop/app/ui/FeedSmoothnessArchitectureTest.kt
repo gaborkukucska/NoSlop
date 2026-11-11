@@ -90,6 +90,20 @@ class FeedSmoothnessArchitectureTest {
             2, Regex("""isRestoringFeedPositionAwayFrom\(settledItemId, pagerState\.settledPage\)""").findAll(tab).count()
         )
         assertTrue(tab.contains("viewModel.onFeedPositionRestored(settledItemId, pagerState.settledPage)"))
+        // NOSLOP_FRESH_LIST_TOP_V2: only the top of the list the ViewModel holds ends the wait.
+        assertEquals(2, Regex("""topId = _unifiedFeed\.value\.firstOrNull\(\)\?\.id""").findAll(vm).count())
+    }
+
+    @Test
+    fun aRestoreJumpIsNeverReadAsASwipe() {
+        // NOSLOP_FRESH_LIST_TOP_V2: the target is the last settled slide before the pager jumps to it.
+        val tab = source("ui/UnifiedFeedTab.kt")
+        val jumps = Regex("""lastSettledItemId = target\s+lastSettledListIds = unifiedItems\.map \{ it\.id \}\s+pagerState\.scrollToPage\(index\)""")
+        assertEquals(2, jumps.findAll(tab).count())
+        assertEquals(
+            "no restore records its target after the jump",
+            0, Regex("""scrollToPage\(index\)\s+lastSettledItemId = target""").findAll(tab).count()
+        )
     }
 
     @Test
