@@ -1400,8 +1400,8 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 
 ### Permissions (`AndroidManifest.xml`)
 
-`INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (API 33+ WorkManager
-notifications), `CAMERA` (optional feature, for QR scanning),
+`INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (API 33+; asked for
+at run time since 2026-11-11, §16.39), `CAMERA` (optional feature, for QR scanning),
 `RECEIVE_BOOT_COMPLETED` (WorkManager rescheduling), `FOREGROUND_SERVICE` and
 `FOREGROUND_SERVICE_DATA_SYNC` (required for `NoSlopForegroundService`, see
 §11). `android:allowBackup="false"` — OS-level backup is disabled in favor of
@@ -2462,6 +2462,153 @@ Details that matter:
 
 Tests: `PlaybackPolicyTest`.
 
+### 16.36 Putting a list back where it was (`NOSLOP_FEED_POSITION_RESTORE_V2`, `NOSLOP_FRESH_LIST_TOP_V1`)
+
+A list swapped into the pager reaches the screen one frame before the pager
+moves, so for that frame the pager "settles" on whatever item sits at its old
+page in the new list. Two effects act on a settle: the settle effect (saves
+the Live Feed position, marks the item read, starts the 4 s viewed timer) and
+the swipe-past effect (`itemsSwipedPast`: everything between the last and the
+current page is read, viewed and swiped). Both used to act on that frame.
+
+`ui/FeedPositionRestore.kt` holds one pending target, at most `MAX_WAIT_MS`
+(2 s):
+
+* `begin(itemId)`: the Live Feed is being put back at `itemId`. The ViewModel
+  takes the target before it swaps the cached list in.
+* `beginTop()`: a fresh list is going to page 0. Called for every first batch
+  that is not the plain Live Feed (filters, Mesh, an author's posts, any
+  search), and by the History, Saved and Liked loaders.
+* `isAwayFrom(itemId, page)` is true while a restore is pending and the pager
+  is elsewhere; both effects return early then, and `saveFeedPosition` refuses
+  to overwrite the target. `reached(itemId, page)` ends the wait, also when the
+  pager settles there by itself.
+
+Returning to the Live Feed also clears a leftover `forceScrollToTop`.
+
+Tests: `FeedPositionRestoreTest`, `FeedSmoothnessArchitectureTest`.
+
+### 16.37 Photo streams, Reddit and article text (`NOSLOP_FEED_TYPES_V1`, `NOSLOP_ARTICLE_DESCRIPTION_V1`)
+
+* `feeds/FeedTypeRules.kt`: `isPhotoStreamFeed(sourceId, feedUrl)` (the ids in
+  `PHOTO_STREAM_SOURCE_IDS`, or any `flickr.com/services/feeds/` address) and
+  `isRedditFeedUrl`.
+* `FeedParser.fetchAndParse` hands a reddit.com feed to
+  `RedditApiClient.parseRssListing(body, sourceId)`, so a post read through a
+  subreddit source and through the Reddit API categories has one id. In a
+  photo stream, `parseRssItem` and `parseAtomEntry` keep an image enclosure or
+  `media:content` as `mediaUrl` with `mediaType = "image"`; elsewhere it stays
+  a thumbnail.
+* Reddit excerpts are `""` (both the RSS and JSON paths) instead of
+  "r/sub · by u/author".
+* `feeds/api/PageDescription.kt`: `extractPageDescription(html)` reads
+  `og:description`, then `twitter:description`, then `description`, from the
+  `<head>` only, 20–600 characters, entities decoded.
+  `isDescribableArticleUrl` skips Reddit, YouTube and X.
+  `ArticleMetadataResolver.resolveDescription` reads at most 256 KB over the
+  lead-image client and caches the answer per URL (`""` when the page has
+  none). `SegmentedArticleReader` asks for it when an article has no text.
+* Stored rows keep their type (inserts are IGNORE). `FeedRepository
+  .repairFeedTypesOnce()` runs once (setting `feed_types_repair_v1`) at the
+  start of `pruneFeedItemsIfDue`: `deleteGenericRedditCopies`,
+  `deleteUntypedPhotoStreamItems`, `clearRedditPlaceholderExcerpts`. Saved rows
+  and rows in viewing history are kept.
+
+Tests: `FeedTypeRulesTest`, `FeedParserPhotoStreamTest`, `SearchPagingE5sTest`.
+
+### 16.38 Liked (`NOSLOP_LIKED_LIST_V1`)
+
+Liked is built from reactions, not from `isSaved`. `data/LikedItems.kt`:
+`POSITIVE_REACTIONS` (like, upvote, laugh, fire, wow, celebrate, insightful,
+clap, gem), `likedAtByPost(marks, ownKeys)` (latest like per post by one of
+this device's identities) and `nextLikedPage` (30 a page, newest like first,
+matching the search, not on screen yet).
+
+* `ReactionDao.getReactionsBy(authors, types)` and `VoteDao.getUpvotesBy(authors)`
+  feed `NoSlopRepository.getOwnLikeTimes()`.
+* A feed item is liked when its anchor post (`ReactionAnchor.forUrl`) has a
+  positive reaction; a mesh post by someone else when it has one, or an upvote
+  in `mesh_votes`.
+* `UnifiedFeedTab` filters Liked as `Feed || Mesh` (the ViewModel already chose
+  the items) and has its own empty state. Saved still filters on `isSaved`.
+
+Tests: `LikedItemsTest`.
+
+### 16.39 Phone notifications (`NOSLOP_PHONE_NOTIFICATIONS_V1`)
+
+Android 13 (API 33) and newer drop notifications unless `POST_NOTIFICATIONS`
+was granted at run time.
+
+* `NotificationSettings.phone` (default true, read from the stored JSON with
+  the other switches).
+* `ui/components/PhoneNotifications.kt`: `PhoneNotificationPermissionPrompt`
+  (shown from `MainActivity` after `UpdateReadyPrompt`) asks once per install
+  while the setting is on, recorded in the `noslop_phone_notifications`
+  preferences; `PhoneNotificationsSetting` is the switch at the top of
+  Settings › Notifications, with a "Tap to allow" line that asks again or, when
+  Android will not ask any more, opens the app's notification settings.
+* `NotificationHelper.showNotification` returns early when the setting is off
+  or `NotificationManagerCompat.areNotificationsEnabled()` is false, and logs
+  the second case once under `NOTIFY`. In-app alerts are saved either way.
+
+Tests: `NotificationSettingsTest`.
+
+### 16.40 HUB build switch (`NOSLOP_HUB_BUILD_SWITCH_V1`)
+
+`app/build.gradle.kts` sets `BuildConfig.ENABLE_HUB` from the environment
+variable `NOSLOP_ENABLE_HUB`, else the Gradle property of that name; anything
+but `true` is false. `HubFeature.enabled` starts from it; tests may set it.
+
+* **One gate for every Hub path.** `NoSlopRepository.getAppSetting` answers
+  null for `HubFeature.STATUS_KEY` (`hub_deployment_status`) when the HUB is
+  off. Every Hub reader goes through it (mesh push, `GossipService`, the
+  ViewModel's Hub sync loop, historical pulls, `invokeHubApi`, the onion heal,
+  `HubSyncWorker`, `TorService.skipHiddenServiceRegistration`, the Settings HUB
+  section), so they all see no Hub. The stored value is kept for a later build
+  with the HUB.
+* **UI.** `MainScreenContent` leaves out the HUBs item and `HaiNetTab`; tab 2
+  from `selectTab` and the `hubs-deploy` route land on the Feed. The bottom
+  menu shows Alerts on the Feed page too (Feed, DMs, compose, Alerts,
+  Settings), and the Feed page's top-left bell becomes an empty slot of the
+  same size, so the All/Mesh switch stays where it was.
+* **Elsewhere.** `NoSlopApp` cancels `hub_backup_sync_daily` instead of
+  queueing it; `MainActivity` skips "Connect Home Hub?"; the background-mesh
+  warning drops "Deploy HUB" and its HUB advice; `QRScanScreen` answers a
+  `hainet_auth` code with "HUB support is not part of this build."; and
+  `handleQrLogin` returns at once.
+
+Tests: `HubFeatureGateTest`, `HubBuildSwitchArchitectureTest`, `OnionAddressUpdateTest`.
+
+### 16.41 Type filters skip what was seen and fetch more (`NOSLOP_TYPE_FILTER_REFILL_V1`)
+
+Videos, Audio, Images and Articles were "persistent lists": every visit listed
+every stored item of the type, seen or not, and the list ended with the stored
+items. They now take the Live Feed's exclusions in `computeFeedBatch` (read,
+viewed, swiped, saved, reacted-to and voted-down items, swiped mesh posts).
+This replaces the §20.9 exemption; what kept those tabs from emptying then is
+now the refill below. A typed search is unchanged: it pages itself (§17.25).
+
+`ui/TypeFilterRefill.kt`:
+
+* `keywordPool(filter, ...)`: music genres (Audio) or video genres (Videos),
+  then the keywords of each selected interest, the interest names, and
+  `FALLBACK_KEYWORD` (documentary, podcast, photography, news). Each once.
+* `Session`: whose keyword is next per filter (turns carry over between
+  visits), and the limits of one visit: `MAX_ROUNDS_PER_VISIT` (10) searches,
+  stopping after `MAX_EMPTY_ROUNDS` (3) in a row with no result an earlier one
+  had not returned. A change of `currentFilterMode` starts a new visit.
+
+`computeFeedBatch` asks for a refill (`FeedBatchPlan.fetchTypeRefill`) when
+fewer stored items of the type are left than one batch (30), with
+`searchListIsWaiting` when it found none. `applyFeedBatch` calls
+`fetchTypeRefill` on the main thread: one search at a time through
+`searchCustomFeedPage(keyword, filter, new cursor, firstPage = true)`, which
+stores the results like a search. A waiting list shows the spinner and is
+refilled when the results land. The log line is `<filter> refill: N results,
+M new` (no keyword).
+
+Tests: `TypeFilterRefillTest`, `TypeFilterRefillArchitectureTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
@@ -3087,7 +3234,7 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 - Replaced blocking while-loops in `FeedRepository.kt` with non-blocking Tor staggers (`delay(1000ms)`), allowing RSS articles, NASA images, and Music audio to fetch continuously in the background while videos play.
 - Unified media detection helpers (`isAudioFeedItem`, `isVideoFeedItem`, `isImageFeedItem`, `isArticleFeedItem`) in `NoSlopViewModel.kt`, ensuring audio tracks (MP3/FLAC/AAC) and images are recognized consistently across the entire pipeline.
 - Raised batch size for all specific filters (`Videos`, `Audio`, `Images`, `Articles`, `Mesh`, `History`, `Liked`, `Saved`) from 3 to 30, unblocking infinite scrolling past slide 27.
-- Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
+- *(Replaced 2026-11-11: these tabs skip what was seen again, and fetch more of their type when they run out, §16.41.)* Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
 - *(Replaced: the Live Feed now never brings back items the user saw, swiped or reacted to.)* Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
 
 ### 20.10 Tor Resolve Priority & Bandwidth De-Contention

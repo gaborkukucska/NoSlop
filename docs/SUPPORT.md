@@ -14,6 +14,15 @@
 *   **Video stops when you leave the app**: Turn on **Background Playback** and **Foreground Service** in Settings.
 *   **Audio buffering**: Clearnet audio (your aggregated feed) comes from its source, over Tor when "Route Clearnet via Tor" is on, so it can take a few seconds to start; audio or media attached to **mesh posts/DMs** is fetched chunk-by-chunk from a peer over Tor and may take longer to buffer, especially on a slow or freshly-built circuit.
 
+### Notifications Don't Reach the Phone
+*   **Phone notifications switch**: Settings › Notifications › **Phone notifications** must be on. It is on by default. Off, alerts only show inside the app.
+*   **Android 13 and newer**: Android asks once whether NoSlop may show notifications. If you said no, the switch shows "Tap to allow"; tap it to be asked again, or to open Android's notification settings for NoSlop when Android won't ask any more.
+
+### Lists and Filters
+*   **Liked and Saved**: Liked shows what you reacted to positively (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), newest first. Saved shows what you saved. Liking something also saves it, so a liked item is in both.
+*   **Videos, Audio, Images, Articles**: these skip what you have already seen. When they run low, NoSlop searches for more of that type using your interests, so the first slides after the end may take a few seconds.
+*   **No HUBs tab**: builds without the HAI-Net HUB have no HUBs tab, and the notifications icon is in the bottom menu instead of the Feed page's top-left corner.
+
 ### Installing an Update
 NoSlop checks the downloaded update against its published checksum, then saves it to your Download folder. It can't start the install itself. Tap **Open Downloads**, then tap the NoSlop APK. The Settings banner keeps these steps until the update is installed.
 

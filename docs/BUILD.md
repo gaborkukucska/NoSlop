@@ -136,6 +136,15 @@ This is the fully featured, production-ready original application located in the
 
 There are two flavours: `github` (`com.noslop.app`, with the in-app update check) and `play` (`com.noslop.me.app`, without it). Plain `assembleDebug` builds both.
 
+**HAI-Net HUB (off by default).** The HUBs page and everything that depends on a Hub are built in only when you ask for them, with an environment variable or a Gradle property:
+
+```bash
+NOSLOP_ENABLE_HUB=true ./gradlew :app:assembleGithubDebug
+./gradlew -PNOSLOP_ENABLE_HUB=true :app:assembleGithubDebug
+```
+
+Without it there is no HUBs tab, the Alerts icon sits in the bottom menu on every page, and the app ignores any Hub it was linked to before (the link is kept for a later build with the HUB). The value is read at configuration time, so change it with a clean build or `--rerun-tasks` if Gradle reuses an old `BuildConfig`. See `docs/TECHNICAL_REFERENCE.md` §16.40.
+
 ### Option B: Build the New KMP App
 This is the new Kotlin Multiplatform application currently under development in the `mvp/` directory. Note that this requires the `NOSLOP_STORE_FILE` property to be configured in your `~/.gradle/gradle.properties` for release builds.
 
