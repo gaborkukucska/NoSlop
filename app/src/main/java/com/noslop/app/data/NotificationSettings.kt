@@ -9,7 +9,9 @@ data class NotificationSettings(
     val system: Boolean = true,
     val reactions: Boolean = true,
     val connectionRequests: Boolean = true,
-    val broadcasts: Boolean = true
+    val broadcasts: Boolean = true,
+    // NOSLOP_PHONE_NOTIFICATIONS_V1 — alerts also go to the phone's notification shade.
+    val phone: Boolean = true
 ) {
     fun toJson(): String {
         return com.noslop.app.util.Json.gson.toJson(this)
@@ -27,7 +29,8 @@ data class NotificationSettings(
                     system = map["system"] as? Boolean ?: true,
                     reactions = map["reactions"] as? Boolean ?: true,
                     connectionRequests = map["connectionRequests"] as? Boolean ?: true,
-                    broadcasts = map["broadcasts"] as? Boolean ?: true
+                    broadcasts = map["broadcasts"] as? Boolean ?: true,
+                    phone = map["phone"] as? Boolean ?: true
                 )
             } catch (e: Exception) {
                 NotificationSettings()

@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.noslop.app.MainActivity
 
 object NotificationHelper {
@@ -26,7 +27,26 @@ object NotificationHelper {
         }
     }
 
+    @Volatile
+    private var reportedBlocked = false
+
     fun showNotification(context: Context, title: String, message: String, deepLinkRoute: String? = null, notificationId: Int = System.currentTimeMillis().toInt()) {
+        // NOSLOP_PHONE_NOTIFICATIONS_V1 — the user's switch first (the in-app alert is saved by the caller
+        // either way), then Android's: without the permission on Android 13+ a notification is dropped.
+        val wanted = try {
+            com.noslop.app.NoSlopApp.repository.notificationSettingsFlow.value.phone
+        } catch (e: UninitializedPropertyAccessException) {
+            true
+        }
+        if (!wanted) return
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            if (!reportedBlocked) {
+                reportedBlocked = true
+                com.noslop.app.debug.Logger.warn("NOTIFY", "Android is blocking NoSlop's notifications; alerts show in the app only")
+            }
+            return
+        }
+        reportedBlocked = false
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         val intent = (launchIntent ?: Intent(context, MainActivity::class.java)).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP

@@ -587,6 +587,13 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             val notificationSettings by viewModel.notificationSettings.collectAsState()
                             
                             Text("Notifications".tr, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+
+                            // NOSLOP_PHONE_NOTIFICATIONS_V1 — the phone's notification shade, above the in-app choices.
+                            com.noslop.app.ui.components.PhoneNotificationsSetting(
+                                enabled = notificationSettings.phone,
+                                onEnabledChange = { viewModel.updateNotificationSettings(notificationSettings.copy(phone = it)) }
+                            )
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 4.dp))
                             
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

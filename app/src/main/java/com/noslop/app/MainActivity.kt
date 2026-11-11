@@ -207,6 +207,9 @@ class MainActivity : ComponentActivity() {
 
                         MainScreen(viewModel = viewModel, initialRoute = targetRoute)
                         com.noslop.app.ui.components.UpdateReadyPrompt()
+                        // NOSLOP_PHONE_NOTIFICATIONS_V1 — Android 13+ asks once; Settings can ask again.
+                        val phoneNotifications = viewModel.notificationSettings.collectAsState().value.phone
+                        com.noslop.app.ui.components.PhoneNotificationPermissionPrompt(wanted = phoneNotifications)
                     }
                 } else {
                     OnboardingScreen(
