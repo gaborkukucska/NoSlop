@@ -23,7 +23,7 @@ Only the latest release. These are alpha builds and the wire protocol has change
 
 * The Android app in `app/`: identity and key handling, DMs and group chats, the gossip and Tor transport, backups and the creator-identity file, media handling, and the update check and download.
 * The wire protocol in [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
-* The proxy Worker in [`proxy/`](proxy/), which carries YouTube, Reddit and Jamendo search requests.
+* The optional proxy Worker in [`proxy/`](proxy/), which people can run for YouTube, Reddit and Jamendo search requests. Official builds don't use one.
 
 ## What is out of scope
 
@@ -41,7 +41,7 @@ Several weaknesses are already known and written down, so you don't have to redi
 * If the Keystore-backed preferences can't be opened, secrets fall back to AES-GCM under a separate Keystore key, or, with no working Keystore, under a key derived from the device ID, which only obscures them. The app shows a warning when that happens.
 * Updates are checked against a SHA-256 checksum and the signing certificate, but there is no extra signature and no certificate pinning on the update check.
 * Packets pulled from a Hub skip the envelope signature check.
-* Rate limits are fixed per sender, and the default proxy secret ships inside the APK. The Worker forwards only the app's own requests and rate-limits them (`proxy/`), but anyone with the APK can sign requests.
+* Rate limits are fixed per sender. A build made with a proxy secret (`NOSLOP_PROXY_SECRET`) carries it inside the APK, where anyone can extract it; official builds have none. The Worker in `proxy/` forwards only the app's own requests and rate-limits them.
 * **Never reviewed by a human professional.** The primitives are standard ones from Bouncy Castle, but the protocol built from them is NoSlop's own. It has had repeated AI-assisted code reviews (kept in `docs/archived/`) and a lot of device testing, but no human professional has ever reviewed it. Review by someone qualified is very welcome.
 
 A new angle on any of these is welcome. A report that only restates one is still useful as a vote for fixing it sooner.

@@ -17,8 +17,9 @@ object ProxyAuth {
     val PROXY_SECRET: String
         get() = customProxySecret?.takeIf { it.isNotBlank() } ?: com.noslop.app.BuildConfig.PROXY_SECRET
 
+    /** NOSLOP_OPTIONAL_PROXY_V1 — the proxy is used only with both an address and a secret. */
     val isConfigured: Boolean
-        get() = PROXY_SECRET.isNotBlank()
+        get() = PROXY_URL.isNotBlank() && PROXY_SECRET.isNotBlank()
 
     fun setCustomProxy(url: String?, secret: String?) {
         customProxyUrl = url?.trim()?.removeSuffix("/")

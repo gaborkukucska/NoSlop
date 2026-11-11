@@ -164,7 +164,7 @@ NoSlop is early software. Please read this before you rely on it:
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption. Photos, videos and audio you send or receive are ordinary files in the app's own storage folder.
-* **Some requests pass through servers I run.** Search requests for YouTube, Reddit and Jamendo go through a Cloudflare Worker (source in [`proxy/`](proxy/)), which sees the search terms but, over Tor, not who sent them. Settings › Report an Issue goes through a relay at noslop.me and becomes a public GitHub issue. See the [FAQ](docs/FAQ.md).
+* **One server I run is involved, if you use it.** Settings › Report an Issue goes through a relay at noslop.me and becomes a public GitHub issue. The app uses no API proxy unless you set one up in Settings; [`proxy/`](proxy/) has a Cloudflare Worker you can run for that. See the [FAQ](docs/FAQ.md).
 * **Updates are checked, not authenticated.** The app verifies the APK's checksum and signing certificate, with no extra signature and no certificate pinning on the check.
 * **Never reviewed by a professional.** NoSlop uses standard cryptographic primitives, but the protocol built from them is its own, and no human professional has ever reviewed it. Read the [FAQ](docs/FAQ.md) before you trust it with anything sensitive.
 * **Back up your Word Cloud.** No server holds a copy of your identity, so there is no recovery.

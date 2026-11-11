@@ -987,7 +987,7 @@ Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
 - `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used by `MeshTransport` and mesh data paths.
 - `activeClearnetClient: OkHttpClient` — dynamic proxy client. Returns `torClient` if the user has enabled "Use Tor for Clearnet" (default: true), otherwise returns `rawClearnetClient`. Used by `FeedParser` and `feeds/api/*Client` classes.
 
-*Note on Cloudflare Worker API Proxy:* Because API providers (YouTube, Reddit, Jamendo) actively block Tor exit nodes, requests from `YouTubeInternalClient`, `RedditApiClient`, and `JamendoApiClient` are routed through a Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) when utilizing `activeClearnetClient`. This bypasses IP blocks over Tor. For details on proxy secret usage, direct fallback behavior, and media stream byte separation, see §15.
+*Note on the optional API proxy:* YouTube, Reddit and Jamendo sometimes refuse Tor exits. When a proxy URL and secret are set (Settings, or `NOSLOP_PROXY_URL` and `NOSLOP_PROXY_SECRET` at build time), `YouTubeInternalClient` search, `RedditApiClient` and `JamendoApiClient` try it first and fall back to a direct request. Official builds set neither, so they always go direct (`NOSLOP_OPTIONAL_PROXY_V1`). The Worker is in `proxy/`; see §15.1.
 
 ### 7.2 Source Library (`SourceLibrary.kt`)
 
@@ -1504,8 +1504,8 @@ is traceable rather than silently disappearing:
 
 An architectural audit of the legacy Android app codebase (`app/`) evaluated the privacy and security guarantees of key components, resulting in comprehensive security hardening implementations across the framework:
 
-### 15.1 Cloudflare Worker API Proxy (`yt-proxy.megadreamland.workers.dev`)
-- **Purpose**: API clients (`YouTubeInternalClient`, `RedditApiClient`, `JamendoApiClient`) send search/metadata requests to `https://yt-proxy.megadreamland.workers.dev` to prevent API providers from blocking Tor exit node IP ranges.
+### 15.1 Optional Cloudflare Worker API Proxy (`proxy/`)
+- **Purpose**: When a proxy URL and secret are set, API clients (`YouTubeInternalClient` search, `RedditApiClient`, `JamendoApiClient`) send search requests to it, so API providers don't see a Tor exit. `ProxyAuth.isConfigured` needs both; official builds set neither and go direct (`NOSLOP_OPTIONAL_PROXY_V1`). The Worker's allow list, rate limits and key rotation are described in `proxy/README.md`. The owner's own Worker (`yt-proxy.megadreamland.workers.dev`) was deleted on 2026-11-11.
 - **Dynamic HMAC Request Signing**: Standard requests generate dynamic HTTP headers `X-Proxy-Timestamp` and `X-Proxy-Signature` (`HMAC-SHA256(timestamp:payload, PROXY_SECRET)`), eliminating reliance on raw static secrets.
 - **Tor Circuit Cycling & Fallbacks**: If proxy requests return HTTP 403 or 429 rate limit responses over Tor, `YouTubeInternalClient` moves to a new circuit by bumping the video's stream nonce (§18.3). No process-wide `SIGNAL NEWNYM` is sent. When `useTorForClearnet = true`, all direct fallbacks strictly execute through `activeClearnetClient` (routed over Tor SOCKS5).
 - **API Metadata vs. Media Stream Bytes**: Cloudflare Worker only proxies API JSON queries. Actual video/audio stream playback bytes (`googlevideo.com`, `jamendo.com`, `v.redd.it`) bypass `yt-proxy` and are fetched directly via `activeMediaClient` (`activeClearnetClient`).
@@ -2702,9 +2702,10 @@ length rather than the frame.
 
 `PROXY_URL`, `PROXY_SECRET` and `PROXY_SEND_LEGACY_SECRET` are BuildConfig
 fields sourced from Gradle properties, with `PROXY_SEND_LEGACY_SECRET` defaulting
-to `false`. The shipped secret is no longer in the public repo and the raw secret
-never crosses the wire. Authentication is 100% dynamic HMAC-SHA256 verified by the
-Cloudflare Worker (`ACCEPT_LEGACY_SECRET = false`), reporting `X-Proxy-Auth: hmac`.
+to `false`. `PROXY_URL` and `PROXY_SECRET` default to empty, and no official build
+has set them (`NOSLOP_OPTIONAL_PROXY_V1`). The raw secret never crosses the wire:
+requests carry an HMAC-SHA256 signature, and the Worker in `proxy/` no longer
+accepts the raw-secret header at all.
 
 ### 17.7 Identity fallback — `NOSLOP_UNLOCK_FALLBACK_V1`
 

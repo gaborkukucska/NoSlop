@@ -40,18 +40,17 @@ android {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
 
-        // NOSLOP_PROXY_SECRET_V1
-        // The API proxy endpoint and its HMAC key. Set NOSLOP_PROXY_URL and
-        // NOSLOP_PROXY_SECRET in ~/.gradle/gradle.properties so the shipped
-        // values are not committed. The defaults preserve current behaviour for
-        // anyone building from a clean clone.
+        // NOSLOP_PROXY_SECRET_V1, NOSLOP_OPTIONAL_PROXY_V1
+        // The optional API proxy (the Worker in proxy/) and its HMAC key. Both are empty by
+        // default: a build uses no proxy unless NOSLOP_PROXY_URL and NOSLOP_PROXY_SECRET are set
+        // (in ~/.gradle/gradle.properties, not committed), or the user enters them in Settings.
         //
         // NOSLOP_PROXY_LEGACY_SECRET controls whether the raw secret is still
         // sent as an X-Proxy-Secret header. Defaults to false.
         buildConfigField(
             "String",
             "PROXY_URL",
-            "\"" + (project.findProperty("NOSLOP_PROXY_URL") ?: "https://yt-proxy.megadreamland.workers.dev") + "\""
+            "\"" + (project.findProperty("NOSLOP_PROXY_URL") ?: "") + "\""
         )
         buildConfigField(
             "String",

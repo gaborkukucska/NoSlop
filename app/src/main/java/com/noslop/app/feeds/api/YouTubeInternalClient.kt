@@ -273,12 +273,14 @@ object YouTubeInternalClient {
             if (items.isEmpty()) {
                 Logger.warn(TAG, "Parsed 0 videos from ${bodyStr.length} bytes (top-level keys: ${root.keySet().joinToString()})")
             } else {
-                Logger.info(TAG, "Fetched ${items.size} videos from InnerTube proxy for query: ${Logger.redact(query)}")
+                // NOSLOP_OPTIONAL_PROXY_V1 — say which way the search went.
+                val route = if (response.request.url.host.equals("www.youtube.com", ignoreCase = true)) "direct" else "proxy"
+                Logger.info(TAG, "Fetched ${items.size} videos from InnerTube search ($route) for query: ${Logger.redact(query)}")
             }
             return@withContext items
             
         } catch (e: Exception) {
-            Logger.error(TAG, "Failed to search InnerTube proxy: ${e.message}")
+            Logger.error(TAG, "InnerTube search failed: ${e.message}")
             return@withContext emptyList()
         }
     }

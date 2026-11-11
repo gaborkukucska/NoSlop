@@ -1,7 +1,10 @@
 # NoSlop proxy Worker
 
-YouTube, Reddit and Jamendo block many Tor exits. The app sends three kinds of request
-through this Cloudflare Worker so they still work over Tor:
+YouTube, Reddit and Jamendo sometimes refuse Tor exits. The official builds don't use a
+proxy; they go to those sites directly. If direct requests fail often for you, run this
+Cloudflare Worker and enter its address and secret in the app's Settings (Custom API Proxy
+URL and Custom API Proxy Secret). The app then sends three kinds of request through it,
+and falls back to a direct request when the Worker refuses or fails:
 
 | Route | Method | What the app asks for |
 |---|---|---|
@@ -23,8 +26,9 @@ can see the same requests.
 
 * **HMAC signature.** Every request carries `X-Proxy-Timestamp` and `X-Proxy-Signature`,
   HMAC-SHA256 of `<timestamp>:<payload>` (the URL for GET, the body for POST). Requests
-  more than 10 minutes old are refused. The key ships inside the APK, so treat it as a
-  speed bump, not a secret: the limits below are what stop abuse.
+  more than 10 minutes old are refused. If you build the key into an APK
+  (`NOSLOP_PROXY_SECRET`), anyone with the APK can extract it, so the limits below are what
+  stop abuse. A key entered only in Settings stays on the phone.
 * **Allow list.** Any other path or method is 404 or 405, so a leaked key can't use the
   Worker as a general proxy.
 * **Rate limits.** `CLIENT_LIMITER` per client address and route, `ROUTE_LIMITER` per
