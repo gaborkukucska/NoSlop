@@ -962,7 +962,10 @@ fun UnifiedFeedTab(
     LaunchedEffect(settledItemId) {
         // NOSLOP_FEED_POSITION_RESTORE_V2 — the slide under the pager while the Live Feed is being put
         // back at its saved item was never chosen by the user: don't save it, mark it read or count it.
-        if (viewModel.isRestoringFeedPositionAwayFrom(settledItemId)) return@LaunchedEffect
+        // NOSLOP_FRESH_LIST_TOP_V1 — landing on the target (the saved item, or page 0 of a fresh list)
+        // ends the wait, however the pager got there.
+        if (settledItemId != null) viewModel.onFeedPositionRestored(settledItemId, pagerState.settledPage)
+        if (viewModel.isRestoringFeedPositionAwayFrom(settledItemId, pagerState.settledPage)) return@LaunchedEffect
         val settledIndex = unifiedItems.indexOfFirst { it.id == settledItemId }
         if (settledItemId != null && settledIndex >= 0) {
             val currentItem = unifiedItems[settledIndex]
@@ -1063,8 +1066,9 @@ fun UnifiedFeedTab(
             lastSettledItemId = null // empty list: the next item shown is not reached by swiping
             return@LaunchedEffect
         }
-        // NOSLOP_FEED_POSITION_RESTORE_V2 — not reached by swiping either.
-        if (viewModel.isRestoringFeedPositionAwayFrom(settledItemId)) return@LaunchedEffect
+        // NOSLOP_FEED_POSITION_RESTORE_V2 — not reached by swiping either. NOSLOP_FRESH_LIST_TOP_V1: nor
+        // is the page a fresh list arrives on before its jump to page 0.
+        if (viewModel.isRestoringFeedPositionAwayFrom(settledItemId, pagerState.settledPage)) return@LaunchedEffect
         if (hasRestoredInitialPosition && unifiedItems.any { it.id == settledItemId }) {
             val listIds = unifiedItems.map { it.id }
             val passed = itemsSwipedPast(unifiedItems, lastSettledItemId, settledItemId, sameListAsBefore = listIds == lastSettledListIds)

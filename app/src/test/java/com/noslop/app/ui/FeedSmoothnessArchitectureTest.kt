@@ -76,6 +76,23 @@ class FeedSmoothnessArchitectureTest {
     }
 
     @Test
+    fun aFreshListWaitsForItsFirstPageBeforeCountingSwipes() {
+        // NOSLOP_FRESH_LIST_TOP_V1: a filter, list or search arrived on the old list's page, and its jump
+        // to page 0 was read as a swipe back over everything above it.
+        val vm = source("ui/NoSlopViewModel.kt")
+        assertEquals(
+            "filters and searches (applyFeedBatch), History, Saved/Liked and an author's posts",
+            4, Regex("""feedPositionRestore\.beginTop\(\)""").findAll(vm).count()
+        )
+        val tab = source("ui/UnifiedFeedTab.kt")
+        assertEquals(
+            "the settle effect and the swipe-past effect both wait",
+            2, Regex("""isRestoringFeedPositionAwayFrom\(settledItemId, pagerState\.settledPage\)""").findAll(tab).count()
+        )
+        assertTrue(tab.contains("viewModel.onFeedPositionRestored(settledItemId, pagerState.settledPage)"))
+    }
+
+    @Test
     fun thePlayerIsKeptMountedThroughTheSwipe() {
         val video = source("ui/components/VideoPlayer.kt")
         assertTrue(video.contains("if (keepPlayerMounted) {"))

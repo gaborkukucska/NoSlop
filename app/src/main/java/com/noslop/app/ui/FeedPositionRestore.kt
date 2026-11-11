@@ -20,27 +20,51 @@ internal class FeedPositionRestore(
     @Volatile
     private var target: String? = null
     @Volatile
+    private var toTop = false
+    @Volatile
     private var startedAtMs = 0L
 
     /** A restore to [itemId] starts now. Null means no restore (the list goes to the top instead). */
     fun begin(itemId: String?) {
         startedAtMs = now()
+        toTop = false
         target = itemId
     }
 
-    /** True while a restore is pending and [itemId] is not its target. */
-    fun isAwayFrom(itemId: String?): Boolean {
-        val pending = target ?: return false
-        if (now() - startedAtMs > maxWaitMs) {
-            target = null
-            return false
-        }
-        return itemId != pending
+    /**
+     * --- NOSLOP_FRESH_LIST_TOP_V1 ---
+     * A fresh list (a filter, a list or a search) is on its way to its first page. It reaches the screen
+     * with the pager on the page it had in the old list, and the jump to page 0 lands a frame later; read
+     * as a swipe, that jump marked every item above the old page as read, viewed and swiped. Until page 0
+     * is reached, any other page is ignored.
+     */
+    fun beginTop() {
+        startedAtMs = now()
+        target = null
+        toTop = true
     }
 
-    /** The pager reached [itemId]: a restore waiting for it is done. */
-    fun reached(itemId: String) {
-        if (target == itemId) target = null
+    /**
+     * True while a restore is pending and the pager is not at its target: [itemId] for a restore to an
+     * item, page 0 for a fresh list ([page] is the pager's settled page, -1 when not known).
+     */
+    fun isAwayFrom(itemId: String?, page: Int = -1): Boolean {
+        if (target == null && !toTop) return false
+        if (now() - startedAtMs > maxWaitMs) {
+            target = null
+            toTop = false
+            return false
+        }
+        return if (toTop) page != 0 else itemId != target
+    }
+
+    /** The pager reached [itemId] on [page]: a restore waiting for it is done. */
+    fun reached(itemId: String?, page: Int = -1) {
+        if (toTop) {
+            if (page == 0) toTop = false
+        } else if (target != null && target == itemId) {
+            target = null
+        }
     }
 
     companion object {

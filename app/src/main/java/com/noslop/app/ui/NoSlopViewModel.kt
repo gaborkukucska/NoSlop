@@ -218,11 +218,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     // --- NOSLOP_FEED_POSITION_RESTORE_V2 --- see FeedPositionRestore.
     private val feedPositionRestore = FeedPositionRestore()
 
-    /** True while the Live Feed is being put back at its saved item and [itemId] is another item. */
-    fun isRestoringFeedPositionAwayFrom(itemId: String?): Boolean = feedPositionRestore.isAwayFrom(itemId)
+    /**
+     * True while the feed is on its way to a target and the pager is not there yet: the Live Feed's
+     * saved item, or page 0 of a fresh list (NOSLOP_FRESH_LIST_TOP_V1). [page] is the settled page.
+     */
+    fun isRestoringFeedPositionAwayFrom(itemId: String?, page: Int = -1): Boolean =
+        feedPositionRestore.isAwayFrom(itemId, page)
 
-    /** The pager has reached [itemId]; a restore waiting for it is done. */
-    fun onFeedPositionRestored(itemId: String) = feedPositionRestore.reached(itemId)
+    /** The pager has reached [itemId] on [page]; a wait for it is done. */
+    fun onFeedPositionRestored(itemId: String?, page: Int = -1) = feedPositionRestore.reached(itemId, page)
     private val _savedActiveItemId = MutableStateFlow<String?>(null)
     val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
     private val _isSavedPositionLoaded = MutableStateFlow(false)
@@ -1233,6 +1237,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
         }
         if (isInitialLoad) {
+            feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
             viewModelScope.launch {
                 kotlinx.coroutines.delay(50)
                 _scrollToTopEvent.emit(Unit)
@@ -1289,6 +1294,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
         }
         if (isInitialLoad) {
+            feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
             viewModelScope.launch {
                 kotlinx.coroutines.delay(50)
                 _scrollToTopEvent.emit(Unit)
@@ -1995,6 +2001,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
             // Force the Pager to snap to the top (Index 0) on fresh filter loads
             if (plan.isInitialLoad) {
+                // NOSLOP_FRESH_LIST_TOP_V1 — not for the plain Live Feed, which restores its saved slide.
+                if (actualFilter != "Live Feed" || activeSearchQuery.isNotBlank()) feedPositionRestore.beginTop()
                 viewModelScope.launch {
                     kotlinx.coroutines.delay(150)
                     _scrollToTopEvent.emit(Unit)
@@ -2840,6 +2848,8 @@ fun toggleAggregator() {
             _unifiedFeed.value = emptyList()
             sessionLoadedIds.clear()
             loadMoreFeedItems(filter)
+            // NOSLOP_FRESH_LIST_TOP_V1 — to the post asked for, or to the top.
+            if (targetPostId != null) feedPositionRestore.begin(targetPostId) else feedPositionRestore.beginTop()
             selectTab(0)
             if (targetPostId != null) {
                 kotlinx.coroutines.delay(100)
