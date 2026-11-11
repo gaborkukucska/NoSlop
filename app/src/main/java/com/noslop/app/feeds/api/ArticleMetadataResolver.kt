@@ -84,6 +84,43 @@ object ArticleMetadataResolver {
         return@withContext null
     }
 
+    // --- NOSLOP_ARTICLE_DESCRIPTION_V1 ---
+    // The description a linked page gives of itself, for an article slide with no text of its own.
+    // "" marks a page that answered without one, so it is not asked again this session; a failed
+    // request is not remembered and may be tried again when the slide comes back.
+    private val descriptionCache = ConcurrentHashMap<String, String>()
+    private const val DESCRIPTION_READ_LIMIT = 256 * 1024
+
+    fun getCachedDescription(articleUrl: String?): String? {
+        if (articleUrl.isNullOrBlank()) return null
+        return descriptionCache[normalizeKey(articleUrl)]?.takeIf { it.isNotEmpty() }
+    }
+
+    suspend fun resolveDescription(articleUrl: String?): String? = withContext(Dispatchers.IO) {
+        if (articleUrl == null || !isDescribableArticleUrl(articleUrl)) return@withContext null
+        val key = normalizeKey(articleUrl)
+        descriptionCache[key]?.let { return@withContext it.takeIf { d -> d.isNotEmpty() } }
+        try {
+            val request = okhttp3.Request.Builder()
+                .url(articleUrl)
+                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop; Mozilla/5.0)")
+                .build()
+            com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val head = response.body?.byteStream()?.let { readUpTo(it, DESCRIPTION_READ_LIMIT) } ?: ""
+                val found = extractPageDescription(head)
+                descriptionCache[key] = found ?: ""
+                if (found != null) Logger.debug(TAG, "Resolved a page description (${found.length} chars)")
+                found
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Failed to resolve a page description: ${e.message}")
+            null
+        }
+    }
+
     private fun normalizeKey(url: String): String {
         return url.trim().lowercase().substringBefore("?").substringBefore("#")
     }

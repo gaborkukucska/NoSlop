@@ -210,7 +210,6 @@ object RedditApiClient {
         val title = rssText(entry, "title")?.takeIf { it.isNotBlank() } ?: return null
         val permalink = rssAttribute(entry, "link", "href") ?: return null
         val author = rssText(entry, "name")?.removePrefix("/u/")
-        val subreddit = rssAttribute(entry, "category", "term") ?: ""
         val content = rssText(entry, "content") ?: ""
         val linked = Regex("<a href=\"([^\"]+)\">\\s*\\[link\\]").find(content)?.groupValues?.get(1)?.let { unescapeXml(it) }
         val selftext = Regex("<div class=\"md\">(.*?)</div>", RegexOption.DOT_MATCHES_ALL).find(content)
@@ -228,7 +227,9 @@ object RedditApiClient {
             title = title,
             url = if (linked.isNullOrBlank() || isRedditPage) permalink else linked,
             author = "u/$author",
-            excerpt = selftext?.takeIf { it.isNotBlank() } ?: "r/$subreddit · by u/$author",
+            // NOSLOP_FEED_TYPES_V1 — no "r/sub · by u/author" stand-in: the reader shows the linked
+            // page's description for a post with no text of its own.
+            excerpt = selftext?.takeIf { it.isNotBlank() } ?: "",
             thumbnailUrl = thumbnail ?: if (isImage) linked else null,
             publishedAt = com.noslop.app.feeds.FeedParser.parseDate(rssText(entry, "published") ?: rssText(entry, "updated")),
             mediaUrl = if (isImage) linked else null,
@@ -336,8 +337,8 @@ object RedditApiClient {
             thumbnailUrl = previewUrl
         }
 
-        val subreddit = data.get("subreddit")?.asString ?: ""
-        val excerpt = if (!selftext.isNullOrBlank()) selftext else "r/$subreddit · by u/$author"
+        // NOSLOP_FEED_TYPES_V1 — as for RSS: the post's own text, or nothing.
+        val excerpt = if (!selftext.isNullOrBlank()) selftext else ""
 
         return FeedItem(
             id = "reddit_$name",

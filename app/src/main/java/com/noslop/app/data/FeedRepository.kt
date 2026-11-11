@@ -141,9 +141,29 @@ class FeedRepository(
         Logger.info(TAG, "Cleared previous feed items and sources")
     }
 
+    /**
+     * NOSLOP_FEED_TYPES_V1 — once per install: rows stored before the feed type rules keep their old
+     * type, because a later fetch of the same item is ignored. Removes the generic parser's copies of
+     * Reddit posts and the untyped photo stream items (both refetched correctly) and clears the stored
+     * Reddit stand-in excerpts.
+     */
+    private suspend fun repairFeedTypesOnce() {
+        if (appSettingDao.getSetting(com.noslop.app.feeds.FEED_TYPES_REPAIR_SETTING) != null) return
+        val redditCopies = feedDao.deleteGenericRedditCopies()
+        val photos = feedDao.deleteUntypedPhotoStreamItems(com.noslop.app.feeds.PHOTO_STREAM_SOURCE_IDS.toList())
+        val excerpts = feedDao.clearRedditPlaceholderExcerpts()
+        appSettingDao.insertSetting(AppSetting(com.noslop.app.feeds.FEED_TYPES_REPAIR_SETTING, System.currentTimeMillis().toString()))
+        Logger.info(
+            TAG,
+            "Feed type repair: removed $redditCopies generic Reddit copies and $photos untyped photo stream items, " +
+                "cleared $excerpts Reddit stand-in excerpts"
+        )
+    }
+
     /** Applies [FeedRetention], at most once a day. */
     suspend fun pruneFeedItemsIfDue(nowMs: Long = System.currentTimeMillis()) = withContext(Dispatchers.IO) {
         try {
+            repairFeedTypesOnce()
             val lastRun = appSettingDao.getSetting(FeedRetention.LAST_RUN_SETTING)?.toLongOrNull()
             if (!FeedRetention.isDue(lastRun, nowMs)) return@withContext
             val staleBefore = nowMs - FeedRetention.RETENTION_MS

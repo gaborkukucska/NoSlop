@@ -86,6 +86,29 @@ interface FeedDao {
     @Query("DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0")
     suspend fun clearUnsavedItems()
 
+    // --- NOSLOP_FEED_TYPES_V1 --- one-off repair of rows stored before the feed type rules
+    // (FeedTypeRules). Saved items and anything in viewing history are kept.
+
+    /** Reddit posts stored by the generic feed parser; RedditApiClient's copies (reddit_...) stay. */
+    @Query(
+        "DELETE FROM feed_items WHERE isSaved = 0 AND id NOT LIKE 'reddit!_%' ESCAPE '!' " +
+        "AND url LIKE '%://www.reddit.com/r/%' " +
+        "AND id NOT IN (SELECT itemId FROM viewed_history)"
+    )
+    suspend fun deleteGenericRedditCopies(): Int
+
+    /** Photo stream items stored as articles; the next sync stores them as images. */
+    @Query(
+        "DELETE FROM feed_items WHERE isSaved = 0 AND sourceId IN (:sourceIds) " +
+        "AND (mediaType IS NULL OR mediaType = '') " +
+        "AND id NOT IN (SELECT itemId FROM viewed_history)"
+    )
+    suspend fun deleteUntypedPhotoStreamItems(sourceIds: List<String>): Int
+
+    /** The "r/sub · by u/author" stand-in the Reddit parsers used to store as an excerpt. */
+    @Query("UPDATE feed_items SET excerpt = '' WHERE apiSource = 'reddit' AND excerpt LIKE 'r/% · by u/%'")
+    suspend fun clearRedditPlaceholderExcerpts(): Int
+
     // --- NOSLOP_FEED_RETENTION_V1 --- the rules are explained in FeedRetention.
 
     @Query(

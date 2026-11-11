@@ -53,6 +53,9 @@ class FakeFeedDao : FeedDao {
     override suspend fun deleteStaleUnreadItems(staleBefore: Long): Int = 0
     override suspend fun getRemovableUnreadCount(): Int = 0
     override suspend fun deleteOldestUnreadItems(count: Int): Int = 0
+    override suspend fun deleteGenericRedditCopies(): Int = 0
+    override suspend fun deleteUntypedPhotoStreamItems(sourceIds: List<String>): Int = 0
+    override suspend fun clearRedditPlaceholderExcerpts(): Int = 0
 }
 
 /** Fake [ViewedHistoryDao] preserving insert-IGNORE semantics, count, and oldest-first pruning. */

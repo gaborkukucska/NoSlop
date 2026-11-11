@@ -53,8 +53,16 @@ object FeedParser {
             com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful && response.body != null) {
                     Logger.info(TAG, "Successfully fetched feed: $feedUrl (HTTP ${response.code})")
-                    response.body!!.byteStream().use { stream ->
-                        parseStream(stream, sourceId, feedUrl)
+                    if (isRedditFeedUrl(feedUrl)) {
+                        // NOSLOP_FEED_TYPES_V1 — the same posts reach the Reddit API categories, read by
+                        // RedditApiClient. One parser keeps one id per post, and one set of rules.
+                        val page = com.noslop.app.feeds.api.RedditApiClient.parseRssListing(response.body!!.string(), sourceId)
+                        if (page == null) Logger.warn(TAG, "Reddit feed for $sourceId was not a feed")
+                        page?.items ?: emptyList()
+                    } else {
+                        response.body!!.byteStream().use { stream ->
+                            parseStream(stream, sourceId, feedUrl)
+                        }
                     }
                 } else {
                     Logger.warn(TAG, "Server returned HTTP ${response.code} for $feedUrl. Response: ${response.message}")
@@ -79,6 +87,7 @@ object FeedParser {
 
             var eventType = parser.eventType
             var isAtom = false
+            val photoStream = isPhotoStreamFeed(sourceId, feedUrl) // NOSLOP_FEED_TYPES_V1
 
             while (eventType != XmlPullParser.END_DOCUMENT) {
                 val name = parser.name
@@ -86,9 +95,9 @@ object FeedParser {
                     if (name.equals("feed", ignoreCase = true)) {
                         isAtom = true
                     } else if (name.equals("item", ignoreCase = true) && !isAtom) {
-                        list.add(parseRssItem(parser, sourceId))
+                        list.add(parseRssItem(parser, sourceId, photoStream))
                     } else if (name.equals("entry", ignoreCase = true) && isAtom) {
-                        list.add(parseAtomEntry(parser, sourceId))
+                        list.add(parseAtomEntry(parser, sourceId, photoStream))
                     }
                 }
                 eventType = parser.next()
@@ -136,7 +145,7 @@ object FeedParser {
         }
     }
 
-    private fun parseRssItem(parser: XmlPullParser, sourceId: String): FeedItem {
+    private fun parseRssItem(parser: XmlPullParser, sourceId: String, photoStream: Boolean = false): FeedItem {
         var title = ""
         var link = ""
         var author: String? = null
@@ -168,6 +177,11 @@ object FeedParser {
                             val derivedType = getMediaType(encUrl, encType)
                             if (derivedType == "image") {
                                 if (thumbnailUrl == null) thumbnailUrl = encUrl
+                                // NOSLOP_FEED_TYPES_V1 — in a photo stream the image is the item itself.
+                                if (photoStream && mediaUrl == null) {
+                                    mediaUrl = encUrl
+                                    mediaType = "image"
+                                }
                             } else {
                                 mediaUrl = encUrl
                                 mediaType = derivedType
@@ -231,7 +245,7 @@ object FeedParser {
         )
     }
 
-    private fun parseAtomEntry(parser: XmlPullParser, sourceId: String): FeedItem {
+    private fun parseAtomEntry(parser: XmlPullParser, sourceId: String, photoStream: Boolean = false): FeedItem {
         var title = ""
         var link = ""
         var authorStr: String? = null
@@ -256,6 +270,11 @@ object FeedParser {
                             val derivedType = getMediaType(href, type)
                             if (derivedType == "image") {
                                 if (thumbnailUrl == null) thumbnailUrl = href
+                                // NOSLOP_FEED_TYPES_V1 — in a photo stream the image is the item itself.
+                                if (photoStream && mediaUrl == null) {
+                                    mediaUrl = href
+                                    mediaType = "image"
+                                }
                             } else {
                                 mediaUrl = href
                                 mediaType = derivedType
@@ -282,6 +301,11 @@ object FeedParser {
                             val derivedType = getMediaType(encUrl, encType)
                             if (derivedType == "image") {
                                 if (thumbnailUrl == null) thumbnailUrl = encUrl
+                                // NOSLOP_FEED_TYPES_V1 — in a photo stream the image is the item itself.
+                                if (photoStream && mediaUrl == null) {
+                                    mediaUrl = encUrl
+                                    mediaType = "image"
+                                }
                             } else {
                                 mediaUrl = encUrl
                                 mediaType = derivedType

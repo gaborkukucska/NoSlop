@@ -410,7 +410,17 @@ fun SegmentedArticleReader(
     modifier: Modifier = Modifier,
     publishedAt: Long = 0L
 ) {
-    val rawContent = content.ifBlank { "" }
+    // --- NOSLOP_ARTICLE_DESCRIPTION_V1 --- a post with no text of its own (a Reddit link post: Reddit's
+    // feed carries only the title) shows the linked page's own description instead of an empty page.
+    var resolvedDescription by remember(articleUrl) {
+        mutableStateOf(com.noslop.app.feeds.api.ArticleMetadataResolver.getCachedDescription(articleUrl))
+    }
+    LaunchedEffect(articleUrl, content.isBlank()) {
+        if (content.isBlank() && resolvedDescription == null && com.noslop.app.feeds.api.isDescribableArticleUrl(articleUrl)) {
+            resolvedDescription = com.noslop.app.feeds.api.ArticleMetadataResolver.resolveDescription(articleUrl)
+        }
+    }
+    val rawContent = content.ifBlank { resolvedDescription ?: "" }
     val context = LocalContext.current
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
     
