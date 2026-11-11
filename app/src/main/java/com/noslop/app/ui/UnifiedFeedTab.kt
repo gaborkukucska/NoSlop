@@ -865,6 +865,10 @@ fun UnifiedFeedTab(
         viewModel.updateActiveSearchQuery(searchQuery)
         if (!filterMode.startsWith("Author:") && (filterMode != "Live Feed" || searchQuery.isNotBlank())) {
             forceScrollToTop = true
+        } else if (filterMode == "Live Feed" && searchQuery.isBlank()) {
+            // NOSLOP_FEED_POSITION_RESTORE_V2 — a filtered list that came back empty never consumed its
+            // jump to the top, and the Live Feed took it on the way back instead of its saved position.
+            forceScrollToTop = false
         }
         if (searchQuery.isBlank()) {
             viewModel.syncFilterMode(filterMode)
@@ -929,6 +933,7 @@ fun UnifiedFeedTab(
                 lastSettledItemId = target
                 lastSettledListIds = unifiedItems.map { it.id }
                 restoreItemId = null // Consumed
+                viewModel.onFeedPositionRestored(target) // NOSLOP_FEED_POSITION_RESTORE_V2
             }
         }
     }
@@ -955,6 +960,9 @@ fun UnifiedFeedTab(
     // new slide, so it no longer re-runs this or counts towards the break reminder.
     val settledItemId = unifiedItems.getOrNull(pagerState.settledPage)?.id
     LaunchedEffect(settledItemId) {
+        // NOSLOP_FEED_POSITION_RESTORE_V2 — the slide under the pager while the Live Feed is being put
+        // back at its saved item was never chosen by the user: don't save it, mark it read or count it.
+        if (viewModel.isRestoringFeedPositionAwayFrom(settledItemId)) return@LaunchedEffect
         val settledIndex = unifiedItems.indexOfFirst { it.id == settledItemId }
         if (settledItemId != null && settledIndex >= 0) {
             val currentItem = unifiedItems[settledIndex]
@@ -1055,6 +1063,8 @@ fun UnifiedFeedTab(
             lastSettledItemId = null // empty list: the next item shown is not reached by swiping
             return@LaunchedEffect
         }
+        // NOSLOP_FEED_POSITION_RESTORE_V2 — not reached by swiping either.
+        if (viewModel.isRestoringFeedPositionAwayFrom(settledItemId)) return@LaunchedEffect
         if (hasRestoredInitialPosition && unifiedItems.any { it.id == settledItemId }) {
             val listIds = unifiedItems.map { it.id }
             val passed = itemsSwipedPast(unifiedItems, lastSettledItemId, settledItemId, sameListAsBefore = listIds == lastSettledListIds)

@@ -214,6 +214,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var isSearchModeActive = false
     private var savedFeedItemId: String? = null
     val currentSavedFeedItemId: String? get() = savedFeedItemId
+
+    // --- NOSLOP_FEED_POSITION_RESTORE_V2 --- see FeedPositionRestore.
+    private val feedPositionRestore = FeedPositionRestore()
+
+    /** True while the Live Feed is being put back at its saved item and [itemId] is another item. */
+    fun isRestoringFeedPositionAwayFrom(itemId: String?): Boolean = feedPositionRestore.isAwayFrom(itemId)
+
+    /** The pager has reached [itemId]; a restore waiting for it is done. */
+    fun onFeedPositionRestored(itemId: String) = feedPositionRestore.reached(itemId)
     private val _savedActiveItemId = MutableStateFlow<String?>(null)
     val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
     private val _isSavedPositionLoaded = MutableStateFlow(false)
@@ -342,6 +351,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun saveFeedPosition(itemId: String) {
+        // NOSLOP_FEED_POSITION_RESTORE_V2 — the item on screen while a restore is on its way is not the
+        // user's position.
+        if (feedPositionRestore.isAwayFrom(itemId)) return
         if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
             savedFeedItemId = itemId
             cachedDefaultFeed = _unifiedFeed.value.toList()
@@ -971,13 +983,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     activeSearchQuery = ""
                 }
                 if (cachedDefaultFeed.isNotEmpty() && !forceRefresh) {
+                    // NOSLOP_FEED_POSITION_RESTORE_V2 — the target is taken before the list is swapped in.
+                    val restoreTarget = savedFeedItemId
+                    feedPositionRestore.begin(restoreTarget)
                     _unifiedFeed.value = cachedDefaultFeed.toList()
                     sessionLoadedIds.clear()
                     sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
                     viewModelScope.launch {
                         kotlinx.coroutines.delay(50)
-                        if (savedFeedItemId != null) {
-                            _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                        if (restoreTarget != null) {
+                            _restoreScrollPositionEvent.emit(restoreTarget)
                         } else {
                             _scrollToTopEvent.emit(Unit)
                         }
@@ -1111,6 +1126,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     _isRefreshingFeeds.value = false
                 }
                 
+                // NOSLOP_FEED_POSITION_RESTORE_V2 — the target is taken before the list is swapped in.
+                val restoreTarget = savedFeedItemId
+                if (cachedDefaultFeed.isNotEmpty()) feedPositionRestore.begin(restoreTarget)
                 _unifiedFeed.value = cachedDefaultFeed.toList()
                 
                 sessionLoadedIds.clear()
@@ -1120,8 +1138,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     loadMoreFeedItems("Live Feed")
                 } else {
                     kotlinx.coroutines.delay(50)
-                    if (savedFeedItemId != null) {
-                        _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                    if (restoreTarget != null) {
+                        _restoreScrollPositionEvent.emit(restoreTarget)
                     } else {
                         _scrollToTopEvent.emit(Unit)
                     }
