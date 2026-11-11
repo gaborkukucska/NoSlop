@@ -817,7 +817,10 @@ fun UnifiedFeedTab(
             val matchesMode = when (filterMode) {
                 "Live Feed" -> true
                 "History" -> true
-                "Liked", "Saved" -> item is UnifiedItem.Feed && item.item.isSaved
+                // NOSLOP_LIKED_LIST_V1 — the ViewModel builds Liked from reactions; a liked item may be
+                // a mesh post, and one taken out of Saved is still liked.
+                "Liked" -> item is UnifiedItem.Feed || item is UnifiedItem.Mesh
+                "Saved" -> item is UnifiedItem.Feed && item.item.isSaved
                 "Videos" -> isVideoItem(item)
                 "Images" -> isImageItem(item)
                 "Audio" -> isAudioItem(item)
@@ -1157,7 +1160,16 @@ fun UnifiedFeedTab(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Content you view will appear here chronologically.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
                     }
-                } else if (filterMode == "Liked" || filterMode == "Saved") {
+                } else if (filterMode == "Liked") {
+                    // NOSLOP_LIKED_LIST_V1
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.Favorite, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No Liked Items".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Items you react to with ❤️, 👍 or another positive reaction will appear here.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (filterMode == "Saved") {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Icon(Icons.Default.Bookmark, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(16.dp))

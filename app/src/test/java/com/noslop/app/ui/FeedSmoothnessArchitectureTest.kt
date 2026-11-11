@@ -81,8 +81,8 @@ class FeedSmoothnessArchitectureTest {
         // to page 0 was read as a swipe back over everything above it.
         val vm = source("ui/NoSlopViewModel.kt")
         assertEquals(
-            "filters and searches (applyFeedBatch), History, Saved/Liked and an author's posts",
-            4, Regex("""feedPositionRestore\.beginTop\(\)""").findAll(vm).count()
+            "filters and searches (applyFeedBatch), History, Saved, Liked (NOSLOP_LIKED_LIST_V1) and an author's posts",
+            5, Regex("""feedPositionRestore\.beginTop\(\)""").findAll(vm).count()
         )
         val tab = source("ui/UnifiedFeedTab.kt")
         assertEquals(

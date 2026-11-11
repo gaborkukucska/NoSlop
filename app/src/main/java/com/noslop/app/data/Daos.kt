@@ -668,6 +668,10 @@ interface ReactionDao {
 
     @Query("SELECT * FROM mesh_reactions")
     suspend fun getAllReactionsList(): List<MeshReaction>
+
+    // --- NOSLOP_LIKED_LIST_V1 --- the reactions of [types] made by [authors].
+    @Query("SELECT * FROM mesh_reactions WHERE authorPublicKeyB64 IN (:authors) AND reactionType IN (:types)")
+    suspend fun getReactionsBy(authors: List<String>, types: List<String>): List<MeshReaction>
 }
 
 @Dao
@@ -713,6 +717,10 @@ interface VoteDao {
 
     @Query("SELECT DISTINCT postId FROM mesh_votes")
     suspend fun getAllVotedPostIds(): List<String>
+
+    // --- NOSLOP_LIKED_LIST_V1 --- the upvotes made by [authors].
+    @Query("SELECT * FROM mesh_votes WHERE authorPublicKeyB64 IN (:authors) AND voteType = 'upvote'")
+    suspend fun getUpvotesBy(authors: List<String>): List<MeshVote>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVote(vote: MeshVote)

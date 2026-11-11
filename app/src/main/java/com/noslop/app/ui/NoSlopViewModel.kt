@@ -1245,6 +1245,70 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // --- NOSLOP_LIKED_LIST_V1 ---
+    // The Liked list: feed items and other people's mesh posts this device's identities reacted to
+    // positively (data/LikedItems.kt), newest like first, 30 at a time. It used to be the Saved list.
+    private var likedLoadInFlight = false
+
+    private fun loadLikedBatch(isInitialLoad: Boolean, query: String = activeSearchQuery) {
+        if (likedLoadInFlight) return
+        likedLoadInFlight = true
+        val shownKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+        val feeds = allFeeds
+        val meshes = allMeshes
+        val ownKeys = setOfNotNull(localKeys.value?.publicKeyB64, burnableKeys.value?.publicKeyB64)
+        val terms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        viewModelScope.launch {
+            try {
+                val likedAt = repository.getOwnLikeTimes()
+                val batch = withContext(Dispatchers.Default) {
+                    val feedSource = feeds.ifEmpty { repository.getSavedFeedItemsList() }
+                    val candidates: List<UnifiedItem> = feedSource.map { UnifiedItem.Feed(it) } +
+                        meshes.filter { !it.isOrphaned && !it.id.startsWith("clearnet_") && it.authorPublicKeyB64 !in ownKeys }
+                            .map { UnifiedItem.Mesh(it) }
+                    com.noslop.app.data.nextLikedPage(
+                        candidates = candidates,
+                        likedAt = { item ->
+                            when (item) {
+                                is UnifiedItem.Feed -> item.item.url?.takeIf { it.isNotBlank() }
+                                    ?.let { likedAt[com.noslop.app.data.ReactionAnchor.forUrl(it)] }
+                                is UnifiedItem.Mesh -> likedAt[item.post.id]
+                                else -> null
+                            }
+                        },
+                        isShown = { com.noslop.app.data.getCanonicalItemKey(it) in shownKeys },
+                        matches = { item -> likedItemMatches(item, terms) },
+                        limit = 30
+                    )
+                }
+                if (currentFilterMode != "Liked" || activeSearchQuery != query || batch.isEmpty()) return@launch
+                sessionLoadedIds.addAll(batch.map { it.id })
+                _unifiedFeed.value = (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                if (isInitialLoad) {
+                    feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
+                    kotlinx.coroutines.delay(50)
+                    _scrollToTopEvent.emit(Unit)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.error("VM", "Building the Liked list failed: ${e.message}")
+            } finally {
+                likedLoadInFlight = false
+            }
+        }
+    }
+
+    private fun likedItemMatches(item: UnifiedItem, terms: List<String>): Boolean {
+        if (terms.isEmpty()) return true
+        val text = when (item) {
+            is UnifiedItem.Feed -> listOfNotNull(item.item.title, item.item.author, item.item.excerpt, item.item.fullContent)
+            is UnifiedItem.Mesh -> listOfNotNull(item.post.content, item.post.clearnetTitle, item.post.authorHandle)
+            else -> emptyList()
+        }.joinToString(" ").lowercase()
+        return terms.all { text.contains(it) }
+    }
+
     private fun loadSavedBatch(
         isInitialLoad: Boolean,
         query: String = activeSearchQuery
@@ -1337,7 +1401,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        if (actualFilter == "Liked" || actualFilter == "Saved") {
+        if (actualFilter == "Liked") {
+            // NOSLOP_LIKED_LIST_V1 — what the user liked, not everything they saved.
+            loadLikedBatch(_unifiedFeed.value.isEmpty(), activeSearchQuery)
+            return
+        }
+        if (actualFilter == "Saved") {
             val isInitialLoad = _unifiedFeed.value.isEmpty()
             loadSavedBatch(isInitialLoad, activeSearchQuery)
             return

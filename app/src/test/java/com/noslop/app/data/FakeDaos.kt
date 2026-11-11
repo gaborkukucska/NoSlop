@@ -119,6 +119,8 @@ class FakeReactionDao : ReactionDao {
     override suspend fun deleteReactionsForPost(postId: String) { store.values.removeAll { it.postId == postId } }
     override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
     override suspend fun getAllReactionsList(): List<MeshReaction> = store.values.toList()
+    override suspend fun getReactionsBy(authors: List<String>, types: List<String>): List<MeshReaction> =
+        store.values.filter { it.authorPublicKeyB64 in authors && it.reactionType in types }
 }
 
 /** Fake [VoteDao] with get-by-id / insert / delete semantics for the vote toggle logic. */
@@ -132,6 +134,8 @@ class FakeVoteDao : VoteDao {
     override suspend fun deleteVotesByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteVotesForPost(postId: String) { store.values.removeAll { it.postId == postId } }
     override suspend fun getAllVotedPostIds(): List<String> = store.values.map { it.postId }.distinct()
+    override suspend fun getUpvotesBy(authors: List<String>): List<MeshVote> =
+        store.values.filter { it.authorPublicKeyB64 in authors && it.voteType == "upvote" }
 }
 
 /** Fake [PeerDao] keyed by public key (REPLACE on insert). */

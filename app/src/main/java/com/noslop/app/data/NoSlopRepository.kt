@@ -2646,6 +2646,21 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun reactToFeedItem(item: FeedItem) = meshSocialRepository.reactToFeedItem(item)
 
+    /**
+     * NOSLOP_LIKED_LIST_V1 — when each post was last liked by this device's own identities: a positive
+     * reaction (POSITIVE_REACTIONS) or, on a mesh post, an upvote. Feed items are liked through their
+     * anchor post (ReactionAnchor).
+     */
+    suspend fun getOwnLikeTimes(): Map<String, Long> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val own = listOfNotNull(getLocalIdentity()?.publicKeyB64, getBurnableIdentity()?.publicKeyB64).distinct()
+        if (own.isEmpty()) return@withContext emptyMap()
+        val reactions = db.reactionDao().getReactionsBy(own, POSITIVE_REACTIONS.toList())
+            .map { LikeMark(it.postId, it.authorPublicKeyB64, it.reactionType, it.timestamp) }
+        val upvotes = db.voteDao().getUpvotesBy(own)
+            .map { LikeMark(it.postId, it.authorPublicKeyB64, it.voteType, it.timestamp) }
+        likedAtByPost(reactions + upvotes, own.toSet())
+    }
+
     suspend fun getReactedAnchorIds(): Set<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val reactionIds = db.reactionDao().getAllReactionsList().map { it.postId }.toSet()
         val voteIds = db.voteDao().getAllVotedPostIds().toSet()
