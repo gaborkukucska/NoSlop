@@ -160,7 +160,7 @@ NoSlop is early software. Please read this before you rely on it:
 
 * **Alpha, Android first.** Expect rough edges. Releases are tested to the best of my ability, on many devices, but they stay marked alpha until qualified developers have contributed enough to the project. An iOS and desktop port is in progress under `mvp/`.
 * **Sideloaded.** There is no store listing: install the APK from the GitHub releases page and verify its SHA-256 checksum.
-* **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice, and the terms of some sources are still unchecked. More sources are welcome from the community.
+* **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice. Some of these uses go against the source's own terms; [docs/SOURCES.md](docs/SOURCES.md) records each source's terms and status. More sources are welcome from the community (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption. Photos, videos and audio you send or receive are ordinary files in the app's own storage folder.
@@ -190,6 +190,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 * 🌍 **[docs/TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — Guide for community localization and language JSON files.
 * 🛡️ **[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — User privacy expectations, data sovereignty, and security posture.
 * 🔐 **[SECURITY.md](SECURITY.md)** — How to report a vulnerability privately, what is in scope, and the known limitations.
+* 📰 **[docs/SOURCES.md](docs/SOURCES.md)** — Every clearnet source, what its terms say, and whether the app follows them.
 * 🤝 **[CONTRIBUTING.md](CONTRIBUTING.md)** — Translations, bug reports and code changes: how to help and the project's rules.
 * ❓ **[docs/FAQ.md](docs/FAQ.md)** — Straight answers: how NoSlop compares to Briar and SimpleX, which servers are involved, safety, Tor speed, and how it is built.
 * 🧭 **[docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md](docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md)** — Proposed creator discovery, community mirroring and Home HUB work (not implemented).
