@@ -2646,6 +2646,16 @@ the top bar) names failing API services; `ManageSourcesDialog` marks failing sou
 
 Tests: `SourceHealthRulesTest`, `SourceStatusArchitectureTest`.
 
+### 16.44 A list built from empty, off the main thread (`NOSLOP_EMPTY_BUILD_OFF_MAIN_V1`)
+
+`loadMoreFeedItems` builds a list from empty on `Dispatchers.Default`, like an append, and applies it on
+the main thread. `emptyBuildKey` ("<mode>|<search>") makes a second request for the same list wait for
+the one in flight; each new build bumps `feedListGeneration`, so a result for an earlier list, or one
+that finds the list already filled, is dropped. `isBuildingFeedList` is true from start to finish of
+the build that set it, and `UnifiedFeedTab` shows "Curating your feed..." ahead of every empty state
+while it is. Injections stay synchronous. History, Saved and Liked have their own loaders, still on
+the main thread.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

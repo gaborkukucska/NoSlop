@@ -243,6 +243,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var pendingAppendFilter: String? = null
     // Bumped each time a list is built from empty, so a batch for the list before it is dropped.
     private var feedListGeneration = 0
+    // NOSLOP_EMPTY_BUILD_OFF_MAIN_V1 — the mode and search of the list being built from empty, if one is.
+    // Main thread only.
+    private var emptyBuildKey: String? = null
+    private val _isBuildingFeedList = MutableStateFlow(false)
+    /** True while a list is being built from empty; the feed shows its loading text, not an empty state. */
+    val isBuildingFeedList: StateFlow<Boolean> = _isBuildingFeedList.asStateFlow()
     // Canonical keys by feed item id. Stable for an item, and read for every stored item on each build.
     private val feedKeyCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -1436,14 +1442,49 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // playing on its own surface. An append now builds on a background thread and only publishes on
         // the main thread.
         //
-        // A list built from empty stays synchronous. Its callers empty the list and call this: building
-        // it later would flash the empty-list screen ("Your feed is empty") on every mode switch.
-        if (_unifiedFeed.value.isEmpty() || isInjection) {
+        // An injection inserts into the list on screen, so it stays synchronous.
+        if (isInjection) {
             feedListGeneration++
             val startedMs = System.currentTimeMillis()
             val plan = computeFeedBatch(actualFilter)
             if (plan != null) applyFeedBatch(plan, actualFilter, isInjection)
             Logger.info("VM", "Feed list built on the main thread in ${System.currentTimeMillis() - startedMs}ms from ${allFeeds.size} stored items")
+            return
+        }
+        // NOSLOP_EMPTY_BUILD_OFF_MAIN_V1 — a list built from empty is computed off the main thread too
+        // (463 ms for 19,167 stored items froze the screen when a filter opened). isBuildingFeedList keeps
+        // the feed on its loading text meanwhile, so no empty-list screen flashes.
+        if (_unifiedFeed.value.isEmpty()) {
+            val key = "$actualFilter|$activeSearchQuery"
+            if (emptyBuildKey == key) return // this list is being built; it is applied when ready
+            emptyBuildKey = key
+            val generation = ++feedListGeneration
+            val searchAtStart = activeSearchQuery
+            _isBuildingFeedList.value = true
+            viewModelScope.launch {
+                val startedMs = System.currentTimeMillis()
+                try {
+                    val plan = withContext(Dispatchers.Default) { computeFeedBatch(actualFilter) }
+                    val stale = currentFilterMode != actualFilter || activeSearchQuery != searchAtStart ||
+                        feedListGeneration != generation || _unifiedFeed.value.isNotEmpty()
+                    if (stale) {
+                        if (plan?.addedCreatorDepletion == true) hasShownCreatorDepletionInSession = false
+                        Logger.info("VM", "Dropped a new feed list: another list was asked for while it was being built")
+                    } else if (plan != null) {
+                        applyFeedBatch(plan, actualFilter, isInjection = false)
+                    }
+                    Logger.info("VM", "Feed list built off the main thread in ${System.currentTimeMillis() - startedMs}ms from ${allFeeds.size} stored items")
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Logger.error("VM", "Building a feed list failed: ${e.message}")
+                } finally {
+                    if (emptyBuildKey == key && feedListGeneration == generation) {
+                        emptyBuildKey = null
+                        _isBuildingFeedList.value = false
+                    }
+                }
+            }
             return
         }
         if (isLoadingMoreFeedItems) {

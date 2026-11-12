@@ -724,6 +724,7 @@ fun UnifiedFeedTab(
     val context = LocalContext.current
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
+    val isBuildingList by viewModel.isBuildingFeedList.collectAsState() // NOSLOP_EMPTY_BUILD_OFF_MAIN_V1
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
     // Collected only to keep the flow running for the ViewModel. Not read here: these change on every
     // swipe, and as keys of unifiedItems below they rebuilt a list that does not depend on them.
@@ -1127,7 +1128,13 @@ fun UnifiedFeedTab(
 
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                if (filterMode == "Mesh" || filterMode == "P2P Mesh") {
+                if (isBuildingList) {
+                    // NOSLOP_EMPTY_BUILD_OFF_MAIN_V1 — the list is being built; it isn't empty.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Curating your feed...".tr, color = TextMuted, fontWeight = FontWeight.Bold)
+                    }
+                } else if (filterMode == "Mesh" || filterMode == "P2P Mesh") {
                     if (!showOldMeshPosts) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                             Icon(Icons.Default.Hub, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))

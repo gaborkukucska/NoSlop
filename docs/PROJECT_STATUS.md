@@ -25,7 +25,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 
 **Feed and playback**
 
-* **History and Saved still build on the main thread.** Round 1 moved Live Feed and filter appends off it, not `loadHistoryBatch` or the Saved path. A very long list there can still hold up a swipe.
+* **History, Saved and Liked still build on the main thread.** Round 1 moved appends off it and patch 16 (2026-11-12) lists built from empty; `loadHistoryBatch`, the Saved path and `loadLikedBatch` remain. `loadHistoryBatch` rebuilds five maps over every stored item on each call, so a long history can hold up a swipe.
 * **Every `feed_items` write reloads the whole table,** `fullContent` included. Retention cut the table by a third, but the reload remains.
 * **`setImmersiveFullscreen` runs on every slide** rather than on a change.
 * **`AudioPlayer` has no recovery path.** It no longer tears down mid-swipe, but it doesn't re-resolve in place the way `VideoPlayer` does (§16.33, §16.35).
@@ -122,6 +122,12 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-12) — Lists Built Off the Main Thread (v0.7.8-alpha)
+
+* **Opening a filter froze the screen** (`NOSLOP_EMPTY_BUILD_OFF_MAIN_V1`, patch 16). A list built from empty (a filter, a search, Mesh, a refreshed Live Feed) ran `computeFeedBatch` on the main thread: 463 ms from 19,167 stored items when Articles opened in the 2026-11-11 capture, 966 ms blocked in all. It had stayed there so the empty-list screen wouldn't flash. Now it is computed on `Dispatchers.Default` and applied on the main thread, with `isBuildingFeedList` true meanwhile; the feed shows "Curating your feed..." instead of any empty state. A second request for the same mode and search waits for the build in flight; a request for another list bumps `feedListGeneration`, which drops the earlier result, as does a list that is no longer empty when the result is ready. Injections stay synchronous.
+* **Test:** `FeedSmoothnessArchitectureTest` (new cases).
+* **To check on a device:** switching filters, opening a search and pulling to refresh show "Curating your feed..." briefly and never "Your feed is empty" or "Nothing New Here" when there are items; the log line is now "Feed list built off the main thread in N ms".
 
 ## Completed Changes (2026-11-12) — Source Status (v0.7.8-alpha)
 

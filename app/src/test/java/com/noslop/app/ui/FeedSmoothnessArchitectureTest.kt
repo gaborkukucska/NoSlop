@@ -34,6 +34,25 @@ class FeedSmoothnessArchitectureTest {
     }
 
     @Test
+    fun aListBuiltFromEmptyIsComputedOffTheMainThread() {
+        // NOSLOP_EMPTY_BUILD_OFF_MAIN_V1: only an injection builds on the main thread.
+        val vm = source("ui/NoSlopViewModel.kt")
+        val fn = vm.substring(vm.indexOf("fun loadMoreFeedItems"), vm.indexOf("private fun computeFeedBatch"))
+        assertEquals(2, Regex("""withContext\(Dispatchers\.Default\) \{ computeFeedBatch\(actualFilter\) \}""").findAll(fn).count())
+        assertEquals("one synchronous build, for an injection", 1, Regex("""val plan = computeFeedBatch\(actualFilter\)""").findAll(fn).count())
+        assertTrue(fn.contains("if (isInjection) {"))
+        assertTrue("a second request for the same list waits", fn.contains("if (emptyBuildKey == key) return"))
+        assertTrue("the flag is cleared only by the build that set it", fn.contains("if (emptyBuildKey == key && feedListGeneration == generation) {"))
+    }
+
+    @Test
+    fun theFeedShowsItsLoadingTextWhileAListIsBuilt() {
+        val tab = source("ui/UnifiedFeedTab.kt")
+        val empty = tab.substring(tab.indexOf("if (unifiedItems.isEmpty()) {"))
+        assertTrue("the loading text comes before every empty state", empty.indexOf("if (isBuildingList) {") in 0 until empty.indexOf("Nothing New Here"))
+    }
+
+    @Test
     fun theFeedListDoesNotRebuildOnEverySwipe() {
         val tab = source("ui/UnifiedFeedTab.kt")
         val keys = tab.substring(tab.indexOf("val unifiedItems = remember("), tab.indexOf("if (injectedTutStep == null)"))
