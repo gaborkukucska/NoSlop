@@ -2669,6 +2669,41 @@ the main thread.
 
 Tests: `FlickrTagFeedTest`, `ClearnetShareTest`, `FeedParserPhotoStreamTest`.
 
+### 16.46 Keeping swiped-away videos, resyncing preloaded audio (`NOSLOP_KEEP_SWIPED_V1`)
+
+* `PreloadManager.keep(rawUrl, resolvedUrl, player)`: called from `ExoVideoPlayer`'s dispose. Keeps up to
+  `MAX_KEPT_SWIPED` (2) healthy players (`canKeepSwiped`: READY, no error, not a 127.0.0.1 mesh stream,
+  URL not about to expire), paused, newest kept, each let go after `KEPT_SWIPED_MAX_AGE_MS` (15 min).
+  Otherwise the caller releases the player. The visibility effect no longer stops a player that will be
+  kept. The slide's own listeners are removed before keeping.
+* `claim()` tries `claimKept()` first (same URL, error and expiry checks as a warm player); `warmUp()`
+  doesn't warm a slide that is kept; `hasWarmPlayer()`, `invalidate()` and `evictAll()` include kept
+  players.
+* `AdaptiveTorLoadControl(isForeground, isKept)`: kept players use 10-20 s with a 15 s back buffer from
+  the keyframe. Fresh players use the same class (foreground numbers unchanged).
+* `retainOnly()` drops unwanted warm players after `LEFT_BEHIND_GRACE_MS` (3 s), against the latest keep set.
+* `resyncForClaim()`: an exact seek to the current position when `resyncReasonAtClaim()` says so (warm
+  player under 1 s, kept player, or the audio output changed since it was warmed or kept;
+  `watchAudioRoute` counts `AudioDeviceCallback` changes and, on API 31+, audio mode changes).
+* `AvSyncDiagnostics.sampleWhilePlaying`: one exact seek to the current position when a sample's clock
+  is off real time by more than `CLOCK_DRIFT_RESYNC_TOLERANCE` (4 %) at normal speed (`clockDriftNeedsResync`).
+* `MediaComponents.ARTICLE_ACTIONS_CLEARANCE` (76 dp) is the article reader's right padding.
+
+Tests: `KeepSwipedPolicyTest`, `KeptLoadControlTest`, `KeepSwipedArchitectureTest`.
+
+### 16.47 YouTube streams in pieces (`NOSLOP_CHUNKED_STREAM_V1`)
+
+* `ui/components/ChunkedRangeDataSource`: for `*.googlevideo.com` GET requests, opens consecutive
+  ranges of `GOOGLEVIDEO_CHUNK_BYTES` (8 MiB) and opens the next when one ends. `open()` returns the
+  length of the whole request (from the request, or the first piece's `Content-Range` total). A piece
+  that ends short is the end of the stream. Other hosts pass through.
+* Wired into the fresh player and `buildRecoverySource` in `VideoPlayer.kt` and the warm player in
+  `PreloadManager.doWarmUp`, between `DefaultDataSource.Factory` and the OkHttp factory.
+* Why: googlevideo throttles one request to almost nothing after about 10 MB (2026-11-12 19:20 log:
+  rebuffers at 10.6 MB and 10.0 MB into two streams).
+
+Tests: `ChunkedRangeDataSourceTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

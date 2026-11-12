@@ -70,7 +70,9 @@ object PreloadManager {
     private class Preloaded(
         val player: ExoPlayer,
         val resolvedUrl: String,
-        val expiresAtMs: Long
+        val expiresAtMs: Long,
+        // NOSLOP_KEEP_SWIPED_V1 — the audio output it was warmed under (see audioRouteEpoch)
+        val audioRouteEpoch: Int
     )
 
     // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
@@ -123,6 +125,146 @@ object PreloadManager {
             }
             return false
         }
+    }
+
+    // --- NOSLOP_KEEP_SWIPED_V1 ---
+    // The last MAX_KEPT_SWIPED videos the user swiped away from, paused where they were, so a swipe back
+    // resumes them instead of downloading them again. Main thread only, like preloadedPlayers.
+    private class Kept(
+        val player: ExoPlayer,
+        val resolvedUrl: String,
+        val expiresAtMs: Long,
+        val audioRouteEpoch: Int
+    )
+
+    private val keptPlayers = LinkedHashMap<String, Kept>()
+
+    // Read by AdaptiveTorLoadControl on the playback thread.
+    private val keptRawUrls = ConcurrentHashMap.newKeySet<String>()
+
+    fun isKept(rawUrl: String): Boolean = rawUrl in keptRawUrls
+
+    // Bumped when the audio output changes (headphones, Bluetooth, a call). A player that waited through
+    // it can come back with its sound out of step with its picture: in the 2026-11-12 capture a call
+    // killed the waiting players' AudioTracks and Android rebuilt them behind ExoPlayer's back.
+    @Volatile
+    private var audioRouteEpoch = 0
+    private var audioRouteWatched = false
+
+    /** Starts noticing audio output changes. Main thread; once per process. */
+    fun watchAudioRoute(context: Context) {
+        if (audioRouteWatched) return
+        audioRouteWatched = true
+        val audioManager = context.applicationContext.getSystemService(android.media.AudioManager::class.java) ?: return
+        var initialReport = true
+        audioManager.registerAudioDeviceCallback(object : android.media.AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                // Registering reports the outputs already there, which is not a change.
+                if (initialReport) {
+                    initialReport = false
+                    return
+                }
+                noteAudioRouteChange("output added")
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
+                noteAudioRouteChange("output removed")
+            }
+        }, mainHandler)
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            audioManager.addOnModeChangedListener(java.util.concurrent.Executor { mainHandler.post(it) }) { mode ->
+                noteAudioRouteChange("audio mode $mode")
+            }
+        }
+    }
+
+    private fun noteAudioRouteChange(what: String) {
+        audioRouteEpoch++
+        Logger.info("AV_SYNC", "Audio output changed ($what): waiting players resync when shown")
+    }
+
+    /** Whether [player], leaving the screen, would be kept. See [canKeepSwiped]. */
+    fun canKeep(rawUrl: String, resolvedUrl: String, player: ExoPlayer): Boolean = canKeepSwiped(
+        rawUrl = rawUrl,
+        resolvedUrl = resolvedUrl,
+        hasError = player.playerError != null,
+        playbackState = player.playbackState,
+        expiresAtMs = expiryOfResolvedUrl(resolvedUrl),
+        nowMs = System.currentTimeMillis(),
+        minTtlMs = MIN_USEFUL_TTL_MS
+    )
+
+    /**
+     * Keeps a player whose slide has left the screen, paused where it is, for a swipe back. Returns false
+     * when it cannot be kept, and the caller releases it. Main thread.
+     */
+    fun keep(rawUrl: String, resolvedUrl: String, player: ExoPlayer): Boolean {
+        if (!canKeep(rawUrl, resolvedUrl, player)) return false
+        val cacheKey = cacheKeyFor(rawUrl)
+        player.playWhenReady = false
+        keptPlayers.remove(cacheKey)?.takeIf { it.player !== player }?.let { retire(it.player) }
+        // A warm copy of the same slide (clearnet warms the slide behind) is not needed now.
+        preloadedPlayers.remove(cacheKey)?.let { retire(it.player) }
+        keptPlayers[cacheKey] = Kept(player, resolvedUrl, expiryOfResolvedUrl(resolvedUrl), audioRouteEpoch)
+        keptRawUrls.add(rawUrl)
+        while (keptPlayers.size > MAX_KEPT_SWIPED) {
+            val oldest = keptPlayers.entries.first()
+            keptPlayers.remove(oldest.key)
+            keptRawUrls.remove(oldest.key.substringBefore("||"))
+            Logger.info("PRELOAD", "Letting go of the oldest kept player: ${oldest.key}")
+            retire(oldest.value.player)
+        }
+        Logger.info("PRELOAD", "Kept swiped-away player for $cacheKey at ${player.currentPosition}ms (kept: ${keptPlayers.size})")
+        mainHandler.postDelayed({ letGoIfStillKept(cacheKey, player) }, KEPT_SWIPED_MAX_AGE_MS)
+        return true
+    }
+
+    private fun letGoIfStillKept(cacheKey: String, player: ExoPlayer) {
+        val kept = keptPlayers[cacheKey] ?: return
+        if (kept.player !== player) return
+        keptPlayers.remove(cacheKey)
+        keptRawUrls.remove(cacheKey.substringBefore("||"))
+        Logger.info("PRELOAD", "Letting go of a kept player nobody came back to: $cacheKey")
+        retire(player)
+    }
+
+    private fun claimKept(cacheKey: String, rawUrl: String, expectedResolvedUrl: String?): ExoPlayer? {
+        val kept = keptPlayers.remove(cacheKey) ?: return null
+        keptRawUrls.remove(rawUrl)
+        val problem = when {
+            expectedResolvedUrl != null && kept.resolvedUrl != expectedResolvedUrl -> "URL changed since it was kept"
+            kept.player.playerError != null -> "it failed while kept"
+            kept.player.playbackState == androidx.media3.common.Player.STATE_IDLE -> "it was stopped"
+            kept.expiresAtMs <= System.currentTimeMillis() -> "its URL expired"
+            else -> null
+        }
+        if (problem != null) {
+            Logger.info("PRELOAD", "Not reusing the kept player for $cacheKey: $problem")
+            retire(kept.player)
+            return null
+        }
+        preloadedPlayers.remove(cacheKey)?.let { retire(it.player) }
+        currentlyPlayingUrl = rawUrl
+        lastNetworkByteTimeMs = System.currentTimeMillis()
+        Logger.info(
+            "PRELOAD",
+            "Reusing kept player: $cacheKey ${Logger.redact(rawUrl)} pos=${kept.player.currentPosition} state=${kept.player.playbackState}"
+        )
+        com.noslop.app.ui.components.AvSyncDiagnostics.of(kept.player)
+            ?.onHandedOver(kept.player.playbackState, kept.player.totalBufferedDuration)
+        resyncForClaim(kept.player, kept = true, audioRouteChanged = kept.audioRouteEpoch != audioRouteEpoch)
+        return kept.player
+    }
+
+    /** See [resyncReasonAtClaim]. An exact seek to where the player is, inside what it has buffered. */
+    private fun resyncForClaim(player: ExoPlayer, kept: Boolean, audioRouteChanged: Boolean) {
+        val position = player.currentPosition
+        val reason = resyncReasonAtClaim(kept, player.playbackState, position, audioRouteChanged) ?: return
+        val previous = player.seekParameters
+        player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+        player.seekTo(position)
+        player.setSeekParameters(previous)
+        Logger.info("AV_SYNC", "Resync at claim ($reason) pos=$position")
     }
 
     // --- NOSLOP_YT_COLDSTART_V1 ---
@@ -317,6 +459,14 @@ object PreloadManager {
         deferred: CompletableDeferred<Unit>
     ) = kotlinx.coroutines.withContext(Dispatchers.Main) {
         val cacheKey = cacheKeyFor(rawUrl)
+        // NOSLOP_KEEP_SWIPED_V1 — a slide kept from a swipe away needs no warm copy.
+        keptPlayers[cacheKey]?.let { kept ->
+            if (kept.resolvedUrl == resolvedUrl && kept.expiresAtMs > System.currentTimeMillis()) {
+                Logger.info("PRELOAD", "Kept from a swipe away, not warming again: $cacheKey")
+                finish(rawUrl, deferred)
+                return@withContext
+            }
+        }
         val existing = preloadedPlayers[cacheKey]
         if (existing != null) {
             if (existing.resolvedUrl == resolvedUrl && existing.expiresAtMs > System.currentTimeMillis()) {
@@ -344,18 +494,23 @@ object PreloadManager {
             return@withContext
         }
         Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
+        watchAudioRoute(context)
 
         val mediaHttpClient = com.noslop.app.ui.components.mediaClientFor(resolvedUrl, rawUrl)
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(mediaHttpClient)
             .setTransferListener(globalTransferListener)
-        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
-            .setTransferListener(globalTransferListener)
+        // NOSLOP_CHUNKED_STREAM_V1 — googlevideo in 8 MiB pieces (ChunkedRangeDataSource)
+        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(
+            context,
+            com.noslop.app.ui.components.ChunkedRangeDataSource.Factory(httpDataSourceFactory)
+        ).setTransferListener(globalTransferListener)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
         // AdaptiveTorLoadControl: 10s-20s while preloading in background; automatically expands
         // to 50s-75s with 60s back-buffer when claimed as the active on-screen player.
         val loadControl = AdaptiveTorLoadControl(
-            isForeground = { currentlyPlayingUrl == rawUrl }
+            isForeground = { currentlyPlayingUrl == rawUrl },
+            isKept = { PreloadManager.isKept(rawUrl) }
         )
 
         // --- NOSLOP_WARM_START_SYNC_V1 ---
@@ -419,7 +574,7 @@ object PreloadManager {
         // Store the player immediately - don't wait for READY state. It keeps
         // buffering in the background; VideoPlayer handles the rest on claim.
         val cacheKey = "$rawUrl||$quality"
-        preloadedPlayers[cacheKey] = Preloaded(player, resolvedUrl, expiresAtMs)
+        preloadedPlayers[cacheKey] = Preloaded(player, resolvedUrl, expiresAtMs, audioRouteEpoch)
         Logger.info(
             "PRELOAD",
             "Stored preloaded player for $cacheKey (total cached: ${preloadedPlayers.size}), " +
@@ -465,6 +620,7 @@ object PreloadManager {
      */
     fun claim(rawUrl: String, expectedResolvedUrl: String? = null): ExoPlayer? {
         val cacheKey = cacheKeyFor(rawUrl)
+        claimKept(cacheKey, rawUrl, expectedResolvedUrl)?.let { return it }
         val entry = preloadedPlayers[cacheKey]
 
         if (entry == null) {
@@ -510,6 +666,7 @@ object PreloadManager {
         Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey ${Logger.redact(rawUrl)} state=${entry.player.playbackState} bufMs=${entry.player.totalBufferedDuration}")
         com.noslop.app.ui.components.AvSyncDiagnostics.of(entry.player)
             ?.onHandedOver(entry.player.playbackState, entry.player.totalBufferedDuration)
+        resyncForClaim(entry.player, kept = false, audioRouteChanged = entry.audioRouteEpoch != audioRouteEpoch)
         return entry.player
     }
 
@@ -534,9 +691,23 @@ object PreloadManager {
                 }
             }
         }
+        // NOSLOP_KEEP_SWIPED_V1 — a kept player for the slide is as stale as a warm one.
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            dropKept(cacheKey, rawUrl)
+        } else {
+            com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) { dropKept(cacheKey, rawUrl) }
+        }
         cancelledTasks.add(rawUrl)
         pendingTasks.remove(rawUrl)
         readyTasks.remove(rawUrl)
+    }
+
+    private fun dropKept(cacheKey: String, rawUrl: String) {
+        keptPlayers.remove(cacheKey)?.let {
+            keptRawUrls.remove(rawUrl)
+            Logger.info("PRELOAD", "Invalidated kept player for $cacheKey")
+            retire(it.player)
+        }
     }
 
     private val mainHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
@@ -599,7 +770,8 @@ object PreloadManager {
     }
 
     /** Whether a warm player is waiting for [rawUrl]. Main thread only. */
-    fun hasWarmPlayer(rawUrl: String): Boolean = preloadedPlayers.containsKey(cacheKeyFor(rawUrl))
+    fun hasWarmPlayer(rawUrl: String): Boolean =
+        preloadedPlayers.containsKey(cacheKeyFor(rawUrl)) || keptPlayers.containsKey(cacheKeyFor(rawUrl))
 
     /**
      * Drops all preload work except for [keepRawUrls]. A slide the user has moved past cannot be
@@ -615,7 +787,22 @@ object PreloadManager {
         for (rawUrl in pendingTasks.keys) {
             if (rawUrl !in keepRawUrls) cancelledTasks.add(rawUrl)
         }
-        val unwanted = preloadedPlayers.keys.filter { it.substringBefore("||") !in keepRawUrls }
+        // --- NOSLOP_KEEP_SWIPED_V1 ---
+        // A warm player is dropped only if it is still unwanted a moment later. In the 2026-11-12 18:50
+        // capture a list shift dropped three warm players, and the same three were built again from
+        // nothing 100-300 ms later; the first was then claimed with nothing buffered.
+        latestKeepRawUrls = keepRawUrls
+        if (preloadedPlayers.keys.any { it.substringBefore("||") !in keepRawUrls }) {
+            mainHandler.removeCallbacks(dropLeftBehindRunnable)
+            mainHandler.postDelayed(dropLeftBehindRunnable, LEFT_BEHIND_GRACE_MS)
+        }
+    }
+
+    private var latestKeepRawUrls: Set<String> = emptySet()
+    private val dropLeftBehindRunnable = Runnable { dropLeftBehind() }
+
+    private fun dropLeftBehind() {
+        val unwanted = preloadedPlayers.keys.filter { it.substringBefore("||") !in latestKeepRawUrls }
         for (cacheKey in unwanted) {
             preloadedPlayers.remove(cacheKey)?.let {
                 Logger.info("PRELOAD", "Dropping preloaded player for a slide left behind: $cacheKey")
@@ -625,8 +812,10 @@ object PreloadManager {
     }
 
     fun evictAll() {
-        val playersToRelease = preloadedPlayers.values.map { it.player }.toList()
+        val playersToRelease = preloadedPlayers.values.map { it.player } + keptPlayers.values.map { it.player }
         preloadedPlayers.clear()
+        keptPlayers.clear()
+        keptRawUrls.clear()
         if (playersToRelease.isNotEmpty()) {
             com.noslop.app.util.AppScopes.main.launch(Dispatchers.Main) {
                 for (p in playersToRelease) {
@@ -651,7 +840,10 @@ object PreloadManager {
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AdaptiveTorLoadControl(
-    private val isForeground: () -> Boolean
+    private val isForeground: () -> Boolean,
+    // NOSLOP_KEEP_SWIPED_V1 — a player kept for a swipe back: no more downloading than a preload, and
+    // a back buffer from the keyframe so the resync seek on its return stays inside the buffer.
+    private val isKept: () -> Boolean = { false }
 ) : androidx.media3.exoplayer.LoadControl {
     private val foregroundControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(50000, 75000, 1200, 4000)
@@ -665,12 +857,23 @@ class AdaptiveTorLoadControl(
         .setPrioritizeTimeOverSizeThresholds(true)
         .build()
 
+    private val keptControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(10000, 20000, 1200, 4000)
+        .setBackBuffer(15000, true)
+        .setPrioritizeTimeOverSizeThresholds(true)
+        .build()
+
     private val activeControl: DefaultLoadControl
-        get() = if (isForeground()) foregroundControl else backgroundControl
+        get() = when {
+            isForeground() -> foregroundControl
+            isKept() -> keptControl
+            else -> backgroundControl
+        }
 
     override fun onPrepared(playerId: androidx.media3.exoplayer.analytics.PlayerId) {
         foregroundControl.onPrepared(playerId)
         backgroundControl.onPrepared(playerId)
+        keptControl.onPrepared(playerId)
     }
 
     override fun onTracksSelected(
@@ -680,16 +883,19 @@ class AdaptiveTorLoadControl(
     ) {
         foregroundControl.onTracksSelected(parameters, trackGroups, trackSelections)
         backgroundControl.onTracksSelected(parameters, trackGroups, trackSelections)
+        keptControl.onTracksSelected(parameters, trackGroups, trackSelections)
     }
 
     override fun onStopped(playerId: androidx.media3.exoplayer.analytics.PlayerId) {
         foregroundControl.onStopped(playerId)
         backgroundControl.onStopped(playerId)
+        keptControl.onStopped(playerId)
     }
 
     override fun onReleased(playerId: androidx.media3.exoplayer.analytics.PlayerId) {
         foregroundControl.onReleased(playerId)
         backgroundControl.onReleased(playerId)
+        keptControl.onReleased(playerId)
     }
 
     // ExoPlayer asks for the allocator once, when the player is built (a preload, so the background

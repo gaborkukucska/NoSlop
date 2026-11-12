@@ -52,6 +52,7 @@ internal class AvSyncDiagnostics private constructor(path: String, rawUrl: Strin
         var lastRealtimeMs = 0L
         var lastOffsetUs = 0L
         var lastOffsetCount = 0
+        var resynced = false
         repeat(SAMPLE_COUNT) {
             kotlinx.coroutines.delay(SAMPLE_INTERVAL_MS)
             val positionMs = player.currentPosition
@@ -70,6 +71,20 @@ internal class AvSyncDiagnostics private constructor(path: String, rawUrl: Strin
                         "dropped=${counters?.droppedBufferCount} skipped=${counters?.skippedOutputBufferCount} " +
                         "toKeyframe=${counters?.droppedToKeyframeCount}"
                 )
+                // --- NOSLOP_KEEP_SWIPED_V1 ---
+                // A clock running off real time leaves sound and picture apart once it recovers (the
+                // 2026-11-12 18:50 start ran at 0.90 for 4 s). One exact seek to where it is rebuilds
+                // the AudioTrack and lines them up again.
+                if (!resynced && player.playbackState == Player.STATE_READY &&
+                    com.noslop.app.ui.clockDriftNeedsResync(clockRate, player.playbackParameters.speed)
+                ) {
+                    resynced = true
+                    val previous = player.seekParameters
+                    player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.EXACT)
+                    player.seekTo(positionMs)
+                    player.setSeekParameters(previous)
+                    log("resync: clock ran at ${"%.3f".format(Locale.US, clockRate)} of real time, seek to pos=$positionMs")
+                }
             }
             lastPositionMs = if (player.isPlaying) positionMs else -1L
             lastRealtimeMs = realtimeMs

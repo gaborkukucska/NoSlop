@@ -1072,7 +1072,8 @@ private fun buildRecoverySource(
 ): androidx.media3.exoplayer.source.MediaSource {
     val listener = PreloadManager.globalTransferListener
     val httpFactory = OkHttpDataSource.Factory(mediaClientFor(streamUrl, rawUrl)).setTransferListener(listener)
-    val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpFactory)
+    // NOSLOP_CHUNKED_STREAM_V1 — googlevideo in 8 MiB pieces (ChunkedRangeDataSource)
+    val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, ChunkedRangeDataSource.Factory(httpFactory))
         .setTransferListener(listener)
     val mimeType = when {
         streamUrl.contains(".m3u8", ignoreCase = true) || streamUrl.contains("hls", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
@@ -1252,8 +1253,12 @@ private fun ExoVideoPlayer(
                 }
                 // --- NOSLOP_SMOOTH_TEARDOWN_V1 ---
                 // Frees the decoder on the playback thread. Cancelled if the slide comes back in time.
-                kotlinx.coroutines.delay(PLAYER_STOP_DELAY_MS)
-                player.stop()
+                // NOSLOP_KEEP_SWIPED_V1 — a player that will be kept is only paused: stopping it threw
+                // its buffer away, and a swipe back had to download it again.
+                if (!PreloadManager.canKeep(rawUrl, url, player)) {
+                    kotlinx.coroutines.delay(PLAYER_STOP_DELAY_MS)
+                    player.stop()
+                }
             }
         }
     }
@@ -1478,6 +1483,9 @@ private fun ExoVideoPlayer(
 
         // Pass the resolved URL: PreloadManager rejects a warm player whose
         // baked-in URL has expired or no longer matches what we just resolved.
+        // NOSLOP_KEEP_SWIPED_V1 — notices audio output changes; the slide's listener is removed when it goes.
+        PreloadManager.watchAudioRoute(context)
+        var uiListener: androidx.media3.common.Player.Listener? = null
         val preloaded = PreloadManager.claim(rawUrl, url)
         val player = if (preloaded != null) {
             preloaded.apply {
@@ -1551,7 +1559,7 @@ private fun ExoVideoPlayer(
                             )
                         }
                     }
-                })
+                }.also { uiListener = it })
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
                 if (playbackState == androidx.media3.common.Player.STATE_READY) {
                     onReady()
@@ -1587,7 +1595,8 @@ private fun ExoVideoPlayer(
             }
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(client)
                 .setTransferListener(transferListener)
-            val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+            // NOSLOP_CHUNKED_STREAM_V1 — googlevideo in 8 MiB pieces (ChunkedRangeDataSource)
+            val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, ChunkedRangeDataSource.Factory(httpDataSourceFactory))
                 .setTransferListener(transferListener)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
@@ -1596,16 +1605,13 @@ private fun ExoVideoPlayer(
                 setEnableDecoderFallback(true)
             }
 
-            val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    50000, // min buffer (50s) maintains continuous buffer without 35s socket-killing idle gaps
-                    75000, // max buffer (75s) keeps a healthy 25s top-up window over Tor
-                    1200,  // buffer for playback (1.2s) ensures snappy startup
-                    4000   // buffer for playback after rebuffer (4s)
-                )
-                .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
-                .setPrioritizeTimeOverSizeThresholds(true)
-                .build()
+            // NOSLOP_KEEP_SWIPED_V1 — on screen this is the same 50 s / 75 s / 1.2 s / 4 s with a 60 s back
+            // buffer as before (AdaptiveTorLoadControl's foreground settings). Kept for a swipe back, it
+            // stops downloading ahead so it doesn't compete with the video on screen.
+            val loadControl = com.noslop.app.ui.AdaptiveTorLoadControl(
+                isForeground = { PreloadManager.currentlyPlayingUrl == rawUrl },
+                isKept = { PreloadManager.isKept(rawUrl) }
+            )
 
             androidx.media3.exoplayer.ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(mediaSourceFactory)
@@ -1684,7 +1690,7 @@ private fun ExoVideoPlayer(
                             )
                             }
                         }
-                    })
+                    }.also { uiListener = it })
                     AvSyncDiagnostics.attach(this, "fresh", rawUrl)
                     prepare()
                     playWhenReady = isVisible
@@ -1706,7 +1712,12 @@ private fun ExoVideoPlayer(
             } catch (e: Exception) {
                 Logger.debug("VIDEO_DEBUG", "Failed to save playback position during dispose: ${e.message}")
             }
-            player.release()
+            // --- NOSLOP_KEEP_SWIPED_V1 ---
+            // A healthy player is kept, paused where it is, for a swipe back; anything else is released.
+            uiListener?.let { player.removeListener(it) }
+            if (!PreloadManager.keep(rawUrl, url, player)) {
+                player.release()
+            }
             exoPlayer = null
             // The teardown now runs after the next slide has started: leave its flag alone.
             if (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl == null) {
@@ -1799,6 +1810,12 @@ private fun ExoVideoPlayer(
             }
         }
         player.addListener(listener)
+        try {
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            // NOSLOP_KEEP_SWIPED_V1 — a kept player outlives this slide.
+            player.removeListener(listener)
+        }
     }
 
     Box(

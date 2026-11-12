@@ -395,6 +395,12 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
 }
 
 /**
+ * NOSLOP_ARTICLE_CLEARANCE_V1 — room on the right of an article slide for the like, share and comment
+ * buttons (48 dp wide, 12 dp from the edge), so the title and text don't run behind them.
+ */
+internal val ARTICLE_ACTIONS_CLEARANCE = 76.dp
+
+/**
  * Article reader with horizontal pagination.
  * Each segment fits within the viewport, and sideways swiping navigates between pages.
  * This ensures no gesture conflict with the parent VerticalPager's vertical swiping.
@@ -541,7 +547,7 @@ fun SegmentedArticleReader(
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(horizontal = 28.dp, vertical = 56.dp)
+                            .padding(start = 28.dp, end = ARTICLE_ACTIONS_CLEARANCE, top = 56.dp, bottom = 56.dp)
                     ) {
                         Surface(
                             color = AccentGreen,
@@ -592,7 +598,7 @@ fun SegmentedArticleReader(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                        .padding(start = 24.dp, end = ARTICLE_ACTIONS_CLEARANCE, top = 20.dp, bottom = 20.dp),
                     contentAlignment = if (showLeadImageOnPage1) Alignment.TopCenter else Alignment.Center
                 ) {
                     Column(
