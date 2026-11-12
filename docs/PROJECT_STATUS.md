@@ -23,6 +23,13 @@ These rounds fix the three reports in `isues.txt`, all on the legacy Android app
 
 This is the full list of open work on the legacy app as of 2026-11-03, with every item checked against the code. It replaces the old "Open Architectural & Technical Register" and "Consolidated Master Backlog", now in `docs/archived/PROJECT_STATUS_HISTORY.md`. Entries in this file or the history may say "still open" about items closed since; this list wins.
 
+**Planned for 0.8.0-alpha** (agreed 2026-11-12; left out of 0.7.8-alpha because each needs a migration or a design first)
+
+* **Encrypt the database on the device.** Today only 1:1 DM contents (stored as received ciphertext), group chat bodies (AES-256-GCM, Keystore key) and the identity keys (Keystore) are encrypted by NoSlop; contacts, peers, posts, comments, likes, feed history and DM metadata (who and when) rely on Android's file encryption. Plan: Room on SQLCipher with a random key wrapped by an Android Keystore key, a one-time conversion of the existing database on update (with a tested fallback that never loses data), and backup export/import and the 0.7.x-to-0.8 update re-tested. Write a short design note first.
+* **Encrypt media on the device.** Photos, videos and audio sent or received are plain files under the app's folder (`Android/data/com.noslop.app/files`). Plan: a seekable stream cipher per file (AES-CTR, or GCM in fixed-size chunks) with a Keystore-wrapped key, a decrypting `DataSource` for the players, a Coil fetcher for images, and `MediaProxyService` decrypting as it serves peers. Existing files converted in the background.
+* **Welcome tutorial slides:** more visual or interactive (owner, 2026-11-11), if not done before the release.
+* **Empty state with the aggregator off:** a line pointing to Connect and Creators, if not done before the release.
+
 **Feed and playback**
 
 * **History, Saved and Liked still build on the main thread.** Round 1 moved appends off it and patch 16 (2026-11-12) lists built from empty; `loadHistoryBatch`, the Saved path and `loadLikedBatch` remain. `loadHistoryBatch` rebuilds five maps over every stored item on each call, so a long history can hold up a swipe.
@@ -122,6 +129,13 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-12) — Messages Hidden from Screenshots, Release Notes (v0.7.8-alpha)
+
+* **Screen security** (`NOSLOP_SCREEN_SECURITY_V1`, patch 20). While the Messages tab is open (the chat list and every 1:1 or group thread, with its dialogs, which inherit the flag) the window has Android's `FLAG_SECURE`: no screenshots, no screen recording, and a blank recent-apps preview. Settings has "Hide messages from screenshots", on by default, for anyone who needs a screenshot. Phone notifications for messages already carry no message text ("Message from {author}").
+* **Release notes** rewritten for 0.7.8-alpha (`release-notes.md`); the old text still named a search proxy.
+* **0.8.0-alpha plan** written down at the top of Work Remaining.
+* **Tests:** `ScreenSecurityTest`, `ScreenSecurityArchitectureTest`.
 
 ## Completed Changes (2026-11-12) — YouTube Streams Fetched in Pieces (v0.7.8-alpha)
 

@@ -500,6 +500,8 @@
   "{sources} not responding right now. Its items may be missing for a while.": "{sources} jelenleg nem válaszol. Az elemei egy ideig hiányozhatnak.",
   "{sources} not responding right now. Their items may be missing for a while.": "{sources} jelenleg nem válaszolnak. Az elemeik egy ideig hiányozhatnak.",
   "Tap to hide": "Koppintson az elrejtéshez",
+  "Hide messages from screenshots": "Üzenetek elrejtése a képernyőképekről",
+  "Messages can't be captured in screenshots or screen recordings, and the recent-apps preview stays blank while they are open.": "Az üzenetek nem kerülnek képernyőképre vagy képernyőfelvételre, és a legutóbbi alkalmazások előnézete üres marad, amíg nyitva vannak.",
   "Share to mesh": "Megosztás a meshen",
   "Share link": "Link megosztása",
   "Share it with your mesh, or send its link to any app.": "Ossza meg a meshen, vagy küldje el a linkjét bármely alkalmazásba.",

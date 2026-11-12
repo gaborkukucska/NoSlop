@@ -567,6 +567,11 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
+                            // NOSLOP_SCREEN_SECURITY_V1
+                            com.noslop.app.ui.components.ScreenSecuritySetting()
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
                             // SEND CHAT ON ENTER
                             val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
                             Row(

@@ -549,6 +549,8 @@
   "{sources} not responding right now. Its items may be missing for a while.": "{sources} not responding right now. Its items may be missing for a while.",
   "{sources} not responding right now. Their items may be missing for a while.": "{sources} not responding right now. Their items may be missing for a while.",
   "Tap to hide": "Tap to hide",
+  "Hide messages from screenshots": "Hide messages from screenshots",
+  "Messages can't be captured in screenshots or screen recordings, and the recent-apps preview stays blank while they are open.": "Messages can't be captured in screenshots or screen recordings, and the recent-apps preview stays blank while they are open.",
   "Share to mesh": "Share to mesh",
   "Share link": "Share link",
   "Share it with your mesh, or send its link to any app.": "Share it with your mesh, or send its link to any app.",

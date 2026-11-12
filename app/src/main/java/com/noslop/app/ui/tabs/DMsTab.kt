@@ -59,6 +59,8 @@ import com.noslop.app.ui.components.*
 
 @Composable
 fun DMsTab(viewModel: NoSlopViewModel) {
+    // NOSLOP_SCREEN_SECURITY_V1 — the chat list and every thread drawn here are kept out of screenshots.
+    com.noslop.app.ui.components.SecureWhileShown()
     val peers by viewModel.peers.collectAsState()
     val conversations by viewModel.conversations.collectAsState()
     val selectedPeerPub by viewModel.selectedPeerPub.collectAsState()
