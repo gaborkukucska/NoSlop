@@ -3,7 +3,7 @@ package com.noslop.app.ui.components
 
 import android.content.Context
 import android.content.Intent
-import com.noslop.app.util.tr
+import com.noslop.app.util.LanguageManager
 import kotlin.random.Random
 
 /** NOSLOP_CLEARNET_SHARE_V1 — the text sent when a clearnet slide's link is shared outside NoSlop. */
@@ -26,14 +26,17 @@ object ClearnetShareText {
 }
 
 object ClearnetShare {
-    /** Opens the Android share sheet with [title], [url] and a NoSlop line picked at random. */
+    /**
+     * Opens the Android share sheet with [title], [url] and a NoSlop line picked at random.
+     * Runs from a click handler, outside composition, so it translates with LanguageManager (the tr property works only inside composition).
+     */
     fun send(context: Context, title: String, url: String) {
-        val text = ClearnetShareText.compose(title, url, ClearnetShareText.pickMessage(Random.Default).tr)
+        val text = ClearnetShareText.compose(title, url, LanguageManager.translate(ClearnetShareText.pickMessage(Random.Default)))
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, title)
             putExtra(Intent.EXTRA_TEXT, text)
         }
-        context.startActivity(Intent.createChooser(intent, "Share link".tr).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        context.startActivity(Intent.createChooser(intent, LanguageManager.translate("Share link")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
