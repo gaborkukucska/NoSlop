@@ -56,10 +56,10 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
                         val host = req.url.host
                         val builder = req.newBuilder()
                         if (host.contains("wikimedia.org") || host.contains("wikipedia.org")) {
-                            builder.header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                            builder.header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                         } else if (host.contains("artic.edu")) {
-                            builder.header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
-                            builder.header("AIC-User-Agent", "NoSlop-Android/1.0")
+                            builder.header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
+                            builder.header("AIC-User-Agent", "NoSlop-Android (${com.noslop.app.net.NoSlopUserAgent.CONTACT})")
                         }
                         chain.proceed(builder.build())
                     }

@@ -37,7 +37,7 @@ object ArticleMetadataResolver {
                         val restUrl = "https://$lang.wikipedia.org/api/rest_v1/page/summary/$pageTitle"
                         val restReq = okhttp3.Request.Builder()
                             .url(restUrl)
-                            .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                            .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                             .build()
                         client.newCall(restReq).execute().use { restRes ->
                             if (restRes.isSuccessful) {
@@ -60,7 +60,7 @@ object ArticleMetadataResolver {
 
             val request = okhttp3.Request.Builder()
                 .url(articleUrl)
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop; Mozilla/5.0)")
+                .header("User-Agent", "${com.noslop.app.net.NoSlopUserAgent.value} Mozilla/5.0")
                 .build()
 
             val response = client.newCall(request).execute()
@@ -103,7 +103,7 @@ object ArticleMetadataResolver {
         try {
             val request = okhttp3.Request.Builder()
                 .url(articleUrl)
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop; Mozilla/5.0)")
+                .header("User-Agent", "${com.noslop.app.net.NoSlopUserAgent.value} Mozilla/5.0")
                 .build()
             com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null

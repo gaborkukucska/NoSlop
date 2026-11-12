@@ -55,6 +55,8 @@ private fun getSourceLabel(item: FeedItem): String {
         "wikimedia" -> "Wikimedia"
         "wikipedia" -> "Wikipedia"
         "hackernews", "hn" -> "Hacker News"
+        "openverse" -> "Openverse"
+        "artic" -> "Art Institute"
         else -> null
     }
     if (fromApi != null) return fromApi
@@ -256,14 +258,21 @@ fun FullScreenFeedCard(
             ) {
                 Column(modifier = Modifier.fillMaxWidth(0.8f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // NOSLOP_SOURCE_CREDIT_V1 — the source badge links back to the item's own page.
+                        var showSourcePage by remember { mutableStateOf(false) }
+                        val sourcePage = item.url?.takeIf { it.startsWith("http") }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(AccentGreen.copy(alpha = 0.15f))
+                                .then(if (sourcePage != null) Modifier.clickable { showSourcePage = true } else Modifier)
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             val badgeText = getSourceLabel(item)
-                            Text(badgeText, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(if (sourcePage != null) "$badgeText ↗" else badgeText, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                        if (showSourcePage && sourcePage != null) {
+                            com.noslop.app.ui.ArticleWebViewDialog(url = sourcePage, title = item.title, onDismiss = { showSourcePage = false })
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         val creatorKeywords by (viewModel?.creatorKeywords ?: kotlinx.coroutines.flow.MutableStateFlow("")).collectAsState()
@@ -325,6 +334,19 @@ fun FullScreenFeedCard(
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis
                     )
+
+                    // NOSLOP_SOURCE_CREDIT_V1 — openly licensed media show their licence.
+                    val licenceLine = SourceCredit.licenceLine(item.apiSource, item.excerpt)
+                    if (licenceLine != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = licenceLine,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(6.dp))
 

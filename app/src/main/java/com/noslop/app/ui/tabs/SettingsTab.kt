@@ -2070,6 +2070,37 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop/blob/main/docs/PRIVACY_POLICY.md"))) }.padding(vertical = 4.dp)
                     )
 
+                    // NOSLOP_SOURCE_CREDIT_V1 — the credits the sources' terms ask for.
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Content sources".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Each slide names its source and creator. Tap the source to open the original page.".tr, color = TextMuted, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Made using Openverse but not endorsed or certified by Openverse.".tr,
+                        color = TextMuted,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://openverse.org"))) }.padding(vertical = 2.dp)
+                    )
+                    Text(
+                        "Photos and videos provided by Pexels.".tr,
+                        color = AccentGreen,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.pexels.com"))) }.padding(vertical = 2.dp)
+                    )
+                    Text(
+                        "Music from Jamendo, under each artist's licence.".tr,
+                        color = AccentGreen,
+                        fontSize = 13.sp,
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.jamendo.com"))) }.padding(vertical = 2.dp)
+                    )
+                    Text("Images from Wikimedia Commons and Openverse are shown under each file's licence.".tr, color = TextMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp))
+                    Text(
+                        "Source terms".tr,
+                        color = AccentGreen,
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop/blob/main/docs/SOURCES.md"))) }.padding(vertical = 4.dp)
+                    )
+
                     Spacer(modifier = Modifier.height(24.dp))
                     HorizontalDivider(color = BorderSubtle)
                     Spacer(modifier = Modifier.height(16.dp))

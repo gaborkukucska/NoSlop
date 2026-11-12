@@ -45,12 +45,19 @@ object FeedParser {
     fun fetchAndParse(feedUrl: String, sourceId: String): List<FeedItem> {
         return try {
             Logger.info(TAG, "Fetching feed contents from: $feedUrl")
-            val request = okhttp3.Request.Builder()
-                .url(feedUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .build()
+            // NOSLOP_HONEST_USER_AGENT_V1 — NoSlop names itself. A site that refuses that gets one retry
+            // as a browser, and is remembered for this run. Reddit RSS stays as it was (owner, 2026-11-12).
+            val host = com.noslop.app.net.NoSlopUserAgent.hostOf(feedUrl)
+            val asBrowser = isRedditFeedUrl(feedUrl) || com.noslop.app.net.NoSlopUserAgent.needsBrowser(host)
+            var response = fetchFeed(feedUrl, if (asBrowser) com.noslop.app.net.NoSlopUserAgent.BROWSER else com.noslop.app.net.NoSlopUserAgent.value)
+            if (!asBrowser && com.noslop.app.net.NoSlopUserAgent.shouldRetryAsBrowser(response.code)) {
+                Logger.warn(TAG, "$host refused NoSlop's User-Agent (HTTP ${response.code}); retrying as a browser")
+                response.close()
+                com.noslop.app.net.NoSlopUserAgent.rememberNeedsBrowser(host)
+                response = fetchFeed(feedUrl, com.noslop.app.net.NoSlopUserAgent.BROWSER)
+            }
 
-            com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
+            response.use { response ->
                 if (response.isSuccessful && response.body != null) {
                     Logger.info(TAG, "Successfully fetched feed: $feedUrl (HTTP ${response.code})")
                     if (isRedditFeedUrl(feedUrl)) {
@@ -74,6 +81,11 @@ object FeedParser {
             emptyList()
         }
     }
+
+    private fun fetchFeed(feedUrl: String, userAgent: String): okhttp3.Response =
+        com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(
+            okhttp3.Request.Builder().url(feedUrl).header("User-Agent", userAgent).build()
+        ).execute()
 
     /**
      * Parse feed inputs using Android XmlPullParser (handling RSS & Atom formats)

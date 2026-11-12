@@ -58,7 +58,7 @@ object WikipediaApiClient {
 
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val body = client.newCall(request).execute().use { res ->
@@ -95,7 +95,7 @@ object WikipediaApiClient {
                             val summaryUrl = "https://$language.wikipedia.org/api/rest_v1/page/summary/$encTitle"
                             val sumReq = Request.Builder()
                                 .url(summaryUrl)
-                                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                                 .build()
                             client.newCall(sumReq).execute().use { sumRes ->
                                 if (sumRes.isSuccessful) {

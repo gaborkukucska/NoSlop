@@ -92,7 +92,7 @@ object OpenverseApiClient {
 
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val body = client.newCall(request).execute().use { res ->
@@ -189,7 +189,7 @@ object OpenverseApiClient {
 
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val body = client.newCall(request).execute().use { res ->

@@ -115,9 +115,9 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         
         val targetUserAgent = when {
             activeUrl?.contains("wikimedia.org") == true || activeUrl?.contains("wikipedia.org") == true ->
-                "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+                com.noslop.app.net.NoSlopUserAgent.value
             activeUrl?.contains("artic.edu") == true ->
-                "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+                com.noslop.app.net.NoSlopUserAgent.value
             else ->
                 "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
         }
@@ -127,7 +127,7 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
             .setHeader("User-Agent", targetUserAgent)
             .apply {
                 if (activeUrl?.contains("artic.edu") == true) {
-                    setHeader("AIC-User-Agent", "NoSlop-Android/1.0")
+                    setHeader("AIC-User-Agent", "NoSlop-Android (${com.noslop.app.net.NoSlopUserAgent.CONTACT})")
                 }
             }
             .crossfade(true)
@@ -315,9 +315,9 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
 
             val zoomUserAgent = when {
                 url.contains("wikimedia.org") || url.contains("wikipedia.org") ->
-                    "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+                    com.noslop.app.net.NoSlopUserAgent.value
                 url.contains("artic.edu") ->
-                    "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)"
+                    com.noslop.app.net.NoSlopUserAgent.value
                 else ->
                     "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
             }
@@ -327,7 +327,7 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                 .setHeader("User-Agent", zoomUserAgent)
                 .apply {
                     if (url.contains("artic.edu")) {
-                        setHeader("AIC-User-Agent", "NoSlop-Android/1.0")
+                        setHeader("AIC-User-Agent", "NoSlop-Android (${com.noslop.app.net.NoSlopUserAgent.CONTACT})")
                     }
                     when (mediaSettings.imageQuality) {
                         "low" -> size(1280)

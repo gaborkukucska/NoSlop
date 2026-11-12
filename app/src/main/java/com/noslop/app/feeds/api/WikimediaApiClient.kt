@@ -105,7 +105,7 @@ object WikimediaApiClient {
 
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val body = client.newCall(request).execute().use { res ->
@@ -165,7 +165,7 @@ object WikimediaApiClient {
                     title = title.removePrefix("File:").substringBeforeLast("."),
                     url = descriptionUrl,
                     author = cleanArtist,
-                    excerpt = cleanDesc.take(200),
+                    excerpt = listOfNotNull(metadata?.getAsJsonObject("LicenseShortName")?.get("value")?.asString?.let { android.text.Html.fromHtml(it, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim() }?.takeIf { it.isNotBlank() }, cleanDesc.takeIf { it.isNotBlank() }).joinToString(" · ").take(200), // NOSLOP_SOURCE_CREDIT_V1: licence first
                     thumbnailUrl = thumbUrl,
                     publishedAt = 0L,
                     mediaUrl = thumbUrl,
@@ -200,7 +200,7 @@ object WikimediaApiClient {
             val request = Request.Builder()
                 .url(url)
                 // Wikimedia's UA policy asks for a descriptive agent with contact info.
-                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val response = client.newCall(request).execute()
@@ -258,7 +258,7 @@ object WikimediaApiClient {
                         title = title.removePrefix("File:").substringBeforeLast("."),
                         url = descriptionUrl,
                         author = cleanArtist,
-                        excerpt = cleanDesc.take(200),
+                        excerpt = listOfNotNull(metadata?.getAsJsonObject("LicenseShortName")?.get("value")?.asString?.let { android.text.Html.fromHtml(it, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim() }?.takeIf { it.isNotBlank() }, cleanDesc.takeIf { it.isNotBlank() }).joinToString(" · ").take(200), // NOSLOP_SOURCE_CREDIT_V1: licence first
                         thumbnailUrl = thumbUrl,
                         // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
                         publishedAt = 0L,

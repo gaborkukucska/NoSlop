@@ -38,6 +38,7 @@ object VimeoApiClient {
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "bearer $apiKey")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .header("Accept", "application/vnd.vimeo.*+json;version=3.4")
                 .build()
 

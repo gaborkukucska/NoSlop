@@ -68,7 +68,7 @@ object JamendoApiClient {
 
             if (ProxyAuth.isConfigured) {
                 val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
-                val reqBuilder = Request.Builder().url(proxiedUrl)
+                val reqBuilder = Request.Builder().url(proxiedUrl).header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
                 try {
                     response = client.newCall(reqBuilder.build()).execute()
@@ -84,7 +84,7 @@ object JamendoApiClient {
             }
 
             if (response == null) {
-                val directReq = Request.Builder().url(url).build()
+                val directReq = Request.Builder().url(url).header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value).build()
                 try {
                     response = client.newCall(directReq).execute()
                 } catch (e: Exception) {

@@ -61,7 +61,7 @@ object PodcastIndexClient {
             .header("X-Auth-Date", nowSeconds.toString())
             .header("X-Auth-Key", apiKey)
             .header("Authorization", sha1(apiKey + apiSecret + nowSeconds))
-            .header("User-Agent", "NoSlop-Android/1.0")
+            .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
             .build()
 
     internal fun parseShows(root: JsonObject): List<Show> =

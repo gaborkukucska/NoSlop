@@ -188,12 +188,17 @@ object InternetArchiveClient {
     /** E5s2: [fetchAndParse], with whether the search has a further page. */
     private suspend fun fetchAndParsePage(url: String, defaultMediaType: String, sourceId: String): SourcePage {
         return try {
-            val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
-                .build()
-
-            val response = client.newCall(request).execute()
+            // NOSLOP_HONEST_USER_AGENT_V1 — NoSlop names itself; one retry as a browser only if refused.
+            val host = com.noslop.app.net.NoSlopUserAgent.hostOf(url)
+            val asBrowser = com.noslop.app.net.NoSlopUserAgent.needsBrowser(host)
+            fun call(userAgent: String) = client.newCall(Request.Builder().url(url).header("User-Agent", userAgent).build()).execute()
+            var response = call(if (asBrowser) com.noslop.app.net.NoSlopUserAgent.BROWSER else com.noslop.app.net.NoSlopUserAgent.value)
+            if (!asBrowser && com.noslop.app.net.NoSlopUserAgent.shouldRetryAsBrowser(response.code)) {
+                Logger.warn(TAG, "$host refused NoSlop's User-Agent (HTTP ${response.code}); retrying as a browser")
+                response.close()
+                com.noslop.app.net.NoSlopUserAgent.rememberNeedsBrowser(host)
+                response = call(com.noslop.app.net.NoSlopUserAgent.BROWSER)
+            }
             if (!response.isSuccessful) {
                 Logger.warn(TAG, "Internet Archive API returned ${response.code}")
                 response.close()

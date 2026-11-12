@@ -2616,6 +2616,24 @@ M new` (no keyword).
 
 Tests: `TypeFilterRefillTest`, `TypeFilterRefillArchitectureTest`.
 
+### 16.42 Honest User-Agents and source credits (`NOSLOP_HONEST_USER_AGENT_V1`, `NOSLOP_SOURCE_CREDIT_V1`)
+
+* `net/NoSlopUserAgent`: `value` is `NoSlop-Android/<version> (+<repository>; noslop.me@proton.me)`.
+  `FeedParser.fetchAndParse` and `InternetArchiveClient.fetchAndParsePage` send it and, on HTTP 403
+  or 406 only, retry once with `BROWSER`, adding the host to an in-memory set (`needsBrowser`) so the
+  next refresh goes straight to the browser User-Agent. Reddit feed URLs keep the browser
+  User-Agent, and so do media downloads: images from general CDNs (`MediaComponents`; Wikimedia and Art
+  Institute images send `value`), streams (`VideoPlayer`), and any request that names no User-Agent
+  (`HttpClientProvider`'s default). Jamendo, Guardian and Vimeo API calls, which named none, now send
+  `value`. `HonestUserAgentArchitectureTest` allows a browser literal only in those files and
+  `YouTubeInternalClient`, `InvidiousApiClient`, `RedditApiClient` and `NoSlopUserAgent`.
+* `FeedCard` media overlay: the source badge opens `item.url` in `ArticleWebViewDialog` (which blocks
+  the WebView under Tor and offers the browser). `SourceCredit.licenceLine` shows the Openverse
+  excerpt, or the licence at the start of a Wikimedia excerpt (`LicenseShortName`).
+* Settings › About NoSlop: the source credits and a link to `docs/SOURCES.md`.
+
+Tests: `NoSlopUserAgentTest`, `SourceCreditTest`, `HonestUserAgentArchitectureTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

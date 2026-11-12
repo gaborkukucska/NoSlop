@@ -60,7 +60,7 @@ object GuardianApiClient {
     /** E5s2: [fetch], with whether the Guardian has a further page. */
     private fun fetchPage(url: String, apiKey: String, sourceId: String): SourcePage {
         return try {
-            val request = Request.Builder().url(url).header("api-key", apiKey).build()
+            val request = Request.Builder().url(url).header("api-key", apiKey).header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value).build()
             val response = client.newCall(request).execute()
             val body = response.body?.string() ?: return SourcePage.failed()
             val root = gson.fromJson(body, JsonObject::class.java)

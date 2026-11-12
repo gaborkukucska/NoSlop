@@ -44,7 +44,7 @@ object NasaApiClient {
         return try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val response = client.newCall(request).execute()
@@ -133,7 +133,7 @@ object NasaApiClient {
         return try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0")
+                .header("User-Agent", com.noslop.app.net.NoSlopUserAgent.value)
                 .build()
 
             val response = client.newCall(request).execute()
