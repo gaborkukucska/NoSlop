@@ -35,7 +35,7 @@ About 45 publisher feeds in `SourceLibrary`, from Ars Technica to NME, plus Flic
 | Source | Notes | Status |
 |---|---|---|
 | Publisher feeds (news, tech, science, culture) | `FeedParser` sends NoSlop's User-Agent, and retries once as a browser only when a site refuses it (HTTP 403 or 406), remembering that host until the app restarts. The log names such hosts. | User-Agent **OK** since 2026-11-12 (NoSlop's, with one browser retry for a site that refuses it); terms **Unchecked** one by one |
-| Flickr public feed (`flickr-explore`) | The Flickr API terms don't cover feeds. They do say to respect each owner's rights and licence, and not to replicate Flickr. The app keeps each photo's author and the link to its photo page. | **OK** as far as read |
+| Flickr public feed (`flickr-explore`) | The Flickr API terms don't cover feeds. They do say to respect each owner's rights and licence, and not to replicate Flickr. The app keeps each photo's author and the link to its photo page. Since 2026-11-12 it asks the feed for the user's interests as tags and drops photos with adult words in their title, caption or tags; the public feed has no SafeSearch switch. | **OK** as far as read |
 | Reddit subreddit RSS | See Reddit above. | **Conflict** (User-Agent) |
 
 ## Changes made, and what is left

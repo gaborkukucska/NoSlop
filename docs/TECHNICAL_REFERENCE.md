@@ -2656,6 +2656,19 @@ the build that set it, and `UnifiedFeedTab` shows "Curating your feed..." ahead 
 while it is. Injections stay synchronous. History, Saved and Liked have their own loaders, still on
 the main thread.
 
+### 16.45 Flickr from interests, sharing a link (`NOSLOP_FLICKR_INTERESTS_V1`, `NOSLOP_CLEARNET_SHARE_V1`)
+
+* `FeedRepository.fetchRssSource`: when `FlickrTagFeed.appliesTo(source.url)` (the untagged
+  `photos_public.gne`), the URL gets `tags=` (up to 6 of the user's interest keywords, or interest
+  names, as Flickr tags, shuffled each refresh) and `tagmode=any`. Items from a photo stream are
+  dropped when `FlickrTagFeed.isMature(title + excerpt)`. `FeedParser.parseRssItem` keeps a photo
+  stream's `media:category` tags as "Tags: ..." at the end of the excerpt, and leaves a photo stream's
+  video enclosures out (Flickr videos need a signed-in session).
+* `FeedCard`: Share on a clearnet slide offers "Share to mesh" or "Share link";
+  `ClearnetShare.send` opens `ACTION_SEND` with `ClearnetShareText.compose(title, url, message)`.
+
+Tests: `FlickrTagFeedTest`, `ClearnetShareTest`, `FeedParserPhotoStreamTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

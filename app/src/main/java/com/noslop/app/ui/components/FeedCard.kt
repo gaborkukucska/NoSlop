@@ -383,6 +383,30 @@ fun FullScreenFeedCard(
         val showSoftBlockOverlay = isSoftBlocked && !revealOverride && !isContentTransparencyEnabled
         val showTransparencyBadge = isSoftBlocked && isContentTransparencyEnabled
 
+        // NOSLOP_CLEARNET_SHARE_V1 — share to the mesh, or the original link to any app.
+        var showShareChoice by remember { mutableStateOf(false) }
+        val shareContext = LocalContext.current
+        if (showShareChoice) {
+            AlertDialog(
+                onDismissRequest = { showShareChoice = false },
+                containerColor = SurfaceDark,
+                title = { Text("Share".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("Share it with your mesh, or send its link to any app.".tr, color = TextMuted) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showShareChoice = false
+                        item.url?.let { ClearnetShare.send(shareContext, item.title, it) }
+                    }) { Text("Share link".tr, color = AccentGreen) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showShareChoice = false
+                        onShareToMesh()
+                    }) { Text("Share to mesh".tr, color = TextLight) }
+                }
+            )
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             OverlayInteractions(
                 isMesh = false,
@@ -392,7 +416,7 @@ fun FullScreenFeedCard(
                 onToggleSave = { viewModel?.toggleItemSavedState(item.id, !item.isSaved) },
                 onLike = { viewModel?.reactToFeedItem(item, "like") },
                 onReaction = { type -> viewModel?.reactToFeedItem(item, type) },
-                onShare = onShareToMesh,
+                onShare = { if (ClearnetShareText.canShare(item.url)) showShareChoice = true else onShareToMesh() },
                 onComment = { 
                     viewModel?.bridgeFeedItemToMesh(item)
                     viewModel?.openCommentsForPost(anchorId)

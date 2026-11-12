@@ -63,6 +63,29 @@ class FeedParserPhotoStreamTest {
     }
 
     @Test
+    fun aFlickrPhotosTags_areKeptInItsExcerpt() {
+        // NOSLOP_FLICKR_INTERESTS_V1: tags are searchable and filterable.
+        val xml = flickrRss.replace(
+            "<enclosure url=",
+            "<media:category scheme=\"urn:flickr:tags\">harbour sea boats</media:category>\n          <enclosure url="
+        )
+        val item = parse(xml, "flickr-explore").single()
+        assertTrue(item.excerpt!!.endsWith("Tags: harbour sea boats"))
+    }
+
+    @Test
+    fun aFlickrVideo_staysAPhoto() {
+        // Flickr serves its videos only to signed-in sessions.
+        val xml = flickrRss.replace(
+            "<enclosure url=\"https://live.staticflickr.com/1/123_abc_b.jpg\" type=\"image/jpeg\" length=\"0\"/>",
+            "<enclosure url=\"https://live.staticflickr.com/video/123/abc/720p.mp4?s=x\" type=\"video/mp4\" length=\"0\"/>"
+        )
+        val item = parse(xml, "flickr-explore").single()
+        assertEquals("image", item.mediaType)
+        assertEquals("https://live.staticflickr.com/1/123_abc_b.jpg", item.mediaUrl)
+    }
+
+    @Test
     fun theSameImageInANewsFeed_staysAnArticleWithAThumbnail() {
         val item = parse(flickrRss, "bbc-world", "https://feeds.bbci.co.uk/news/world/rss.xml").single()
         assertNull(item.mediaType)

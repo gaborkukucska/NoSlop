@@ -509,6 +509,13 @@ class FeedRepository(
         )
     }
 
+    /** NOSLOP_FLICKR_INTERESTS_V1 — tags for Flickr's public feed from the user's interests. */
+    private suspend fun flickrTags(): List<String> {
+        val interests = preferencesRepository.getUserSelectedCategories()
+        val keywords = interests.flatMap { preferencesRepository.getUserKeywordsForCategory(it) }
+        return com.noslop.app.feeds.FlickrTagFeed.tags(keywords, interests, kotlin.random.Random.Default)
+    }
+
     private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>): Boolean {
         try {
             if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && TOR_BLOCKED_DOMAINS.any { source.url.contains(it) }) {
@@ -516,7 +523,20 @@ class FeedRepository(
                 return true
             }
             Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
-            val items = FeedParser.fetchAndParse(source.url, source.id)
+            // NOSLOP_FLICKR_INTERESTS_V1 — Flickr's public photo feed is asked for the user's interests, and
+            // photos carrying an adult word are dropped (the public feed has no SafeSearch switch).
+            val fetchUrl = if (com.noslop.app.feeds.FlickrTagFeed.appliesTo(source.url)) {
+                com.noslop.app.feeds.FlickrTagFeed.urlFor(source.url, flickrTags())
+            } else {
+                source.url
+            }
+            val items = FeedParser.fetchAndParse(fetchUrl, source.id).let { parsed ->
+                if (com.noslop.app.feeds.isPhotoStreamFeed(source.id, source.url)) {
+                    parsed.filterNot { com.noslop.app.feeds.FlickrTagFeed.isMature("${it.title} ${it.excerpt}") }
+                } else {
+                    parsed
+                }
+            }
             if (items.isNotEmpty()) {
                 val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
                 val filteredItems = items.filter { item ->

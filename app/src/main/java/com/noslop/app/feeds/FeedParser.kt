@@ -167,6 +167,7 @@ object FeedParser {
         var mediaUrl: String? = null
         var mediaType: String? = null
         var thumbnailUrl: String? = null
+        val photoTags = mutableListOf<String>() // NOSLOP_FLICKR_INTERESTS_V1
 
         var eventType = parser.next()
         while (!(eventType == XmlPullParser.END_TAG && parser.name.equals("item", ignoreCase = true))) {
@@ -194,6 +195,9 @@ object FeedParser {
                                     mediaUrl = encUrl
                                     mediaType = "image"
                                 }
+                            } else if (photoStream && derivedType == "video") {
+                                // NOSLOP_FLICKR_INTERESTS_V1 — Flickr serves its videos only to signed-in
+                                // sessions, so they never play; the item stays a photo.
                             } else {
                                 mediaUrl = encUrl
                                 mediaType = derivedType
@@ -219,6 +223,10 @@ object FeedParser {
                             thumbnailUrl = groupResult.first // Use video URL as thumb fallback or thumbnail from group
                         }
                     }
+                    "media:category", "category" -> {
+                        // NOSLOP_FLICKR_INTERESTS_V1 — a photo's tags, kept for search and filtering.
+                        if (photoStream) photoTags += readText(parser).trim() else skip(parser)
+                    }
                     else -> skip(parser)
                 }
             }
@@ -230,6 +238,13 @@ object FeedParser {
         if (cleanedDesc.trim().equals("Comments", ignoreCase = true) || cleanedDesc.trim().equals("Comment", ignoreCase = true)) {
             cleanedDesc = ""
             description = ""
+        }
+        val tagLine = photoTags.filter { it.isNotEmpty() }.joinToString(" ").take(300)
+        if (tagLine.isNotEmpty()) cleanedDesc = (if (cleanedDesc.isBlank()) "" else "$cleanedDesc\n") + "Tags: $tagLine"
+        if (photoStream && mediaUrl == null && thumbnailUrl != null) {
+            // A photo stream item whose only media was a video: show its still.
+            mediaUrl = thumbnailUrl
+            mediaType = "image"
         }
         val id = guid.ifBlank { link.ifBlank { title + pubDateStr } }
 

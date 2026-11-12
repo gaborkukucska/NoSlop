@@ -123,6 +123,12 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 
 ---
 
+## Completed Changes (2026-11-12) — Flickr From Interests, Sharing a Link (v0.7.8-alpha)
+
+* **Flickr photos were random, some adult** (`NOSLOP_FLICKR_INTERESTS_V1`, patch 17). "Flickr Explore" is Flickr's public feed (`photos_public.gne`): the latest uploads from everyone. Each refresh now asks for photos tagged with up to 6 of the user's interest keywords, or interest names, picked at random, any of them (`FlickrTagFeed`). Photo-stream items keep their Flickr tags in the excerpt ("Tags: ..."), so search and negative keywords see them, and photos whose title, caption or tags carry an adult word are dropped before they are stored. The public feed has no SafeSearch switch, so an untagged adult photo can still get through; the Flickr API's `safe_search=1` needs a key (not built). Flickr videos in the feed stay photos: Flickr serves them only to signed-in sessions (ExoPlayer error 2004 in the 2026-11-11 capture).
+* **Sharing a slide's link** (`NOSLOP_CLEARNET_SHARE_V1`). On a clearnet slide, Share asks "Share to mesh" (as before) or "Share link", which opens the Android share sheet with the title, the original link and one of five NoSlop lines picked at random (`ClearnetShareText`).
+* **Tests:** `FlickrTagFeedTest`, `ClearnetShareTest`, two new cases in `FeedParserPhotoStreamTest`.
+
 ## Completed Changes (2026-11-12) — Lists Built Off the Main Thread (v0.7.8-alpha)
 
 * **Opening a filter froze the screen** (`NOSLOP_EMPTY_BUILD_OFF_MAIN_V1`, patch 16). A list built from empty (a filter, a search, Mesh, a refreshed Live Feed) ran `computeFeedBatch` on the main thread: 463 ms from 19,167 stored items when Articles opened in the 2026-11-11 capture, 966 ms blocked in all. It had stayed there so the empty-list screen wouldn't flash. Now it is computed on `Dispatchers.Default` and applied on the main thread, with `isBuildingFeedList` true meanwhile; the feed shows "Curating your feed..." instead of any empty state. A second request for the same mode and search waits for the build in flight; a request for another list bumps `feedListGeneration`, which drops the earlier result, as does a list that is no longer empty when the result is ready. Injections stay synchronous.
