@@ -1445,6 +1445,20 @@ fun UnifiedFeedTab(
                 }
             }
         }
+
+        // NOSLOP_SOURCE_STATUS_V1 — name the services that aren't answering, under the top bar.
+        if (isActiveTab) {
+            com.noslop.app.ui.components.SourceStatusBanner(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 64.dp, start = 24.dp, end = 24.dp)
+                    .zIndex(10f)
+                    .graphicsLayer {
+                        translationY = topSlideOffset
+                        alpha = if (topSlideOffset < 0f) (1f - (kotlin.math.abs(topSlideOffset) / 300f)).coerceIn(0f, 1f) else 1f
+                    }
+            )
+        }
     }
 
     // ─── Search & Filter Modal ───

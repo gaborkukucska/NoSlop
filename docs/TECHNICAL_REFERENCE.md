@@ -2634,6 +2634,18 @@ Tests: `TypeFilterRefillTest`, `TypeFilterRefillArchitectureTest`.
 
 Tests: `NoSlopUserAgentTest`, `SourceCreditTest`, `HonestUserAgentArchitectureTest`.
 
+### 16.43 Source status (`NOSLOP_SOURCE_STATUS_V1`)
+
+`SourceHealth.interceptor` is added after `userAgentInterceptor` in every `HttpClientProvider`
+builder, so it sits inside `torGuardInterceptor` and sees only attempts that were made. It records,
+per host, success or failure (`IOException`, or HTTP 401, 403, 429, 5xx); onion and loopback hosts are
+ignored and at most 500 hosts are kept (`SourceHealthRules.next`). `SourceHealthRules.failing` reports
+a host after 3 failures in a row only if another host answered after the run began. API sources map
+to hosts through `SERVICE_HOSTS`; feed sources by their URL's host. `SourceStatusBanner` (feed, under
+the top bar) names failing API services; `ManageSourcesDialog` marks failing sources.
+
+Tests: `SourceHealthRulesTest`, `SourceStatusArchitectureTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

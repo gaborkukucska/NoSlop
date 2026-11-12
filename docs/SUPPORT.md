@@ -18,6 +18,10 @@
 *   **Phone notifications switch**: Settings › Notifications › **Phone notifications** must be on. It is on by default. Off, alerts only show inside the app.
 *   **Android 13 and newer**: Android asks once whether NoSlop may show notifications. If you said no, the switch shows "Tap to allow"; tap it to be asked again, or to open Android's notification settings for NoSlop when Android won't ask any more.
 
+### "Not responding" on the Feed
+*   **What it means**: a source (YouTube, Reddit, a feed site) refused or failed NoSlop's last three requests while other sources answered. Its items may be missing until it answers again; nothing is wrong with your phone. Tap the line to hide it.
+*   **Which one**: Settings › Content Preferences › Manage Sources marks each source that isn't answering, with the last error.
+
 ### Lists and Filters
 *   **Liked and Saved**: Liked shows what you reacted to positively (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), newest first. Saved shows what you saved. Liking something also saves it, so a liked item is in both.
 *   **Videos, Audio, Images, Articles**: these skip what you have already seen. When they run low, NoSlop searches for more of that type using your interests, so the first slides after the end may take a few seconds.

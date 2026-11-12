@@ -123,6 +123,12 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 
 ---
 
+## Completed Changes (2026-11-12) — Source Status (v0.7.8-alpha)
+
+* **A source that stopped answering thinned the feed with no explanation** (`NOSLOP_SOURCE_STATUS_V1`, patch 15). The clients swallow their errors, so the signal is taken in `HttpClientProvider`: `SourceHealth.interceptor`, inside the Tor guard, records each real attempt per host. A host is "not responding" after 3 attempts in a row failed (an exception, or HTTP 401, 403, 429 or 5xx) while another host answered after the first of them, so being offline, or Tor not being up, blames no one; one answer clears it (`SourceHealthRules`). The feed shows a line under the top bar naming the API services not responding (tap to hide until the set changes), and Settings › Manage Sources marks each failing source with the last code or error. Memory only.
+* **Tests:** `SourceHealthRulesTest`, `SourceStatusArchitectureTest`.
+* **To check on a device:** with Tor on, the line should stay away in normal use. Turning airplane mode on must not raise it.
+
 ## Completed Changes (2026-11-12) — Honest User-Agents, Source Credits (v0.7.8-alpha)
 
 Owner decisions, 2026-11-12: YouTube (InnerTube search and playback without YouTube's player), Reddit (unauthenticated JSON through a proxy, RSS with a browser User-Agent) and Vimeo (direct streams from the player config) stay as they are, and the README and `docs/SOURCES.md` say they go against those sites' terms. The rest of the review's "Changes needed" is done (`NOSLOP_HONEST_USER_AGENT_V1`, `NOSLOP_SOURCE_CREDIT_V1`, patch 14):

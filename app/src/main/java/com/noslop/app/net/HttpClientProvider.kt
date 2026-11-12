@@ -184,6 +184,7 @@ object HttpClientProvider {
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .addInterceptor(torGuardInterceptor)
                 .addInterceptor(userAgentInterceptor)
+                .addInterceptor(com.noslop.app.feeds.SourceHealth.interceptor) // NOSLOP_SOURCE_STATUS_V1
                 .build()
         }.also {
             if (isolatedMediaClientCache.size > 60) {
@@ -234,6 +235,7 @@ object HttpClientProvider {
             .proxy(Proxy.NO_PROXY) // Force direct connection for LAN/clearnet, ignoring Tor system properties
             .dns(cascadingDns)
             .addInterceptor(userAgentInterceptor)
+            .addInterceptor(com.noslop.app.feeds.SourceHealth.interceptor) // NOSLOP_SOURCE_STATUS_V1
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -278,6 +280,7 @@ object HttpClientProvider {
             .dispatcher(dispatcher)
             .addInterceptor(torGuardInterceptor)
             .addInterceptor(userAgentInterceptor)
+            .addInterceptor(com.noslop.app.feeds.SourceHealth.interceptor) // NOSLOP_SOURCE_STATUS_V1
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
             // --- NOSLOP_FAST_FAIL_V1 ---
             // The 60s connect timeout was justified as "better mesh

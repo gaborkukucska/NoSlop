@@ -1143,6 +1143,8 @@ fun ManageSourcesDialog(
     var showApiWarningFor by remember { mutableStateOf<String?>(null) }
     val allLibrarySources = SourceLibrary.sources
     val activeSourceIds = savedSources.filter { it.isActive }.map { it.id }.toSet()
+    val sourceHealth by com.noslop.app.feeds.SourceHealth.state.collectAsState()
+    val failingHosts = remember(sourceHealth) { com.noslop.app.feeds.SourceHealthRules.failing(sourceHealth) }
 
     // Group sources by category for clean presentation
     val groupedSources = allLibrarySources
@@ -1190,13 +1192,23 @@ fun ManageSourcesDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        text = src.title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = TextLight,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    // NOSLOP_SOURCE_STATUS_V1 — say when the source isn't answering.
+                                    val problem = com.noslop.app.feeds.SourceHealthRules.problemFor(src.url, src.feedType, failingHosts)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = src.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = TextLight,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (problem != null) {
+                                            Text(
+                                                text = "Not responding".tr + (problem.lastProblem?.let { " ($it)" } ?: ""),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = androidx.compose.ui.graphics.Color(0xFFFFB74D)
+                                            )
+                                        }
+                                    }
                                     Switch(
                                         checked = isActive,
                                         onCheckedChange = { 
