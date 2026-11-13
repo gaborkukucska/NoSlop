@@ -2212,7 +2212,10 @@ fun toggleAggregator() {
         ONBOARDING_COMPLETED,
         DISCOVERABILITY_CHANGED,
         CREATOR_MODE_CHANGED,
-        CREATOR_IDENTITY_BURNED
+        CREATOR_IDENTITY_BURNED,
+
+        /** NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1: the app was updated since the user was last asked. */
+        APP_UPDATED
     }
 
     private val _backupPromptReason = MutableStateFlow<BackupPromptReason?>(null)
@@ -2224,6 +2227,29 @@ fun toggleAggregator() {
 
     fun dismissBackupPrompt() {
         _backupPromptReason.value = null
+        // NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1: the user was asked on this version (and backed up, or chose
+        // not to). The next question comes with the next update.
+        viewModelScope.launch {
+            repository.putAppSetting(BackupPromptPolicy.SETTING_KEY, com.noslop.app.BuildConfig.VERSION_CODE.toString())
+        }
+    }
+
+    /**
+     * NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1: makes the backup popup due when the app was updated since the
+     * user was last asked. Called once when the main screen appears (BackupPromptHost). A popup that is
+     * already due for another reason is left as it is.
+     */
+    fun checkBackupPromptAfterUpdate() {
+        viewModelScope.launch {
+            if (_backupPromptReason.value != null) return@launch
+            val askedFor = BackupPromptPolicy.parseStored(repository.getAppSetting(BackupPromptPolicy.SETTING_KEY))
+            val running = com.noslop.app.BuildConfig.VERSION_CODE
+            val due = BackupPromptPolicy.dueAfterUpdate(repository.isOnboardingComplete(), askedFor, running)
+            if (due && _backupPromptReason.value == null) {
+                Logger.info("BACKUP_PROMPT", "Backup popup due after an update", "askedFor=$askedFor | running=$running")
+                _backupPromptReason.value = BackupPromptReason.APP_UPDATED
+            }
+        }
     }
 
     /**
@@ -2284,6 +2310,8 @@ fun toggleAggregator() {
             _dmTutorialStep.value = 0
             repository.putAppSetting("feed_tutorial_step", "0")
             repository.putAppSetting("dms_tutorial_step", "0")
+            // NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1: a new account is asked now, so not again until an update.
+            repository.putAppSetting(BackupPromptPolicy.SETTING_KEY, com.noslop.app.BuildConfig.VERSION_CODE.toString())
             _backupPromptReason.value = BackupPromptReason.ONBOARDING_COMPLETED
         }
     }

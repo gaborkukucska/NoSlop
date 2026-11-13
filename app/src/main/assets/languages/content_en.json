@@ -1051,5 +1051,6 @@
   "Open Downloads": "Open Downloads",
   "Download Again": "Download Again",
   "Could not open Downloads. Open your Files app instead.": "Could not open Downloads. Open your Files app instead.",
-  "Could not fetch the latest release and its checksum. Update cancelled.": "Could not fetch the latest release and its checksum. Update cancelled."
+  "Could not fetch the latest release and its checksum. Update cancelled.": "Could not fetch the latest release and its checksum. Update cancelled.",
+  "NoSlop was updated. Your keys and contacts live only on this device, with no server copy. Make a fresh backup now, so your latest contacts, groups and settings can be restored if this device is lost.": "NoSlop was updated. Your keys and contacts live only on this device, with no server copy. Make a fresh backup now, so your latest contacts, groups and settings can be restored if this device is lost."
 }

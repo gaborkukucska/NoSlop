@@ -521,6 +521,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 if (selectedTab == 1) DMsTab(viewModel)
                 if (selectedTab == 2 && hubEnabled) HaiNetTab(viewModel, initialScanMode)
                 if (selectedTab == 3) SettingsTab(viewModel, onNavigateToHubs = { if (hubEnabled) selectedTab = 2 })
+                // NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1: the "back up your account" popup, on whatever tab is open.
+                com.noslop.app.ui.components.BackupPromptHost(viewModel)
                 if (selectedTab == 4) {
                     com.noslop.app.ui.tabs.NotificationsScreen(
                         viewModel = viewModel,
