@@ -94,7 +94,7 @@ class DbEncryptionArchitectureTest {
         // Every SQLCipher connection: SQLiteDatabase.openDatabase(...) and the SQLiteOpenHelper constructor.
         val opens = Regex("""SQLiteDatabase\.openDatabase\(([^;]*?)\)\s*\n""", RegexOption.DOT_MATCHES_ALL)
             .findAll(source).map { it.groupValues[1] }.toList()
-        assertEquals("expected the export and the verify connection", 2, opens.size)
+        assertEquals("expected the export, the verify and the read connection", 3, opens.size)
         for (args in opens) {
             assertTrue("openDatabase without the logging-only handler: $args", args.contains("neverDelete"))
         }
@@ -126,7 +126,20 @@ class DbEncryptionArchitectureTest {
         )
         assertTrue(
             "and must first check that the original is there, so the flag can't create an empty one",
-            open.indexOf("plain.isFile") in 0 until open.indexOf("SQLiteDatabase.openDatabase(")
+            open.indexOf("source.isFile") in 0 until open.indexOf("SQLiteDatabase.openDatabase(")
+        )
+    }
+
+    @Test
+    fun exportNeverAttachesWithANullKey() {
+        // A NULL key in ATTACH means "use the main database's key": a copy meant to be plaintext, or to be
+        // under another key, would silently be written under the source's key instead.
+        val source = code("data/DbEncryption.kt")
+        val attach = Regex("""ATTACH DATABASE \? AS target_db KEY \?", arrayOf<Any>\(([^\n]*)\)\)""").find(source)
+        assertTrue("the ATTACH call was not found", attach != null)
+        assertTrue(
+            "the key argument must fall back to an empty string, never to null",
+            attach!!.groupValues[1].contains("targetPassword ?: \"\"")
         )
     }
 

@@ -64,7 +64,7 @@ class DbEncryptionConversionTest {
     fun cleanUp() {
         for (name in names) {
             val main = context.getDatabasePath(name)
-            for (suffix in listOf("", DbEncryption.BACKUP_SUFFIX, DbEncryption.TEMP_SUFFIX, DbEncryption.FAILED_SUFFIX)) {
+            for (suffix in listOf("", DbEncryption.BACKUP_SUFFIX, DbEncryption.TEMP_SUFFIX, DbEncryption.FAILED_SUFFIX, ".rekeyed", ".plain")) {
                 DbFiles.deleteWithSidecars(File(main.path + suffix))
             }
         }
@@ -182,6 +182,72 @@ class DbEncryptionConversionTest {
 
         assertTrue("the database file must still be there", files.main.exists())
         assertArrayEquals("the database file must be unchanged", before, files.main.readBytes())
+        SqlCipherEngine.verify(files.main, testKey, 19)
+    }
+
+    // --- what a restore does with the database in a backup ---
+
+    @Test
+    fun encryptedDatabase_isCopiedUnderAnotherKey_andBackToPlaintext() {
+        val files = DbFiles(context.getDatabasePath(RAW_DB))
+        createPlaintextDatabase(files.main, rows = 50, blob = ByteArray(64) { it.toByte() })
+        val preparer = preparer(files)
+        assertTrue(preparer.prepare().encrypted)
+        preparer.confirmEncryptedOpen()
+        val before = files.main.length()
+
+        // From the old device's key to this device's key.
+        val otherKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val rekeyed = File(files.main.path + ".rekeyed")
+        val report = SqlCipherEngine.export(files.main, testKey, rekeyed, otherKey)
+        assertEquals(19, report.userVersion)
+        assertTrue("items and the odd table must be counted: $report", report.rows >= 53)
+        SqlCipherEngine.verify(rekeyed, otherKey, 19)
+        assertEquals(FileState.ENCRYPTED, DbFiles(rekeyed).state())
+        assertFalse(fileContains(rekeyed, marker))
+        try {
+            SqlCipherEngine.verify(rekeyed, testKey, null)
+            fail("the copy must not open with the source's key")
+        } catch (expected: Exception) {
+            // expected
+        }
+        assertEquals(
+            listOf("$marker row 7", null),
+            SqlCipherEngine.readStrings(
+                rekeyed, otherKey,
+                listOf("SELECT body FROM items WHERE id = 7", "SELECT body FROM items WHERE id = 99999")
+            )
+        )
+
+        // To plain SQLite, for a device that can't encrypt.
+        val plain = File(files.main.path + ".plain")
+        SqlCipherEngine.export(rekeyed, otherKey, plain, null)
+        SqlCipherEngine.verify(plain, null, 19)
+        assertEquals(FileState.PLAINTEXT, DbFiles(plain).state())
+        assertTrue(fileContains(plain, marker))
+        assertEquals(listOf<String?>("$marker row 7"), SqlCipherEngine.readStrings(plain, null, listOf("SELECT body FROM items WHERE id = 7")))
+        // Android's own SQLite must be able to read it, as on a device without the library.
+        val androidDb = android.database.sqlite.SQLiteDatabase.openDatabase(
+            plain.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+        )
+        try {
+            androidDb.rawQuery("SELECT count(*) FROM items", null).use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals(50L, c.getLong(0))
+            }
+            assertEquals(19, androidDb.version)
+        } finally {
+            androidDb.close()
+        }
+        try {
+            SqlCipherEngine.verify(plain, otherKey, null)
+            fail("a plaintext file must not pass as an encrypted one")
+        } catch (expected: Exception) {
+            // expected
+        }
+
+        // The source was only read.
+        assertEquals(before, files.main.length())
         SqlCipherEngine.verify(files.main, testKey, 19)
     }
 

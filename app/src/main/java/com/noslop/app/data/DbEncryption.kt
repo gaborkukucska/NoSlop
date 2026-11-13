@@ -155,16 +155,24 @@ internal interface CipherEngine {
     fun isAvailable(): Boolean
 
     /**
-     * Copies the plaintext database [plain] into a new encrypted file [target] and compares the row
-     * count of every table. Throws on any failure. Leaves [plain] with no write-ahead log.
+     * Copies the database [source] into a new file [target] and compares the row count of every table.
+     * A null key means plain SQLite on that side, so this one call converts a plaintext database
+     * (null, key), moves a database from one key to another (key, key) and writes a plaintext copy
+     * (key, null). Throws on any failure. Leaves [source] with no write-ahead log.
      */
-    fun export(plain: File, target: File, rawKey: ByteArray): ExportReport
+    fun export(source: File, sourceKey: ByteArray?, target: File, targetKey: ByteArray?): ExportReport
 
     /**
-     * Throws unless [encrypted] opens with [rawKey], passes SQLCipher's and SQLite's integrity checks,
-     * and (when given) has [expectedUserVersion].
+     * Throws unless [file] opens with [rawKey] (null: as plain SQLite), passes SQLite's integrity check
+     * and, when encrypted, SQLCipher's, and (when given) has [expectedUserVersion].
      */
-    fun verify(encrypted: File, rawKey: ByteArray, expectedUserVersion: Int?)
+    fun verify(file: File, rawKey: ByteArray?, expectedUserVersion: Int?)
+
+    /**
+     * The first column of the first row of each query (null when a query has no row), read from [file]
+     * opened read-only with [rawKey] (null: as plain SQLite). Never deletes a file it can't read.
+     */
+    fun readStrings(file: File, rawKey: ByteArray?, queries: List<String>): List<String?>
 
     /** A Room open helper for the encrypted database. [password] is kept by the helper; don't zero it. */
     fun openHelper(
@@ -329,7 +337,7 @@ internal class DbOpenPreparer(
         Logger.info(DbEncryption.TAG, "Converting the database", "dbBytes=$dbBytes | walBytes=$walBytes")
 
         DbFiles.deleteWithSidecars(files.temp)
-        val report = engine.export(files.main, files.temp, rawKey)
+        val report = engine.export(files.main, null, files.temp, rawKey)
 
         // The original must stand on its own before it becomes the backup.
         if (files.wal.exists() && files.wal.length() > 0L) {
@@ -532,58 +540,64 @@ internal object SqlCipherEngine : CipherEngine {
         }
     }
 
-    override fun export(plain: File, target: File, rawKey: ByteArray): ExportReport {
-        val password = DbEncryptionPolicy.sqlcipherRawKey(rawKey)
-        // An empty password opens the file as plain SQLite. Opening without the WAL flag also moves the
+    override fun export(source: File, sourceKey: ByteArray?, target: File, targetKey: ByteArray?): ExportReport {
+        // An empty password opens the source as plain SQLite. Opening without the WAL flag also moves the
         // file out of write-ahead mode, which folds its log into the main file.
-        //
+        val sourcePassword = sourceKey?.let { DbEncryptionPolicy.sqlcipherRawKey(it) } ?: ByteArray(0)
+        val targetPassword = targetKey?.let { DbEncryptionPolicy.sqlcipherRawKey(it) }
         // CREATE_IF_NECESSARY is for the copy, not for this file: ATTACH opens the new file with the
         // flags of the connection it runs on, and without the flag SQLite refuses to create it
         // (error 14, found on the first device run). The check before it keeps the flag from ever
         // creating an empty database where the original should be.
-        if (!plain.isFile) throw IOException("the database to convert is not there")
+        if (!source.isFile) throw IOException("the database to copy is not there")
         val db = SQLiteDatabase.openDatabase(
-            plain.absolutePath, ByteArray(0), null,
+            source.absolutePath, sourcePassword, null,
             SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.CREATE_IF_NECESSARY, neverDelete, null
         )
         try {
             var attached = false
             try {
-                db.execSQL("ATTACH DATABASE ? AS encrypted KEY ?", arrayOf<Any>(target.absolutePath, password))
+                // The KEY argument is never null: with a null key SQLite would give the copy the source's
+                // key. An empty string means "no key", which makes the copy plain SQLite.
+                db.execSQL("ATTACH DATABASE ? AS target_db KEY ?", arrayOf<Any>(target.absolutePath, targetPassword ?: ""))
                 attached = true
-                db.rawExecSQL("SELECT sqlcipher_export('encrypted')")
+                db.rawExecSQL("SELECT sqlcipher_export('target_db')")
                 val userVersion = db.version
-                db.execSQL("PRAGMA encrypted.user_version = $userVersion")
+                db.execSQL("PRAGMA target_db.user_version = $userVersion")
 
                 val original = rowCounts(db, "main")
-                val copy = rowCounts(db, "encrypted")
+                val copy = rowCounts(db, "target_db")
                 DbEncryptionPolicy.firstCountMismatch(original, copy)?.let { throw IOException(it) }
                 return ExportReport(userVersion, original.size, original.values.sum())
             } finally {
                 if (attached) {
                     try {
-                        db.execSQL("DETACH DATABASE encrypted")
+                        db.execSQL("DETACH DATABASE target_db")
                     } catch (e: Exception) {
-                        Logger.warn(DbEncryption.TAG, "Could not detach the encrypted copy", DbEncryption.describe(e))
+                        Logger.warn(DbEncryption.TAG, "Could not detach the copy", DbEncryption.describe(e))
                     }
                 }
             }
         } finally {
             db.close()
-            password.fill(0)
+            sourcePassword.fill(0)
+            targetPassword?.fill(0)
         }
     }
 
-    override fun verify(encrypted: File, rawKey: ByteArray, expectedUserVersion: Int?) {
-        val password = DbEncryptionPolicy.sqlcipherRawKey(rawKey)
+    override fun verify(file: File, rawKey: ByteArray?, expectedUserVersion: Int?) {
+        if (!file.isFile) throw IOException("the database to check is not there")
+        val password = rawKey?.let { DbEncryptionPolicy.sqlcipherRawKey(it) } ?: ByteArray(0)
         val db = SQLiteDatabase.openDatabase(
-            encrypted.absolutePath, password, null, SQLiteDatabase.OPEN_READONLY, neverDelete, null
+            file.absolutePath, password, null, SQLiteDatabase.OPEN_READONLY, neverDelete, null
         )
         try {
             db.query("SELECT count(*) FROM sqlite_master").use { it.moveToFirst() }
-            // Lists every page whose authentication tag is wrong. No rows means every page is intact.
-            db.query("PRAGMA cipher_integrity_check").use { c ->
-                if (c.moveToFirst()) throw IOException("cipher_integrity_check found a damaged page")
+            if (rawKey != null) {
+                // Lists every page whose authentication tag is wrong. No rows means every page is intact.
+                db.query("PRAGMA cipher_integrity_check").use { c ->
+                    if (c.moveToFirst()) throw IOException("cipher_integrity_check found a damaged page")
+                }
             }
             db.query("PRAGMA quick_check").use { c ->
                 val result = if (c.moveToFirst()) c.getString(0) else null
@@ -591,6 +605,22 @@ internal object SqlCipherEngine : CipherEngine {
             }
             if (expectedUserVersion != null && db.version != expectedUserVersion) {
                 throw IOException("user_version is ${db.version}, expected $expectedUserVersion")
+            }
+        } finally {
+            db.close()
+            password.fill(0)
+        }
+    }
+
+    override fun readStrings(file: File, rawKey: ByteArray?, queries: List<String>): List<String?> {
+        if (!file.isFile) throw IOException("the database to read is not there")
+        val password = rawKey?.let { DbEncryptionPolicy.sqlcipherRawKey(it) } ?: ByteArray(0)
+        val db = SQLiteDatabase.openDatabase(
+            file.absolutePath, password, null, SQLiteDatabase.OPEN_READONLY, neverDelete, null
+        )
+        try {
+            return queries.map { sql ->
+                db.query(sql).use { c -> if (c.moveToFirst()) c.getString(0) else null }
             }
         } finally {
             db.close()

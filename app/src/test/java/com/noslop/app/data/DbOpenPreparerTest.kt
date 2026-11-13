@@ -347,23 +347,28 @@ class DbOpenPreparerTest {
 
         override fun isAvailable() = available
 
-        override fun export(plain: File, target: File, rawKey: ByteArray): ExportReport {
+        override fun export(source: File, sourceKey: ByteArray?, target: File, targetKey: ByteArray?): ExportReport {
             exports++
-            assertEquals(32, rawKey.size)
+            assertNull("the conversion reads a plaintext database", sourceKey)
+            assertEquals(32, targetKey!!.size)
             if (failExport) {
                 target.writeBytes("partial".toByteArray())
                 throw IOException("disk full")
             }
-            target.writeBytes(encrypt(plain.readBytes()))
-            if (leaveWal) File(plain.path + "-wal").writeBytes(ByteArray(64))
+            target.writeBytes(encrypt(source.readBytes()))
+            if (leaveWal) File(source.path + "-wal").writeBytes(ByteArray(64))
             return ExportReport(userVersion = 19, tables = 3, rows = 42)
         }
 
-        override fun verify(encrypted: File, rawKey: ByteArray, expectedUserVersion: Int?) {
+        override fun verify(file: File, rawKey: ByteArray?, expectedUserVersion: Int?) {
             verifies++
+            assertEquals("the preparer only ever checks an encrypted file", 32, rawKey!!.size)
             if (failVerify) throw IOException("cipher_integrity_check found a damaged page")
-            if (!String(encrypted.readBytes(), Charsets.ISO_8859_1).startsWith(MARKER)) throw IOException("file is not a database")
+            if (!String(file.readBytes(), Charsets.ISO_8859_1).startsWith(MARKER)) throw IOException("file is not a database")
         }
+
+        override fun readStrings(file: File, rawKey: ByteArray?, queries: List<String>): List<String?> =
+            throw UnsupportedOperationException("not used by these tests")
 
         override fun openHelper(
             configuration: SupportSQLiteOpenHelper.Configuration,
