@@ -82,6 +82,15 @@
 -keep class com.jcraft.jsch.** { *; }
 -dontwarn com.jcraft.jsch.**
 
+# 8. SQLCipher (NOSLOP_DB_ENCRYPTION_V1). Its native code finds these classes and members by name.
+# The library ships the same rules; they are repeated here so DbEncryptionArchitectureTest can see them.
+-keep,includedescriptorclasses class net.zetetic.database.** { *; }
+-keep,includedescriptorclasses interface net.zetetic.database.** { *; }
+-keepclasseswithmembernames class net.zetetic.database.** {
+    native <methods>;
+}
+-dontwarn net.zetetic.database.**
+
 # Mesh protocol packets and payloads
 -keep class com.noslop.app.mesh.** { *; }
 -keep class com.noslop.app.data.GroupChat { *; }

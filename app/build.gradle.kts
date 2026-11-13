@@ -227,6 +227,11 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    // NOSLOP_DB_ENCRYPTION_V1: SQLCipher encrypts mesh.db (TECHNICAL_REFERENCE §16.51). 4.20.0 is built
+    // against androidx.sqlite 2.7.0; both sqlite artifacts are named so they stay on one version.
+    implementation("net.zetetic:sqlcipher-android:4.20.0@aar")
+    implementation("androidx.sqlite:sqlite:2.7.0")
+    implementation("androidx.sqlite:sqlite-framework:2.7.0")
     testImplementation("androidx.room:room-testing:2.7.0")
     androidTestImplementation("androidx.room:room-testing:2.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

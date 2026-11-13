@@ -324,6 +324,9 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                // NOSLOP_DB_ENCRYPTION_V1: on Room's first query this decides what mesh.db is, converts a
+                // plaintext database once, and opens it encrypted (TECHNICAL_REFERENCE §16.51).
+                .openHelperFactory(DbEncryption.openHelperFactory(context.applicationContext))
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
                 .build()
                 .also { INSTANCE = it }

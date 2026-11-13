@@ -983,6 +983,12 @@ object BackupManager {
         var handle = "Anonymous"
         var expectedPub: String? = null
         try {
+            // NOSLOP_DB_ENCRYPTION_V1: Android's own SQLite deletes a file it can't read as a database, and
+            // this can be handed the live mesh.db. An encrypted file must never reach it. (Patch 28c reads
+            // it with its key instead.)
+            if (DbFiles(dbFile).state() == DbEncryptionPolicy.FileState.ENCRYPTED) {
+                throw java.io.IOException("the database is encrypted")
+            }
             val db = android.database.sqlite.SQLiteDatabase.openDatabase(
                 dbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
             )
