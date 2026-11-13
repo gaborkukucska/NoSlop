@@ -2733,6 +2733,134 @@ Test: `MeshOnlyEmptyStateArchitectureTest`.
 
 Test: `FeedTutorialArchitectureTest`.
 
+### 16.51 Database encryption: design (`NOSLOP_DB_ENCRYPTION_V1`)
+
+Design note for 0.8.0-alpha, agreed 2026-11-13. Nothing in this section is built yet. Each part gets a
+"built" line when its patch lands.
+
+**What it protects.** `mesh.db` holds contacts, peers, posts, comments, likes, feed history and DM
+metadata (who and when) as plain SQLite. Android's file encryption protects the file while the phone is
+locked after a restart. It does not protect it from a rooted device, a forensic image of an unlocked
+phone, or a copy of the app's data folder. After this change the file is unreadable without a key held by
+the Android Keystore on that device. It does not protect a running, unlocked app, and it does not cover
+media files (the next 0.8.0 item) or the log file.
+
+**Owner decisions (2026-11-13).**
+
+1. Order for 0.8.0: database, then media, then the tutorial.
+2. The conversion runs on the first start after the update, with "Securing your data..." on the splash
+   screen. A failure leaves the app on the old database and it tries again at the next start.
+3. A device whose Keystore doesn't work stays unencrypted, and Settings says so.
+4. A backup archive carries the encrypted database and its key, both inside the Word Cloud encryption.
+   No plaintext database is written to disk. 0.7.x can't restore a 0.8.0 backup and says so. 0.8.0
+   restores every older backup.
+
+**Library.** `net.zetetic:sqlcipher-android` 4.20.0 with `androidx.sqlite:sqlite` 2.7.0. minSdk 23 (the
+app's is 24), 16 KB pages supported. It ships a native library for each of the four ABIs, so the APK
+grows; the size is measured in patch 28a and recorded here. Its ProGuard rules (`net.zetetic.database.**`)
+go into `proguard-rules.pro`. Defaults are kept: AES-256-CBC with HMAC-SHA512 per 4096-byte page.
+
+**The key.**
+
+* 32 random bytes from `SecureRandom`, made once per device.
+* Wrapped with AES-256-GCM under a Keystore key (alias `noslop_db_key_v1`, no user authentication, the
+  same settings as `GroupMessageCrypto`). The wrapped key is a small file in `noBackupFilesDir`, written
+  to a temp file, synced and renamed.
+* Before the key is used for the first time it is unwrapped again and compared. A key that can't be read
+  back is never used to encrypt anything.
+* Given to SQLCipher as a raw key (`x'<64 hex>'`). This skips the 256,000-round password stretch, which a
+  random key doesn't need, so opening stays fast.
+* The key never changes on a device. A restore re-keys the incoming database to it (see Backup).
+
+**Where it plugs in.** Room opens the file lazily, on the thread of the first query, not in
+`getDatabase()`. So `NoSlopApp.onCreate` stays as it is. `getDatabase()` gives Room one new
+`SupportSQLiteOpenHelper.Factory` (`data/DbEncryption.kt`). Its helper does the work on first open:
+
+1. Read the first 16 bytes of `mesh.db`. `SQLite format 3\0` means plaintext; anything else means
+   encrypted. The file itself is the state, so no flag can disagree with it.
+2. Decide (pure function `DbEncryptionPolicy.decide`, unit tested):
+
+   | File | Key and library | Result |
+   |---|---|---|
+   | none | working | create encrypted |
+   | none | not working | create plaintext |
+   | plaintext | working, enough space, under 3 failed tries for this version | convert, then open encrypted |
+   | plaintext | anything else | open plaintext, record why |
+   | encrypted | working | open encrypted |
+   | encrypted | not working | stop: show the error screen, change nothing |
+
+3. Open through SQLCipher's factory or the framework's, and pass Room's WAL setting on.
+
+Every query waits behind this open, so nothing reads a half-converted file. Because the first open is on
+a background thread, the conversion is too. The six `runBlocking` call sites are checked in patch 28b for
+any that could reach the database from the main thread during the first start.
+
+"Not working" covers a Keystore error, a wrapped key that fails its read-back, and the native library not
+loading. Robolectric can't load the native library, so unit tests take the plaintext path and the
+existing 30 or so database tests run unchanged.
+
+**The one-time conversion.** Never changes the original until the copy is proven.
+
+1. Free space must be at least twice the size of `mesh.db` plus its WAL, plus 50 MB. If not, skip and
+   say so in the log and in Settings. (The owner's phone had 2.1 GB free of 225 GB on 2026-11-13.)
+2. Open `mesh.db` with SQLCipher and an empty key (plaintext mode). `PRAGMA wal_checkpoint(TRUNCATE)`.
+3. `ATTACH DATABASE 'mesh.db.enc-tmp' AS encrypted KEY "x'...'"`, `SELECT sqlcipher_export('encrypted')`,
+   copy `user_version`, `DETACH`, close.
+4. Verify `mesh.db.enc-tmp` with the key: `PRAGMA cipher_integrity_check` returns no rows,
+   `PRAGMA quick_check` is `ok`, `user_version` matches, and every table has the same row count as the
+   original.
+5. Swap: rename `mesh.db` to `mesh.db.plain-bak`, rename the temp file to `mesh.db`, delete `-wal` and
+   `-shm`.
+6. Room opens the encrypted file and runs one query. Only then is `mesh.db.plain-bak` deleted.
+
+Any failure in steps 2 to 4 deletes the temp file and opens the plaintext database as before. The app
+loses nothing and tries again at the next start, up to 3 times per app version.
+
+Recovery at start, before step 1 of "Where it plugs in":
+
+| Found | Action |
+|---|---|
+| `mesh.db.enc-tmp` | delete it (a conversion was cut off before the swap) |
+| `mesh.db.plain-bak`, no `mesh.db` | rename the backup to `mesh.db` (cut off mid-swap) |
+| both, `mesh.db` opens with the key | continue; the backup goes after the first query |
+| both, `mesh.db` doesn't open | put the backup back, count one failed try |
+
+Deleting the plaintext file does not wipe flash storage. Old blocks can remain until the phone reuses
+them. The docs will say this plainly.
+
+**Backup.** NSG2 format version goes from 1 to 2, so 0.7.x answers "made by a newer version".
+
+* Export from an encrypted device: checkpoint, then the file goes in as `database.enc.db` with the raw
+  key as `database.key`. Export from an unencrypted device: `database.db`, as today.
+* Import stages as today, then, still before the commit point:
+  * `database.enc.db`: checked with the archive's key (`cipher_integrity_check`, `quick_check`), then
+    `PRAGMA rekey` to this device's key. On a device with no working key it is exported to plaintext in
+    the stage folder instead.
+  * `database.db` (0.7.x and older archives): checked as today, then converted in the stage folder with
+    the steps above.
+* The commit, the snapshot and the rollback keep copying whole files. The device key doesn't change
+  during an import, so a rolled-back file still opens.
+* `planLegacyRederivation` and the staged `quick_check` open files through one key-aware helper instead
+  of `android.database.sqlite` directly.
+* `factoryReset` uses `clearAllTables()` and is unaffected. The key file stays.
+
+**Settings.** One line under the existing security settings: "Database: encrypted on this device", or
+"Database: not encrypted" with the reason (Keystore unavailable, not enough free space, conversion failed
+and will be retried). New strings go into all 21 language files (`TranslationParityTest`).
+
+**Cost to measure.** Every `feed_items` write reloads the whole table, and batches took 2.4-4.9 s at
+about 31,500 rows. Compare `Feed batch built` and `JANK` lines on the same device before and after, and
+record the conversion time and database size from the new `DB_ENCRYPTION` log lines. If batches slow by
+more than about a quarter, fix the full-table reload before release rather than weaken the cipher.
+
+**Patches.**
+
+* 28a: dependency, ProGuard rules, key store, policy, factory, conversion, log lines. Unit tests for the
+  policy, the header check and the recovery table; an instrumented test for a real conversion.
+* 28b: splash line, Settings line, strings, `runBlocking` check.
+* 28c: backup export and import, format version 2, tests for old and new archives.
+* 28d: README, SECURITY, FAQ, privacy policy, SUPPORT, this section marked as built.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
