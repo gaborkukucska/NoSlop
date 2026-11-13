@@ -32,4 +32,7 @@ Privacy:
 - Report an Issue now says that reports become public GitHub issues
 - The privacy policy says which server is involved (the bug-report relay) and what it sees, and what is and isn't encrypted on your phone
 
+Languages:
+- Every screen is now in your language. About 230 lines that still showed in English are translated into all 21 languages
+
 Once downloaded, open the file from your Files app to install the update.

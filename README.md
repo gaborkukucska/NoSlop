@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.8--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.9--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
@@ -46,7 +46,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked. A video that stalls recovers in place, at the same position, whether you're watching or away.
 * 🚫 **100% Ad & Tracker-Free** — Pure tracker-free client (using offline ZXing barcode scanning, no Google telemetry SDKs). Zero banners or sponsored interruptions.
 * 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
-* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery (800+ UI strings; a test enforces that every string has an English entry, and untranslated strings fall back to English).
+* 🌍 **Global Multi-Language Accessibility** — 21+ languages natively supported out-of-the-box with zero-code dynamic translation discovery (1,050+ UI strings, each translated into every language; a test enforces that every string has an English entry, and untranslated strings fall back to English).
 
 ---
 
@@ -107,7 +107,7 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio. Its cl
 
 ## 🌍 Community Localization (21+ Languages Supported)
 
-NoSlop is designed to be accessible to anyone, anywhere in the world. As of **v0.5.8-alpha**, the app includes **21 native language translations** of the UI, modals and system messages. Any string not yet translated falls back to English:
+NoSlop is designed to be accessible to anyone, anywhere in the world. As of **v0.7.9-alpha**, the app includes **21 native language translations** of the UI, modals and system messages, and every string is translated into each of them. A string added later shows in English until it is translated:
 
 | Language | Code | Native Name | Language | Code | Native Name |
 |---|---|---|---|---|---|

@@ -23,7 +23,7 @@ These rounds fix the three reports in `isues.txt`, all on the legacy Android app
 
 This is the full list of open work on the legacy app as of 2026-11-03, with every item checked against the code. It replaces the old "Open Architectural & Technical Register" and "Consolidated Master Backlog", now in `docs/archived/PROJECT_STATUS_HISTORY.md`. Entries in this file or the history may say "still open" about items closed since; this list wins.
 
-**Planned for 0.8.0-alpha** (agreed 2026-11-12; left out of 0.7.8-alpha because each needs a migration or a design first)
+**Planned for 0.8.0-alpha** (agreed 2026-11-12; left out of 0.7.9-alpha because each needs a migration or a design first)
 
 * **Encrypt the database on the device.** Today only 1:1 DM contents (stored as received ciphertext), group chat bodies (AES-256-GCM, Keystore key) and the identity keys (Keystore) are encrypted by NoSlop; contacts, peers, posts, comments, likes, feed history and DM metadata (who and when) rely on Android's file encryption. Plan: Room on SQLCipher with a random key wrapped by an Android Keystore key, a one-time conversion of the existing database on update (with a tested fallback that never loses data), and backup export/import and the 0.7.x-to-0.8 update re-tested. Write a short design note first.
 * **Encrypt media on the device.** Photos, videos and audio sent or received are plain files under the app's folder (`Android/data/com.noslop.app/files`). Plan: a seekable stream cipher per file (AES-CTR, or GCM in fixed-size chunks) with a Keystore-wrapped key, a decrypting `DataSource` for the players, a Coil fetcher for images, and `MediaProxyService` decrypting as it serves peers. Existing files converted in the background.
@@ -130,41 +130,50 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 
 ---
 
-## Completed Changes (2026-11-13) — Release Prep: New Text in Every Language, Docs (v0.7.8-alpha)
+## Completed Changes (2026-11-13) — Every String in Every Language, Version 0.7.9-alpha (v0.7.9-alpha)
+
+<!-- NOSLOP_VERSION_079_V1 -->
+* **Translations** (`NOSLOP_TRANSLATIONS_078_V1`, patches 25a–25d). The strings added between 0.5.8 and 0.7.7 that were still English-only (about 226 in 19 languages, 229 in Hungarian) are now in all 20 other languages, using each file's existing terms and keeping placeholders, links and names unchanged. Owner's run, 2026-11-13: unit tests pass and the parity report shows 0 missing for every language.
+* **Stale keys removed** (patch 26). Two keys no longer in English ("Discoverability Mode" and the old Report an Issue introduction) were still in the 19 files other than Hungarian. Nothing reads them, so they are removed and the parity report shows 0 "not in English" for every language.
+* **Version 0.7.9-alpha** (`versionCode` 79, patch 26). 0.7.8-alpha was tagged (`v0.7.8-alpha`) and installed on the owner's phone but not published as a GitHub release. 0.7.9-alpha is published instead, so the in-app updater can be tested going from 0.7.8 to 0.7.9. The entries below marked v0.7.9-alpha were written as 0.7.8-alpha and ship in 0.7.9-alpha. No other code, packet, Room schema or archive format changes.
+* **Docs:** README (badge, string count, localization), BUILD (§8), TECHNICAL_REFERENCE (header, §12), TRANSLATION_GUIDE, release notes (a Languages section).
+* **Verify on release:** with 0.7.8-alpha installed, publish 0.7.9-alpha as BUILD §8.3 says (not a pre-release or draft, one `.apk`, its `.sha256`), then check for updates in the app. It should find 0.7.9-alpha, download it over Tor, pass the checksum and certificate checks, and install over 0.7.8-alpha keeping all data.
+
+## Completed Changes (2026-11-13) — Release Prep: New Text in Every Language, Docs (v0.7.9-alpha)
 
 * **Translations** (`NOSLOP_RELEASE_078_V1`, patch 24). The 39 strings added since 0.7.7 (phone notifications, Liked, source credits and status, the HUB switch, Report an Issue, sharing a link and its five notes, screen security, the aggregator-off empty state, the tutorial) were in English and Hungarian only; they are now in all 19 other languages, using each file's existing terms and keeping placeholders, links and names unchanged.
 * **Docs:** README (sharing a link, kept videos, messages off screenshots), SUPPORT (aggregator-off empty feed, swiping back to a video, black screenshots of messages), TRANSLATION_GUIDE (key count). The older English-only strings are in the 0.8.0-alpha plan.
-* The version was already 0.7.8-alpha (versionCode 78, patch 12).
+* The version was already 0.7.8-alpha (versionCode 78, patch 12); patch 26 makes it 0.7.9-alpha.
 
-## Completed Changes (2026-11-12) — Feed Tutorial Matches the Build, Livelier (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Feed Tutorial Matches the Build, Livelier (v0.7.9-alpha)
 
 * **Feed tutorial** (`NOSLOP_FEED_TUTORIAL_V2`, patch 23). Written for the HUB build, the tutorial said the bottom bar holds "Feed, DMs, Alerts, HUBs, and Settings" and that notifications are at the top left; in the default build there is no HUBs item and Alerts is in the bottom bar. Both slides now follow `HubFeature.enabled`. The swipe arrows move gently, slide 3 lists what each button does (react, comment, share to the mesh or any app, save), slide 5 shows the '+' button, and the step dots show the current step as a wider bar. English and Hungarian.
 * **Test:** `FeedTutorialArchitectureTest`.
 
-## Completed Changes (2026-11-12) — An Empty Feed with the Aggregator Off Says Why (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — An Empty Feed with the Aggregator Off Says Why (v0.7.9-alpha)
 
 * **Mesh-only empty state** (`NOSLOP_MESH_ONLY_EMPTY_V1`, patch 22). With the Clearnet Aggregator off the feed only shows mesh posts, so a new user with no contacts saw "Your feed is empty. Pull to refresh or post to the mesh!". Now, with the aggregator off and no search active, the empty feed says the aggregator is off and that the feed shows posts from people you connect with, with "Find people" (opens DMs & Contacts) and "Turn on Clearnet Aggregator". English and Hungarian.
 * **Test:** `MeshOnlyEmptyStateArchitectureTest`.
 
-## Completed Changes (2026-11-12) — History and Saved Built Off the Main Thread (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — History and Saved Built Off the Main Thread (v0.7.9-alpha)
 
 * **History and Saved** (`NOSLOP_LISTS_OFF_MAIN_V1`, patch 21) build each page on a background thread and publish it on the main thread, as the Live Feed and Liked already did. History built five maps over every stored item (about 20,000 on the owner's phone) on the main thread for every page of 30, so a long history held up the swipe. The page logic moved unchanged into `ui/ListPages.kt` (`historyPage`, `savedPage`), except that History now stops once it has its 30. A page is only published onto the list it was built for; if the list changed meanwhile (another filter, a search, a reset) it is built again from the list as it is now. A request that arrives while a page is being built is run after it.
 * **Tests:** `ListPagesTest`, `ListsOffMainArchitectureTest`.
 
-## Completed Changes (2026-11-12) — Messages Hidden from Screenshots, Release Notes (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Messages Hidden from Screenshots, Release Notes (v0.7.9-alpha)
 
 * **Screen security** (`NOSLOP_SCREEN_SECURITY_V1`, patch 20). While the Messages tab is open (the chat list and every 1:1 or group thread, with its dialogs, which inherit the flag) the window has Android's `FLAG_SECURE`: no screenshots, no screen recording, and a blank recent-apps preview. Settings has "Hide messages from screenshots", on by default, for anyone who needs a screenshot. Phone notifications for messages already carry no message text ("Message from {author}").
-* **Release notes** rewritten for 0.7.8-alpha (`release-notes.md`); the old text still named a search proxy.
+* **Release notes** rewritten for 0.7.9-alpha (`release-notes.md`); the old text still named a search proxy.
 * **0.8.0-alpha plan** written down at the top of Work Remaining.
 * **Tests:** `ScreenSecurityTest`, `ScreenSecurityArchitectureTest`.
 
-## Completed Changes (2026-11-12) — YouTube Streams Fetched in Pieces (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — YouTube Streams Fetched in Pieces (v0.7.9-alpha)
 
 * **The 30-second YouTube rebuffers** (`NOSLOP_CHUNKED_STREAM_V1`, patch 19). The app's own log of 2026-11-12 19:20 has two, and both began about 10 MB into the stream: at 205 s of a 735 s, 38 MB video (about 10.6 MB) and at 196 s of a 2076 s, 106 MB video (about 10.0 MB). Both times no bytes had arrived for the whole 50 s of buffer before the stall, with the player on screen and the app in front. ExoPlayer fetched each video with one open-ended request, and googlevideo serves about the first 10 MB of a request at full speed and then slows it to almost nothing (other YouTube downloaders fetch in pieces under 10 MB for this reason). The stall detector then moved to a fresh stream after 12 s, and with the resolve over Tor and the new connection's start the picture came back after 31 s and 46 s.
 * **Fix:** requests to `googlevideo.com` go through `ChunkedRangeDataSource`, which asks for 8 MiB at a time and opens the next piece when one ends; ExoPlayer still sees one stream. Other hosts are untouched. Used by fresh, warm and recovery players.
 * **Tests:** `ChunkedRangeDataSourceTest` (a server that stops after a set number of bytes per request is read whole in pieces; a seek starts its pieces where it lands; other hosts pass through).
 
-## Completed Changes (2026-11-12) — Swiped-Away Videos Kept, Preloaded Audio Resynced (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Swiped-Away Videos Kept, Preloaded Audio Resynced (v0.7.9-alpha)
 
 * **What the 18:52 capture showed.** NoSlop's own log lines only cover 18:42:27-18:52: Android's main log buffer had filled, so the stream break before that was not captured. A swiped-away video was stopped after 0.2 s and released after 0.45 s, so swiping back downloaded it again. At 18:50:22, before the phone calls, a list shift made `retainOnly()` drop the three warm players, and the same three were built again from nothing 100-300 ms later. The first was claimed with nothing buffered, started without a picture after 1.5 s, and its sound began 1.7 s after its picture; for its first 4 s its playback clock ran at 0.90 of real time (`AV_SYNC clock=0.899`, a stale AudioTrack timestamp from Android), which leaves picture and sound apart afterwards. Sound was going to Bluetooth (A2DP).
 * **Swiped-away videos are kept** (`NOSLOP_KEEP_SWIPED_V1`, patch 18). The last 2 videos swiped away from stay paused where they were (`PreloadManager.keep`); a swipe back resumes them with no download. While kept they download nothing more than a preload and keep a 15 s back buffer (`AdaptiveTorLoadControl` kept mode); they are let go after 15 minutes. A failed, loading, mesh-proxied or nearly expired player is stopped and released as before. Fresh players now use `AdaptiveTorLoadControl` too (same foreground numbers as before).
@@ -174,25 +183,25 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 * **Tests:** `KeepSwipedPolicyTest`, `KeptLoadControlTest`, `KeepSwipedArchitectureTest`.
 * **Still open:** whether the resyncs fix the slight offset on some videos over Bluetooth needs a device check. (The 30 s stream break was captured later the same evening; see the patch 19 entry above.)
 
-## Completed Changes (2026-11-12) — Flickr From Interests, Sharing a Link (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Flickr From Interests, Sharing a Link (v0.7.9-alpha)
 
 * **Flickr photos were random, some adult** (`NOSLOP_FLICKR_INTERESTS_V1`, patch 17). "Flickr Explore" is Flickr's public feed (`photos_public.gne`): the latest uploads from everyone. Each refresh now asks for photos tagged with up to 6 of the user's interest keywords, or interest names, picked at random, any of them (`FlickrTagFeed`). Photo-stream items keep their Flickr tags in the excerpt ("Tags: ..."), so search and negative keywords see them, and photos whose title, caption or tags carry an adult word are dropped before they are stored. The public feed has no SafeSearch switch, so an untagged adult photo can still get through; the Flickr API's `safe_search=1` needs a key (not built). Flickr videos in the feed stay photos: Flickr serves them only to signed-in sessions (ExoPlayer error 2004 in the 2026-11-11 capture).
 * **Sharing a slide's link** (`NOSLOP_CLEARNET_SHARE_V1`). On a clearnet slide, Share asks "Share to mesh" (as before) or "Share link", which opens the Android share sheet with the title, the original link and one of five NoSlop lines picked at random (`ClearnetShareText`).
 * **Tests:** `FlickrTagFeedTest`, `ClearnetShareTest`, two new cases in `FeedParserPhotoStreamTest`.
 
-## Completed Changes (2026-11-12) — Lists Built Off the Main Thread (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Lists Built Off the Main Thread (v0.7.9-alpha)
 
 * **Opening a filter froze the screen** (`NOSLOP_EMPTY_BUILD_OFF_MAIN_V1`, patch 16). A list built from empty (a filter, a search, Mesh, a refreshed Live Feed) ran `computeFeedBatch` on the main thread: 463 ms from 19,167 stored items when Articles opened in the 2026-11-11 capture, 966 ms blocked in all. It had stayed there so the empty-list screen wouldn't flash. Now it is computed on `Dispatchers.Default` and applied on the main thread, with `isBuildingFeedList` true meanwhile; the feed shows "Curating your feed..." instead of any empty state. A second request for the same mode and search waits for the build in flight; a request for another list bumps `feedListGeneration`, which drops the earlier result, as does a list that is no longer empty when the result is ready. Injections stay synchronous.
 * **Test:** `FeedSmoothnessArchitectureTest` (new cases).
 * **To check on a device:** switching filters, opening a search and pulling to refresh show "Curating your feed..." briefly and never "Your feed is empty" or "Nothing New Here" when there are items; the log line is now "Feed list built off the main thread in N ms".
 
-## Completed Changes (2026-11-12) — Source Status (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Source Status (v0.7.9-alpha)
 
 * **A source that stopped answering thinned the feed with no explanation** (`NOSLOP_SOURCE_STATUS_V1`, patch 15). The clients swallow their errors, so the signal is taken in `HttpClientProvider`: `SourceHealth.interceptor`, inside the Tor guard, records each real attempt per host. A host is "not responding" after 3 attempts in a row failed (an exception, or HTTP 401, 403, 429 or 5xx) while another host answered after the first of them, so being offline, or Tor not being up, blames no one; one answer clears it (`SourceHealthRules`). The feed shows a line under the top bar naming the API services not responding (tap to hide until the set changes), and Settings › Manage Sources marks each failing source with the last code or error. Memory only.
 * **Tests:** `SourceHealthRulesTest`, `SourceStatusArchitectureTest`.
 * **To check on a device:** with Tor on, the line should stay away in normal use. Turning airplane mode on must not raise it.
 
-## Completed Changes (2026-11-12) — Honest User-Agents, Source Credits (v0.7.8-alpha)
+## Completed Changes (2026-11-12) — Honest User-Agents, Source Credits (v0.7.9-alpha)
 
 Owner decisions, 2026-11-12: YouTube (InnerTube search and playback without YouTube's player), Reddit (unauthenticated JSON through a proxy, RSS with a browser User-Agent) and Vimeo (direct streams from the player config) stay as they are, and the README and `docs/SOURCES.md` say they go against those sites' terms. The rest of the review's "Changes needed" is done (`NOSLOP_HONEST_USER_AGENT_V1`, `NOSLOP_SOURCE_CREDIT_V1`, patch 14):
 
@@ -202,7 +211,7 @@ Owner decisions, 2026-11-12: YouTube (InnerTube search and playback without YouT
 * **Tests:** `NoSlopUserAgentTest`, `SourceCreditTest`, `HonestUserAgentArchitectureTest` (no browser User-Agent outside the YouTube, Invidious and Reddit clients).
 * **To check on a device:** every feed in `SourceLibrary` still loads. A feed behind bot protection now costs one extra request on its first refresh; the log names it. Record any that need the browser User-Agent in `docs/SOURCES.md`.
 
-## Completed Changes (2026-11-11) — Proxy Worker Hardening, Privacy and Security Claims Checked (v0.7.8-alpha)
+## Completed Changes (2026-11-11) — Proxy Worker Hardening, Privacy and Security Claims Checked (v0.7.9-alpha)
 
 * **The proxy is optional and off by default** (`NOSLOP_OPTIONAL_PROXY_V1`, patch 13). No release ever shipped a proxy secret (`BuildConfig.PROXY_SECRET` was `""` in every build), so every install went direct; the owner's 2026-11-11 capture had 77 YouTube searches, all direct, none failed. The log line said "from InnerTube proxy" either way and now names the route. `PROXY_URL` defaults to `""`, `ProxyAuth.isConfigured` needs both a URL and a secret (Settings or the build), and the docs below were corrected again: patch 10 had described the Worker as in use. The owner is deleting the deployed Worker (`yt-proxy.megadreamland.workers.dev`), whose built-in fallback secret was no longer private. Test: `ProxyAuthTest`.
 * **The proxy Worker is in the repository** (`proxy/`), for anyone who wants to run one. The FAQ and privacy policy called it open-source, but its source wasn't here. Changes from the Worker that was deployed:
@@ -218,9 +227,9 @@ Owner decisions, 2026-11-12: YouTube (InnerTube search and playback without YouT
   * the Worker sees the search terms in the requests it carries, not, over Tor, who sent them.
   * The privacy policy said "We operate no servers and receive no data", "Your private key never leaves your device" and that the camera is only used for QR codes. It is rewritten in full.
 
-## Completed Changes (2026-11-11) — Feed Position, Fresh Lists, Feed Types, Liked, Phone Notifications, HUB Build Switch, Type Filters (v0.7.8-alpha)
+## Completed Changes (2026-11-11) — Feed Position, Fresh Lists, Feed Types, Liked, Phone Notifications, HUB Build Switch, Type Filters (v0.7.9-alpha)
 
-Ships as 0.7.8-alpha (`versionCode` 78); 0.7.7-alpha was already released. `release-notes.md` is rewritten for 0.7.8-alpha.
+Written as 0.7.8-alpha (`versionCode` 78) and ships as 0.7.9-alpha (`versionCode` 79, patch 26); 0.7.7-alpha was already released. `release-notes.md` is rewritten for this release.
 
 Seven patches for the seven reports in `isues.txt`, all on the legacy Android app (the MVP is out of scope). No packet or archive format changes and no Room schema change: the new DAO calls are queries on existing tables. Design notes: `docs/TECHNICAL_REFERENCE.md` §16.36–§16.41.
 

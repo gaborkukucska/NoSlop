@@ -11,7 +11,7 @@ NoSlop uses a simple, community-friendly JSON file system for translations. You 
 >    - *Correct Compose UI example:* `"{count} members".tr.replace("{count}", memberCount.toString())`
 >    - *Correct Toast / Notification example:* `LanguageManager.translate("Failed with code HTTP {code}").replace("{code}", code.toString())`
 > 
-> As of 2026-11-13 (v0.7.8-alpha), the English translation file contains **1,050+** translation keys. Run a diff against Hungarian (`content_hu.json`) to check for missing entries and ensure key parity. `TranslationParityTest` writes how many keys each language lacks to `app/build/reports/translation-parity.txt`.
+> As of 2026-11-13 (v0.7.9-alpha), the English translation file contains **1,053** translation keys, and every language file has all of them. Run a diff against Hungarian (`content_hu.json`) to check for missing entries and ensure key parity. `TranslationParityTest` writes how many keys each language lacks to `app/build/reports/translation-parity.txt`.
 
 If you want to add your language to NoSlop, follow these simple steps:
 
