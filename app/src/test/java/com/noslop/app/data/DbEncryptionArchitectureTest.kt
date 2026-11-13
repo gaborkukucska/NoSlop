@@ -158,6 +158,33 @@ class DbEncryptionArchitectureTest {
     }
 
     @Test
+    fun backup_carriesTheEncryptedDatabaseWithItsKey_andARestoreNeverStagesTheKey() {
+        val source = code("data/BackupManager.kt")
+        val exportStart = source.indexOf("fun exportData(")
+        val exportEnd = source.indexOf("fun importData(", exportStart)
+        assertTrue(exportStart >= 0 && exportEnd > exportStart)
+
+        val export = source.substring(exportStart, exportEnd)
+        assertTrue(export.contains("addToZip(zos, dbFile, BackupDbStage.ENTRY_ENCRYPTED)"))
+        assertTrue(export.contains("ZipEntry(BackupDbStage.ENTRY_KEY)"))
+        assertTrue(
+            "an encrypted database is never put in an archive before its key was read",
+            export.indexOf("DbKeyStore.load(context, mayCreate = false)") in 0 until export.indexOf("BackupDbStage.ENTRY_ENCRYPTED")
+        )
+        assertFalse(
+            "the database key goes straight into the archive stream, never into a file",
+            Regex("""File\([^)]*ENTRY_KEY""").containsMatchIn(source)
+        )
+
+        val restore = source.substring(exportEnd)
+        assertTrue(restore.contains("readSmallEntry(zis, DbEncryptionPolicy.KEY_BYTES)"))
+        assertFalse(Regex("""restoreFile\([^)]*ENTRY_KEY""").containsMatchIn(restore))
+        val prepare = restore.indexOf("BackupDbStage.prepare(")
+        assertTrue("the staged database is prepared before the commit", prepare in 0 until restore.indexOf("commitStarted = true"))
+        assertTrue("the archive's key is zeroed when the restore ends", restore.contains("DbKeyStore.wipe(stagedDbKey)"))
+    }
+
+    @Test
     fun onlyTheKeyStore_knowsTheAliasAndTheKeyFile() {
         val dataDir = File(appDir, "src/main/java/com/noslop/app")
         val offenders = dataDir.walkTopDown()

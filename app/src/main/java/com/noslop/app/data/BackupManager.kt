@@ -126,8 +126,28 @@ object BackupManager {
             val zipBytes = CountingOutputStream(BackupArchiveFormat.openForWriting(targetStream, MnemonicGenerator.normalize(mnemonic)))
             // Not `use`: after a failure the zip must not be finished nor its last chunk sealed (see finally).
             ZipOutputStream(BufferedOutputStream(zipBytes, BUFFER_BYTES)).let { zos ->
+                // NOSLOP_DB_ENCRYPTION_V1: an encrypted database goes in as the file it is, with its key beside
+                // it. Both are inside the archive's Word Cloud encryption, so still no plaintext copy of the
+                // database is written anywhere. A restore puts it under the restoring device's own key
+                // (BackupDbStage). A database this device could not encrypt goes in as before.
                 if (dbFile.exists()) {
-                    addToZip(zos, dbFile, "database.db")
+                    if (DbFiles(dbFile).state() == DbEncryptionPolicy.FileState.ENCRYPTED) {
+                        val dbKey = when (val loaded = DbKeyStore.load(context, mayCreate = false)) {
+                            is DbKeyStore.Result.Ready -> loaded.key
+                            is DbKeyStore.Result.Unavailable ->
+                                throw IOException("The database key is not available, so this backup could not be restored: ${loaded.why}")
+                        }
+                        try {
+                            addToZip(zos, dbFile, BackupDbStage.ENTRY_ENCRYPTED)
+                            zos.putNextEntry(ZipEntry(BackupDbStage.ENTRY_KEY))
+                            zos.write(dbKey)
+                            zos.closeEntry()
+                        } finally {
+                            DbKeyStore.wipe(dbKey)
+                        }
+                    } else {
+                        addToZip(zos, dbFile, BackupDbStage.ENTRY_PLAIN)
+                    }
                 }
 
                 // Add sovereign identity JSON (encrypted inside this zip with the 12-word mnemonic)
@@ -436,6 +456,8 @@ object BackupManager {
             var hasStagedDb = false
             var sawEntry = false
             var stagedGroupMessagesJson: String? = null
+            // NOSLOP_DB_ENCRYPTION_V1: the database key of a 0.8.0 archive. In memory only, zeroed when the restore ends.
+            var stagedDbKey: ByteArray? = null
             var legacyRederivation: LegacyRederivation? = null
 
             try {
@@ -450,6 +472,14 @@ object BackupManager {
                                     val stagedDb = File(stageDir, "database.db")
                                     restoreFile(zis, stagedDb)
                                     hasStagedDb = true
+                                }
+                                name == BackupDbStage.ENTRY_ENCRYPTED -> {
+                                    restoreFile(zis, File(stageDir, BackupDbStage.ENTRY_ENCRYPTED))
+                                    hasStagedDb = true
+                                }
+                                name == BackupDbStage.ENTRY_KEY -> {
+                                    // Never written to the stage folder.
+                                    stagedDbKey = readSmallEntry(zis, DbEncryptionPolicy.KEY_BYTES)
                                 }
                                 name == "identity_backup.json" -> {
                                     val stagedId = File(stageDir, "identity_backup.json")
@@ -518,8 +548,15 @@ object BackupManager {
                 }
 
                 // 1. Verify staged database integrity before committing (F13 / R09)
-                if (hasStagedDb) {
-                    val stagedDbFile = File(stageDir, "database.db")
+                // (An encrypted database from a 0.8.0 archive is checked with its key in step 4b.)
+                if (hasStagedDb && File(stageDir, BackupDbStage.ENTRY_PLAIN).exists()) {
+                    val stagedDbFile = File(stageDir, BackupDbStage.ENTRY_PLAIN)
+                    // NOSLOP_DB_ENCRYPTION_V1: Android's own SQLite deletes a file it can't read as a database,
+                    // so a file that is not one is refused before it gets there.
+                    if (DbFiles(stagedDbFile).state() == DbEncryptionPolicy.FileState.ENCRYPTED) {
+                        Logger.error(TAG, "Staged database failed integrity check: it is not a SQLite file")
+                        return ImportResult.Failed(rolledBack = true, reason = BackupDbStage.REASON_INTEGRITY)
+                    }
                     try {
                         val testDb = android.database.sqlite.SQLiteDatabase.openDatabase(
                             stagedDbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
@@ -589,6 +626,25 @@ object BackupManager {
                     }
                 }
 
+                // 4b. NOSLOP_DB_ENCRYPTION_V1: bring the staged database into the form this device keeps it in
+                // (encrypted under this device's key when it can, plain SQLite otherwise) and leave it as
+                // database.db in the stage folder for the commit. An encrypted database from a 0.8.0 archive is
+                // checked with the archive's key first. All of it happens before anything live is replaced.
+                if (hasStagedDb) {
+                    val liveState = DbFiles(context.getDatabasePath(DB_NAME)).state()
+                    val prepared = BackupDbStage.prepare(stageDir, stagedDbKey, liveState, SqlCipherEngine) { mayCreate ->
+                        DbKeyStore.load(context, mayCreate)
+                    }
+                    when (prepared) {
+                        is BackupDbStage.Outcome.Failed -> {
+                            Logger.error(TAG, "Import failed: ${prepared.reason}")
+                            return ImportResult.Failed(rolledBack = true, reason = prepared.reason)
+                        }
+                        is BackupDbStage.Outcome.Ready ->
+                            Logger.info(TAG, "Staged database is ready for this device", "encrypted=${prepared.encrypted} | ${prepared.note}")
+                    }
+                }
+
                 // 5. D09: a legacy archive (no portable identity, keystore-sealed prefs only) restored on a
                 // device that can't open those prefs is rebuilt from the Word Cloud. Whether that rebuild gives
                 // the archive's identity is decided here, from the staged data, before anything is replaced.
@@ -597,7 +653,18 @@ object BackupManager {
                 legacyRederivation =
                     if (!hasPortableIdentity && File(stageDir, "preferences.xml").exists() && !File(stageDir, "preferences_fallback.xml").exists()) {
                         val dbForIdentity = if (hasStagedDb) File(stageDir, "database.db") else context.getDatabasePath(DB_NAME)
-                        planLegacyRederivation(dbForIdentity, mnemonic)
+                        planLegacyRederivation(dbForIdentity, mnemonic) { file, queries ->
+                            // The staged database after step 4b, or the live one: both are under this device's key.
+                            when (val loaded = DbKeyStore.load(context, mayCreate = false)) {
+                                is DbKeyStore.Result.Ready -> try {
+                                    SqlCipherEngine.readStrings(file, loaded.key, queries)
+                                } finally {
+                                    DbKeyStore.wipe(loaded.key)
+                                }
+                                is DbKeyStore.Result.Unavailable ->
+                                    throw IOException("the database key is not available: ${loaded.why}")
+                            }
+                        }
                     } else null
 
                 // --- U02 / V02: MULTI-STORE SNAPSHOT FOR ATOMIC ROLLBACK ---
@@ -904,6 +971,7 @@ object BackupManager {
                 }
             } finally {
                 stageDir.deleteRecursively()
+                DbKeyStore.wipe(stagedDbKey)
             }
 
             // Cross-device detection for legacy archives without portable identity
@@ -979,28 +1047,38 @@ object BackupManager {
      * derives the identity from [mnemonic]. `matchesArchive` is false when the database names a different
      * public key (an old, non-deterministic identity), records none (R6), or the derivation failed.
      */
-    internal fun planLegacyRederivation(dbFile: File, mnemonic: String): LegacyRederivation {
+    internal fun planLegacyRederivation(
+        dbFile: File,
+        mnemonic: String,
+        encryptedReader: ((file: File, queries: List<String>) -> List<String?>)? = null
+    ): LegacyRederivation {
         var handle = "Anonymous"
         var expectedPub: String? = null
+        val handleQuery = "SELECT value FROM app_settings WHERE key = 'local_handle' LIMIT 1"
+        val pubQuery = "SELECT value FROM app_settings WHERE key = 'local_pub_ed25519' LIMIT 1"
         try {
             // NOSLOP_DB_ENCRYPTION_V1: Android's own SQLite deletes a file it can't read as a database, and
-            // this can be handed the live mesh.db. An encrypted file must never reach it. (Patch 28c reads
-            // it with its key instead.)
+            // this can be handed the live mesh.db. An encrypted file never reaches it: it is read with its
+            // key through [encryptedReader], or not at all.
             if (DbFiles(dbFile).state() == DbEncryptionPolicy.FileState.ENCRYPTED) {
-                throw java.io.IOException("the database is encrypted")
-            }
-            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                dbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
-            )
-            try {
-                db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_handle' LIMIT 1", null).use {
-                    if (it.moveToFirst()) handle = it.getString(0)
+                val reader = encryptedReader ?: throw java.io.IOException("the database is encrypted")
+                val values = reader(dbFile, listOf(handleQuery, pubQuery))
+                values.getOrNull(0)?.let { handle = it }
+                expectedPub = values.getOrNull(1)
+            } else {
+                val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                    dbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                )
+                try {
+                    db.rawQuery(handleQuery, null).use {
+                        if (it.moveToFirst()) handle = it.getString(0)
+                    }
+                    db.rawQuery(pubQuery, null).use {
+                        if (it.moveToFirst()) expectedPub = it.getString(0)
+                    }
+                } finally {
+                    db.close()
                 }
-                db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_pub_ed25519' LIMIT 1", null).use {
-                    if (it.moveToFirst()) expectedPub = it.getString(0)
-                }
-            } finally {
-                db.close()
             }
         } catch (readError: Exception) {
             com.noslop.app.debug.Logger.warn("BACKUP", "Could not read the identity key recorded in the archive: ${readError.message}")
@@ -1022,6 +1100,23 @@ object BackupManager {
         } else {
             LegacyRederivation(handle, cleanMnemonic, derived, true, "match")
         }
+    }
+
+    /**
+     * NOSLOP_DB_ENCRYPTION_V1: reads a small archive entry into memory (the database key). An entry longer
+     * than [limit] comes back one byte too long, which no caller accepts as a key.
+     */
+    private fun readSmallEntry(zis: ZipInputStream, limit: Int): ByteArray {
+        val buffer = ByteArray(limit + 1)
+        var read = 0
+        while (read < buffer.size) {
+            val n = zis.read(buffer, read, buffer.size - read)
+            if (n < 0) break
+            read += n
+        }
+        val entry = buffer.copyOf(read)
+        buffer.fill(0)
+        return entry
     }
 
     /** D09: the flag IdentityRepository.needsIdentityRecovery reads after the restart. */

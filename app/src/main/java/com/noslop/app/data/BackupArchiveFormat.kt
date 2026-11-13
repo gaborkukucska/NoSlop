@@ -20,7 +20,7 @@ import javax.crypto.spec.SecretKeySpec
  *
  * New exports are "NSG2" (integers big-endian):
  *
- *     header = "NSG2" | version (1 byte, 1) | salt (16) | nonce prefix (7)                    28 bytes
+ *     header = "NSG2" | version (1 byte, 2; version 1 is still read) | salt (16) | nonce prefix (7)   28 bytes
  *     key    = HKDF-SHA256(MnemonicGenerator.deriveSeed(canonical Word Cloud), salt,
  *                          info "noslop-backup-v2"), 32 bytes
  *     body   = the chunk records of the creator identity file (CreatorIdentityArchive, NSC1):
@@ -48,7 +48,16 @@ internal object BackupArchiveFormat {
 
     internal val MAGIC_NSG1 = "NSG1".toByteArray(Charsets.US_ASCII)
     internal val MAGIC_NSG2 = "NSG2".toByteArray(Charsets.US_ASCII)
-    internal const val NSG2_VERSION = 1
+    /**
+     * 2 since 0.8.0 (NOSLOP_DB_ENCRYPTION_V1). The container is the same as version 1. What changed is the
+     * zip inside: the database can be `database.enc.db` with `database.key` (BackupDbStage), which 0.7.x
+     * does not know. With the higher number a 0.7.x build says "made by a newer version" instead of
+     * restoring an identity with no database.
+     */
+    internal const val NSG2_VERSION = 2
+
+    /** The oldest NSG2 version still read. */
+    internal const val NSG2_MIN_VERSION = 1
     internal const val NSG2_HEADER_SIZE = 4 + 1 + 16 + 7
 
     /** NSG1 and CBC archives start with a 16-byte header ("NSG1" + IV, or the CBC IV). */
@@ -91,11 +100,12 @@ internal object BackupArchiveFormat {
      * returned stream seals the last chunk and closes [target]; a stream that is never closed leaves the
      * file without its last chunk, so it can never be restored as a complete backup.
      */
-    fun openForWriting(target: OutputStream, canonicalMnemonic: String): OutputStream {
+    fun openForWriting(target: OutputStream, canonicalMnemonic: String, version: Int = NSG2_VERSION): OutputStream {
+        require(version in NSG2_MIN_VERSION..NSG2_VERSION) { "unknown NSG2 version $version" }
         val random = SecureRandom()
         val salt = ByteArray(16).also { random.nextBytes(it) }
         val noncePrefix = ByteArray(7).also { random.nextBytes(it) }
-        val header = nsg2Header(NSG2_VERSION, salt, noncePrefix)
+        val header = nsg2Header(version, salt, noncePrefix)
         val key = nsg2Key(canonicalMnemonic, salt)
         target.write(header)
         return CreatorIdentityArchive.ChunkedAeadOutputStream(target, key, header, noncePrefix)
@@ -168,7 +178,7 @@ internal object BackupArchiveFormat {
             Logger.warn(TAG, "NSG2 archive version $version is newer than this build reads ($NSG2_VERSION)")
             return Opened.NewerVersion
         }
-        if (version != NSG2_VERSION) return Opened.Damaged
+        if (version < NSG2_MIN_VERSION) return Opened.Damaged
         val salt = header.copyOfRange(5, 21)
         val noncePrefix = header.copyOfRange(21, 28)
 

@@ -166,9 +166,34 @@ class BackupArchiveFormatE3Test {
     }
 
     @Test
+    fun newArchives_areVersion2_andVersion1ArchivesStillOpen() {
+        // NOSLOP_DB_ENCRYPTION_V1: 0.8.0 writes version 2 so that 0.7.x refuses it by name; 0.7.x archives
+        // (version 1) must keep opening.
+        assertEquals(2, BackupArchiveFormat.NSG2_VERSION)
+        assertEquals(2, nsg2(small)[4].toInt())
+
+        val zipped = java.io.ByteArrayOutputStream()
+        ZipOutputStream(zipped).use { zos ->
+            small.forEach { (name, bytes) ->
+                zos.putNextEntry(java.util.zip.ZipEntry(name))
+                zos.write(bytes)
+                zos.closeEntry()
+            }
+        }
+        val out = java.io.ByteArrayOutputStream()
+        BackupArchiveFormat.openForWriting(out, words, version = 1).use { it.write(zipped.toByteArray()) }
+        val v1 = out.toByteArray()
+        assertEquals(1, v1[4].toInt())
+        assertEntries(small, read(v1))
+
+        // The version byte is part of what each chunk authenticates: it can't be changed afterwards.
+        assertEquals(Outcome.Refused("WrongWordCloud"), read(v1.copyOf().also { it[4] = 2 }))
+    }
+
+    @Test
     fun malformedHeaderFields_areRefused() {
         val a = nsg2(small)
-        assertEquals(Outcome.Refused("NewerVersion"), read(a.copyOf().also { it[4] = 2 }))
+        assertEquals(Outcome.Refused("NewerVersion"), read(a.copyOf().also { it[4] = 3 }))
         assertEquals(Outcome.Refused("Damaged"), read(a.copyOf().also { it[4] = 0 }))
         assertEquals("flag byte", Outcome.Refused("Damaged"), read(a.copyOf().also { it[28] = 2 }))
         assertEquals("absurd chunk length", Outcome.Refused("Damaged"), read(a.copyOf().also { it[29] = 0x7f }))
