@@ -155,7 +155,8 @@ class BackupNsg2E3Test {
         assertRefusedAndUnchanged(restore(archive.copyOf(archive.size - 1)), "kept")
         assertRefusedAndUnchanged(restore(archive + byteArrayOf(0)), "kept")
 
-        val newer = restore(archive.copyOf().also { it[4] = 2 })
+        // One above the version this build writes, whatever that is (it became 2 in 0.8.0).
+        val newer = restore(archive.copyOf().also { it[4] = (BackupArchiveFormat.NSG2_VERSION + 1).toByte() })
         assertRefusedAndUnchanged(newer, "kept")
         assertEquals("This backup was made by a newer version of NoSlop", (newer as ImportResult.Failed).reason)
     }
