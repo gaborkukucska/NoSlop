@@ -1167,93 +1167,63 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // --- NOSLOP_LISTS_OFF_MAIN_V1 ---
+    // History and Saved are built on a background thread and published on the main thread, as the Live
+    // Feed is (NOSLOP_FEED_BUILD_OFF_MAIN_V1) and Liked is. History used to build five maps over every
+    // stored item on the main thread for each page, so a long history held up the swipe.
+    // A page is only published onto the list it was built for; if the list changed meanwhile, it is
+    // built again from the list as it is now.
+    private var historyLoadInFlight = false
+    private var historyLoadAgain = false
+
     private fun loadHistoryBatch(
         historyRecords: List<ViewedHistoryItem>,
         isInitialLoad: Boolean,
         query: String = activeSearchQuery
     ) {
-        val currentKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
-        val feedMap = allFeeds.associateBy { it.id }
-        val meshMap = allMeshes.associateBy { it.id }
-        val feedByNormId = allFeeds.associateBy { normalizeFeedItemId(it.id, it.url ?: "") }
-        val feedByCanonKey = allFeeds.associateBy { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) }
-        val meshByCanonKey = allMeshes.associateBy { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
-
-        val searchTerms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
-        val matchedHistory = mutableListOf<UnifiedItem>()
-        val seenKeys = mutableSetOf<String>()
-
-        for (rec in historyRecords) {
-            var item: UnifiedItem? = feedMap[rec.itemId]?.let { UnifiedItem.Feed(it) }
-                ?: meshMap[rec.itemId]?.let { UnifiedItem.Mesh(it) }
-                ?: feedByNormId[rec.itemId]?.let { UnifiedItem.Feed(it) }
-                ?: feedByCanonKey[rec.itemId]?.let { UnifiedItem.Feed(it) }
-                ?: meshByCanonKey[rec.itemId]?.let { UnifiedItem.Mesh(it) }
-
-            // Synthesize historical YouTube item if purged from feed_items in an earlier session
-            if (item == null && (rec.itemId.startsWith("yt_") || rec.itemId.startsWith("url_yt_"))) {
-                val videoId = rec.itemId.removePrefix("url_yt_").removePrefix("yt_").substringBefore("&").substringBefore("?")
-                if (videoId.isNotBlank()) {
-                    val synth = FeedItem(
-                        id = "yt_$videoId",
-                        sourceId = "api-yt",
-                        title = "YouTube Video",
-                        url = "https://www.youtube.com/watch?v=$videoId",
-                        author = "YouTube",
-                        publishedAt = rec.viewedAt,
-                        thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
-                        mediaUrl = "https://www.youtube.com/watch?v=$videoId",
-                        mediaType = "video",
-                        apiSource = "youtube",
-                        isRead = true
-                    )
-                    item = UnifiedItem.Feed(synth)
-                }
-            }
-
-            if (item != null) {
-                val cKey = com.noslop.app.data.getCanonicalItemKey(item)
-                if (seenKeys.add(cKey)) {
-                    val matchesSearch = if (searchTerms.isEmpty()) true else {
-                        when (item) {
-                            is UnifiedItem.Feed -> {
-                                val t = item.item.title.lowercase()
-                                val a = item.item.author?.lowercase() ?: ""
-                                val e = item.item.excerpt?.lowercase() ?: ""
-                                searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) }
-                            }
-                            is UnifiedItem.Mesh -> {
-                                val c = item.post.content.lowercase()
-                                val a = item.post.authorHandle.lowercase()
-                                val t = item.post.clearnetTitle?.lowercase() ?: ""
-                                searchTerms.all { term -> c.contains(term) || a.contains(term) || t.contains(term) }
-                            }
-                            else -> false
-                        }
-                    }
-                    if (matchesSearch) {
-                        matchedHistory.add(item)
-                    }
-                }
-            }
-        }
-
-        val unconsumed = matchedHistory.filter { com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys }
-        if (unconsumed.isEmpty()) {
+        if (historyLoadInFlight) {
+            historyLoadAgain = true
             return
         }
-        val batch = unconsumed.take(30)
-        sessionLoadedIds.addAll(batch.map { it.id })
-        _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
-            batch
-        } else {
-            (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
-        }
-        if (isInitialLoad) {
-            feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(50)
-                _scrollToTopEvent.emit(Unit)
+        historyLoadInFlight = true
+        val shown = _unifiedFeed.value
+        val feeds = allFeeds
+        val meshes = allMeshes
+        viewModelScope.launch {
+            val startedMs = System.currentTimeMillis()
+            try {
+                val batch = withContext(Dispatchers.Default) {
+                    historyPage(historyRecords, feeds, meshes, shown.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet(), query)
+                }
+                val sameList = currentFilterMode == "History" && activeSearchQuery == query && _unifiedFeed.value === shown
+                if (!sameList) {
+                    if (currentFilterMode == "History") historyLoadAgain = true
+                } else if (batch.isNotEmpty()) {
+                    sessionLoadedIds.addAll(batch.map { it.id })
+                    _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+                        batch
+                    } else {
+                        (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                    }
+                    if (isInitialLoad) {
+                        feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(50)
+                            _scrollToTopEvent.emit(Unit)
+                        }
+                    }
+                }
+                Logger.info("VM", "History page built off the main thread in ${System.currentTimeMillis() - startedMs}ms from ${historyRecords.size} records")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.error("VM", "Building the History list failed: ${e.message}")
+            } finally {
+                historyLoadInFlight = false
+                if (historyLoadAgain) {
+                    historyLoadAgain = false
+                    if (currentFilterMode == "History") loadMoreFeedItems("History")
+                }
             }
         }
     }
@@ -1322,59 +1292,65 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         return terms.all { text.contains(it) }
     }
 
+    // --- NOSLOP_LISTS_OFF_MAIN_V1 --- (see loadHistoryBatch)
+    private var savedLoadInFlight = false
+    private var savedLoadAgain = false
+
     private fun loadSavedBatch(
         isInitialLoad: Boolean,
         query: String = activeSearchQuery
     ) {
-        val currentKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
-        val inMemorySaved = allFeeds.filter { it.isSaved }
-        
-        if (inMemorySaved.isEmpty() && isInitialLoad) {
-            viewModelScope.launch(Dispatchers.IO) {
-                val dbSaved = repository.getSavedFeedItemsList()
-                withContext(Dispatchers.Main) {
-                    processSavedBatch(dbSaved, currentKeys, isInitialLoad, query)
-                }
-            }
+        if (savedLoadInFlight) {
+            savedLoadAgain = true
             return
         }
-        processSavedBatch(inMemorySaved, currentKeys, isInitialLoad, query)
-    }
-
-    private fun processSavedBatch(
-        savedFeeds: List<FeedItem>,
-        currentKeys: Set<String>,
-        isInitialLoad: Boolean,
-        query: String
-    ) {
-        val searchTerms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
-        val matchedSaved = savedFeeds.filter { item ->
-            if (searchTerms.isEmpty()) true else {
-                val t = item.title.lowercase()
-                val a = item.author?.lowercase() ?: ""
-                val e = item.excerpt?.lowercase() ?: ""
-                val c = item.fullContent?.lowercase() ?: ""
-                searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) || c.contains(term) }
-            }
-        }.sortedByDescending { item ->
-            savedTimestampsMap[item.id] ?: item.publishedAt
-        }
-
-        val unconsumed = matchedSaved.filter { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) !in currentKeys }
-        if (unconsumed.isEmpty()) return
-
-        val batch = unconsumed.take(30).map { UnifiedItem.Feed(it) }
-        sessionLoadedIds.addAll(batch.map { it.id })
-        _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
-            batch
-        } else {
-            (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
-        }
-        if (isInitialLoad) {
-            feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
-            viewModelScope.launch {
-                kotlinx.coroutines.delay(50)
-                _scrollToTopEvent.emit(Unit)
+        savedLoadInFlight = true
+        val shown = _unifiedFeed.value
+        val feeds = allFeeds
+        viewModelScope.launch {
+            try {
+                val batch = withContext(Dispatchers.Default) {
+                    val inMemorySaved = feeds.filter { it.isSaved }
+                    val saved = if (inMemorySaved.isEmpty() && isInitialLoad) {
+                        repository.getSavedFeedItemsList()
+                    } else {
+                        inMemorySaved
+                    }
+                    savedPage(
+                        saved = saved,
+                        savedAt = { item -> savedTimestampsMap[item.id] ?: item.publishedAt },
+                        shownKeys = shown.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet(),
+                        query = query
+                    )
+                }
+                val sameList = currentFilterMode == "Saved" && activeSearchQuery == query && _unifiedFeed.value === shown
+                if (!sameList) {
+                    if (currentFilterMode == "Saved") savedLoadAgain = true
+                } else if (batch.isNotEmpty()) {
+                    sessionLoadedIds.addAll(batch.map { it.id })
+                    _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+                        batch
+                    } else {
+                        (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                    }
+                    if (isInitialLoad) {
+                        feedPositionRestore.beginTop() // NOSLOP_FRESH_LIST_TOP_V1
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(50)
+                            _scrollToTopEvent.emit(Unit)
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.error("VM", "Building the Saved list failed: ${e.message}")
+            } finally {
+                savedLoadInFlight = false
+                if (savedLoadAgain) {
+                    savedLoadAgain = false
+                    if (currentFilterMode == "Saved") loadMoreFeedItems("Saved")
+                }
             }
         }
     }

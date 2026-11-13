@@ -63,6 +63,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 🏠 **Home HUBs & Admin AI (in development)** — The app can link or auto-deploy an always-on home server over SSH as a master database and private LLM assistant, but the Hub side is still being built and no Hub is deployed yet. Treat this as experimental. It is built in only with `NOSLOP_ENABLE_HUB=true` (see [docs/BUILD.md](docs/BUILD.md)).
 * 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post. This is how conversation about clearnet content moves onto the mesh.
 * 🛡️ **Gossip Firewall & Mesh Filters** — 6-hop flood routing with LRU deduplication, packet verification, and granular toggles for incoming and outgoing media types.
+* 🙈 **Messages Kept Off Screenshots** — While your messages are open they can't be captured in screenshots or screen recordings, and the recent-apps preview stays blank. A switch in Settings turns this off.
 * ✍️ **Every Packet Signed** — Each packet carries an Ed25519 envelope signature by its sender, so nobody can pose as one of your contacts. Unsigned, forged, replayed or badly out-of-date packets are dropped, so device clocks must be within an hour. Versions before v0.7.0-alpha can't connect to this one: both sides must update.
 
 ---
@@ -90,7 +91,8 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 
 A vertically snapping feed purpose-built for clean signal-to-noise ratio. Its clearnet content comes from the built-in aggregator:
 
-* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with Tor preloading that warms up to three slides ahead, so the next video is usually already playing when you swipe.
+* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with Tor preloading that warms up to three slides ahead, so the next video is usually already playing when you swipe. The last two videos you swiped away from stay paused where you left them, so swiping back carries on.
+* 🔗 **Share Anywhere** — Send a web slide's original link to any app, with a short note about NoSlop, or share it to the mesh.
 * 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
 * 📖 **Segmented Article Reader** — Multi-page horizontal book-style reader with asynchronous OpenGraph lead image resolution and full Markdown support.
 * 🎛️ **Non-Algorithmic Interleaved Curation** — Balanced mix quotas interleaving favorite creators, selected topics, and discovery items without opaque recommendation algorithms.

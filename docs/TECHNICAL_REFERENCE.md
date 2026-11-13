@@ -2704,6 +2704,35 @@ Tests: `KeepSwipedPolicyTest`, `KeptLoadControlTest`, `KeepSwipedArchitectureTes
 
 Tests: `ChunkedRangeDataSourceTest`.
 
+### 16.48 History and Saved off the main thread (`NOSLOP_LISTS_OFF_MAIN_V1`)
+
+* `ui/ListPages.kt`: `historyPage(records, feeds, meshes, shownKeys, query)` and `savedPage(saved, savedAt,
+  shownKeys, query)`, pure, 30 items per page (`LIST_PAGE_SIZE`).
+* `NoSlopViewModel.loadHistoryBatch` / `loadSavedBatch` snapshot the list, `allFeeds` and `allMeshes`, run the
+  page on `Dispatchers.Default` (Saved reads the database when nothing saved is in memory on a first load),
+  and publish on the main thread only if the mode, the search and the list (`===`) are unchanged; otherwise
+  they build again. One build at a time per list; a request during a build runs after it.
+
+Tests: `ListPagesTest`, `ListsOffMainArchitectureTest`.
+
+### 16.49 Empty feed with the aggregator off (`NOSLOP_MESH_ONLY_EMPTY_V1`)
+
+* `UnifiedFeedTab`: when the list is empty, after the building, Mesh, History, Liked, Saved, Author, My
+  Content and refreshing states, and before the generic "Your feed is empty.", a branch for
+  `!isAggregatorEnabled && searchQuery.isBlank()` explains that only mesh posts can fill the feed, with
+  "Find people" (`onTabChange(1)`, DMs & Contacts) and "Turn on Clearnet Aggregator" (`toggleAggregator()`).
+
+Test: `MeshOnlyEmptyStateArchitectureTest`.
+
+### 16.50 Feed tutorial (`NOSLOP_FEED_TUTORIAL_V2`)
+
+* `FeedTutorialSlide` reads `HubFeature.enabled`: slide 2 (bottom bar) and slide 4 (top controls) keep the
+  HUB build's text there, and say "Feed, DMs, Alerts and Settings" and "search and filter ... at the top
+  right" without it. One `rememberInfiniteTransition` moves the arrows; slide 3 has a legend of the
+  buttons; slide 5 draws the '+' button; the current step dot is 20 dp wide.
+
+Test: `FeedTutorialArchitectureTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

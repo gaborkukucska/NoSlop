@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -725,6 +726,7 @@ fun UnifiedFeedTab(
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
     val isBuildingList by viewModel.isBuildingFeedList.collectAsState() // NOSLOP_EMPTY_BUILD_OFF_MAIN_V1
+    val isAggregatorEnabled by viewModel.isAggregatorEnabled.collectAsState() // NOSLOP_MESH_ONLY_EMPTY_V1
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
     // Collected only to keep the flow running for the ViewModel. Not read here: these change on every
     // swipe, and as keys of unifiedItems below they rebuilt a list that does not depend on them.
@@ -1212,6 +1214,33 @@ fun UnifiedFeedTab(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Curating your feed...".tr, color = TextMuted, fontWeight = FontWeight.Bold)
+                    }
+                } else if (!isAggregatorEnabled && searchQuery.isBlank()) {
+                    // NOSLOP_MESH_ONLY_EMPTY_V1 — with the aggregator off only mesh posts can fill the feed:
+                    // say so, and point at where people are found.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.Hub, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Clearnet Aggregator is off".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Your feed shows posts from people you connect with, and none have arrived yet. Find people in DMs & Contacts, or turn the Clearnet Aggregator back on.".tr,
+                            color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = { onTabChange(1) },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Find people".tr, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { viewModel.toggleAggregator() }) {
+                            Text("Turn on Clearnet Aggregator".tr, color = AccentGreen)
+                        }
                     }
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2471,6 +2500,16 @@ private fun isArticleItem(item: UnifiedItem): Boolean {
 fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Float = 0f, rightSlideOffset: Float = 0f) {
     var authorRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
     var interactRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    // --- NOSLOP_FEED_TUTORIAL_V2 ---
+    // The slides describe the build they are in (no HUBs item, Alerts in the bottom bar, without the HUB),
+    // and the swipe arrows move gently.
+    val hubBuild = com.noslop.app.HubFeature.enabled
+    val bounce by rememberInfiniteTransition(label = "tutorialBounce").animateFloat(
+        initialValue = 0f,
+        targetValue = 10f,
+        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "tutorialBounceOffset"
+    )
 
     Box(
         modifier = Modifier
@@ -2554,7 +2593,7 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                 when (step) {
                     0 -> {
-                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(64.dp))
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(64.dp).graphicsLayer { translationY = -bounce.dp.toPx() })
                         Spacer(modifier = Modifier.height(24.dp))
                         Text("Welcome to your Feed!".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
@@ -2563,9 +2602,13 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                     1 -> {
                         Text("Navigation Menu".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.".tr, color = TextMuted, textAlign = TextAlign.Center)
+                        Text(
+                            if (hubBuild) "Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.".tr
+                            else "Use the bottom bar to switch between Feed, DMs, Alerts and Settings.".tr,
+                            color = TextMuted, textAlign = TextAlign.Center
+                        )
                         Spacer(modifier = Modifier.height(48.dp))
-                        Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp).graphicsLayer { translationY = bounce.dp.toPx() })
                     }
                     2 -> {
                         Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
@@ -2582,6 +2625,27 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                                 Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                             }
                         }
+                        // NOSLOP_FEED_TUTORIAL_V2 — what each button does.
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(SurfaceDark.copy(alpha = 0.85f))
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            listOf(
+                                Icons.Default.AddReaction to "React with an emoji",
+                                Icons.AutoMirrored.Filled.Chat to "Comment",
+                                Icons.Default.Share to "Share to the mesh or any app",
+                                Icons.Default.BookmarkBorder to "Save for later"
+                            ).forEach { (icon, label) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(icon, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(label.tr, color = TextLight, fontSize = 14.sp)
+                                }
+                            }
+                        }
                     }
                     3 -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -2589,10 +2653,22 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                             Spacer(modifier = Modifier.height(48.dp))
                             Text("Top Controls".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text("Check your notifications (top-left) or search and filter your feed (top-right).".tr, color = TextMuted, textAlign = TextAlign.Center)
+                            Text(
+                                if (hubBuild) "Check your notifications (top-left) or search and filter your feed (top-right).".tr
+                                else "Search and filter your feed with the button at the top right.".tr,
+                                color = TextMuted, textAlign = TextAlign.Center
+                            )
                         }
                     }
                     4 -> {
+                        // NOSLOP_FEED_TUTORIAL_V2 — the button this slide is about.
+                        Box(
+                            modifier = Modifier.size(56.dp).clip(CircleShape).background(AccentGreen),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = PrimaryBlack, modifier = Modifier.size(28.dp))
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
                         Text("Broadcast to Mesh".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Tap the floating '+' button to broadcast your own posts to the mesh network!".tr, color = TextMuted, textAlign = TextAlign.Center)
@@ -2602,14 +2678,28 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                 }
                 
                 Spacer(modifier = Modifier.height(40.dp))
-                Text("Swipe UP to continue".tr, color = TextMuted, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.KeyboardArrowUp, contentDescription = null, tint = TextMuted,
+                        modifier = Modifier.size(18.dp).graphicsLayer { translationY = -bounce.dp.toPx() }
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Swipe UP to continue".tr, color = TextMuted, fontSize = 12.sp)
+                }
                 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
                     horizontalArrangement = Arrangement.Center
                 ) {
                     repeat(5) { i ->
-                        Box(modifier = Modifier.padding(4.dp).size(8.dp).clip(CircleShape).background(if (i == step) Color(0xFFFFCA28) else TextMuted))
+                        // NOSLOP_FEED_TUTORIAL_V2 — the current step is a wider bar.
+                        Box(
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(width = if (i == step) 20.dp else 8.dp, height = 8.dp)
+                                .clip(CircleShape)
+                                .background(if (i == step) Color(0xFFFFCA28) else TextMuted)
+                        )
                     }
                 }
             }

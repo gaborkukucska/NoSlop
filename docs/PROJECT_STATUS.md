@@ -27,12 +27,13 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 
 * **Encrypt the database on the device.** Today only 1:1 DM contents (stored as received ciphertext), group chat bodies (AES-256-GCM, Keystore key) and the identity keys (Keystore) are encrypted by NoSlop; contacts, peers, posts, comments, likes, feed history and DM metadata (who and when) rely on Android's file encryption. Plan: Room on SQLCipher with a random key wrapped by an Android Keystore key, a one-time conversion of the existing database on update (with a tested fallback that never loses data), and backup export/import and the 0.7.x-to-0.8 update re-tested. Write a short design note first.
 * **Encrypt media on the device.** Photos, videos and audio sent or received are plain files under the app's folder (`Android/data/com.noslop.app/files`). Plan: a seekable stream cipher per file (AES-CTR, or GCM in fixed-size chunks) with a Keystore-wrapped key, a decrypting `DataSource` for the players, a Coil fetcher for images, and `MediaProxyService` decrypting as it serves peers. Existing files converted in the background.
-* **Welcome tutorial slides:** more visual or interactive (owner, 2026-11-11), if not done before the release.
-* **Empty state with the aggregator off:** a line pointing to Connect and Creators, if not done before the release.
+* **Welcome tutorial slides:** patch 23 corrected the feed tutorial for the HUB-less build and made it livelier before the release. A fuller redesign (interactive slides, the onboarding screens too) stays here for 0.8.0.
+* ~~**Empty state with the aggregator off.**~~ Done before the release (patch 22).
+* **Translate the older strings.** Every string added for 0.7.8-alpha is in all 21 languages (patch 24), but about 226 strings added between 0.5.8 and 0.7.7 are still English-only in the 19 languages other than Hungarian, and 229 in Hungarian; they show in English. The parity report (`app/build/reports/translation-parity.txt`) lists them.
 
 **Feed and playback**
 
-* **History, Saved and Liked still build on the main thread.** Round 1 moved appends off it and patch 16 (2026-11-12) lists built from empty; `loadHistoryBatch`, the Saved path and `loadLikedBatch` remain. `loadHistoryBatch` rebuilds five maps over every stored item on each call, so a long history can hold up a swipe.
+* ~~**History, Saved and Liked still build on the main thread.**~~ Done 2026-11-12 (patch 21): History and Saved build their pages on a background thread (`ui/ListPages.kt`); Liked already did.
 * **Every `feed_items` write reloads the whole table,** `fullContent` included. Retention cut the table by a third, but the reload remains.
 * **`setImmersiveFullscreen` runs on every slide** rather than on a change.
 * **`AudioPlayer` has no recovery path.** It no longer tears down mid-swipe, but it doesn't re-resolve in place the way `VideoPlayer` does (§16.33, §16.35).
@@ -59,7 +60,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **Plan for YouTube InnerTube breaking or being blocked.** It is the most useful source and the least stable one. Decide the fallback order (Invidious, official API with the user's key, the Worker) and add a visible "this source is failing" state rather than an empty slot in the mix.
 * **Finish the source terms review.** `docs/SOURCES.md` records each source's terms and status. Done 2026-11-12: honest User-Agents, the AIC contact, notices and per-slide credit; YouTube, Reddit and Vimeo kept and disclosed (owner). Open: the terms still Unchecked (Guardian, Podcast Index, Internet Archive, Hacker News, the publisher feeds one by one).
 * **Decide the long-term default.** Owner direction (2026-11-07): the mesh is expected to carry more of the feed as creators join, and the aggregator may then be off by default for new installs while staying for public open sources. No criteria set yet (number of creators, mesh content share). Until then it stays on by default.
-* **Check what a fresh install shows with the aggregator off.** With `enable_aggregator` false the clearnet feed is empty (`feedItems` is forced to an empty list in `NoSlopViewModel`); only mesh content shows. Walk through that first run and decide whether it needs an empty-state message pointing at Connect and Creators.
+* ~~**Check what a fresh install shows with the aggregator off.**~~ Done 2026-11-12 (patch 22): the empty feed says the Clearnet Aggregator is off, with "Find people" (DMs & Contacts) and "Turn on Clearnet Aggregator". Still worth a walk through a first run with it off.
 * ~~**Tell contributors how to add a source.**~~ Done 2026-11-11: "Add a source" in `CONTRIBUTING.md`, with the terms check in `docs/SOURCES.md`.
 * **Source list is a starter set.** Owner: the current list is a random starting selection and the community is expected to extend it. Consider letting users add their own RSS feed URL in Settings (not built).
 
@@ -129,6 +130,27 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-13) — Release Prep: New Text in Every Language, Docs (v0.7.8-alpha)
+
+* **Translations** (`NOSLOP_RELEASE_078_V1`, patch 24). The 39 strings added since 0.7.7 (phone notifications, Liked, source credits and status, the HUB switch, Report an Issue, sharing a link and its five notes, screen security, the aggregator-off empty state, the tutorial) were in English and Hungarian only; they are now in all 19 other languages, using each file's existing terms and keeping placeholders, links and names unchanged.
+* **Docs:** README (sharing a link, kept videos, messages off screenshots), SUPPORT (aggregator-off empty feed, swiping back to a video, black screenshots of messages), TRANSLATION_GUIDE (key count). The older English-only strings are in the 0.8.0-alpha plan.
+* The version was already 0.7.8-alpha (versionCode 78, patch 12).
+
+## Completed Changes (2026-11-12) — Feed Tutorial Matches the Build, Livelier (v0.7.8-alpha)
+
+* **Feed tutorial** (`NOSLOP_FEED_TUTORIAL_V2`, patch 23). Written for the HUB build, the tutorial said the bottom bar holds "Feed, DMs, Alerts, HUBs, and Settings" and that notifications are at the top left; in the default build there is no HUBs item and Alerts is in the bottom bar. Both slides now follow `HubFeature.enabled`. The swipe arrows move gently, slide 3 lists what each button does (react, comment, share to the mesh or any app, save), slide 5 shows the '+' button, and the step dots show the current step as a wider bar. English and Hungarian.
+* **Test:** `FeedTutorialArchitectureTest`.
+
+## Completed Changes (2026-11-12) — An Empty Feed with the Aggregator Off Says Why (v0.7.8-alpha)
+
+* **Mesh-only empty state** (`NOSLOP_MESH_ONLY_EMPTY_V1`, patch 22). With the Clearnet Aggregator off the feed only shows mesh posts, so a new user with no contacts saw "Your feed is empty. Pull to refresh or post to the mesh!". Now, with the aggregator off and no search active, the empty feed says the aggregator is off and that the feed shows posts from people you connect with, with "Find people" (opens DMs & Contacts) and "Turn on Clearnet Aggregator". English and Hungarian.
+* **Test:** `MeshOnlyEmptyStateArchitectureTest`.
+
+## Completed Changes (2026-11-12) — History and Saved Built Off the Main Thread (v0.7.8-alpha)
+
+* **History and Saved** (`NOSLOP_LISTS_OFF_MAIN_V1`, patch 21) build each page on a background thread and publish it on the main thread, as the Live Feed and Liked already did. History built five maps over every stored item (about 20,000 on the owner's phone) on the main thread for every page of 30, so a long history held up the swipe. The page logic moved unchanged into `ui/ListPages.kt` (`historyPage`, `savedPage`), except that History now stops once it has its 30. A page is only published onto the list it was built for; if the list changed meanwhile (another filter, a search, a reset) it is built again from the list as it is now. A request that arrives while a page is being built is run after it.
+* **Tests:** `ListPagesTest`, `ListsOffMainArchitectureTest`.
 
 ## Completed Changes (2026-11-12) — Messages Hidden from Screenshots, Release Notes (v0.7.8-alpha)
 
