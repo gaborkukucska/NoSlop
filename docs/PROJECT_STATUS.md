@@ -29,7 +29,6 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **Encrypt media on the device.** Photos, videos and audio sent or received are plain files under the app's folder (`Android/data/com.noslop.app/files`). Plan: a seekable stream cipher per file (AES-CTR, or GCM in fixed-size chunks) with a Keystore-wrapped key, a decrypting `DataSource` for the players, a Coil fetcher for images, and `MediaProxyService` decrypting as it serves peers. Existing files converted in the background.
 * **Welcome tutorial slides:** patch 23 corrected the feed tutorial for the HUB-less build and made it livelier before the release. A fuller redesign (interactive slides, the onboarding screens too) stays here for 0.8.0.
 * ~~**Empty state with the aggregator off.**~~ Done before the release (patch 22).
-* **Translate the older strings.** Every string added for 0.7.8-alpha is in all 21 languages (patch 24), but about 226 strings added between 0.5.8 and 0.7.7 are still English-only in the 19 languages other than Hungarian, and 229 in Hungarian; they show in English. The parity report (`app/build/reports/translation-parity.txt`) lists them.
 
 **Feed and playback**
 
