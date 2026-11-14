@@ -58,6 +58,7 @@ class ContactVerificationD10bTest {
             .build()
         repo = NoSlopRepository(context, db)
         repo.saveLocalIdentity("alice", alice, "mnemonic test word cloud phrase")
+        repo.stopPresenceHeartbeat()
         handshake = HandshakePacketHandler(repo, db)
     }
 
