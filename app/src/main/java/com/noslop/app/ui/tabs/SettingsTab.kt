@@ -577,6 +577,11 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
+                            // NOSLOP_MEDIA_ENCRYPTION_V1
+                            com.noslop.app.ui.components.MediaEncryptionSetting()
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
                             // SEND CHAT ON ENTER
                             val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
                             Row(

@@ -112,6 +112,14 @@ object MediaManager {
                 Logger.warn(TAG, "Database not readable before the media key was loaded: ${e.message}")
             }
             MediaVault.load(repo.context) { MediaVault.databaseIsEncrypted() }
+            val mediaKey = MediaVault.key()
+            if (mediaKey != null) {
+                MediaMigration.convertPlainFiles(
+                    dirs = mediaDirectories(repo.context),
+                    masterKey = mediaKey,
+                    isActiveDownload = { id -> activeDownloads.containsKey(id) }
+                )
+            }
         }
 
         scope.launch {
@@ -265,16 +273,11 @@ object MediaManager {
         val maxAgeMs = 5L * 24 * 60 * 60 * 1000 // 5 days
         
         try {
-            val possibleDirs = listOf(
-                Environment.DIRECTORY_PICTURES,
-                Environment.DIRECTORY_MOVIES,
-                Environment.DIRECTORY_MUSIC,
-                Environment.DIRECTORY_DOWNLOADS
-            ).mapNotNull { repo.context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } + File(repo.context.filesDir, "NoSlop")
+            val possibleDirs = mediaDirectories(repo.context)
             
             val allFiles = possibleDirs.filter { it.exists() }.flatMap { it.listFiles()?.toList() ?: emptyList() }
             
-            val validFiles = allFiles.filter { !it.name.endsWith(".mine") && !it.name.endsWith(".part") }
+            val validFiles = allFiles.filter { MediaVault.isMediaContent(it.name) }
             val sortedFiles = validFiles.sortedBy { it.lastModified() }
             
             var currentSize = 0L
@@ -307,6 +310,14 @@ object MediaManager {
             Logger.error(TAG, "Failed to enforce storage limits: ${e.message}")
         }
     }
+
+    private fun mediaDirectories(context: Context): List<File> =
+        listOf(
+            Environment.DIRECTORY_PICTURES,
+            Environment.DIRECTORY_MOVIES,
+            Environment.DIRECTORY_MUSIC,
+            Environment.DIRECTORY_DOWNLOADS
+        ).mapNotNull { context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } + File(context.filesDir, "NoSlop")
 
     private fun getMediaDirectory(type: String?): File {
         val repo = repository ?: throw IllegalStateException("MediaManager not initialized")

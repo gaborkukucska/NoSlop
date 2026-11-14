@@ -1072,5 +1072,9 @@
   "the encryption library did not load": "the encryption library did not load",
   "the reason is not known": "the reason is not known",
   "there is not enough free space to convert it. Free some space and restart NoSlop": "there is not enough free space to convert it. Free some space and restart NoSlop",
-  "this phone's Keystore is not available": "this phone's Keystore is not available"
+  "this phone's Keystore is not available": "this phone's Keystore is not available",
+  "Media encryption": "Media encryption",
+  "Photos, videos and audio on this phone are encrypted. Their key is kept by the Android Keystore and never leaves this phone.": "Photos, videos and audio on this phone are encrypted. Their key is kept by the Android Keystore and never leaves this phone.",
+  "Media on this phone is not encrypted: {reason}.": "Media on this phone is not encrypted: {reason}.",
+  "the database is not encrypted": "the database is not encrypted"
 }

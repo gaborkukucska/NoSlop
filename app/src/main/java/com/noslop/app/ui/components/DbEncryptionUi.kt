@@ -66,6 +66,29 @@ fun DbEncryptionSetting() {
     }
 }
 
+/** NOSLOP_MEDIA_ENCRYPTION_V1: the media encryption line in Settings. */
+@Composable
+fun MediaEncryptionSetting() {
+    val status by com.noslop.app.mesh.MediaVault.status.collectAsState()
+    val encrypted = status.state == com.noslop.app.mesh.MediaVault.State.ENCRYPTED
+    if (!encrypted && status.state != com.noslop.app.mesh.MediaVault.State.PLAINTEXT) return
+
+    val text = if (encrypted) {
+        "Photos, videos and audio on this phone are encrypted. Their key is kept by the Android Keystore and never leaves this phone.".tr
+    } else {
+        val reason = when (status.reason) {
+            com.noslop.app.mesh.MediaVault.PlainReason.DATABASE_NOT_ENCRYPTED -> "the database is not encrypted".tr
+            com.noslop.app.mesh.MediaVault.PlainReason.KEY_UNAVAILABLE -> "this phone's Keystore is not available".tr
+            com.noslop.app.mesh.MediaVault.PlainReason.DISABLED, null -> "the reason is not known".tr
+        }
+        LanguageManager.translate("Media on this phone is not encrypted: {reason}.").replace("{reason}", reason)
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text("Media encryption".tr, fontWeight = FontWeight.Bold, color = TextLight)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = if (encrypted) TextMuted else TemporaryAmber)
+    }
+}
+
 /**
  * The whole screen when the database can't be opened ([DbEncryption.State.LOCKED]).
  *

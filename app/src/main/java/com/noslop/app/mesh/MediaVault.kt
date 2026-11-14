@@ -2,9 +2,15 @@
 package com.noslop.app.mesh
 
 import android.content.Context
+import android.os.Looper
 import com.noslop.app.data.DbEncryption
 import com.noslop.app.data.DbKeyStore
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * NOSLOP_MEDIA_ENCRYPTION_V1: the key mesh media is encrypted with on this device ([MediaCrypto]).
@@ -22,14 +28,18 @@ import com.noslop.app.debug.Logger
 object MediaVault {
     private const val TAG = "MEDIA_VAULT"
 
-    /**
-     * Whether new media is encrypted. False while the readers and writers are being moved over to
-     * [MediaCrypto] (patch 29a): with it false no key is ever made and every file stays as it is.
-     */
-    const val ENABLED = false
+    /** Whether media encryption is active on this device. */
+    const val ENABLED = true
 
     /** The wrapped media key, next to the database key. */
     const val KEY_FILE = "media_key.bin"
+
+    enum class State { NOT_LOADED, ENCRYPTED, PLAINTEXT }
+    enum class PlainReason { DISABLED, DATABASE_NOT_ENCRYPTED, KEY_UNAVAILABLE }
+    data class Status(val state: State, val reason: PlainReason? = null)
+
+    private val _status = MutableStateFlow(Status(State.NOT_LOADED))
+    val status: StateFlow<Status> = _status.asStateFlow()
 
     @Volatile
     private var masterKey: ByteArray? = null
@@ -37,8 +47,26 @@ object MediaVault {
     @Volatile
     private var loaded = false
 
-    /** The media key, or null when media encryption is off or the key is not loaded yet. */
-    fun key(): ByteArray? = masterKey
+    @Volatile
+    private var loadStarted = false
+
+    private val loadLatch = CountDownLatch(1)
+
+    /**
+     * The media key, or null when media encryption is off. If [load] has already been started on a
+     * background thread and a background caller asks before it finishes, wait briefly so an encrypted
+     * file is never misread as missing its key.
+     */
+    fun key(): ByteArray? {
+        if (loadStarted && !loaded && Looper.myLooper() != Looper.getMainLooper()) {
+            try {
+                loadLatch.await(5, TimeUnit.SECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        return masterKey
+    }
 
     /** True once [load] has run, whatever it found. */
     fun isLoaded(): Boolean = loaded
@@ -48,35 +76,49 @@ object MediaVault {
      * thread. [databaseEncrypted] must be asked after the database is open.
      */
     fun load(context: Context, databaseEncrypted: () -> Boolean) {
+        loadStarted = true
         try {
             val hasFile = DbKeyStore.hasKeyFile(context, KEY_FILE)
+            val dbEncrypted = databaseEncrypted()
             // An existing key is always loaded, so files it encrypted stay readable. A new one is only
             // made when encryption is on and the database is encrypted too.
-            val mayCreate = ENABLED && databaseEncrypted()
+            val mayCreate = ENABLED && dbEncrypted
             if (!hasFile && !mayCreate) {
-                Logger.info(TAG, "Media encryption is off on this device", "enabled=$ENABLED")
+                val reason = if (!ENABLED) PlainReason.DISABLED else PlainReason.DATABASE_NOT_ENCRYPTED
+                _status.value = Status(State.PLAINTEXT, reason)
+                Logger.info(TAG, "Media encryption is off on this device", "enabled=$ENABLED | dbEncrypted=$dbEncrypted")
                 return
             }
             when (val result = DbKeyStore.load(context, mayCreate, KEY_FILE)) {
                 is DbKeyStore.Result.Ready -> {
                     masterKey = result.key
+                    _status.value = Status(State.ENCRYPTED)
                     Logger.info(TAG, "Media key ready")
                 }
-                is DbKeyStore.Result.Unavailable ->
+                is DbKeyStore.Result.Unavailable -> {
+                    _status.value = Status(State.PLAINTEXT, PlainReason.KEY_UNAVAILABLE)
                     Logger.warn(TAG, "Media key is not available; new media is stored unencrypted", result.why)
+                }
             }
         } catch (e: Exception) {
+            _status.value = Status(State.PLAINTEXT, PlainReason.KEY_UNAVAILABLE)
             Logger.warn(TAG, "Media key could not be loaded", e.javaClass.simpleName + (e.message?.let { ": $it" } ?: ""))
         } finally {
             loaded = true
+            loadLatch.countDown()
         }
     }
 
     /** True when the database is open and encrypted. */
     fun databaseIsEncrypted(): Boolean = DbEncryption.status.value.state == DbEncryption.State.ENCRYPTED
 
-    /** Marker files beside the media (`<id>.mine`) carry no content and stay as they are. */
-    fun isMediaContent(fileName: String): Boolean = !fileName.endsWith(".mine")
+    /** Marker, partial, and migration temp/backup files carry no final media content and stay as they are. */
+    fun isMediaContent(fileName: String): Boolean =
+        !fileName.endsWith(".mine") &&
+            !fileName.endsWith(".creator_locked") &&
+            !fileName.endsWith(".part") &&
+            !fileName.endsWith(".enc-tmp") &&
+            !fileName.endsWith(".plain-bak")
 
     /** Test hook. */
     internal fun setKeyForTesting(key: ByteArray?) {
