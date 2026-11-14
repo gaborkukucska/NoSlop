@@ -70,6 +70,12 @@ android {
             ?: project.findProperty("NOSLOP_ENABLE_HUB")?.toString() ?: "false")
             .trim().equals("true", ignoreCase = true)
         buildConfigField("boolean", "ENABLE_HUB", enableHub.toString())
+
+        // Optional build-time switch to auto-fill the Word Cloud in Export Profile / backup popups for testing.
+        val autofillBackupMnemonic = (System.getenv("NOSLOP_AUTOFILL_BACKUP_MNEMONIC")
+            ?: project.findProperty("NOSLOP_AUTOFILL_BACKUP_MNEMONIC")?.toString() ?: "false")
+            .trim().equals("true", ignoreCase = true)
+        buildConfigField("boolean", "AUTOFILL_BACKUP_MNEMONIC", autofillBackupMnemonic.toString())
     }
 
     flavorDimensions += "distribution"

@@ -92,6 +92,14 @@ fun BackupPromptHost(viewModel: NoSlopViewModel) {
     var advisoryOption by remember { mutableStateOf(com.noslop.app.data.BackupMediaOption.NONE) }
     var advisoryMnemonicInput by remember { mutableStateOf("") }
     var showAdvisoryMnemonicPrompt by remember { mutableStateOf(false) }
+    LaunchedEffect(showAdvisoryMnemonicPrompt) {
+        if (com.noslop.app.BuildConfig.AUTOFILL_BACKUP_MNEMONIC && showAdvisoryMnemonicPrompt && advisoryMnemonicInput.isBlank()) {
+            val stored = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.noslop.app.NoSlopApp.repository.getWordCloudMnemonic()
+            }
+            if (stored.isNotBlank()) advisoryMnemonicInput = stored
+        }
+    }
     // R5b: set once the typed words were checked (matching, or the user accepted a difference).
     var advisoryWordsAccepted by remember { mutableStateOf(false) }
     var advisoryMismatch by remember { mutableStateOf<com.noslop.app.data.WordCloudCheck.Differs?>(null) }

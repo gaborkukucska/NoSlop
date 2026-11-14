@@ -1628,6 +1628,15 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
                             val scope = rememberCoroutineScope()
 
+                            LaunchedEffect(showMnemonicDialog, isExporting) {
+                                if (com.noslop.app.BuildConfig.AUTOFILL_BACKUP_MNEMONIC && showMnemonicDialog && isExporting && mnemonicInput.isBlank()) {
+                                    val stored = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.noslop.app.NoSlopApp.repository.getWordCloudMnemonic()
+                                    }
+                                    if (stored.isNotBlank()) mnemonicInput = stored
+                                }
+                            }
+
                             if (showMnemonicDialog) {
 
                                 AlertDialog(
