@@ -85,6 +85,8 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
                         return chain.proceed(request)
                     }
                 })
+                // NOSLOP_MEDIA_ENCRYPTION_V1: after the interceptor above, so it sees the resolved address.
+                com.noslop.app.ui.EncryptedMediaImages.install(this)
             }
             .build()
     }

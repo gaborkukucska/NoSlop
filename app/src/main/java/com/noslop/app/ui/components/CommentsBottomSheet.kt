@@ -472,6 +472,7 @@ fun CommentItem(
                 val gifImageLoader = remember(context) {
                     coil.ImageLoader.Builder(context)
                         .components {
+                            com.noslop.app.ui.EncryptedMediaImages.install(this) // NOSLOP_MEDIA_ENCRYPTION_V1
                             if (android.os.Build.VERSION.SDK_INT >= 28) {
                                 add(coil.decode.ImageDecoderDecoder.Factory())
                             } else {

@@ -117,7 +117,8 @@ fun AudioPlayer(
                     .setLoadControl(loadControl)
                     .setAudioAttributes(audioAttributes, true)
                     .build().apply {
-                        val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+                        // NOSLOP_MEDIA_ENCRYPTION_V1: an encrypted local file plays through the local media server.
+                        val mediaItem = androidx.media3.common.MediaItem.fromUri(com.noslop.app.ui.playableMediaUrl(url))
                         setMediaItem(mediaItem)
                         volume = 1f
                         val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)

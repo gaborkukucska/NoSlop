@@ -608,6 +608,7 @@ fun GroupChatThreadScreen(
                                                             coil.ImageLoader.Builder(context)
                                                                 .okHttpClient { com.noslop.app.net.HttpClientProvider.activeClearnetClient }
                                                                 .components {
+                                                                    com.noslop.app.ui.EncryptedMediaImages.install(this) // NOSLOP_MEDIA_ENCRYPTION_V1
                                                                     if (android.os.Build.VERSION.SDK_INT >= 28) {
                                                                         add(coil.decode.ImageDecoderDecoder.Factory())
                                                                     }

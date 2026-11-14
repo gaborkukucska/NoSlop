@@ -298,11 +298,19 @@ private suspend fun doResolve(rawUrl: String, quality: String, isPreload: Boolea
 
     val result = when {
         isDirectFileUrl(rawUrl) -> {
+            // NOSLOP_MEDIA_ENCRYPTION_V1: the player cannot read a file that is encrypted on the device.
+            // Such a file is played through the local media server, which decrypts as it streams.
+            val playable = com.noslop.app.ui.playableMediaUrl(rawUrl)
+            if (playable != rawUrl) {
+                Logger.info("VIDEO_RESOLVE", "Local file is encrypted, playing it through the local media server")
+                return@withContext VideoSource.Direct(playable)
+            }
             if (rawUrl.contains("127.0.0.1") || rawUrl.contains("localhost")) {
                 val id = rawUrl.substringAfter("id=").substringBefore("&")
                 if (id.isNotBlank()) {
                     val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(id, "video")
-                    if (localFile != null && localFile.exists()) {
+                    // Only a plain file can skip the server.
+                    if (localFile != null && localFile.exists() && !com.noslop.app.mesh.MediaCrypto.isEncrypted(localFile)) {
                         Logger.info("VIDEO_RESOLVE", "Found local file, bypassing proxy: ${localFile.absolutePath}")
                         return@withContext VideoSource.Direct("file://${localFile.absolutePath}")
                     }
