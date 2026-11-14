@@ -1957,10 +1957,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             return@withContext
         }
 
-        // Clean up any placeholder peer from earlier development
+        // Clean up any placeholder peer from earlier development, or the previous main-identity seed
         val oldPlaceholder = peerDao.getPeerByPublicKey("official_noslop_creator_node_key")
         if (oldPlaceholder != null) {
             peerDao.deletePeer(oldPlaceholder)
+        }
+        val prevMainSeed = peerDao.getPeerByPublicKey("MCowBQYDK2VwAyEA8EwKLIg/0T8GVlsgIje0hBP1Ratx/+gVcfLmuMhWO9Q=")
+        if (prevMainSeed != null && !prevMainSeed.isTrusted) {
+            peerDao.deletePeer(prevMainSeed)
         }
 
         val myKeys = getLocalIdentity()
@@ -2076,9 +2080,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             )
         }
 
-        const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEA8EwKLIg/0T8GVlsgIje0hBP1Ratx/+gVcfLmuMhWO9Q="
-        const val OFFICIAL_CREATOR_ONION = "6bgauleih7it6bswlmqcen5uqqj7krnloh76qflr6ltlrscwhpknvmid.onion"
-        const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAMzpIr+ws90nVtvmco5OPCvWdgnc44osF7dRcIoYnpBI="
+        const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEArEvD8dh20kJyW1jBHra44WgJ7fDIxF6q2ZHhg6wOpEY="
+        const val OFFICIAL_CREATOR_ONION = "vrf4h4oyo3jee4s3ldar5nvy4fuat3pqzdcf5kwzshqyhlaourdb6mad.onion"
+        const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAOu4gQY4Lq7BSVs2Oxjx1fCJ+CHKC0aWimaxqDSkOzFo="
 
         /**
          * Keys of former official nodes. Their devices are gone, so nobody can say who holds the keys now.
