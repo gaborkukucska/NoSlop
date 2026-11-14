@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.7.9--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.8.0--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
@@ -142,7 +142,7 @@ NoSlop features **Zero-Code Dynamic Language Discovery**:
 | **Media** | Media3 / ExoPlayer, Coil, Android System WebView (fallback) |
 | **Networking** | Embedded Tor daemon (`tor-android`), OkHttp, SOCKS5 Stream Isolation |
 | **Cryptography** | Ed25519 (Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
-| **Persistence** | Room (SQLite; Keystore AES-256-GCM group message encryption at rest; database files protected by Android file-based encryption), EncryptedSharedPreferences (Android Keystore). Fallback: AES-GCM under a separate Keystore key, or, with no working Keystore, under a device-derived key that only obscures; the app warns |
+| **Persistence** | Room on SQLCipher (`mesh.db` encrypted with AES-256-CBC + HMAC-SHA512 under a Keystore-wrapped random key; unencrypted fallback if Keystore/library unavailable), per-file AES-256-CTR media encryption (`MediaCrypto` / `MediaVault`), EncryptedSharedPreferences (Android Keystore). Fallback for prefs: AES-GCM under a separate Keystore key, or, with no working Keystore, under a device-derived key that only obscures; the app warns |
 | **Hardware** | CameraX (QR scanning & media capture), ZXing (tracker-free) |
 | **Background** | Android WorkManager & Foreground Services |
 
@@ -165,7 +165,7 @@ NoSlop is early software. Please read this before you rely on it:
 * **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice. Some of these uses go against the source's own terms: YouTube (an unofficial interface, and playback without YouTube's player), Reddit (no registered app) and Vimeo (streams read from its player). I've chosen to keep them for now. [docs/SOURCES.md](docs/SOURCES.md) records each source's terms and status. More sources are welcome from the community (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
-* **The database is only partly encrypted.** DM and group message bodies are; feed items, history, peers and settings rely on Android's file encryption. Photos, videos and audio you send or receive are ordinary files in the app's own storage folder.
+* **Device encryption relies on the Android Keystore.** `mesh.db` (SQLCipher) and stored mesh media (`MediaCrypto`, AES-256-CTR) are encrypted under Keystore-wrapped keys. On devices where the Keystore is unavailable, the database and media fall back to unencrypted storage (shown in Settings); log files remain plain.
 * **One server I run is involved, if you use it.** Settings › Report an Issue goes through a relay at noslop.me and becomes a public GitHub issue. The app uses no API proxy unless you set one up in Settings; [`proxy/`](proxy/) has a Cloudflare Worker you can run for that. See the [FAQ](docs/FAQ.md).
 * **Updates are checked, not authenticated.** The app verifies the APK's checksum and signing certificate, with no extra signature and no certificate pinning on the check.
 * **Never reviewed by a professional.** NoSlop uses standard cryptographic primitives, but the protocol built from them is its own, and no human professional has ever reviewed it. Read the [FAQ](docs/FAQ.md) before you trust it with anything sensitive.

@@ -23,11 +23,11 @@ These rounds fix the three reports in `isues.txt`, all on the legacy Android app
 
 This is the full list of open work on the legacy app as of 2026-11-03, with every item checked against the code. It replaces the old "Open Architectural & Technical Register" and "Consolidated Master Backlog", now in `docs/archived/PROJECT_STATUS_HISTORY.md`. Entries in this file or the history may say "still open" about items closed since; this list wins.
 
-**Planned for 0.8.0-alpha** (agreed 2026-11-12; left out of 0.7.9-alpha because each needs a migration or a design first)
+**Planned for 0.8.0-alpha** (agreed 2026-11-12; implemented 2026-11-14)
 
-* **Encrypt the database on the device.** Today only 1:1 DM contents (stored as received ciphertext), group chat bodies (AES-256-GCM, Keystore key) and the identity keys (Keystore) are encrypted by NoSlop; contacts, peers, posts, comments, likes, feed history and DM metadata (who and when) rely on Android's file encryption. Plan: Room on SQLCipher with a random key wrapped by an Android Keystore key, a one-time conversion of the existing database on update (with a tested fallback that never loses data), and backup export/import and the 0.7.x-to-0.8 update re-tested. Design note written 2026-11-13: `docs/TECHNICAL_REFERENCE.md` §16.51, with the owner's four decisions (order, conversion on first start, unencrypted fallback when the Keystore fails, backup carries the encrypted database and its key). Not built yet.
-* **Encrypt media on the device.** Photos, videos and audio sent or received are plain files under the app's folder (`Android/data/com.noslop.app/files`). Plan: a seekable stream cipher per file (AES-CTR, or GCM in fixed-size chunks) with a Keystore-wrapped key, a decrypting `DataSource` for the players, a Coil fetcher for images, and `MediaProxyService` decrypting as it serves peers. Existing files converted in the background.
-* **Welcome tutorial slides:** patch 23 corrected the feed tutorial for the HUB-less build and made it livelier before the release. A fuller redesign (interactive slides, the onboarding screens too) stays here for 0.8.0.
+* ~~**Encrypt the database on the device.**~~ Done (`NOSLOP_DB_ENCRYPTION_V1`, patches 28a–28d).
+* ~~**Encrypt media on the device.**~~ Done (`NOSLOP_MEDIA_ENCRYPTION_V1`, patches 29a–29c).
+* ~~**Welcome tutorial slides:**~~ Done: onboarding welcome screen redesigned as a 3-card interactive pager (`OnboardingScreen.Step1Welcome`).
 * ~~**Empty state with the aggregator off.**~~ Done before the release (patch 22).
 
 **Feed and playback**
@@ -80,10 +80,10 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **`mediaDigestFor` can block a same-revision v2 upgrade** of someone else's media that was downloaded unverified (D08). Nothing wrong is accepted; the post keeps its older signature.
 * **DMs have no forward secrecy.** They use static X25519 keys. A Double Ratchet is planned, not started.
 * **Signatures still accept the old pipe form.** `COMMENT`, `EDIT_COMMENT`, `DELETE_COMMENT`, `FOLLOW`, `PEER_REMOVED`, `CONNECTION_REJECTED` and sync check `encodeForSigning` and the pipe string. There is no single versioned encoder yet.
-* **The database isn't fully encrypted.** DM and group bodies are. Feed items, history, peers and settings are plain SQLite under Android's file encryption. SQLCipher isn't added.
+* ~~**The database isn't fully encrypted.**~~ Done in 0.8.0-alpha (`NOSLOP_DB_ENCRYPTION_V1`): `mesh.db` is encrypted with SQLCipher under a Keystore-wrapped key (unencrypted fallback if Keystore unavailable).
 * **OTA updates are checked, not authenticated.** The APK's checksum and signing certificate are verified, but there's no Ed25519 signature over it and no certificate pinning on the update check. Don't describe OTA as MITM-resistant until that lands.
 * **The key-storage fallback is weak without a Keystore.** When EncryptedSharedPreferences can't be opened, secrets are AES-GCM encrypted under a separate Keystore key; with no working Keystore, under a key derived from `ANDROID_ID`, which only obscures them (`IdentityRepository.secureFallbackWrite`). A PIN-derived key isn't built.
-* **Media files are not encrypted.** Photos, videos and audio sent or received are plain files under the app's external files folder (`MediaManager`).
+* ~~**Media files are not encrypted.**~~ Done in 0.8.0-alpha (`NOSLOP_MEDIA_ENCRYPTION_V1`): stored mesh media is encrypted per-file with AES-256-CTR (`MediaCrypto`) under a Keystore-wrapped key (`MediaVault`).
 * **Rate limits are fixed, per sender.** The adaptive token bucket across all packet types isn't built.
 * **A proxy secret built into an APK can be extracted.** Official builds have none (see the aggregator list above); a build made with `NOSLOP_PROXY_SECRET` carries it.
 * **Groups have one admin.** Bans exist; a list of admins doesn't.
@@ -129,6 +129,14 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-14) — Database & Media Encryption, Backup Prompt, Onboarding (v0.8.0-alpha)
+
+* **Database encryption on the device** (`NOSLOP_DB_ENCRYPTION_V1`, patches 28a–28d, `docs/TECHNICAL_REFERENCE.md` §16.51). `mesh.db` is encrypted with SQLCipher (`net.zetetic:sqlcipher-android:4.20.0`) under a 32-byte key wrapped by the Android Keystore (`DbKeyStore`, `db_key.bin`). Existing plaintext databases convert once on first open (`DbOpenPreparer`) while keeping the original until the encrypted copy is verified and opened. An unreadable database never crashes or deletes data: the app opens an in-memory stand-in, keeps Tor off, and shows `LockedDatabaseScreen` (Close, Restore, Start Over which renames to `.set-aside`). Backups use NSG2 v2 (`BackupDbStage`, `BackupArchiveFormat`) carrying `database.enc.db` and `database.key` inside Word Cloud encryption; 0.7.x archives still restore. Settings shows `DbEncryptionSetting`. Audited `IdentityRepository` `runBlocking` quarantine write (moved to `AppScopes.io`). Tested (`DbEncryptionPolicyTest`, `DbKeyStoreTest`, `DbOpenPreparerTest`, `BackupDbStageTest`, `DbEncryptionArchitectureTest`, `BackupArchiveFormatE3Test`, `BackupNsg2E3Test`, and device-run `DbEncryptionConversionTest`).
+* **Backup prompt on any tab and after updates** (`NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1`, patch 28b-1). Moved the backup prompt out of Settings into `BackupPromptHost` in `MainScreenContent`, added `APP_UPDATED` (`BackupPromptPolicy`), and gated onboarding/update prompts on finishing the feed tutorial. Tested (`BackupPromptPolicyTest`, `BackupPromptArchitectureTest`).
+* **Media encryption on the device** (`NOSLOP_MEDIA_ENCRYPTION_V1`, patches 29a–29c, `docs/TECHNICAL_REFERENCE.md` §16.53). Mesh media is encrypted per-file with AES-256-CTR (`MediaCrypto`) under a Keystore-wrapped 32-byte key (`MediaVault`, `media_key.bin`). `MediaManager`, `MediaProxyService`, `BackupManager`, `CreatorIdentityArchive`, `EncryptedMediaImages` (Coil fetcher + local-server disk-cache bypass), and `playableMediaUrl` (`VideoPlayer`, `AudioPlayer`) read and write encrypted media transparently. `MediaVault.ENABLED = true`; existing plain media files in `NoSlop/` are converted in the background with crash-safe `.enc-tmp`/`.plain-bak` recovery (`MediaMigration`), and Settings shows `MediaEncryptionSetting`. Tested (`MediaCryptoTest`, `PlayableMediaUrlTest`, `MediaEncryptionUiArchitectureTest`, `MediaMigrationTest`).
+* **Onboarding welcome pager** (`OnboardingScreen.Step1Welcome`). Replaced the static welcome text with a 3-card interactive `HorizontalPager` with animated indicators.
+* **Version 0.8.0-alpha** (`versionCode` 80).
 
 ## Completed Changes (2026-11-13) — Every String in Every Language, Version 0.7.9-alpha (v0.7.9-alpha)
 

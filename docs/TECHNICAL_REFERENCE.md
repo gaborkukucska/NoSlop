@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.7.9-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
+versionName `0.8.0-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
 targetSdk 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1361,7 +1361,7 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
 | `compileSdk` / `targetSdk` | 37.1 (`release(37) { minorApiLevel = 1 }`, required by `tor-android` 0.4.9.13+) / 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 79 / `0.7.9-alpha` |
+| `versionCode` / `versionName` | 80 / `0.8.0-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
@@ -2735,8 +2735,9 @@ Test: `FeedTutorialArchitectureTest`.
 
 ### 16.51 Database encryption: design (`NOSLOP_DB_ENCRYPTION_V1`)
 
-Design note for 0.8.0-alpha, agreed 2026-11-13. Nothing in this section is built yet. Each part gets a
-"built" line when its patch lands.
+Built in 0.8.0-alpha (patches 28a–28d, 2026-11-14). Tests: `DbEncryptionPolicyTest`, `DbKeyStoreTest`,
+`DbOpenPreparerTest`, `BackupDbStageTest`, `DbEncryptionArchitectureTest`, `BackupArchiveFormatE3Test`,
+`BackupNsg2E3Test`, and `DbEncryptionConversionTest`.
 
 **What it protects.** `mesh.db` holds contacts, peers, posts, comments, likes, feed history and DM
 metadata (who and when) as plain SQLite. Android's file encryption protects the file while the phone is
@@ -2860,6 +2861,35 @@ more than about a quarter, fix the full-table reload before release rather than 
 * 28b: splash line, Settings line, strings, `runBlocking` check.
 * 28c: backup export and import, format version 2, tests for old and new archives.
 * 28d: README, SECURITY, FAQ, privacy policy, SUPPORT, this section marked as built.
+
+### 16.52 Backup prompt after update (`NOSLOP_BACKUP_PROMPT_AFTER_UPDATE_V1`)
+
+* `ui/components/BackupPromptDialog.kt` (`BackupPromptHost`) sits in `MainScreenContent` so it shows on
+  any tab. `BackupPromptPolicy` triggers `BackupPromptReason.APP_UPDATED` once per `BuildConfig.VERSION_CODE`
+  (`app_settings["backup_prompt_version_code"]`), and waits until `feed_tutorial_step >= 5` for
+  onboarding and after-update prompts.
+
+Tests: `BackupPromptPolicyTest`, `BackupPromptArchitectureTest`.
+
+### 16.53 Media encryption (`NOSLOP_MEDIA_ENCRYPTION_V1`)
+
+* `mesh/MediaVault.kt`: manages the 32-byte media master key (`noBackupFilesDir/media_key.bin`), wrapped
+  via `DbKeyStore` (`ENABLED = true`, created only when `DbEncryption` is `ENCRYPTED`). Exposes
+  `StateFlow<Status>` for Settings (`MediaEncryptionSetting`).
+* `mesh/MediaCrypto.kt`: 24-byte header (`"NSM1" | version(1) | 0x00*3 | 16-byte nonce`) + AES-256-CTR
+  with per-file key `HMAC-SHA256(masterKey, "noslop-media-file-v1" | nonce)`. Supports random-access
+  reads/writes (`readAt`, `writeAt`), streaming (`openInput`, `encryptingOutput`), `copyInto`,
+  `copyContentTo`, and `sha256OfContent`.
+* `mesh/MediaManager.kt`, `mesh/MediaProxyService.kt`, `data/BackupManager.kt`,
+  `data/CreatorIdentityArchive.kt`: all media hashing, chunk writes/reads, thumbnails, Downloads export,
+  and archive export/restore go through `MediaCrypto`.
+* `ui/EncryptedMediaImages.kt` & `ui/PlayableMediaUrl.kt`: Coil fetcher decrypts encrypted `File`s in
+  memory and disables disk caching for `http://127.0.0.1:` proxy URLs; `VideoPlayer` and `AudioPlayer`
+  route encrypted local files through `MediaProxyService`.
+* `mesh/MediaMigration.kt`: runs in `MediaManager.initialize` after `MediaVault.load` to convert
+  existing plain files in `NoSlop/` directories using `.enc-tmp` + `.plain-bak` crash-safe swaps.
+
+Tests: `MediaCryptoTest`, `PlayableMediaUrlTest`, `MediaEncryptionUiArchitectureTest`, `MediaMigrationTest`.
 
 ## 17. Audit and Hardening Pass (2026-09-02)
 

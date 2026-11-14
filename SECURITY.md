@@ -37,7 +37,7 @@ Only the latest release. These are alpha builds and the wire protocol has change
 Several weaknesses are already known and written down, so you don't have to rediscover them. They are listed under **Mesh and security** in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). They include:
 
 * DMs use static X25519 keys and have no forward secrecy yet.
-* The database is not fully encrypted: DM and group message bodies are, but feed items, history, peers and settings rely on Android's file encryption alone. Photos, videos and audio sent or received are plain files in the app's storage folder.
+* `mesh.db` is encrypted with SQLCipher and stored mesh media files are encrypted per-file with AES-256-CTR (`MediaCrypto`) under Keystore-wrapped keys. On devices where the Android Keystore is unavailable, database and media storage fall back to unencrypted files (Settings shows the status). Log files remain plain.
 * If the Keystore-backed preferences can't be opened, secrets fall back to AES-GCM under a separate Keystore key, or, with no working Keystore, under a key derived from the device ID, which only obscures them. The app shows a warning when that happens.
 * Updates are checked against a SHA-256 checksum and the signing certificate, but there is no extra signature and no certificate pinning on the update check.
 * Packets pulled from a Hub skip the envelope signature check.
