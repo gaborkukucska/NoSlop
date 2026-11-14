@@ -185,6 +185,69 @@ class DbEncryptionArchitectureTest {
     }
 
     @Test
+    fun aDatabaseThatCantBeOpened_givesAStandIn_notAnException() {
+        // The app queries the database from process start; an exception there is a crash on every launch.
+        val source = code("data/DbEncryption.kt")
+        val start = source.indexOf("private fun open(): SupportSQLiteOpenHelper {")
+        val end = source.indexOf("private fun openStandIn(", start)
+        assertTrue(start >= 0 && end > start)
+        val open = source.substring(start, end)
+        assertFalse("open() must not throw; it answers with the stand-in", Regex("""\bthrow\b""").containsMatchIn(open))
+        assertEquals(2, Regex("""return openStandIn\(""").findAll(open).count())
+
+        val standIn = source.substring(end, source.indexOf("private fun openPlaintext(", end))
+        assertTrue("the stand-in is in memory: it has no file name", standIn.contains(".name(null)"))
+        assertTrue(standIn.contains("DbEncryption.State.LOCKED"))
+    }
+
+    @Test
+    fun torIsNotStarted_onTheStandIn() {
+        // On the empty stand-in a message could arrive, be acknowledged and be lost.
+        val appDirJava = File(appDir, "src/main/java/com/noslop/app")
+        val starters = appDirJava.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".kt") }
+            .filter { it.readText().contains("TorService.startTor(") }
+            .toList()
+        assertEquals(listOf("NoSlopApp.kt", "NoSlopViewModel.kt"), starters.map { it.name }.sorted())
+        for (file in starters) {
+            val text = file.readText()
+            var at = text.indexOf("TorService.startTor(")
+            while (at >= 0) {
+                val before = text.substring(maxOf(0, at - 1500), at)
+                assertTrue(
+                    "${file.name}: TorService.startTor must come after a DbEncryption.isLocked() check",
+                    before.contains("if (com.noslop.app.data.DbEncryption.isLocked()) return@launch")
+                )
+                at = text.indexOf("TorService.startTor(", at + 1)
+            }
+        }
+    }
+
+    @Test
+    fun theScreen_waitsForTheDatabase_beforeItDecidesOnboardedOrNot() {
+        val activity = main("MainActivity.kt")
+        val gate = activity.indexOf("val dbStatus by com.noslop.app.data.DbEncryption.status.collectAsState()")
+        val onboarded = activity.indexOf("val isOnboarded by viewModel.isOnboardingComplete.collectAsState()")
+        assertTrue("the database gate must come before the onboarding decision", gate in 0 until onboarded)
+        val between = activity.substring(gate, onboarded)
+        assertTrue(between.contains("LockedDatabaseScreen(viewModel, locked)"))
+        assertTrue(between.contains("DbEncryption.State.NOT_OPENED"))
+        assertTrue(between.contains("DbEncryption.State.CONVERTING"))
+        assertEquals("both the locked screen and the splash end the composition there", 2, Regex("""return@MyApplicationTheme""").findAll(between).count())
+    }
+
+    @Test
+    fun startOver_renamesTheDatabase_andNeverDeletesIt() {
+        val source = code("data/DbEncryption.kt")
+        val start = source.indexOf("fun setAsideUnreadableDatabase(")
+        val body = source.substring(start, source.indexOf("internal fun describe(", start))
+        assertTrue(body.contains("DbFiles.moveWithSidecars(main, File(main.path + SET_ASIDE_SUFFIX))"))
+        assertFalse(Regex("""\.delete\(\)|deleteWithSidecars|deleteRecursively""").containsMatchIn(body))
+        // And nothing cleans the set-aside copy up later.
+        assertEquals(1, Regex("""SET_ASIDE_SUFFIX\b""").findAll(source.substring(start)).count())
+    }
+
+    @Test
     fun onlyTheKeyStore_knowsTheAliasAndTheKeyFile() {
         val dataDir = File(appDir, "src/main/java/com/noslop/app")
         val offenders = dataDir.walkTopDown()

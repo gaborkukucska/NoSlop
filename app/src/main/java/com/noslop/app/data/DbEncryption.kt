@@ -48,6 +48,12 @@ object DbEncryption {
     /** An encrypted database that stopped opening while a plaintext original was still there. Kept, not deleted. */
     const val FAILED_SUFFIX = ".enc-failed"
 
+    /** A database the user chose to start over from, on the locked screen. Kept; see [setAsideUnreadableDatabase]. */
+    const val SET_ASIDE_SUFFIX = ".set-aside"
+
+    /** The app's one database file. */
+    const val DATABASE_NAME = "mesh.db"
+
     enum class State { NOT_OPENED, CONVERTING, ENCRYPTED, PLAINTEXT, LOCKED }
 
     /** [reason] says why a database is not encrypted, or why it is locked. [detail] is safe to show and log. */
@@ -64,7 +70,8 @@ object DbEncryption {
 
     /**
      * The database is encrypted and can't be read on this device right now. Nothing was changed.
-     * Thrown from every database access until the key is readable again.
+     * Thrown by [DbOpenPreparer.prepare]; the open helper answers it with an empty stand-in database and
+     * [State.LOCKED], so the rest of the app never sees it.
      */
     class DbLockedException(val reason: PlainReason, val detail: String?) : RuntimeException(
         "The database is encrypted and can't be opened: " + (detail ?: reason.name)
@@ -89,6 +96,30 @@ object DbEncryption {
                 return GatedOpenHelper(configuration, preparer, SqlCipherEngine, FrameworkSQLiteOpenHelperFactory())
             }
         }
+    }
+
+    /** True once the database has turned out to be unreadable in this process. False before it was opened. */
+    fun isLocked(): Boolean = _status.value.state == State.LOCKED
+
+    /**
+     * "Start Over" on the locked screen: moves the database that can't be opened, with its side files, to
+     * `mesh.db.set-aside`, so the next start makes a new, empty one. The file is renamed, not deleted,
+     * and is not removed later either; a second "Start Over" replaces it. Returns false if it could not
+     * be moved.
+     */
+    fun setAsideUnreadableDatabase(context: Context): Boolean = try {
+        NoSlopDatabase.closeInstance()
+        val main = context.applicationContext.getDatabasePath(DATABASE_NAME)
+        if (main.exists()) {
+            DbFiles.moveWithSidecars(main, File(main.path + SET_ASIDE_SUFFIX))
+        } else {
+            DbFiles.deleteSidecars(main)
+        }
+        Logger.warn(TAG, "The database that could not be opened was set aside at the user's request")
+        true
+    } catch (e: Exception) {
+        Logger.error(TAG, "The database that could not be opened could not be set aside", describe(e))
+        false
     }
 
     internal fun describe(e: Throwable): String = e.javaClass.simpleName + (e.message?.let { ": $it" } ?: "")
@@ -461,8 +492,7 @@ internal class GatedOpenHelper(
         val plan = try {
             preparer.prepare()
         } catch (e: DbEncryption.DbLockedException) {
-            DbEncryption.report(DbEncryption.Status(DbEncryption.State.LOCKED, e.reason, e.detail))
-            throw e
+            return openStandIn(e.reason, e.detail)
         }
 
         val rawKey = plan.rawKey
@@ -490,13 +520,35 @@ internal class GatedOpenHelper(
             }
             password.fill(0)
             if (!preparer.encryptedOpenFailed(failure, plan.convertedNow)) {
-                // No plaintext original to go back to. Leave the file alone and let the caller see the error.
+                // No plaintext original to go back to. Leave the file alone.
                 Logger.error(DbEncryption.TAG, "Encrypted database did not open; nothing was changed", DbEncryption.describe(failure))
-                throw failure
+                return openStandIn(null, DbEncryption.describe(failure))
             }
             return openPlaintext(PlainReason.CONVERSION_FAILED, DbEncryption.describe(failure))
         }
         return openPlaintext(plan.reason, plan.detail)
+    }
+
+    /**
+     * The database can't be opened. The app queries it from the moment the process starts, long before a
+     * screen could say what is wrong, so an error here would be a crash on every launch. Instead the app
+     * gets an empty database in memory. Nothing it does there reaches the real file, [DbEncryption.State.LOCKED]
+     * puts the "can't be opened" screen over the whole app, and Tor is not started (NoSlopApp, the view
+     * model), so no message can arrive and be lost. It lasts until the process ends.
+     */
+    private fun openStandIn(reason: PlainReason?, detail: String?): SupportSQLiteOpenHelper {
+        val inMemory = SupportSQLiteOpenHelper.Configuration.builder(configuration.context)
+            .name(null)
+            .callback(configuration.callback)
+            .build()
+        val helper = plaintextFactory.create(inMemory)
+        delegate = helper
+        DbEncryption.report(DbEncryption.Status(DbEncryption.State.LOCKED, reason, detail))
+        Logger.error(
+            DbEncryption.TAG, "Database can't be opened; the app runs on an empty stand-in and the file is left alone",
+            "reason=$reason | ${detail ?: ""}"
+        )
+        return helper
     }
 
     private fun openPlaintext(reason: PlainReason?, detail: String?): SupportSQLiteOpenHelper {

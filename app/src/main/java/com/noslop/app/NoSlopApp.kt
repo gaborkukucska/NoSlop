@@ -141,6 +141,10 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // Start embedded Tor daemon early on app start for existing onboarded users
         repositoryScope.launch {
             if (repository.isOnboardingComplete()) {
+                // NOSLOP_DB_ENCRYPTION_V1: with a database that can't be opened the app runs on an empty
+                // stand-in. Tor stays off then, so no message can arrive, be acknowledged and be lost.
+                // (isOnboardingComplete only answers true after reading the database, so it is open here.)
+                if (com.noslop.app.data.DbEncryption.isLocked()) return@launch
                 val identity = repository.getLocalIdentity()
                 val burnableIdentity = repository.getBurnableIdentity()
                 val hubStatus = repository.getAppSetting("hub_deployment_status")

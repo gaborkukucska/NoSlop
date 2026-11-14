@@ -3807,6 +3807,9 @@ fun toggleAggregator() {
             val identity = repository.getLocalIdentity()
             val burnableIdentity = repository.getBurnableIdentity()
             val hubStatus = repository.getAppSetting("hub_deployment_status")
+            // NOSLOP_DB_ENCRYPTION_V1: no Tor on the empty stand-in database (see NoSlopApp). The read above
+            // has opened the database, so the answer is known here.
+            if (com.noslop.app.data.DbEncryption.isLocked()) return@launch
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
             
             // Re-read settings directly to avoid race condition with init

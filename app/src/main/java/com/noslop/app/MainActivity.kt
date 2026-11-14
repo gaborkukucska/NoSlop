@@ -35,6 +35,35 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
+                // NOSLOP_DB_ENCRYPTION_V1: nothing is decided from the database before it is open. "Onboarded or
+                // not" is read from it, and until that answer arrives the app would show onboarding; during a
+                // long one-time conversion an existing user could start a new account over their own. So the
+                // splash screen stays until the database is open, and a database that can't be opened gets its
+                // own screen in place of the whole app (kept for the rest of this run, also while a restore
+                // from that screen is replacing it).
+                val dbStatus by com.noslop.app.data.DbEncryption.status.collectAsState()
+                val lockedStatus = remember { mutableStateOf<com.noslop.app.data.DbEncryption.Status?>(null) }
+                if (dbStatus.state == com.noslop.app.data.DbEncryption.State.LOCKED && lockedStatus.value == null) {
+                    lockedStatus.value = dbStatus
+                }
+                val locked = lockedStatus.value
+                if (locked != null) {
+                    com.noslop.app.ui.components.LockedDatabaseScreen(viewModel, locked)
+                    return@MyApplicationTheme
+                }
+                if (dbStatus.state == com.noslop.app.data.DbEncryption.State.NOT_OPENED ||
+                    dbStatus.state == com.noslop.app.data.DbEncryption.State.CONVERTING
+                ) {
+                    com.noslop.app.ui.SplashScreen(
+                        statusMessage = if (dbStatus.state == com.noslop.app.data.DbEncryption.State.CONVERTING) {
+                            com.noslop.app.util.LanguageManager.translate("Securing your data...")
+                        } else {
+                            com.noslop.app.util.LanguageManager.translate("Initializing NoSlop...")
+                        }
+                    )
+                    return@MyApplicationTheme
+                }
+
                 val isOnboarded by viewModel.isOnboardingComplete.collectAsState()
                 val targetRoute by _routeFlow.collectAsState()
                 
