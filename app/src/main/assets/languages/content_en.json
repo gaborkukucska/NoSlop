@@ -1076,5 +1076,10 @@
   "Media encryption": "Media encryption",
   "Photos, videos and audio on this phone are encrypted. Their key is kept by the Android Keystore and never leaves this phone.": "Photos, videos and audio on this phone are encrypted. Their key is kept by the Android Keystore and never leaves this phone.",
   "Media on this phone is not encrypted: {reason}.": "Media on this phone is not encrypted: {reason}.",
-  "the database is not encrypted": "the database is not encrypted"
+  "the database is not encrypted": "the database is not encrypted",
+  "No accounts, no email, no central servers. Your keys, database and media stay encrypted on this device.": "No accounts, no email, no central servers. Your keys, database and media stay encrypted on this device.",
+  "Peer-to-Peer Over Tor": "Peer-to-Peer Over Tor",
+  "End-to-end encrypted direct messages, group chats and friends-only sharing directly between phones.": "End-to-end encrypted direct messages, group chats and friends-only sharing directly between phones.",
+  "Your Feed, Zero Algorithms": "Your Feed, Zero Algorithms",
+  "Follow creators on the mesh and read the open web through a tracker-free aggregator you control.": "Follow creators on the mesh and read the open web through a tracker-free aggregator you control."
 }

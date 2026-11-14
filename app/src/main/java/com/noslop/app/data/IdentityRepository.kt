@@ -6,6 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 
@@ -107,7 +108,7 @@ class IdentityRepository(private val context: Context, private val appSettingDao
                 if (renamed) {
                     Logger.warn(TAG, "Secure file quarantined to ${quarantine.name}. Storing quarantine recovery state...")
                     isQuarantined.value = true
-                    kotlinx.coroutines.runBlocking {
+                    com.noslop.app.util.AppScopes.io.launch {
                         try {
                             appSettingDao.insertSetting(AppSetting("identity_quarantined", "true"))
                         } catch (e: Exception) {

@@ -6,6 +6,14 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -335,19 +343,38 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
         }
     }
 
+    val welcomeSlides = remember {
+        listOf(
+            Triple(
+                Icons.Default.Security,
+                "Welcome to NoSlop",
+                "No accounts, no email, no central servers. Your keys, database and media stay encrypted on this device."
+            ),
+            Triple(
+                Icons.Default.Hub,
+                "Peer-to-Peer Over Tor",
+                "End-to-end encrypted direct messages, group chats and friends-only sharing directly between phones."
+            ),
+            Triple(
+                Icons.Default.Tune,
+                "Your Feed, Zero Algorithms",
+                "Follow creators on the mesh and read the open web through a tracker-free aggregator you control."
+            )
+        )
+    }
+    val welcomePagerState = rememberPagerState(pageCount = { welcomeSlides.size })
+    val pulse by rememberInfiniteTransition(label = "welcomePulse").animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "welcomePulseScale"
+    )
+
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = Icons.Default.Info,
-            contentDescription = null,
-            tint = AccentGreen,
-            modifier = Modifier.size(80.dp)
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        
         if (needsRecovery) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -370,26 +397,75 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
             }
         }
 
-        Text(
-            text = "Welcome to NoSlop".tr,
-            style = MaterialTheme.typography.headlineMedium,
-            color = TextLight,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "The serverless, unfilterable feed reader and social mesh node.\n\n" +
-                   "• No algorithms\n" +
-                   "• No central servers\n" +
-                   "• End-to-end encrypted DMs\n" +
-                   "• P2P Gossip Mesh",
-            style = MaterialTheme.typography.bodyLarge,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        
-        Spacer(modifier = Modifier.height(32.dp))
+        HorizontalPager(
+            state = welcomePagerState,
+            modifier = Modifier.fillMaxWidth()
+        ) { page ->
+            val (icon, title, body) = welcomeSlides[page]
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                border = BorderStroke(1.dp, BorderSubtle),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size((76 * pulse).dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(AccentGreen.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = AccentGreen,
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Text(
+                        text = title.tr,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = TextLight,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = body.tr,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextMuted,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 22.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(welcomeSlides.size) { index ->
+                val active = welcomePagerState.currentPage == index
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .size(width = if (active) 20.dp else 8.dp, height = 8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (active) AccentGreen else TextMuted.copy(alpha = 0.5f))
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
         
         OutlinedButton(
             onClick = { showRestoreDialog = true },
