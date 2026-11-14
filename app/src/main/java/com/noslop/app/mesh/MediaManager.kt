@@ -32,15 +32,8 @@ object MediaManager {
     fun computeSha256(file: File): String? {
         if (!file.exists()) return null
         return try {
-            val digest = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buffer = ByteArray(8192)
-                var bytesRead: Int
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    digest.update(buffer, 0, bytesRead)
-                }
-            }
-            digest.digest().joinToString("") { "%02x".format(it) }
+            // NOSLOP_MEDIA_ENCRYPTION_V1: the digest is of the content, whether the file is encrypted or not.
+            MediaCrypto.sha256OfContent(file, MediaVault.key())
         } catch (_: Exception) {
             null
         }
@@ -110,6 +103,17 @@ object MediaManager {
         val powerManager = repo.context.getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NoSlop::MediaTransfer")
         
+        // NOSLOP_MEDIA_ENCRYPTION_V1: the media key. Asking for a setting first opens the database, so that
+        // "is the database encrypted" has its answer.
+        scope.launch {
+            try {
+                repo.getAppSetting("app_language")
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Database not readable before the media key was loaded: ${e.message}")
+            }
+            MediaVault.load(repo.context) { MediaVault.databaseIsEncrypted() }
+        }
+
         scope.launch {
             while (isActive) {
                 maintainDownloads()
@@ -379,7 +383,8 @@ object MediaManager {
             val destFile = File(destDir, id)
             if (!isPathInDirectory(destFile, destDir)) return null
             if (source.canonicalPath != destFile.canonicalPath) {
-                source.copyTo(destFile, overwrite = true)
+                // NOSLOP_MEDIA_ENCRYPTION_V1: encrypted on the way in when this device has a media key.
+                MediaCrypto.copyInto(source, destFile, MediaVault.key())
             }
             destFile.setLastModified(System.currentTimeMillis())
             File(destDir, "$id.mine").createNewFile()
@@ -473,7 +478,7 @@ object MediaManager {
         }
 
         if (dl.partFile.exists()) {
-            val existingBytes = dl.partFile.length()
+            val existingBytes = MediaCrypto.contentLength(dl.partFile)
             if (existingBytes > 0 && (dl.totalBytes == 0L || existingBytes < dl.totalBytes)) {
                 dl.contiguousBytes = existingBytes
                 dl.nextRequestOffset = existingBytes
@@ -738,10 +743,8 @@ object MediaManager {
         synchronized(dl) {
             if (data.isNotEmpty()) {
                 try {
-                    RandomAccessFile(dl.partFile, "rw").use { raf ->
-                        raf.seek(offset)
-                        raf.write(data)
-                    }
+                    // NOSLOP_MEDIA_ENCRYPTION_V1: chunks arrive in any order; each is stored at its offset.
+                    MediaCrypto.writeAt(dl.partFile, MediaVault.key(), offset, data)
                 } catch (e: Exception) {
                     Logger.error(TAG, "Disk write failed for ${dl.metadata.id}: ${e.message}")
                 }
@@ -838,7 +841,7 @@ object MediaManager {
             
             dl.status = ActiveDownload.Status.COMPLETED
             updateProgress(dl.metadata.id, 100)
-            Logger.info(TAG, "Download completed for ${dl.metadata.id} (${finalFile.length()} bytes)")
+            Logger.info(TAG, "Download completed for ${dl.metadata.id} (${MediaCrypto.contentLength(finalFile)} bytes)")
             
             updateWakeLock()
             activeDownloads.remove(dl.metadata.id)
@@ -1221,7 +1224,7 @@ object MediaManager {
 
             val file = findLocalFile(repo, payload.mediaId)
             if (file != null && file.exists()) {
-                val totalSize = file.length()
+                val totalSize = MediaCrypto.contentLength(file)
                 val offset = payload.byteOffset ?: (payload.chunkIndex.toLong() * payload.chunkSize)
                 val reqLength = payload.byteLength ?: payload.chunkSize
 
@@ -1264,10 +1267,8 @@ object MediaManager {
                 val buffer = ByteArray(actualLength)
                 if (actualLength > 0) {
                     try {
-                        RandomAccessFile(file, "r").use { raf ->
-                            raf.seek(offset)
-                            raf.readFully(buffer)
-                        }
+                        val read = MediaCrypto.readAt(file, MediaVault.key(), offset, buffer)
+                        if (read != buffer.size) throw java.io.EOFException("read $read of ${buffer.size} bytes")
                     } catch (e: Exception) {
                         Logger.error(TAG, "Read error for ${payload.mediaId}: ${e.message}")
                     }
@@ -1352,7 +1353,7 @@ object MediaManager {
             id = mediaId,
             type = if (mimeType.startsWith("image")) "image" else if (mimeType.startsWith("video")) "video" else "file",
             mimeType = mimeType,
-            size = file?.length() ?: 0,
+            size = file?.let { MediaCrypto.contentLength(it) } ?: 0,
             chunkCount = 999,
             sha256 = hash
         )
@@ -1360,14 +1361,24 @@ object MediaManager {
 
     fun generateTinyThumbnail(file: File, type: String?): String? {
         return try {
+            // NOSLOP_MEDIA_ENCRYPTION_V1: an encrypted file is decoded from its decrypted content.
+            val encrypted = MediaCrypto.isEncrypted(file)
             val bitmap = if (type?.startsWith("video") == true) {
                 val retriever = android.media.MediaMetadataRetriever()
-                retriever.setDataSource(file.absolutePath)
+                if (encrypted) {
+                    retriever.setDataSource(EncryptedMediaSource(file, MediaVault.key()))
+                } else {
+                    retriever.setDataSource(file.absolutePath)
+                }
                 val frame = retriever.getFrameAtTime(1000000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 retriever.release()
                 frame
             } else if (type?.startsWith("image") == true) {
-                android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                if (encrypted) {
+                    MediaCrypto.openInput(file, MediaVault.key()).use { android.graphics.BitmapFactory.decodeStream(it) }
+                } else {
+                    android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                }
             } else {
                 null
             }
@@ -1411,7 +1422,8 @@ object MediaManager {
                 val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 if (uri != null) {
                     resolver.openOutputStream(uri)?.use { out ->
-                        srcFile.inputStream().use { input -> input.copyTo(out) }
+                        // NOSLOP_MEDIA_ENCRYPTION_V1: "save to Downloads" gives the user the normal file.
+                        MediaCrypto.copyContentTo(srcFile, MediaVault.key(), out)
                     }
                     values.clear()
                     values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
@@ -1422,12 +1434,29 @@ object MediaManager {
                 val publicDownloads = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
                 if (!publicDownloads.exists()) publicDownloads.mkdirs()
                 val destFile = java.io.File(publicDownloads, safeName)
-                srcFile.copyTo(destFile, overwrite = true)
+                destFile.outputStream().use { MediaCrypto.copyContentTo(srcFile, MediaVault.key(), it) }
                 true
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to export file to Downloads: ${e.message}")
             false
+        }
+    }
+
+    /** NOSLOP_MEDIA_ENCRYPTION_V1: lets Android's frame grabber read an encrypted video at any position. */
+    private class EncryptedMediaSource(private val file: File, private val key: ByteArray?) : android.media.MediaDataSource() {
+        override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
+            if (size == 0) return 0
+            val chunk = ByteArray(size)
+            val read = MediaCrypto.readAt(file, key, position, chunk)
+            if (read > 0) System.arraycopy(chunk, 0, buffer, offset, read)
+            return read
+        }
+
+        override fun getSize(): Long = MediaCrypto.contentLength(file)
+
+        override fun close() {
+            // Each read opens and closes the file itself.
         }
     }
 }

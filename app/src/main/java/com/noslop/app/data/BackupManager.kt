@@ -361,7 +361,12 @@ object BackupManager {
                                     }
                                     if (shouldInclude) {
                                         try {
-                                            addToZip(zos, file, "media/$dirType/${file.name}")
+                                            // NOSLOP_MEDIA_ENCRYPTION_V1: the archive carries the content of a
+                                            // media file. The archive itself is encrypted by the Word Cloud, and the
+                                            // media key never leaves the device.
+                                            zos.putNextEntry(ZipEntry("media/$dirType/${file.name}"))
+                                            com.noslop.app.mesh.MediaCrypto.copyContentTo(file, com.noslop.app.mesh.MediaVault.key(), zos)
+                                            zos.closeEntry()
                                         } catch (e: Exception) {
                                             if (zipBytes.failed) throw e
                                             Logger.warn(TAG, "Skipping unreadable media file ${file.name}: ${e.message}")
@@ -945,7 +950,14 @@ object BackupManager {
                                 val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
                                 val targetNoSlopDir = File(baseDir, "NoSlop").apply { mkdirs() }
                                 dirTypeFile.listFiles()?.forEach { file ->
-                                    file.copyTo(File(targetNoSlopDir, file.name), overwrite = true)
+                                    val target = File(targetNoSlopDir, file.name)
+                                    // NOSLOP_MEDIA_ENCRYPTION_V1: restored media is encrypted with this device's
+                                    // media key on the way in (plain when the device has none).
+                                    if (com.noslop.app.mesh.MediaVault.isMediaContent(file.name)) {
+                                        com.noslop.app.mesh.MediaCrypto.copyInto(file, target, com.noslop.app.mesh.MediaVault.key())
+                                    } else {
+                                        file.copyTo(target, overwrite = true)
+                                    }
                                 }
                             }
                         }

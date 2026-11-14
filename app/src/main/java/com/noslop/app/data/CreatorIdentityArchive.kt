@@ -141,7 +141,8 @@ object CreatorIdentityArchive {
                         continue
                     }
                     zip.putNextEntry(ZipEntry("media/$mediaId"))
-                    file.inputStream().use { it.copyTo(zip, 64 * 1024) }
+                    // NOSLOP_MEDIA_ENCRYPTION_V1: the archive carries the content; it has its own encryption.
+                    com.noslop.app.mesh.MediaCrypto.copyContentTo(file, com.noslop.app.mesh.MediaVault.key(), zip)
                     zip.closeEntry()
                     written.add(mediaId)
                     mediaFiles++

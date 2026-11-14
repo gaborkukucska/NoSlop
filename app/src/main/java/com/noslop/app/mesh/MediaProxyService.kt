@@ -238,10 +238,8 @@ object MediaProxyService {
                         
                         if (fileToRead != null && fileToRead.exists()) {
                             try {
-                                java.io.RandomAccessFile(fileToRead, "r").use { raf ->
-                                    raf.seek(streamedBytes)
-                                    raf.readFully(buffer, 0, toRead)
-                                }
+                                val got = MediaCrypto.readAt(fileToRead, MediaVault.key(), streamedBytes, buffer, toRead)
+                                if (got != toRead) throw java.io.EOFException("read $got of $toRead bytes")
                                 output.write(buffer, 0, toRead)
                                 output.flush()
                                 streamedBytes += toRead
@@ -340,7 +338,8 @@ object MediaProxyService {
 
     private fun streamFile(file: File, contentType: String, output: OutputStream, rangeHeader: String? = null) {
         try {
-            val totalLength = file.length()
+            // NOSLOP_MEDIA_ENCRYPTION_V1: lengths and ranges are of the content, not of the stored file.
+            val totalLength = MediaCrypto.contentLength(file)
             val rangeResult = parseRange(rangeHeader, totalLength)
 
             if (rangeResult is RangeResult.Unsatisfiable) {
@@ -387,13 +386,12 @@ object MediaProxyService {
             output.flush()
 
             if (contentLength > 0L) {
-                java.io.RandomAccessFile(file, "r").use { raf ->
-                    raf.seek(start)
+                MediaCrypto.openInput(file, MediaVault.key(), start).use { input ->
                     val buffer = ByteArray(32 * 1024)
                     var remaining = contentLength
                     while (remaining > 0) {
                         val toRead = Math.min(buffer.size.toLong(), remaining).toInt()
-                        val bytesRead = raf.read(buffer, 0, toRead)
+                        val bytesRead = input.read(buffer, 0, toRead)
                         if (bytesRead == -1) break
                         output.write(buffer, 0, bytesRead)
                         remaining -= bytesRead

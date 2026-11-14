@@ -74,8 +74,14 @@ internal object DbKeyStore {
      * @param mayCreate true only when no encrypted database exists yet (there is no database, or it is
      *   still plaintext). With false, a missing or unreadable key is reported and nothing is changed.
      */
-    fun load(context: Context, mayCreate: Boolean): Result =
-        load(context.noBackupFilesDir, mayCreate, testWrapKeyOverride ?: ::keystoreWrapKey)
+    fun load(context: Context, mayCreate: Boolean): Result = load(context, mayCreate, KEY_FILE)
+
+    /**
+     * The same for another key kept beside the database key: its own 32 random bytes in its own file
+     * [fileName], wrapped by the same Keystore key. Used for the media key (MediaVault).
+     */
+    fun load(context: Context, mayCreate: Boolean, fileName: String): Result =
+        load(context.noBackupFilesDir, mayCreate, testWrapKeyOverride ?: ::keystoreWrapKey, fileName = fileName)
 
     @VisibleForTesting
     @Synchronized
@@ -83,9 +89,10 @@ internal object DbKeyStore {
         dir: File,
         mayCreate: Boolean,
         wrapKey: () -> SecretKey,
-        retryDelayMs: Long = READ_RETRY_MS
+        retryDelayMs: Long = READ_RETRY_MS,
+        fileName: String = KEY_FILE
     ): Result {
-        val file = File(dir, KEY_FILE)
+        val file = File(dir, fileName)
         return try {
             if (file.exists()) {
                 val failure = try {
@@ -113,7 +120,7 @@ internal object DbKeyStore {
     }
 
     /** True when a wrapped key file exists. Says nothing about whether it can be read. */
-    fun hasKeyFile(context: Context): Boolean = File(context.noBackupFilesDir, KEY_FILE).exists()
+    fun hasKeyFile(context: Context, fileName: String = KEY_FILE): Boolean = File(context.noBackupFilesDir, fileName).exists()
 
     /** Overwrites a key copy that is no longer needed. */
     fun wipe(key: ByteArray?) {
@@ -144,7 +151,7 @@ internal object DbKeyStore {
         if (!dir.exists() && !dir.mkdirs()) throw IOException("key folder could not be made")
         val raw = ByteArray(DbEncryptionPolicy.KEY_BYTES).also { SecureRandom().nextBytes(it) }
         var ok = false
-        val tmp = File(dir, "$KEY_FILE.tmp")
+        val tmp = File(dir, "${file.name}.tmp")
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, wrapKey())
