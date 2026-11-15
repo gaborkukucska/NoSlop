@@ -34,6 +34,9 @@ If any of the four are missing, the release signing config is skipped and
 `assembleRelease` produces an unsigned APK. It no longer fails configuration,
 so a fresh clone builds and tests without a keystore.
 
+The same four properties sign the Play bundle (`bundlePlayRelease`). With Play App Signing, that key is
+only the *upload key*, and a separate keystore for it is recommended (§8.5).
+
 ---
 
 ## 2. Clone and Installation
@@ -232,7 +235,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ### 8.1 Bump the version
 
-In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.7.9-alpha`). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
+In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.8.0-alpha`; both flavours share these two values, and Play refuses a `versionCode` it has already seen, so never reuse one). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
 
 Then run the unit tests:
 
@@ -363,14 +366,14 @@ passed, and any failures and their stack traces.
 Sign with the same keystore as every earlier release. Android refuses an update signed with another key, and so does the app's own certificate check.
 
 ```bash
-VERSION=0.7.9-alpha
+VERSION=0.8.0-alpha   # the versionName from app/build.gradle.kts
 ./gradlew clean :app:assembleGithubRelease
 cp app/build/outputs/apk/github/release/NoSlop-github-release.apk NoSlop-$VERSION.apk
 sha256sum NoSlop-$VERSION.apk > NoSlop-$VERSION.apk.sha256
 gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --title "NoSlop $VERSION" --notes-file release-notes.md
 ```
 
-* **Keep the version in the tag.** The app reads it from the tag (`v0.7.9-alpha`).
+* **Keep the version in the tag.** The app reads it from the tag (for example `v0.8.0-alpha`).
 * **Don't mark it as a pre-release or a draft.** The app asks GitHub for `/releases/latest`, which skips both.
 * **Upload one `.apk`.** The app takes the first one it finds.
 * **Upload the `.sha256`.** Any name ending in `.sha256` works, and a file named after the APK wins. The app can also read a digest from the release notes. Without a checksum, it refuses the download.
@@ -385,6 +388,109 @@ gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --tit
 If `docs/PRIVACY_POLICY.md` changed, update the copy at `https://noslop.me/privacy` too.
 
 An installed app that finds the update downloads it over the user's route, verifies it, and saves it to the Download folder. The user installs it from there.
+
+### 8.5 Publish on Google Play (internal testing)
+
+The Play build is the `play` flavour: app ID `com.noslop.me.app`, no in-app updater (Google Play delivers its updates). It is a separate app from the GitHub APK, with its own data and its own signing key held by Google. Nothing in this section touches the GitHub release in §8.3.
+
+#### Build the bundle
+
+Play takes an Android App Bundle (`.aab`), not an APK.
+
+```bash
+./gradlew clean :app:bundlePlayRelease
+ls app/build/outputs/bundle/playRelease/
+```
+
+Use the file name Gradle prints if it differs from the examples below. Keep `app/build/outputs/mapping/playRelease/mapping.txt` for this version. The bundle carries it too, and the release block sets `debugSymbolLevel = SYMBOL_TABLE` for the native libraries, so Play's crash reports can be read.
+
+Without the four signing properties (§1) Gradle builds an **unsigned** bundle, and Play Console refuses it. Check that it is signed, and which certificate signed it:
+
+```bash
+jarsigner -verify app/build/outputs/bundle/playRelease/NoSlop-play-release.aab
+keytool -printcert -jarfile app/build/outputs/bundle/playRelease/NoSlop-play-release.aab
+```
+
+`jarsigner` should print `jar verified.` Compare the SHA-256 from `keytool` with your upload keystore's.
+
+`versionCode` must be one Play has not seen for this app, on any track, so never reuse one (§8.1).
+
+#### Which key signs the upload
+
+Play Console enrols a new app in **Play App Signing**: Google keeps the key that signs what users install, and the key in your keystore becomes the **upload key**, which only proves that an upload comes from you. Unlike the GitHub release key (§8.3), a lost upload key can be reset through Play Console support.
+
+Use a separate upload keystore for Play rather than the GitHub release keystore. That one can never be lost or replaced, so it is better kept out of one more workflow. Using it as the upload key also works.
+
+```bash
+keytool -genkeypair -v -keystore noslop-play-upload.keystore -alias noslop-upload \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Build with it by setting the four properties from §1 for this one build, without writing the passwords into your shell history. Gradle reads `ORG_GRADLE_PROJECT_<name>` environment variables as project properties:
+
+```bash
+export ORG_GRADLE_PROJECT_NOSLOP_STORE_FILE=/absolute/path/noslop-play-upload.keystore
+export ORG_GRADLE_PROJECT_NOSLOP_KEY_ALIAS=noslop-upload
+read -rs ORG_GRADLE_PROJECT_NOSLOP_STORE_PASSWORD; export ORG_GRADLE_PROJECT_NOSLOP_STORE_PASSWORD
+read -rs ORG_GRADLE_PROJECT_NOSLOP_KEY_PASSWORD;   export ORG_GRADLE_PROJECT_NOSLOP_KEY_PASSWORD
+./gradlew clean :app:bundlePlayRelease
+```
+
+If `~/.gradle/gradle.properties` already holds the GitHub keystore, confirm with the `keytool` command above that the bundle came out signed with the upload key you meant. Close the shell afterwards.
+
+#### Try the bundle on a phone before uploading (optional)
+
+[bundletool](https://github.com/google/bundletool/releases) turns the bundle into APKs for the connected phone, the way Play will:
+
+```bash
+java -jar bundletool.jar build-apks --bundle=NoSlop-play-release.aab --output=noslop.apks --connected-device
+java -jar bundletool.jar install-apks --apks=noslop.apks
+```
+
+This installs `com.noslop.me.app`, next to any GitHub build, with separate data. Without `--ks` options bundletool signs with a debug key, which is fine for a local test.
+
+#### Set up Play Console (once)
+
+1. **Create the app.** Name, default language, app (not game), free. The app ID comes from the first bundle you upload and cannot be changed afterwards: `com.noslop.me.app`.
+2. **App content.** Policy and programs, App content (menu names move around; the dashboard checklist lists what is still open). Answer to match [PRIVACY_POLICY.md](PRIVACY_POLICY.md), and keep the copy at `https://noslop.me/privacy` in sync (§8.4):
+   * Privacy policy: `https://noslop.me/privacy`.
+   * App access: the app has no accounts or logins. Say so.
+   * Ads: none.
+   * Content rating questionnaire and target audience: the app shows third-party feed content and lets people message each other. Answer for that, and pick an adult audience.
+   * Data safety form: it must agree with the privacy policy, including the encryption described there.
+   * Foreground service permissions: see below.
+3. **Internal testing.** Testing, Internal testing.
+   * Testers tab: create an email list. Testers are Google accounts, up to 100.
+   * Releases tab: create a release, accept Play App Signing, upload the `.aab`, add release notes, save, review, start the rollout.
+   * Testers tab: copy the opt-in link. A tester opens it signed in with an invited account, joins, and installs from Play.
+   * Internal tests are not reviewed by Google, so they go out quickly.
+4. **Internal app sharing** is a faster route for one-off checks: upload a bundle and share the link. It needs no release or tester list.
+
+#### Foreground service declaration
+
+The manifest declares two foreground services, both of type `specialUse` with the `FOREGROUND_SERVICE_SPECIAL_USE` permission: `org.torproject.jni.TorService` and `.mesh.NoSlopForegroundService`. Once you upload a bundle that uses a foreground service type, Play Console asks for a declaration on the App content page. For each type it wants:
+
+* a description of the feature that uses the service,
+* the user impact if that work were interrupted or deferred,
+* a link to a video that shows the steps a user takes to trigger the feature.
+
+`specialUse` is not one of Google's pre-set use cases, so you describe it yourself, and a person reviews it. Draft wording, to be checked against what the app really does before you submit:
+
+* **Feature:** NoSlop is a peer-to-peer messenger and feed reader that runs over Tor. The foreground service keeps the embedded Tor daemon and the app's onion-service listener running, so the user can receive direct messages and posts from contacts while the app is in the background. It shows a persistent notification, and the user can switch it off in Settings.
+* **Impact if deferred:** Android stops the process, Tor and the listener close, and contacts cannot reach the user until the app is opened again.
+* **Video:** screen-record these steps: turn the foreground service on in Settings, show the notification, press Home, send a direct message from a second phone, and show it arriving. Share the link so a reviewer can open it without signing in.
+
+There is no `REQUEST_INSTALL_PACKAGES` permission in either flavour, so the Play "install unknown apps" declaration does not apply.
+
+#### Check before you rely on the Play build
+
+* **16 KB memory pages.** Apps that target Android 15 or newer must support 16 KB page sizes on 64-bit devices, and Google's page gives 1 February 2027 as the date after which updates that don't can't be released. NoSlop ships native libraries (`tor-android`, SQLCipher), and nobody has checked them yet. Build `assemblePlayRelease`, check each `arm64-v8a` and `x86_64` `.so` with Google's `check_elf_alignment.sh` ([guide](https://developer.android.com/guide/practices/page-sizes)), and run the app on a 16 KB emulator image. Because `useLegacyPackaging = true` stores the libraries compressed, the ELF alignment is what matters. Play Console also warns at upload.
+* **Target API.** `targetSdk = 36` meets Google's current rule that new apps and updates target Android 16 (API 36). Check [Google's page](https://developer.android.com/google/play/requirements/target-sdk) each August.
+* **Upgrade on Play (0.7.9 to 0.8.0).** To test the database and media conversion through Play itself, first upload an older Play-flavour bundle to the internal track (build it from the `v0.7.9-alpha` tag with a `versionCode` of its own), install it from Play, add data, then upload the new bundle with a higher `versionCode` and update from Play. Then run the upgrade checklist in §8.2.
+* **Production access.** A personal Play Console account created after 13 November 2023 must run a **closed** test with at least 12 testers opted in for 14 continuous days before it can apply for production access. Internal testers don't count. The rule applies per app, and organisation accounts are exempt. Until then the Play build stays in testing by invitation, as the README says.
+* **User-generated content.** Check Play's User Generated Content policy against the app's report and block features before going past testing.
+
+Record the result in `PROJECT_STATUS.md` like the §8.2 smoke test: the build version, the device, and what passed or failed.
 
 ---
 
