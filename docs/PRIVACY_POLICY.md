@@ -1,6 +1,6 @@
 # Privacy Policy — NoSlop
 
-**Effective date:** 2026-11-11
+**Effective date:** 2026-11-15
 **App:** NoSlop (Android)
 **Developer:** NoSlop (open-source project)
 **Source code:** publicly available and auditable
@@ -28,7 +28,7 @@ Your public keys and onion address go to the peers you connect with, and they ar
 
 ### Content you create
 
-Posts, direct messages and other content you create are stored on your device. 1:1 direct messages are stored as the encrypted ciphertext they arrived in, and group chat message bodies are encrypted at rest with an AES-256-GCM key held by the Android Keystore. Feed items, history, peers and settings are stored in the app's database, protected by Android's file encryption but not encrypted by NoSlop itself. Photos, videos and audio you send or receive are stored as ordinary files in the app's own storage folder. Content is shared only with the peers you choose, over the encrypted mesh network.
+Posts, direct messages and other content you create are stored on your device. 1:1 direct messages are stored as the encrypted ciphertext they arrived in, and group chat message bodies are encrypted at rest with an AES-256-GCM key held by the Android Keystore. Since v0.8.0-alpha, NoSlop encrypts the app's database (`mesh.db`, where feed items, history, peers and settings are kept) with SQLCipher under a random key that the Android Keystore protects, and encrypts the photos, videos and audio you send or receive over the mesh file by file (AES-256-CTR) under a separate Keystore-protected key. Data from an older version is converted automatically the first time you open the new one, and the original is kept until the encrypted copy has been checked and opened. If your device can't do this (no working Android Keystore or encryption library, too little free storage for the conversion, or a conversion that failed), the database and mesh media are stored without NoSlop's own encryption, as before 0.8.0, and Settings says so and why. Diagnostic logs are plain text files on your device: they mask onion addresses and long key-like strings, but read them before you share them. Content is shared only with the peers you choose, over the encrypted mesh network.
 
 ### What the app remembers about your feed
 
@@ -117,6 +117,8 @@ NoSlop is fully open source, including the optional proxy Worker. You don't need
 ## Changes to this policy
 
 If we change this policy, we will update the effective date above and note the change in the repository.
+
+**2026-11-15:** reflects v0.8.0-alpha: the database is now encrypted by NoSlop (SQLCipher) and mesh media is encrypted file by file, both under Keystore-protected keys, with the cases where this can't happen listed under *Content you create*; diagnostic logs stay unencrypted but mask onion addresses and key-like strings. The 2026-11-11 entry below describes 0.7.x.
 
 **2026-11-11:** names the bug-report relay as a server run by the developer and says what it sees; says the official builds use no API proxy, and what one you set up would see; private keys can leave the device in backups you export and in Hub deployments; peers see your onion address, not your IP address; the camera is also used for photos and videos you send; media files and most of the database are not encrypted by NoSlop itself.
 

@@ -100,7 +100,7 @@ To review and extract logs directly on your phone:
 2.  Tap on **Structured Debug Logs** to enter the fully integrated logs console.
 3.  Filter logs dynamically by Level (`All`, `DEBUG`, `INFO`, `WARN`, `ERROR`).
 4.  Tap on the **Copy Logs (Refresh Icon)** button in the upper header.
-5.  A clipboard copy action will write the current logs buffer to your system's paste buffer, allowing you to share/paste it in any email, chat thread, or debugging window.
+5.  A clipboard copy action will write the current logs buffer to your system's paste buffer, allowing you to share/paste it in any email, chat thread, or debugging window. NoSlop masks onion addresses and long key-like strings in its logs, but it can't catch everything, so read the log before you paste it anywhere public (a GitHub issue, a forum post). For a security problem, email the address in [SECURITY.md](../SECURITY.md) instead.
 6.  You can also wipe files at any time by pressing the **Trash** icon.
 
 ---
@@ -188,7 +188,7 @@ When debugging issues or seeking help:
 
 1.  Navigate to **Settings** → **Structured Debug Logs** on your emulator/phone.
 2.  Tap the **Copy Logs** button.
-3.  Paste the **copied log dump** into your bug report, chat thread, or issue tracker.
+3.  Paste the **copied log dump** into your bug report, chat thread, or issue tracker. Read it first: logs are masked but can still hold things you'd rather not publish, and GitHub issues are public.
 4.  Add a brief description of what you expected to see on screen vs. what actually occurred.
 5.  Include the device model and Android version for hardware-specific debugging (e.g., MediaCodec exhaustion varies by chipset).
 

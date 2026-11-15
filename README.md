@@ -161,7 +161,7 @@ Releases are tested to the best of my ability, which is why they are marked **al
 NoSlop is early software. Please read this before you rely on it:
 
 * **Alpha, Android first.** Expect rough edges. Releases are tested to the best of my ability, on many devices, but they stay marked alpha until qualified developers have contributed enough to the project. An iOS and desktop port is in progress under `mvp/`.
-* **Sideloaded.** There is no store listing: install the APK from the GitHub releases page and verify its SHA-256 checksum.
+* **Sideloaded.** There is no store listing: install the APK from the [GitHub releases page](https://github.com/gaborkukucska/NoSlop/releases) and verify its SHA-256 checksum. Android may warn about an app from outside the Play Store, and Google Play Protect has blocked earlier NoSlop builds as harmful (history in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)). Since v0.7.4-alpha the GitHub build no longer asks for the install-packages permission or installs updates itself, which Play Protect had flagged. If a block still shows on your device, please open an issue with your phone model, Android version and NoSlop version. Install steps: [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md).
 * **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice. Some of these uses go against the source's own terms: YouTube (an unofficial interface, and playback without YouTube's player), Reddit (no registered app) and Vimeo (streams read from its player). I've chosen to keep them for now. [docs/SOURCES.md](docs/SOURCES.md) records each source's terms and status. More sources are welcome from the community (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
@@ -178,7 +178,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 
 ## 🚀 Getting Started
 
-1. **Build from source** — Follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
+1. **Install the APK, or build from source** — Testers: download the APK and its `.sha256` file from the [releases page](https://github.com/gaborkukucska/NoSlop/releases) and follow [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md). Developers: follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
 2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, then choose the topics and creators for the built-in clearnet aggregator and tune your content mix.
 3. **Connect with People You Know** — Scan or share a Contact Card QR code in person to start chatting and sharing with friends and family. Follow creators by their Creator ID as they join the mesh.
 
@@ -195,6 +195,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 * 📰 **[docs/SOURCES.md](docs/SOURCES.md)** — Every clearnet source, what its terms say, and whether the app follows them.
 * 🤝 **[CONTRIBUTING.md](CONTRIBUTING.md)** — Translations, bug reports and code changes: how to help and the project's rules.
 * ❓ **[docs/FAQ.md](docs/FAQ.md)** — Straight answers: how NoSlop compares to Briar and SimpleX, which servers are involved, safety, Tor speed, and how it is built.
+* 🧪 **[docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md)** — Install, first run, pairing two phones, and how to report a bug without leaking anything.
 * 🧭 **[docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md](docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md)** — Proposed creator discovery, community mirroring and Home HUB work (not implemented).
 * 📱 **[docs/migration/](docs/migration/README.md)** — The iOS and desktop port in `mvp/`.
 * 🏠 **[docs/archived/HUB_INTEGRATION_PLAN.md](docs/archived/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.

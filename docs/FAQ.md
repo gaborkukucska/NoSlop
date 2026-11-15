@@ -48,7 +48,7 @@ Yes, treat it that way.
 
 * NoSlop uses standard primitives from Bouncy Castle (Ed25519, X25519, ChaCha20-Poly1305, AES-GCM, SHA3-256, Argon2id and HKDF). There are no home-made ciphers.
 * The protocol that combines them is NoSlop's own. It has had repeated AI-assisted code reviews (kept in `docs/archived/`) and a lot of testing across devices, but no human professional has ever reviewed it. Review by someone qualified is very welcome: see [SECURITY.md](../SECURITY.md).
-* Known gaps are listed in the [README](../README.md) (Alpha Status) and in [PROJECT_STATUS.md](PROJECT_STATUS.md): no forward secrecy for DMs yet, a database that is only partly encrypted, and update checks that are verified but not authenticated.
+* Known gaps are listed in the [README](../README.md) (Alpha Status) and in [PROJECT_STATUS.md](PROJECT_STATUS.md): no forward secrecy for DMs yet, database and media encryption that falls back to unencrypted files on devices without a working Android Keystore, and update checks that are verified but not authenticated.
 
 So don't use NoSlop for anything where a mistake could put you, or someone else, in danger. Use a mature messenger for that. To lower the risk in everyday use, connect only with people you know, in person, and treat creators you discover as strangers.
 

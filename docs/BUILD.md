@@ -312,6 +312,18 @@ Mark each item as passed, or write down what happened.
 - [ ] Export a backup, then import it on a second install. Contacts, posts and messages come back.
 - [ ] Export the creator identity archive, then import it.
 
+##### Upgrade over an existing install (0.8.0: database and media encryption)
+
+Run this with the previous release installed and holding real data: a large feed history, contacts, DMs, a group, and mesh photos, videos and audio. Install the new build over it with `adb install -r`, as above. Use a debug build for the file checks, because a release build refuses `run-as` (`SUPPORT.md` section 4).
+
+- [ ] The app opens on the feed, not on the database recovery screen (Close / Restore from Backup / Start Over). Contacts, DMs, groups and posts are all still there.
+- [ ] Settings → General says the database and the media are encrypted, or says why not.
+- [ ] Photos, videos and audio from mesh posts and DMs that arrived before the upgrade still open and play.
+- [ ] Debug build only: no `mesh.db.plain-bak` is left beside `mesh.db` after the first successful start, and no `.enc-tmp` or `.plain-bak` files are left in the `NoSlop/` media folder once the background conversion has finished.
+- [ ] Kill the app during the first start after the upgrade, then start it again. It recovers by itself and nothing is lost (the plaintext original is kept until the encrypted copy has been opened).
+- [ ] Restore a backup made by 0.7.x onto the new build. Then export a backup from the new build and restore it on a second device.
+- [ ] With very little free storage the app still starts, and Settings says the database was not encrypted because of space.
+
 ##### Other
 - [ ] QR: show your code on A and scan it with B.
 - [ ] Update check (GitHub flavor): open Settings → About. There's no crash.
