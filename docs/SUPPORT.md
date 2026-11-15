@@ -32,6 +32,15 @@
 ### Screenshots of Messages Are Black
 *   **On purpose**: while the Messages tab is open, NoSlop keeps it out of screenshots and screen recordings, and the recent-apps preview stays blank. To take a screenshot, for example for a bug report, turn off **Hide messages from screenshots** in Settings.
 
+### Installing NoSlop
+*   **Which build do I have?**: If you installed it from Google Play, it is the Play build (`com.noslop.me.app`). If you installed an APK, it is the GitHub build (`com.noslop.app`). They are separate apps with separate data. To move between them, export a backup in one and restore it in the other with your Word Cloud, and don't run the same identity in both at once.
+*   **The APK won't open, or Android says the install was blocked**: Allow installing unknown apps for the app you opened the file from (Files or your browser). On Android 8 and newer it is under Settings > Apps > Special app access > Install unknown apps; on Android 7 it is Settings > Security > Unknown sources. Searching Settings for `unknown` usually finds it. See [TESTER_GUIDE.md](TESTER_GUIDE.md#1-install).
+*   **Play Protect warns or blocks**: Check the file's SHA-256 against the `.sha256` file first. If it matches and a block still shows, please open an issue with your phone model, Android version and NoSlop version. Don't switch Play Protect off just to get past a warning you don't understand.
+*   **"App not installed" or "conflicts with an existing package"**: The copy on your phone was signed with a different key than the file you are installing (for example a build you made yourself, or a test build). Export a backup first, because uninstalling erases the app's data, then uninstall NoSlop, install the new file and restore your backup.
+*   **"There was a problem parsing the package"**: The download is incomplete or the wrong file. Download the `.apk` again and check its checksum.
+*   **Android refuses an app from an unregistered developer**: This comes from Google's developer verification. Use Android's advanced flow (it includes a 24-hour wait) or install from a computer with `adb install`. Steps are in [TESTER_GUIDE.md](TESTER_GUIDE.md#androids-new-limits-on-sideloading).
+*   **First start after upgrading to 0.8.0 is slow**: NoSlop encrypts its database once and converts stored media in the background. Give it a few minutes and don't force-stop it. Settings > General then shows whether database and media encryption are active. If a recovery screen appears instead of the feed, choose **Restore from Backup** or **Close** and report it.
+
 ### Installing an Update
 NoSlop checks the downloaded update against its published checksum, then saves it to your Download folder. It can't start the install itself. Tap **Open Downloads**, then tap the NoSlop APK. The Settings banner keeps these steps until the update is installed.
 

@@ -83,7 +83,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 🛡️ **Default Tor Routing** — Outbound feed fetches, media streams, API requests, and mesh packets route through an embedded local Tor daemon.
 * 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns separate circuits to distinct media streams. That keeps each stream on the same exit and reduces Google IP-lock stalls.
 * 🔁 **Graceful Exit Hopping** — Nonce-bumping hops Tor exits upon provider blocks without process-wide circuit disruption.
-* 📲 **Peerless OTA Updates** — Background update checking over Tor. The GitHub build verifies the SHA-256 checksum and signing certificate, then saves the update to your Download folder for you to install.
+* 📲 **Peerless OTA Updates** — Background update checking over Tor. The GitHub build verifies the SHA-256 checksum and signing certificate, then saves the update to your Download folder for you to install. The Play build is updated by Google Play instead.
 
 ---
 
@@ -161,7 +161,7 @@ Releases are tested to the best of my ability, which is why they are marked **al
 NoSlop is early software. Please read this before you rely on it:
 
 * **Alpha, Android first.** Expect rough edges. Releases are tested to the best of my ability, on many devices, but they stay marked alpha until qualified developers have contributed enough to the project. An iOS and desktop port is in progress under `mvp/`.
-* **Sideloaded.** There is no store listing: install the APK from the [GitHub releases page](https://github.com/gaborkukucska/NoSlop/releases) and verify its SHA-256 checksum. Android may warn about an app from outside the Play Store, and Google Play Protect has blocked earlier NoSlop builds as harmful (history in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)). Since v0.7.4-alpha the GitHub build no longer asks for the install-packages permission or installs updates itself, which Play Protect had flagged. If a block still shows on your device, please open an issue with your phone model, Android version and NoSlop version. Install steps: [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md).
+* **Two builds: a sideloaded APK and a Play test build.** The main build is the APK on the [GitHub releases page](https://github.com/gaborkukucska/NoSlop/releases): verify its SHA-256 checksum, then install it. A Google Play build (a separate app, `com.noslop.me.app`, with its own data) is in testing by invitation only; there is no public Play listing yet. Android may warn about an app from outside the Play Store, and Google Play Protect has blocked earlier NoSlop builds as harmful (history in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)). Since v0.7.4-alpha the GitHub build no longer asks for the install-packages permission or installs updates itself, which Play Protect had flagged. If a block still shows on your device, please open an issue with your phone model, Android version and NoSlop version. Google is also introducing developer verification for apps installed outside Play (in force since 30 September 2026 in Brazil, Indonesia, Singapore and Thailand, and planned worldwide for 2027); the extra steps it may need are in the Tester Guide. Install steps: [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md).
 * **The clearnet aggregator depends on outside sites.** It reads public feeds and APIs, including YouTube's unofficial interface, which can change or block it without notice. Some of these uses go against the source's own terms: YouTube (an unofficial interface, and playback without YouTube's player), Reddit (no registered app) and Vimeo (streams read from its player). I've chosen to keep them for now. [docs/SOURCES.md](docs/SOURCES.md) records each source's terms and status. More sources are welcome from the community (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 * **Both sides must update.** Versions before v0.7.0-alpha can't talk to current ones, and device clocks must agree to within an hour.
 * **DMs have no forward secrecy yet.** They use static X25519 keys. A Double Ratchet is planned, not started.
@@ -178,7 +178,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 
 ## 🚀 Getting Started
 
-1. **Install the APK, or build from source** — Testers: download the APK and its `.sha256` file from the [releases page](https://github.com/gaborkukucska/NoSlop/releases) and follow [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md). Developers: follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
+1. **Install the APK, or build from source** — Testers: download the APK and its `.sha256` file from the [releases page](https://github.com/gaborkukucska/NoSlop/releases), or ask for an invitation to the Play test build, and follow [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md). Developers: follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
 2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, then choose the topics and creators for the built-in clearnet aggregator and tune your content mix.
 3. **Connect with People You Know** — Scan or share a Contact Card QR code in person to start chatting and sharing with friends and family. Follow creators by their Creator ID as they join the mesh.
 
@@ -209,7 +209,7 @@ The full list of open work is in [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md
 
 * 📦 **Decentralized, No Central Servers** — No server holds your identity, your data or your feed choices, and there is no corporate account or cloud backup. Tor relays carry the traffic between peers, and the Official Creator Node is optional and untrusted. Always back up your 12-word Word Cloud.
 * 🤝 **Bring Your Own Network** — NoSlop does not maintain public user directories. Direct peer connections are formed deliberately by exchanging QR codes or onion addresses.
-* 📲 **Direct Installation** — Because NoSlop bypasses centralized app stores, you must allow installation of unknown apps on Android.
+* 📲 **Installing outside the Play Store** — The GitHub build is sideloaded, so you must allow installation of unknown apps on Android, and once Google's developer verification reaches your country you may need extra steps (see [docs/TESTER_GUIDE.md](docs/TESTER_GUIDE.md)). The Play test build installs the normal way.
 
 ---
 

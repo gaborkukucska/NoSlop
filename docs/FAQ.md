@@ -64,6 +64,18 @@ That is why NoSlop follows discovered creators with your **secondary identity**:
 
 One trade-off to know about: by default the secondary identity shows the same name, picture and bio as your main profile, so a creator can see whatever you put there. It protects your keys and onion address, not your profile. If you want to stay anonymous to creators, keep identifying details out of your profile.
 
+## Why does Android warn me when I install NoSlop?
+
+The GitHub build is an APK you install yourself, not from the Play Store, and Android treats any app from outside the store with caution. Expect a prompt to allow installing unknown apps, and possibly a Google Play Protect warning (it has blocked earlier NoSlop builds; the history is in [PROJECT_STATUS.md](PROJECT_STATUS.md)). Check the file's SHA-256 against the published `.sha256` file before you install. The steps are in the [Tester Guide](TESTER_GUIDE.md#1-install). If a block still shows after the checksum matches, please open an issue.
+
+## What is the Play build, and how is it different from the GitHub APK?
+
+It is the same app, built for Google Play, with a different app ID (`com.noslop.me.app`, against `com.noslop.app` for the GitHub build). It is in testing by invitation only for now. Google Play updates it, so it has no in-app update check. The two builds install side by side and share no data, so moving between them means exporting a backup in one and restoring it in the other with your Word Cloud. Don't run the same identity in both at once.
+
+## What is Android's developer verification, and will it block NoSlop?
+
+Google is requiring apps installed on certified Android devices to come from developers who have registered with Google, including apps installed from a file. It is not a ban on sideloading: you can still install an unverified app through Android's advanced flow (which includes a 24-hour wait) or with `adb install`. Google's plan is for it to be in force since 30 September 2026 in Brazil, Indonesia, Singapore and Thailand, and worldwide from 2027, and dates can change, so check [Google's page](https://support.google.com/android-developer-console/answer/16561738). Where it applies, the GitHub APK may need those extra steps, and the Play build comes through Google Play. The steps are in the [Tester Guide](TESTER_GUIDE.md#androids-new-limits-on-sideloading), and the project's own registration status is tracked in [PROJECT_STATUS.md](PROJECT_STATUS.md).
+
 ## Was NoSlop written by AI?
 
 Largely, yes. It is written with heavy help from several leading LLMs. I can't afford to hire developers, and in my experience these models write better code than many I could hire if I could. For now I direct the work and test every release myself, on real devices. I've made it all open source in the hope that qualified developers will read it, check it and improve it.
