@@ -33,6 +33,9 @@ contacts or messages, and neither can update the other. To move from one to the 
 in the first (Settings → Backup) and restore it in the second with your Word Cloud. Don't run the same
 identity in both at once: an identity's onion address can only be hosted by one copy.
 
+Since 0.8.1-alpha each build (and each debug build) uses its own network ports, so both can run at the
+same time. On older versions, with both installed, one of them could send messages but not receive them.
+
 For the Play build, ask for an invitation. You will get a link that works for the Google account the
 invitation was sent to; open it, join the test, and install from Play. The rest of this section is about
 the GitHub APK.

@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.8.0-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
+versionName `0.8.1-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
 targetSdk 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -105,7 +105,7 @@ com.noslop.app
 │   ├── GossipService.kt            TTL, dedup, firewall, rate limit, relay routing
 │   ├── MediaCaptureManager.kt       CameraX/MediaRecorder capture
 │   ├── MediaManager.kt              Chunked media download/cache/auto-download
-│   ├── MediaProxyService.kt         Local HTTP proxy (127.0.0.1:8080) for ExoPlayer/Coil
+│   ├── MediaProxyService.kt         Local HTTP proxy (127.0.0.1:MEDIA_PROXY_PORT, §16.54) for ExoPlayer/Coil
 │   ├── MeshPacketHandler.kt         Incoming packet type dispatch + persistence
 │   ├── MeshTransport.kt             SOCKS5 TCP transport, send retries
 │   └── Packets.kt                   NetworkPacket + all payload data classes
@@ -460,10 +460,11 @@ checksum word). The mnemonic seeds the PBKDF2-HMAC-SHA512 key used by
 
 ### 4.1 Transport (`MeshTransport.kt`)
 
-- **Listener**: `ServerSocket(MESH_PORT=9999, backlog=50,
+- **Listener**: `ServerSocket(MESH_LISTEN_PORT, backlog=50,
   InetAddress.getByName("127.0.0.1"))` — bound **strictly to loopback**.
   Inbound connections only reach this socket via the Tor hidden service
-  mapping (port 9999 on the `.onion` → `127.0.0.1:9999` locally), enforcing a
+  mapping (port 9999 on the `.onion` → `127.0.0.1:MESH_LISTEN_PORT` locally, one
+  port per build variant, §16.54), enforcing a
   "hidden-service-only" architecture (milestone 13).
 - **Wire format**: newline-delimited JSON. Each line is one `NetworkPacket`
   serialized via Gson (`packet.toJson()` / `NetworkPacket.fromJson(line)`).
@@ -887,9 +888,10 @@ Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
 
 ### 6.4 Local Streaming Proxy (`MediaProxyService.kt`)
 
-- Binds `ServerSocket(8080, backlog=100, 127.0.0.1)` — a minimal hand-rolled
+- Binds `ServerSocket(MEDIA_PROXY_PORT, backlog=100, 127.0.0.1)` (one port per build
+  variant, §16.54) — a minimal hand-rolled
   HTTP/1.1 server (no framework) used so ExoPlayer/Coil/WebView can request
-  `noslop://` content via ordinary `http://127.0.0.1:8080/stream?onion=...&id=...`
+  `noslop://` content via ordinary `http://127.0.0.1:<MEDIA_PROXY_PORT>/stream?onion=...&id=...`
   URLs.
 - Request handling:
   1. Parse request line manually (`readHttpHeaders` reads bytes until
@@ -914,7 +916,7 @@ Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
        ByteArray>` reorder buffer + `LinkedBlockingQueue` for out-of-order
        arrivals, with a **120-second** poll timeout per subsequent chunk.
 - `buildProxyUrl(onionAddress, mediaId)` is the single function other layers
-  call to get a consumable `http://127.0.0.1:8080/stream?...` URL.
+  call to get a consumable `http://127.0.0.1:<MEDIA_PROXY_PORT>/stream?...` URL.
 
 ### 6.5 Thumbnail Pipeline (Milestone 49)
 
@@ -984,7 +986,7 @@ compression of large files.
 
 Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
 - `rawClearnetClient: OkHttpClient` — no proxy, used for direct network fetches avoiding Tor (such as background update checks). Configured with a cascading DNS (System -> Cloudflare DoH -> Google DoH) to avoid DNS resolution failures.
-- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used by `MeshTransport` and mesh data paths.
+- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (one port per build variant, §16.54), used by `MeshTransport` and mesh data paths.
 - `activeClearnetClient: OkHttpClient` — dynamic proxy client. Returns `torClient` if the user has enabled "Use Tor for Clearnet" (default: true), otherwise returns `rawClearnetClient`. Used by `FeedParser` and `feeds/api/*Client` classes.
 
 *Note on the optional API proxy:* YouTube, Reddit and Jamendo sometimes refuse Tor exits. When a proxy URL and secret are set (Settings, or `NOSLOP_PROXY_URL` and `NOSLOP_PROXY_SECRET` at build time), `YouTubeInternalClient` search, `RedditApiClient` and `JamendoApiClient` try it first and fall back to a direct request. Official builds set neither, so they always go direct (`NOSLOP_OPTIONAL_PROXY_V1`). The Worker is in `proxy/`; see §15.1.
@@ -1255,7 +1257,7 @@ launch).
      `"ED25519-V3:<seed>"` (persistent address tied to identity key).
    - Else: `"NEW:ED25519-V3"` (ephemeral — used during onboarding before an
      identity exists).
-4. Sends `ADD_ONION <keyParam> Flags=Detach Port=9999,127.0.0.1:9999`.
+4. Sends `ADD_ONION <keyParam> Flags=Detach Port=9999,127.0.0.1:<MESH_LISTEN_PORT>` (§16.54).
 5. Reads multi-line response (`250-...` lines until `250 ` or a `5xx` line).
 6. Extracts `ServiceID=<...>` → `<ServiceID>.onion`.
 7. **Collision handling** (milestone 47): if response contains `"550 Onion
@@ -1361,7 +1363,7 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
 | `compileSdk` / `targetSdk` | 37.1 (`release(37) { minorApiLevel = 1 }`, required by `tor-android` 0.4.9.13+) / 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 80 / `0.8.0-alpha` |
+| `versionCode` / `versionName` | 81 / `0.8.1-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
@@ -1808,6 +1810,9 @@ longer in the source) and threw
 When collecting logs, uninstall the variant not under test. Two daemons make
 timing measurements meaningless and a stale one will contradict the source
 you are reading.
+
+The same lesson came back on 2026-11-17 with the Play flavor, which shared the
+GitHub release ports; since 0.8.1-alpha every variant has its own (§16.54).
 
 ### 16.11 InnerTube client roster (`NOSLOP_INNERTUBE_CLIENTS_V1`)
 
@@ -2891,6 +2896,51 @@ Tests: `BackupPromptPolicyTest`, `BackupPromptArchitectureTest`.
 
 Tests: `MediaCryptoTest`, `PlayableMediaUrlTest`, `MediaEncryptionUiArchitectureTest`, `MediaMigrationTest`.
 
+### 16.54 Own loopback ports for every variant (`NOSLOP_VARIANT_PORTS_V1`)
+
+Built in 0.8.1-alpha (2026-11-17). Every installable variant (flavor × build type) binds its own four
+loopback ports, so any two NoSlop apps can run on one phone at the same time.
+
+| Variant | `MESH_LISTEN_PORT` | `MEDIA_PROXY_PORT` | `TOR_SOCKS_PORT` | `TOR_CONTROL_PORT` |
+|---|---|---|---|---|
+| `githubRelease` (`com.noslop.app`) | 29601 | 29602 | 29603 | 29604 |
+| `githubDebug` (`com.noslop.app.debug`) | 29611 | 29612 | 29613 | 29614 |
+| `playRelease` (`com.noslop.me.app`) | 29621 | 29622 | 29623 | 29624 |
+| `playDebug` (`com.noslop.me.app.debug`) | 29631 | 29632 | 29633 | 29634 |
+
+The onion's virtual port stays `MESH_PORT = 9999` (protocol constant); Tor maps it to the variant's
+`MESH_LISTEN_PORT`. The control port is only bound when the control channel falls back to TCP
+(§17.1, `NOSLOP_CONTROL_SOCKET_V1`/`_V2`); normally it is a Unix socket.
+
+**Why.** Until 0.8.0 the ports were set per build type, so `githubRelease` and `playRelease` both used
+9999/8080/9050/9051. With both installed, the app that started second could bind none of them. Its
+readiness check found the other app's Tor on 9050 and used it for outgoing traffic, and its onion was
+never reachable. Its requests and DMs went out, and the answer to a connection request came back on
+its own outgoing probe socket (`HANDSHAKE_REPLY_WINDOW_MS`, §4.1), so the contact showed as connected
+while nothing sent to it ever arrived: "DMs only work one way" (report of 2026-11-17, owner's Samsung
+SM-G990E with both builds; `/proc/net/tcp` showed the Play app's uid holding no port).
+
+**Where.** `noslopVariantPorts` in `app/build.gradle.kts`, written into `BuildConfig` by
+`androidComponents.onVariants { variant.buildConfigFields.put(...) }` (the AGP 9 replacement for
+`buildConfigField` in build types, which AGP 10 removes). `Constants.MESH_LISTEN_PORT`,
+`TOR_SOCKS_PORT` and `TOR_CONTROL_PORT` and `MediaProxyService` read them from `BuildConfig`.
+
+**Rules**, enforced at configuration time and by `VariantPortsArchitectureTest`:
+* no port shared between variants, four ports per variant;
+* none of 8080, 8118, 9050, 9051, 9150, 9151 (the old media proxy, Orbot and Tor Browser defaults, so
+  NoSlop never meets those apps' Tor either);
+* all in 1024–32767, below Android's ephemeral range (32768–60999);
+* a new flavor or build type fails the build until it has a row;
+* no build type or flavor sets the four fields with `buildConfigField` again.
+
+Nothing stored depends on these ports: onion services are re-registered at every start and local
+media URLs are built at run time. Changing them needs no migration.
+
+**Not covered yet.** NoSlop still doesn't check that the Tor answering on its SOCKS or control port is
+its own: another app holding the port is accepted by the readiness probe. See `docs/PROJECT_STATUS.md`.
+
+Tests: `VariantPortsArchitectureTest`.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
@@ -3634,7 +3684,7 @@ To maintain sovereign identity separation between personal direct messages and p
 * Added a clickable `$` coin badge and donation link across User Info modals opening `ArticleWebViewDialog`.
 
 ### 22.4 Tor Daemon Teardown & 40% (`loading_keys`) Hang Fix (`TorService.kt`)
-* **Process Teardown (`stopTor`)**: Sends `SIGNAL HALT` to the Tor control channel, issues `ACTION_STOP` intent (`"org.torproject.android.intent.action.STOP"`) to the Android service, and polls port 9050 until closed before executing restarts.
+* **Process Teardown (`stopTor`)**: Sends `SIGNAL HALT` to the Tor control channel, issues `ACTION_STOP` intent (`"org.torproject.android.intent.action.STOP"`) to the Android service, and polls `TOR_SOCKS_PORT` until closed before executing restarts.
 * **Cache Purge on Force Restart**: Once the Tor process is terminated, safely purges `app_TorService/data/` (clearing corrupted `cached-consensus` and authority certs) so Tor performs a clean bootstrap.
 * **IPv4 Directory Authority Preference**: Added `ClientPreferIPv6ORPort 0` to `torrc` to prevent authority certificate drops over IPv6.
 

@@ -87,8 +87,8 @@ data class NetworkPacket(
 | `env_sig` | String | Yes (since E2) | Base64 Ed25519 envelope signature by `sender_id` (§1.1) |
 
 Wire format: newline-delimited JSON over the SOCKS5/Tor mesh transport
-(`MeshTransport`, port 9999, loopback-bound — see TECHNICAL_REFERENCE.md
-§4.1). One `NetworkPacket` per line, serialized with the shared
+(`MeshTransport`, onion port 9999 mapped to a loopback-bound listener — see
+TECHNICAL_REFERENCE.md §4.1 and §16.54). One `NetworkPacket` per line, serialized with the shared
 `Json.gson` instance (`toJson()`/`fromJson()`), which leaves out null fields.
 
 13 typed payload accessor methods on `NetworkPacket` (`getPostPayload()`,

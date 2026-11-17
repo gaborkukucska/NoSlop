@@ -70,7 +70,7 @@ The GitHub build is an APK you install yourself, not from the Play Store, and An
 
 ## What is the Play build, and how is it different from the GitHub APK?
 
-It is the same app, built for Google Play, with a different app ID (`com.noslop.me.app`, against `com.noslop.app` for the GitHub build). It is in testing by invitation only for now. Google Play updates it, so it has no in-app update check. The two builds install side by side and share no data, so moving between them means exporting a backup in one and restoring it in the other with your Word Cloud. Don't run the same identity in both at once.
+It is the same app, built for Google Play, with a different app ID (`com.noslop.me.app`, against `com.noslop.app` for the GitHub build). It is in testing by invitation only for now. Google Play updates it, so it has no in-app update check. The two builds install side by side and share no data (since v0.8.1-alpha they also use separate network ports, so both work at the same time), so moving between them means exporting a backup in one and restoring it in the other with your Word Cloud. Don't run the same identity in both at once.
 
 ## What is Android's developer verification, and will it block NoSlop?
 

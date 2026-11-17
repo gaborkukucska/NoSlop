@@ -47,6 +47,7 @@ NoSlop checks the downloaded update against its published checksum, then saves i
 ### Mesh Connectivity
 *   **Adding Peers**: Use the QR scan feature to exchange identity details with friends.
 *   **Tor v3 Addresses**: Mesh communication depends on Tor hidden services. If Tor is not ready, you won't be able to send or receive mesh posts.
+*   **Messages arrive one way only, or a contact request is slow or never arrives**: Before 0.8.1-alpha, the GitHub build and the Play build used the same network ports. With both on one phone, one of them could send but nothing could reach it. Update both to 0.8.1-alpha or newer, or keep only one of them installed.
 
 ## Backup and Restore
 *   **Word Cloud**: Your 12-word mnemonic generates your cryptographic identity keys via HKDF and encrypts your backup archives. Write it down and keep it safe.
