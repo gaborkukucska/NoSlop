@@ -129,12 +129,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Local bind port — Tor maps external 9999 → this port.
-            buildConfigField("int", "MESH_LISTEN_PORT", "9999")
-            buildConfigField("int", "MEDIA_PROXY_PORT", "8080")
-            // Tor proxy ports
-            buildConfigField("int", "TOR_SOCKS_PORT", "9050")
-            buildConfigField("int", "TOR_CONTROL_PORT", "9051")
+            // Loopback ports (mesh listener, media proxy, Tor SOCKS and control) are set per
+            // variant in noslopVariantPorts below (NOSLOP_VARIANT_PORTS_V1).
             
             val showSensitiveLogs = System.getenv("NOSLOP_SHOW_SENSITIVE_LOGS") == "true"
             buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", showSensitiveLogs.toString())
@@ -148,13 +144,7 @@ android {
             // Release build instead of overwriting it.
             applicationIdSuffix = ".debug"
             resValue("string", "app_name", "NoSlop Debug")
-            // Different local bind ports so debug and release can run side-by-side.
-            // Tor will map external 9999 → local 9998 for this build.
-            buildConfigField("int", "MESH_LISTEN_PORT", "9998")
-            buildConfigField("int", "MEDIA_PROXY_PORT", "8081")
-            // Tor proxy ports for debug build
-            buildConfigField("int", "TOR_SOCKS_PORT", "9052")
-            buildConfigField("int", "TOR_CONTROL_PORT", "9053")
+            // Loopback ports are set per variant in noslopVariantPorts below (NOSLOP_VARIANT_PORTS_V1).
             
             buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", "true")
         }
@@ -203,6 +193,51 @@ android {
             // default values makes them no-ops so the core can be tested without Robolectric.
             isReturnDefaultValues = true
         }
+    }
+}
+
+// NOSLOP_VARIANT_PORTS_V1
+// Every installable variant (flavor x build type) has its own loopback ports, so any two of them can
+// be installed side by side. Ports used to be set per build type only, so the GitHub and Play release
+// builds shared 9999/8080/9050/9051: on a phone with both, the second app could bind none of them,
+// borrowed the first app's Tor for its outgoing traffic and published no reachable onion, so it could
+// send but never receive (one-way DMs, 2026-11-17).
+// Order: mesh listener (Tor maps the onion's 9999 here), media proxy, Tor SOCKS, Tor control.
+// Rules, checked below and by VariantPortsArchitectureTest: no port shared between variants, none of
+// the ports other Tor apps use by default (Orbot 9050/9051/8118, Tor Browser 9150/9151) or 8080, and
+// all below 32768 so they never fall in Android's ephemeral range (32768-60999).
+// A new flavor or build type fails the build until it has a row here.
+val noslopVariantPorts: Map<String, List<Int>> = mapOf(
+    "githubRelease" to listOf(29601, 29602, 29603, 29604),
+    "githubDebug" to listOf(29611, 29612, 29613, 29614),
+    "playRelease" to listOf(29621, 29622, 29623, 29624),
+    "playDebug" to listOf(29631, 29632, 29633, 29634),
+)
+run {
+    val all = noslopVariantPorts.values.flatten()
+    require(noslopVariantPorts.values.all { it.size == 4 }) {
+        "NOSLOP_VARIANT_PORTS_V1: every variant needs exactly 4 ports: $noslopVariantPorts"
+    }
+    require(all.size == all.toSet().size) {
+        "NOSLOP_VARIANT_PORTS_V1: two variants share a loopback port: $noslopVariantPorts"
+    }
+    val reserved = setOf(8080, 8118, 9050, 9051, 9150, 9151)
+    require(all.none { it in reserved || it < 1024 || it >= 32768 }) {
+        "NOSLOP_VARIANT_PORTS_V1: a port is reserved by another Tor app, privileged or ephemeral: $noslopVariantPorts"
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val ports = noslopVariantPorts[variant.name]
+            ?: error("NOSLOP_VARIANT_PORTS_V1: no loopback ports for variant '${variant.name}'. Add it to noslopVariantPorts in app/build.gradle.kts.")
+        listOf("MESH_LISTEN_PORT", "MEDIA_PROXY_PORT", "TOR_SOCKS_PORT", "TOR_CONTROL_PORT")
+            .forEachIndexed { i, key ->
+                variant.buildConfigFields?.put(
+                    key,
+                    com.android.build.api.variant.BuildConfigField("int", ports[i].toString(), "NOSLOP_VARIANT_PORTS_V1 (${variant.name})")
+                )
+            }
     }
 }
 

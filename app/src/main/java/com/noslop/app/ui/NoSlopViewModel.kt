@@ -752,7 +752,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 if (state == TorState.READY || state == TorState.PROXY_READY) {
                     retryCount = 0
                     if (!_torReadyState.value.first) {
-                        _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                        _torReadyState.value = Pair(true, "Tor proxy connected (Port ${com.noslop.app.util.Constants.TOR_SOCKS_PORT})")
                     }
                     if (state == TorState.READY && !hasRequestedCatchup) {
                         hasRequestedCatchup = true
@@ -3836,7 +3836,7 @@ fun toggleAggregator() {
                 if (result.first || TorService.torState.value != TorState.READY) {
                     _torReadyState.value = result
                 } else {
-                    _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                    _torReadyState.value = Pair(true, "Tor proxy connected (Port ${com.noslop.app.util.Constants.TOR_SOCKS_PORT})")
                 }
             } finally {
                 _isTorChecking.value = false
