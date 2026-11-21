@@ -90,6 +90,9 @@ object TorService {
     // E1: uncaught exceptions are logged (AppScopes.exceptionHandler) instead of ending the process.
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + com.noslop.app.util.AppScopes.exceptionHandler)
 
+    /** NOSLOP_TOR_SINGLE_START_V1: guards the check-and-claim at the start of [startTor]. */
+    private val startLock = Any()
+
     // FIX: Initial state is IDLE (not STARTING) so that the first startTor() call
     // always proceeds rather than hitting the idempotency guard and returning early.
     private val _torState = MutableStateFlow(TorState.IDLE)
@@ -299,7 +302,21 @@ object TorService {
             } catch (e: Exception) {
                 Logger.warn(TAG, "Failed to clear Tor data directory: ${e.message}")
             }
-        } else if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
+        }
+
+        // NOSLOP_TOR_SINGLE_START_V1: the state is checked and STARTING claimed in one step. Checked and set
+        // separately, three callers arriving together (device log 2026-11-21, 17:29:05.901-.903) all saw IDLE,
+        // and each wrote the torrc, launched the daemon and started a bootstrap job.
+        val previousState: TorState? = synchronized(startLock) {
+            val current = _torState.value
+            if (!forceRestart && (current == TorState.READY || current == TorState.STARTING || current == TorState.PROXY_READY)) {
+                null
+            } else {
+                _torState.value = TorState.STARTING
+                current
+            }
+        }
+        if (previousState == null) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
             val keyChanged = privateKeyB64 != null && privateKeyB64 != currentPrivateKeyB64
             currentPrivateKeyB64 = privateKeyB64
@@ -311,10 +328,9 @@ object TorService {
             return
         }
 
-        Logger.info(TAG, "Starting embedded Tor daemon via native Intent (previous state=${_torState.value})...")
+        Logger.info(TAG, "Starting embedded Tor daemon via native Intent (previous state=$previousState)...")
         // A daemon being (re)started has no hidden services yet.
         forgetRegisteredHiddenServices("daemon start")
-        _torState.value = TorState.STARTING
         daemonStartedAtMs = System.currentTimeMillis() // NOSLOP_TOR_OWN_PORTS_V1
         currentPrivateKeyB64 = privateKeyB64
         currentBurnablePrivateKeyB64 = burnablePrivateKeyB64

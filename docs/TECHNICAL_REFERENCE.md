@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.8.1-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
+versionName `0.8.2-alpha`, Room schema version 19 — see §10, compileSdk 37.1,
 targetSdk 36, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -1363,7 +1363,7 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | `applicationId` | `com.noslop.app` (`github` flavor) / `com.noslop.me.app` (`play` flavor) |
 | `compileSdk` / `targetSdk` | 37.1 (`release(37) { minorApiLevel = 1 }`, required by `tor-android` 0.4.9.13+) / 36 |
 | `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
-| `versionCode` / `versionName` | 81 / `0.8.1-alpha` |
+| `versionCode` / `versionName` | 82 / `0.8.2-alpha` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
@@ -2936,10 +2936,93 @@ SM-G990E with both builds; `/proc/net/tcp` showed the Play app's uid holding no 
 Nothing stored depends on these ports: onion services are re-registered at every start and local
 media URLs are built at run time. Changing them needs no migration.
 
-**Not covered yet.** NoSlop still doesn't check that the Tor answering on its SOCKS or control port is
-its own: another app holding the port is accepted by the readiness probe. See `docs/PROJECT_STATUS.md`.
+Since 0.8.2-alpha NoSlop also checks that the Tor answering on its SOCKS port is its own (§16.55).
 
 Tests: `VariantPortsArchitectureTest`.
+
+### 16.55 Refusing a Tor that isn't NoSlop's own (`NOSLOP_TOR_OWN_PORTS_V1`)
+
+Built in 0.8.2-alpha (2026-11-21). A TCP probe that finds something on `TOR_SOCKS_PORT` can't tell whose
+Tor it is. On 2026-11-17 (§16.54) the Play build sent everything through the GitHub build's Tor and its
+own onion was unreachable. Separate ports made a clash between NoSlop builds impossible, but any other
+app on the port was still accepted.
+
+**How a daemon proves it is NoSlop's.** The control channel is a Unix socket in the app's private files
+directory (§17.1), so a daemon that answers on it is ours; a stale socket file from a dead daemon refuses
+the connection. tor-android 0.4.9.14 broadcasts `STATUS_ON` only after its own control connection is up
+and a first circuit is built, and addresses it to our package (`Intent.setPackage`). Either counts as
+proof, but only if it is newer than the current start (`daemonStartedAtMs`): evidence from an earlier
+daemon does not count (`TorPortOwnership.ownDaemonConfirmed`).
+
+**The checks** (`tor/TorService.kt`, rules in `tor/TorPortOwnership.kt`):
+* At 100 % bootstrap, `GETINFO net/listeners/socks` on our control channel. A loopback listener on our
+  port: ours (`Tor SOCKS listener 127.0.0.1:<port> is NoSlop's own daemon`). Our daemon answers with no
+  listener on our port: **refused**. No readable reply: logged as not confirmed, and the start goes on as
+  before, so a format change can't lock users out.
+* `waitForBootstrap` returns `COMPLETE`, `INCOMPLETE` or `FOREIGN_SOCKS`. On `INCOMPLETE` both callers
+  (`startTor`, `confirmBootstrapThenPromote`) still fall back to the end-to-end routing check, but a
+  passing check now counts only with proof of our daemon. This is the 2026-11-17 case: a daemon that
+  can't bind its SOCKS port exits before its control socket appears, and the routing check then passed
+  through the other app's Tor. A later `ON` from our own daemon still promotes to READY.
+* **Refused** means `TorState.FAILED`, which already stops every Tor-routed HTTP request
+  (`torGuardInterceptor`) and every mesh send (`MeshTransport` waits for READY), plus a `SECURITY:` error
+  line and the translated message "Tor could not connect: another app is using NoSlop's Tor port
+  {port}…". Retry restarts and checks again.
+* The status receiver is registered `RECEIVER_NOT_EXPORTED` (our daemon runs in our process and uid), and
+  ignores a broadcast naming another package (`EXTRA_SERVICE_PACKAGE_NAME`). Exported, any app could send
+  a fake `OFF` and mark Tor FAILED.
+* `MeshTransport` logs a `BindException` on the mesh listener as another app holding NoSlop's mesh port.
+  It is not shown on screen and not retried (see `docs/PROJECT_STATUS.md`).
+
+**The listener replies were read one step late.** `waitForBootstrap` reads only the first line of the
+`status/bootstrap-phase` reply, so its closing `250 OK` stayed unread. Every later `GETINFO` in
+`logProxyListeners` got the previous reply: the socks query logged `250 OK`, and the line logged as
+`httptunnel` was the socks listener. This had been so since `logProxyListeners` was written, so the
+"`GETINFO net/listeners/httptunnel` empty at bootstrap" check (§17, P1) was never really read.
+`TorPortOwnership.readGetInfoReply` skips leftovers of an earlier reply (a bare `250 OK` or another key's
+line) and is bounded. Emulator, 2026-11-21: `socks="127.0.0.1:29613"`, then `httptunnel=` empty.
+
+**The Tor overlay blocks on FAILED.** `TorStatusOverlay` decided whether to block, and whether to offer
+Retry, by comparing the message with English prefixes, but messages arrive translated. On any other
+language a failed Tor showed only a spinner banner. It now blocks, with Retry, whenever the state is
+FAILED (`torFailed`).
+
+Tests: `TorPortOwnershipTest`.
+
+### 16.56 No silent exits on the DM path (`NOSLOP_DM_PATH_NO_SILENT_EXIT_V1`)
+
+Built in 0.8.2-alpha (2026-11-21).
+
+* **`sendConnectionRequest`** chooses the identity to send from (`IdentityRouter.creator()` or `main()`,
+  by the contact's `contact_identity_` binding, as before) before it stores anything. Without one it
+  stores and sends nothing, logs `CONNECTION_REQUEST to … not sent: …` and returns false. It used to
+  store an OUTGOING_PENDING row, send nothing, log nothing and return true. The other cases are
+  unchanged (an ACCEPTED contact keeps its row and its in-person verification; BLOCKED sends nothing;
+  INCOMING_PENDING is accepted).
+* **`sendConnectionRequestResult`** (in `MeshSocialRepository` and `NoSlopRepository`) returns a
+  `ConnectionRequestResult`: `SENT`, `ACCEPTED_THEIRS`, `ACCEPT_REFUSED`, `BLOCKED`,
+  `NO_CREATOR_IDENTITY` or `NO_PERSONAL_IDENTITY`. `.ok` is the old Boolean.
+  `NoSlopViewModel.showConnectionRequestOutcome` turns it into a Toast. "Connection request sent via
+  burnable identity" moved there from the three unknown-node dialogs (DMs, feed card, comments), which
+  showed it when Connect was tapped, before the outcome was known.
+* **`acceptConnectionRequest`** logs when it accepts but can't answer (no identity to answer from).
+* **`DmPacketHandler`** logs a DM or DM_ACK addressed to an identity this node doesn't hold, and a
+  DM_SYNC_REQUEST from a contact whose identity is gone, before dropping them. Return values and the
+  sender's retries are unchanged.
+
+Tests: `ConnectionRequestNoSilentExitTest`.
+
+### 16.57 One Tor start at a time (`NOSLOP_TOR_SINGLE_START_V1`)
+
+Built in 0.8.2-alpha (2026-11-21). `startTor` checked the state and set STARTING separately, so callers
+arriving together all saw IDLE. Emulator log of 2026-11-21: three "Starting embedded Tor daemon
+(previous state=IDLE)" lines within 2 ms, three torrc writes, three bootstrap jobs and three ownership
+checks. The check and the claim are now one `synchronized(startLock)` step. Logging, the torrc, the
+network callback and the service start stay outside the lock. A forced restart still bypasses the check
+(it stops the daemon first). Emulator, five cold starts after the change: one start each, later callers
+"Skipping redundant start".
+
+Tests: `TorSingleStartArchitectureTest`.
 
 ## 17. Audit and Hardening Pass (2026-09-02)
 

@@ -48,6 +48,8 @@ NoSlop checks the downloaded update against its published checksum, then saves i
 *   **Adding Peers**: Use the QR scan feature to exchange identity details with friends.
 *   **Tor v3 Addresses**: Mesh communication depends on Tor hidden services. If Tor is not ready, you won't be able to send or receive mesh posts.
 *   **Messages arrive one way only, or a contact request is slow or never arrives**: Before 0.8.1-alpha, the GitHub build and the Play build used the same network ports. With both on one phone, one of them could send but nothing could reach it. Update both to 0.8.1-alpha or newer, or keep only one of them installed.
+*   **"Another app is using NoSlop's Tor port"**: Since 0.8.2-alpha NoSlop checks that the Tor on its port is its own and refuses any other. Close the app holding the port (another Tor app set to the same port, or a debugging tool such as `adb reverse`), or restart the phone, then tap Retry.
+*   **"Request not sent to …: your creator identity is no longer on this device"**: That contact knows you by your creator identity. Restore it in Studio with Restore Creator Identity (from your creator identity file), then send the request again.
 
 ## Backup and Restore
 *   **Word Cloud**: Your 12-word mnemonic generates your cryptographic identity keys via HKDF and encrypts your backup archives. Write it down and keep it safe.

@@ -88,8 +88,11 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **A proxy secret built into an APK can be extracted.** Official builds have none (see the aggregator list above); a build made with `NOSLOP_PROXY_SECRET` carries it.
 * **Groups have one admin.** Bans exist; a list of admins doesn't.
 * **Deferred by the owner:** C27 (persistent per-peer connections) and R4d (handshake budget).
-* **Another app on NoSlop's ports isn't detected** (found 2026-11-17). The Tor readiness probe accepts whatever answers on `TOR_SOCKS_PORT`, so an app holding that port (or the mesh listener port) would have NoSlop send through its Tor and stay unreachable. Ports no longer clash between NoSlop builds or with Orbot and Tor Browser defaults (`NOSLOP_VARIANT_PORTS_V1`), but there is no check. Wanted: refuse a foreign Tor, log it, and tell the user.
-* **Two silent exits on the DM path** (found 2026-11-17). `sendConnectionRequest` does nothing, with no log line, when the identity it should send from is missing (`me == null`, e.g. a contact bound to a creator identity that no longer exists), and `DmPacketHandler` drops a DM addressed to an identity this node doesn't hold without a log line. Both should log, and the first should tell the user.
+* ~~**Another app on NoSlop's ports isn't detected**~~ Done 2026-11-21 (`NOSLOP_TOR_OWN_PORTS_V1`, `docs/TECHNICAL_REFERENCE.md` §16.55) for the Tor SOCKS port; the mesh listener port is logged only (see below). Found 2026-11-17: The Tor readiness probe accepts whatever answers on `TOR_SOCKS_PORT`, so an app holding that port (or the mesh listener port) would have NoSlop send through its Tor and stay unreachable. Ports no longer clash between NoSlop builds or with Orbot and Tor Browser defaults (`NOSLOP_VARIANT_PORTS_V1`), but there is no check. Wanted: refuse a foreign Tor, log it, and tell the user.
+* ~~**Two silent exits on the DM path**~~ Done 2026-11-21 (`NOSLOP_DM_PATH_NO_SILENT_EXIT_V1`, §16.56). Found 2026-11-17: `sendConnectionRequest` does nothing, with no log line, when the identity it should send from is missing (`me == null`, e.g. a contact bound to a creator identity that no longer exists), and `DmPacketHandler` drops a DM addressed to an identity this node doesn't hold without a log line. Both should log, and the first should tell the user.
+* **The mesh listener port held by another app isn't shown on screen** (found 2026-11-21). `MeshTransport` now logs the `BindException` as another app holding the port, but the user isn't told, and the listener isn't retried in that process, so nothing sent to this node arrives until NoSlop restarts with the port free.
+* **A foreign Tor with Route Clearnet via Tor off** (found 2026-11-21). The refusal sets Tor to FAILED, but the blocking overlay only shows while Route Clearnet via Tor is on, so with it off the mesh stops with only the Settings status line to say so.
+* **One "Receiver … already registered" warning at the first start after an install** (emulator, 2026-11-21, once in five starts, with a single Tor start). Android ignores the duplicate filter. Which receiver it is hasn't been found.
 * **The official creator node was unreachable** for the whole 2026-11-17 capture (`vrf4h4…6mad.onion`, "SOCKS: Host unreachable" from both test devices; one DM queued for it on the emulator). Operational, not code: check the node is running with its creator identity (commit a28ed69).
 
 **Architecture**
@@ -125,7 +128,7 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * A minified release build, using `docs/BUILD.md` §8.2 (E5). Its media section now covers these rounds.
 * Backup export and import on a device (E3).
 * The findings the matrix still marks as not device-verified: C06, C07, C11, D05, D09 and D10.
-* The P1 security fixes on a device: `GETINFO net/listeners/httptunnel` empty at bootstrap, the first-connect SSH host-key dialog, and two-device replay of comments and reactions. The commits were tested by unit tests; no device result is recorded here.
+* The P1 security fixes on a device: `GETINFO net/listeners/httptunnel` empty at bootstrap (seen on the emulator 2026-11-21; before 0.8.2 the line logged under that name was the socks reply, §16.55, so no earlier capture showed it), the first-connect SSH host-key dialog, and two-device replay of comments and reactions. The commits were tested by unit tests; no device result is recorded here.
 * **The Play build through Play Console** (`com.noslop.me.app`, `docs/BUILD.md` §8.5). Nothing is recorded as done: the first internal-testing upload, an install from Play, the 0.7.9 to 0.8.0 upgrade through Play, the foreground-service declaration (`specialUse`, with its video) and the data safety form.
 * **16 KB memory pages.** Apps that target Android 15 or newer must support them, and Google's page gives 2027-02-01 as the date after which updates that don't can't be released. `tor-android` 0.4.9.14 and SQLCipher 4.20.0 ship native libraries and have not been checked (`check_elf_alignment.sh`, and a run on a 16 KB emulator image).
 * **The Play account type.** A personal account created after 2023-11-13 must run a closed test with 12 testers opted in for 14 days before it can apply for production access; internal testers don't count. The account type is not recorded here.
@@ -139,6 +142,24 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-21) — NoSlop Refuses a Tor That Isn't Its Own, No Silent Exits on the DM Path, One Tor Start (v0.8.2-alpha)
+
+* **The request** (`isues.txt`): keep getting NoSlop ready for its debut on Reddit. This round takes the code follow-ups found on 2026-11-17, since first-wave testers would hit them first. The legacy Android app only; the MVP is out of scope. No packet, Room schema or archive format change.
+* **NoSlop refuses a Tor that isn't its own** (`NOSLOP_TOR_OWN_PORTS_V1`, `docs/TECHNICAL_REFERENCE.md` §16.55). READY now needs proof that the daemon on `TOR_SOCKS_PORT` is NoSlop's: its own private control socket reports a listener on that port, or its own daemon broadcast ON since this start. Otherwise Tor is FAILED (no Tor-routed request or mesh send goes out) and a blocking dialog says another app is using NoSlop's Tor port, with Retry. The status receiver is no longer exported. Tested (unit: `TorPortOwnershipTest`).
+* **Found while verifying it: the Tor listener replies were read one step late** (§16.55). The unread end of the bootstrap-phase reply shifted every `GETINFO` in `logProxyListeners`, so the line logged as `httptunnel` was the socks listener. This was so from the start, so the "httptunnel empty" check in Verify before release had never really been read.
+* **The Tor dialog offers Retry in every language** (§16.55). It used to decide by comparing the translated message with English text.
+* **No silent exits on the DM path** (`NOSLOP_DM_PATH_NO_SILENT_EXIT_V1`, §16.56). A connection request that can't go out stores nothing, is logged and is shown to the user; a blocked contact is shown too. "Connection request sent via burnable identity" shows once the request has gone out, not on the tap. The receiving side logs what it drops. Tested (unit: `ConnectionRequestNoSilentExitTest`).
+* **One Tor start at a time** (`NOSLOP_TOR_SINGLE_START_V1`, §16.57). Three callers within 2 ms each started the daemon; the check and the claim are now one step. Tested (unit: `TorSingleStartArchitectureTest`).
+* **Every string in every language again.** The 4 new strings (three "Request not sent" notices, the foreign-Tor message) and the 30 that 0.8.0 added in English only (the welcome cards, the after-update backup prompt, the database and media encryption lines and the locked-database screen) are in all 20 other languages: 1,087 keys each, the same as English.
+* **Verified on the emulator** (owner, 2026-11-21, GitHub debug build, Android 14 x86_64, next to the GitHub release build):
+  * Normal start: `socks="127.0.0.1:29613"`, `httptunnel=` empty, "is NoSlop's own daemon", no `SECURITY` line. The status receiver still gets ON while not exported.
+  * A real foreign Tor on 29613 (`adb reverse tcp:29613 tcp:9050` to the laptop's Tor, app stopped first): the dialog appeared. After `adb reverse --remove` and Retry, Tor came back.
+  * Five cold starts: one daemon start each.
+  * QR contact request received and a DM decrypted and acknowledged, with round 1 installed; no `not sent` or `Dropping DM` lines.
+  * `testGithubDebugUnitTest` passed before each install.
+* **Not yet verified.** The "Request not sent" Toasts on a device (unit test only). The Play builds and the Samsung. `testPlayDebugUnitTest`. The foreign-Tor dialog in a language other than English.
+* **Version 0.8.2-alpha** (`versionCode` 82).
 
 ## Completed Changes (2026-11-15 – 2026-11-16) — Docs and Website for the Tester Launch (v0.8.0-alpha)
 
