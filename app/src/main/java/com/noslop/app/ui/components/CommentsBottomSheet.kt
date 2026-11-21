@@ -369,7 +369,6 @@ fun CommentItem(
             )
 
             if (showConnectWarning && targetOnion != null) {
-                val context = androidx.compose.ui.platform.LocalContext.current
                 AlertDialog(
                     onDismissRequest = { showConnectWarning = false },
                     title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
@@ -386,7 +385,6 @@ fun CommentItem(
                                 )
                                 showConnectWarning = false
                                 showUserInfoDialog = false
-                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), android.widget.Toast.LENGTH_SHORT).show()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
                         ) {

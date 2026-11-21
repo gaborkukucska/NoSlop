@@ -1136,8 +1136,31 @@ class MeshSocialRepository(
      *
      * D06: the peer row is merged, never rebuilt — an ACCEPTED friend is never downgraded, a
      * BLOCKED peer is never contacted, and an INCOMING_PENDING request is simply accepted.
+     *
+     * True when a request went out or their pending request was accepted; [sendConnectionRequestResult]
+     * says which, or why nothing was sent.
      */
     suspend fun sendConnectionRequest(
+        handle: String,
+        publicKeyB64: String,
+        onionAddress: String,
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false,
+        intro: String = ContactIntro.NETWORK,
+        shareMainIdentity: Boolean = false
+    ): Boolean = sendConnectionRequestResult(
+        handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity
+    ).ok
+
+    /**
+     * [sendConnectionRequest], saying what happened (NOSLOP_DM_PATH_NO_SILENT_EXIT_V1).
+     *
+     * The identity to send from is chosen before anything is stored. When it is missing (a contact
+     * bound to a creator identity that is no longer on this device), nothing is written or sent, the
+     * reason is logged and returned so the screen can say it. This used to store an OUTGOING_PENDING
+     * row, send nothing, log nothing and return true.
+     */
+    suspend fun sendConnectionRequestResult(
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
@@ -1149,7 +1172,7 @@ class MeshSocialRepository(
          * contact knows our secondary one (see [completeMainIdentityShare]).
          */
         shareMainIdentity: Boolean = false
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): ConnectionRequestResult = withContext(Dispatchers.IO) {
         val existing = peerDao.getPeerByPublicKey(publicKeyB64)
         // D10b: scanning their QR code with the camera verifies them in person, for the keys in the code.
         val scanPin = if (intro == ContactIntro.QR_CAMERA && encPublicKeyB64.isNotBlank()) {
@@ -1157,7 +1180,7 @@ class MeshSocialRepository(
         } else null
         if (existing != null && existing.relationship == PeerRelationship.BLOCKED) {
             Logger.warn(TAG, "Not sending CONNECTION_REQUEST to blocked peer ${publicKeyB64.take(12)}")
-            return@withContext false
+            return@withContext ConnectionRequestResult.BLOCKED
         }
         if (existing != null && existing.relationship == PeerRelationship.INCOMING_PENDING) {
             // They already asked us; the user asking them back is consent.
@@ -1165,23 +1188,53 @@ class MeshSocialRepository(
             if (scanPin != null && scanPin == CryptoService.deriveSafetyFingerprint(existing.publicKeyB64, existing.encPublicKeyB64)) {
                 peerDao.setVerifiedFingerprint(publicKeyB64, scanPin)
             }
-            return@withContext acceptConnectionRequest(existing)
+            return@withContext if (acceptConnectionRequest(existing)) {
+                ConnectionRequestResult.ACCEPTED_THEIRS
+            } else {
+                ConnectionRequestResult.ACCEPT_REFUSED
+            }
         }
 
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
         val targetOnion = onionAddress.ifBlank { existing?.onionAddress ?: "" }
+        val isAcceptedFriend = existing != null && existing.relationship == PeerRelationship.ACCEPTED
 
-        if (existing != null && existing.relationship == PeerRelationship.ACCEPTED) {
+        if (isAcceptedFriend) {
             // Re-sending to a friend (e.g. the DM screen's "reconnect"): keep ACCEPTED and every
             // stored field; their handshake reply is processed as a profile refresh.
-            Logger.info(TAG, "Re-sending CONNECTION_REQUEST to already-accepted peer ${existing.handle}")
+            Logger.info(TAG, "Re-sending CONNECTION_REQUEST to already-accepted peer ${existing!!.handle}")
             // D10b: scanned in person; verified only if the code carries the keys we already use.
             if (scanPin != null && scanPin == CryptoService.deriveSafetyFingerprint(existing.publicKeyB64, existing.encPublicKeyB64)) {
                 peerDao.setVerifiedFingerprint(publicKeyB64, scanPin)
             }
-        } else {
+        }
+
+        val boundIdentity = db.appSettingDao().getSetting("contact_identity_$publicKeyB64")
+        // E4 (D04 leftover): "Share Permanent Identity" asked from the secondary identity, because a contact
+        // bound to it always got that one. It now asks from the personal identity. The contact stays bound
+        // to the secondary identity (so the temporary chat keeps working) until they accept: the answer to
+        // this request's nonce moves the contact to the personal identity (completeMainIdentityShare).
+        val sharingMain = shareMainIdentity && boundIdentity == "burnable"
+        val useBurnable = !shareMainIdentity && (useBurnableIdentity || boundIdentity == "burnable")
+        val me = if (useBurnable) identityRouter.creator() else identityRouter.main()
+        if (me == null) {
+            // NOSLOP_DM_PATH_NO_SILENT_EXIT_V1: never a pending row for a request that cannot go out.
+            val why = if (useBurnable) {
+                "it must come from our creator identity, which is no longer on this device"
+            } else {
+                "this device has no personal identity"
+            }
+            Logger.warn(TAG, "CONNECTION_REQUEST to ${handle.ifBlank { "?" }} (${publicKeyB64.take(12)}) not sent: $why. Nothing was stored.")
+            return@withContext if (useBurnable) {
+                ConnectionRequestResult.NO_CREATOR_IDENTITY
+            } else {
+                ConnectionRequestResult.NO_PERSONAL_IDENTITY
+            }
+        }
+
+        if (!isAcceptedFriend) {
             val pending = (existing ?: Peer(
                 publicKeyB64 = publicKeyB64,
                 handle = handle,
@@ -1206,40 +1259,30 @@ class MeshSocialRepository(
         // Asking them is consent: forget that we once declined a request from them.
         db.appSettingDao().removeSetting("declined_request_$publicKeyB64")
 
-        val boundIdentity = db.appSettingDao().getSetting("contact_identity_$publicKeyB64")
-        // E4 (D04 leftover): "Share Permanent Identity" asked from the secondary identity, because a contact
-        // bound to it always got that one. It now asks from the personal identity. The contact stays bound
-        // to the secondary identity (so the temporary chat keeps working) until they accept: the answer to
-        // this request's nonce moves the contact to the personal identity (completeMainIdentityShare).
-        val sharingMain = shareMainIdentity && boundIdentity == "burnable"
-        val useBurnable = !shareMainIdentity && (useBurnableIdentity || boundIdentity == "burnable")
-        val me = if (useBurnable) identityRouter.creator() else identityRouter.main()
-        if (me != null) {
-            if (useBurnable) {
-                db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
-            }
-            if (sharingMain) {
-                db.appSettingDao().insertSetting(AppSetting(mainShareKey(publicKeyB64), nonce))
-            } else {
-                db.appSettingDao().removeSetting(mainShareKey(publicKeyB64))
-            }
-            if (existing?.relationship == PeerRelationship.ACCEPTED) {
-                // Nonce is only needed if the peer lost us; store it so their echo can be matched.
-                peerDao.getPeerByPublicKey(publicKeyB64)?.let { peerDao.insertPeer(it.copy(pendingNonce = nonce)) }
-            }
-            // D10b: remembered so the pending-request probes carry the same signed intro.
-            if (intro == ContactIntro.QR_CAMERA) {
-                db.appSettingDao().insertSetting(AppSetting("outgoing_intro_$publicKeyB64", intro))
-            } else {
-                db.appSettingDao().removeSetting("outgoing_intro_$publicKeyB64")
-            }
-            val packet = buildConnectionRequestPacket(me, publicKeyB64, nonce, intro)
-            dispatchPacket(targetOnion, packet)
-            if (existing?.relationship != PeerRelationship.ACCEPTED) {
-                startOutgoingRequestPoll(publicKeyB64, nonce)
-            }
+        if (useBurnable) {
+            db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
         }
-        true
+        if (sharingMain) {
+            db.appSettingDao().insertSetting(AppSetting(mainShareKey(publicKeyB64), nonce))
+        } else {
+            db.appSettingDao().removeSetting(mainShareKey(publicKeyB64))
+        }
+        if (isAcceptedFriend) {
+            // Nonce is only needed if the peer lost us; store it so their echo can be matched.
+            peerDao.getPeerByPublicKey(publicKeyB64)?.let { peerDao.insertPeer(it.copy(pendingNonce = nonce)) }
+        }
+        // D10b: remembered so the pending-request probes carry the same signed intro.
+        if (intro == ContactIntro.QR_CAMERA) {
+            db.appSettingDao().insertSetting(AppSetting("outgoing_intro_$publicKeyB64", intro))
+        } else {
+            db.appSettingDao().removeSetting("outgoing_intro_$publicKeyB64")
+        }
+        val packet = buildConnectionRequestPacket(me, publicKeyB64, nonce, intro)
+        dispatchPacket(targetOnion, packet)
+        if (!isAcceptedFriend) {
+            startOutgoingRequestPoll(publicKeyB64, nonce)
+        }
+        ConnectionRequestResult.SENT
     }
 
     /**
@@ -1481,6 +1524,10 @@ class MeshSocialRepository(
                     dispatchPacket(current.onionAddress, packet)
                 }
             }
+        } else {
+            // NOSLOP_DM_PATH_NO_SILENT_EXIT_V1: accepted here, but no answer can go out (the identity they
+            // addressed is no longer on this device), so they will not see the acceptance.
+            Logger.warn(TAG, "Accepted ${current.handle} (${current.publicKeyB64.take(12)}) but sent no USER_HANDSHAKE: the identity they addressed is no longer on this device")
         }
         true
     }

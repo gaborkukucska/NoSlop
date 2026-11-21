@@ -83,6 +83,8 @@ class DmPacketHandler(
         } else if (packet.targetUserId.isNullOrBlank()) {
             localKeys
         } else {
+            // NOSLOP_DM_PATH_NO_SILENT_EXIT_V1
+            Logger.warn(TAG, "Dropping DM from ${packet.senderId.take(12)}: addressed to ${packet.targetUserId?.take(12)}, an identity this node does not hold (a creator identity removed from this device, or never on it)")
             return false
         }
 
@@ -448,7 +450,12 @@ class DmPacketHandler(
         // D04: the messages we sent as the identity this contact knows, re-sent as that identity. This
         // used to look up (and send as) the personal identity only, so a creator contact got nothing back
         // and every resend named the personal key.
-        val me = repo.identityRouter.forPeer(peerPub, peer)?.keys ?: return true
+        val me = repo.identityRouter.forPeer(peerPub, peer)?.keys
+        if (me == null) {
+            // NOSLOP_DM_PATH_NO_SILENT_EXIT_V1
+            Logger.warn(TAG, "DM_SYNC_REQUEST from ${peer.handle}: not answered, the identity this contact knows is no longer on this node")
+            return true
+        }
         val missedMessages = messageDao.getMessagesSentAfter(
             peerPub = peerPub,
             myPub = me.publicKeyB64,
@@ -604,6 +611,8 @@ class DmPacketHandler(
         } else if (packet.targetUserId.isNullOrBlank()) {
             localKeys
         } else {
+            // NOSLOP_DM_PATH_NO_SILENT_EXIT_V1
+            Logger.warn(TAG, "Dropping DM_ACK from ${packet.senderId.take(12)}: addressed to ${packet.targetUserId?.take(12)}, an identity this node does not hold")
             return false
         }
 

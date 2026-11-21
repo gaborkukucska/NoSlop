@@ -352,7 +352,17 @@ object TorControlChannel {
         return null
     }
 
+    /**
+     * NOSLOP_TOR_OWN_PORTS_V1: wall-clock time of the last successful open. The control socket lives in
+     * this app's private files directory, so an open proves NoSlop's own daemon is running
+     * (TorPortOwnership.ownDaemonConfirmed). 0 until the first open.
+     */
+    @Volatile
+    var lastOpenedAtMs: Long = 0L
+        private set
+
     private fun noteOpened(transport: String) {
+        lastOpenedAtMs = System.currentTimeMillis()
         if (openedTransport == null) {
             openedTransport = transport
             Logger.info(TAG, "Control channel opened", "transport=$transport")

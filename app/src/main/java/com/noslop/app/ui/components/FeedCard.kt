@@ -1119,7 +1119,6 @@ fun FullScreenMeshCardV2(
                                         )
                                         showConnectWarning = false
                                         showUserInfoDialog = false
-                                        Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), Toast.LENGTH_SHORT).show()
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
                                 ) {

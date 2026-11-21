@@ -64,6 +64,12 @@ class MeshTransport(
                         handleIncomingConnection(clientSocket)
                     }
                 }
+            } catch (e: java.net.BindException) {
+                // NOSLOP_TOR_OWN_PORTS_V1: another app holds this port, so this node's onion forwards to it
+                // and nothing sent to this node can arrive. The listener is not retried in this process.
+                listening = false
+                isRunning = false
+                Logger.error(TAG, "Mesh listener could not bind 127.0.0.1:$listenPort (${e.message}): another app holds NoSlop's mesh port, so nothing sent to this node can arrive until it is free and NoSlop restarts")
             } catch (e: Exception) {
                 listening = false
                 isRunning = false

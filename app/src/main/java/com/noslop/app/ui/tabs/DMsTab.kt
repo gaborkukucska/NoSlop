@@ -484,7 +484,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     )
                                     showConnectWarning = false
                                     selectedDiscoverableNode = null
-                                    android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), android.widget.Toast.LENGTH_SHORT).show()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
                             ) {

@@ -3357,7 +3357,40 @@ fun toggleAggregator() {
         /** E4: "Share Permanent Identity" (see MeshSocialRepository.sendConnectionRequest). */
         shareMainIdentity: Boolean = false
     ) {
-        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity) }
+        viewModelScope.launch {
+            val result = repository.sendConnectionRequestResult(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity)
+            showConnectionRequestOutcome(handle, publicKeyB64, result, announceBurnableSend = useBurnableIdentity)
+        }
+    }
+
+    /**
+     * NOSLOP_DM_PATH_NO_SILENT_EXIT_V1: says when a connection request did not go out. The "sent via
+     * burnable identity" notice, which the unknown-node dialogs showed as soon as Connect was tapped,
+     * is shown here once the request has actually gone out.
+     */
+    private fun showConnectionRequestOutcome(
+        handle: String,
+        publicKeyB64: String,
+        result: com.noslop.app.data.ConnectionRequestResult,
+        announceBurnableSend: Boolean
+    ) {
+        val name = handle.ifBlank { publicKeyB64.take(8) }
+        val (text, length) = when (result) {
+            com.noslop.app.data.ConnectionRequestResult.SENT,
+            com.noslop.app.data.ConnectionRequestResult.ACCEPTED_THEIRS ->
+                if (announceBurnableSend) {
+                    com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity") to android.widget.Toast.LENGTH_SHORT
+                } else return
+            com.noslop.app.data.ConnectionRequestResult.NO_CREATOR_IDENTITY ->
+                com.noslop.app.util.LanguageManager.translate("Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.").replace("{handle}", name) to android.widget.Toast.LENGTH_LONG
+            com.noslop.app.data.ConnectionRequestResult.NO_PERSONAL_IDENTITY ->
+                com.noslop.app.util.LanguageManager.translate("Request not sent: this device has no identity yet.") to android.widget.Toast.LENGTH_LONG
+            com.noslop.app.data.ConnectionRequestResult.BLOCKED ->
+                com.noslop.app.util.LanguageManager.translate("Request not sent: {handle} is blocked on this device.").replace("{handle}", name) to android.widget.Toast.LENGTH_LONG
+            // acceptConnectionRequest logs the refusal; the request it would have answered is already gone.
+            com.noslop.app.data.ConnectionRequestResult.ACCEPT_REFUSED -> return
+        }
+        android.widget.Toast.makeText(getApplication(), text, length).show()
     }
 
     fun setDiscoverableEnabled(enabled: Boolean) {
@@ -3586,7 +3619,8 @@ fun toggleAggregator() {
     fun resendConnectionRequest(peer: Peer) {
         viewModelScope.launch {
             val useBurnable = repository.getAppSetting("contact_identity_${peer.publicKeyB64}") == "burnable"
-            repository.sendConnectionRequest(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnable)
+            val result = repository.sendConnectionRequestResult(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnable)
+            showConnectionRequestOutcome(peer.handle, peer.publicKeyB64, result, announceBurnableSend = false)
         }
     }
 

@@ -112,6 +112,45 @@ object TorService {
     @Volatile var startBlockedInBackground: Boolean = false
         private set
 
+    // --- NOSLOP_TOR_OWN_PORTS_V1 --- (TorPortOwnership, docs/TECHNICAL_REFERENCE.md §16.55)
+    // Something answering on SOCKS_PORT is not proof that it is our Tor: on 2026-11-17 the Play build
+    // sent everything through the GitHub build's Tor. Our daemon proves itself by answering on our
+    // private control socket or by broadcasting ON; evidence older than the current start does not count.
+    /** When the current daemon was launched. */
+    @Volatile private var daemonStartedAtMs: Long = 0L
+    /** When our own daemon last broadcast ON (tor-android sends it after its control connection and a first circuit). */
+    @Volatile private var lastOwnStatusOnAtMs: Long = 0L
+
+    private fun ownDaemonConfirmed(): Boolean = TorPortOwnership.ownDaemonConfirmed(
+        daemonStartedAtMs = daemonStartedAtMs,
+        lastControlOpenAtMs = TorControlChannel.lastOpenedAtMs,
+        lastOwnStatusOnAtMs = lastOwnStatusOnAtMs
+    )
+
+    /** Refuses the Tor on SOCKS_PORT: FAILED stops every Tor-routed request and mesh send, and the user is told. */
+    private fun refuseForeignTor(reason: String) {
+        Logger.error(
+            TAG,
+            "SECURITY: the Tor answering on $PROXY_HOST:$SOCKS_PORT is not NoSlop's own daemon ($reason). " +
+                "Refusing to use it: another app holds NoSlop's Tor port."
+        )
+        _torState.value = TorState.FAILED
+        setTorStatusMessage(
+            com.noslop.app.util.LanguageManager.translate("Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.")
+                .replace("{port}", SOCKS_PORT.toString())
+        )
+    }
+
+    /** What [waitForBootstrap] found. */
+    private enum class BootstrapOutcome {
+        /** Our daemon reached 100% and its SOCKS listener is ours (or could not be read; see the log). */
+        COMPLETE,
+        /** Not proven within the time; the caller may fall back to an end-to-end routing check. */
+        INCOMPLETE,
+        /** Our daemon answered and reports no SOCKS listener on our port: whatever answers there is not ours. */
+        FOREIGN_SOCKS
+    }
+
     /**
      * R4: hidden services added with ADD_ONION live inside one Tor process. When that process stops,
      * they are gone, so the "already active" bookkeeping must be forgotten — otherwise the restarted
@@ -132,9 +171,18 @@ object TorService {
     private val torStatusReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             val status = intent?.getStringExtra(org.torproject.jni.TorService.EXTRA_STATUS)
+            // NOSLOP_TOR_OWN_PORTS_V1: tor-android addresses its status to our package; one naming another
+            // package is not about our daemon.
+            val sender = intent?.getStringExtra(org.torproject.jni.TorService.EXTRA_SERVICE_PACKAGE_NAME)
+            val ourPackage = (appContext ?: context)?.packageName
+            if (ourPackage != null && !TorPortOwnership.isOwnStatusBroadcast(sender, ourPackage)) {
+                Logger.warn(TAG, "Ignoring a Tor status broadcast ($status) from another app: $sender")
+                return
+            }
             Logger.info(TAG, "Tor daemon status broadcast: $status")
             when (status) {
                 org.torproject.jni.TorService.STATUS_ON -> {
+                    lastOwnStatusOnAtMs = System.currentTimeMillis()
                     // --- NOSLOP_BOOTSTRAP_TRUTH_V1 ---
                     // STATUS_ON means the daemon PROCESS is up. It says nothing
                     // about circuits, and the old code's "Circuits built" was a
@@ -149,6 +197,7 @@ object TorService {
                     }
                 }
                 org.torproject.jni.TorService.STATUS_OFF -> {
+                    lastOwnStatusOnAtMs = 0L
                     forgetRegisteredHiddenServices("Tor daemon OFF")
                     if (_torState.value != TorState.STARTING) {
                         _torState.value = TorState.FAILED
@@ -266,6 +315,7 @@ object TorService {
         // A daemon being (re)started has no hidden services yet.
         forgetRegisteredHiddenServices("daemon start")
         _torState.value = TorState.STARTING
+        daemonStartedAtMs = System.currentTimeMillis() // NOSLOP_TOR_OWN_PORTS_V1
         currentPrivateKeyB64 = privateKeyB64
         currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
         
@@ -316,7 +366,9 @@ object TorService {
                 context,
                 torStatusReceiver,
                 filter,
-                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+                // NOSLOP_TOR_OWN_PORTS_V1: our daemon runs in this app, so its broadcasts come from our own
+                // uid. Exported, any app could send a fake OFF (Tor marked FAILED) or ON.
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
             )
         } catch (e: Exception) {
             Logger.warn(TAG, "Failed to register torStatusReceiver: ${e.message}")
@@ -372,8 +424,10 @@ object TorService {
                     // required actual proof. 30s was also too short for a cold
                     // Tor on mobile, which meant the timeout branch was being
                     // reached and then papered over.
-                    val bootstrapped = waitForBootstrap(timeoutSeconds = 120)
-                    if (bootstrapped) {
+                    val bootstrap = waitForBootstrap(timeoutSeconds = 120)
+                    if (bootstrap == BootstrapOutcome.FOREIGN_SOCKS) {
+                        refuseForeignTor("NoSlop's daemon reports no SOCKS listener on that port")
+                    } else if (bootstrap == BootstrapOutcome.COMPLETE) {
                         if (_torState.value != TorState.READY) {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor circuits established. Promoting state to READY.")
@@ -393,7 +447,13 @@ object TorService {
                         }
                     } else {
                         val (isTor, _) = checkTorConnection()
-                        if (isTor) {
+                        if (isTor && !ownDaemonConfirmed()) {
+                            // NOSLOP_TOR_OWN_PORTS_V1: a Tor routes, but nothing shows it is ours. A daemon that
+                            // cannot bind its SOCKS port exits before its control socket appears, so this is
+                            // exactly what another app's Tor on our port looks like. A later ON from our own
+                            // daemon still promotes (confirmBootstrapThenPromote).
+                            refuseForeignTor("a Tor routes there, but NoSlop's daemon never answered its control socket or reported ON")
+                        } else if (isTor) {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor connectivity verified. Promoting state to READY.")
                             setTorStatusMessage(null)
@@ -621,8 +681,12 @@ object TorService {
     private fun confirmBootstrapThenPromote() {
         if (bootstrapConfirmJob?.isActive == true || bootstrapJob?.isActive == true) return
         bootstrapConfirmJob = scope.launch {
-            val bootstrapped = waitForBootstrap(timeoutSeconds = 120)
-            if (bootstrapped) {
+            val bootstrap = waitForBootstrap(timeoutSeconds = 120)
+            if (bootstrap == BootstrapOutcome.FOREIGN_SOCKS) {
+                refuseForeignTor("NoSlop's daemon reports no SOCKS listener on that port")
+                return@launch
+            }
+            if (bootstrap == BootstrapOutcome.COMPLETE) {
                 if (_torState.value != TorState.READY) {
                     _torState.value = TorState.READY
                     Logger.info(TAG, "Tor bootstrap confirmed. Promoting state to READY.")
@@ -632,7 +696,9 @@ object TorService {
                 return@launch
             }
             val (isTor, _) = checkTorConnection()
-            if (isTor) {
+            if (isTor && !ownDaemonConfirmed()) {
+                refuseForeignTor("a Tor routes there, but NoSlop's daemon never answered its control socket or reported ON")
+            } else if (isTor) {
                 _torState.value = TorState.READY
                 Logger.info(TAG, "Tor routing verified end-to-end. Promoting state to READY.")
                 setTorStatusMessage(null)
@@ -653,7 +719,9 @@ object TorService {
      * actually opened, so a device log confirms the HTTP tunnel is off (expect
      * `250-net/listeners/httptunnel=` with an empty value). Best-effort only.
      */
-    private fun logProxyListeners(ch: TorControlChannel.Channel) {
+    private fun logProxyListeners(ch: TorControlChannel.Channel): List<String> {
+        // NOSLOP_TOR_OWN_PORTS_V1: the socks reply is returned so the caller can check the port is ours.
+        var socksReply: List<String> = emptyList()
         try {
             for (key in listOf("net/listeners/socks", "net/listeners/httptunnel")) {
                 ch.send("GETINFO $key")
@@ -665,10 +733,12 @@ object TorService {
                     if (l == "250 OK" || l.startsWith("5")) break
                 }
                 Logger.info(TAG, "Tor listeners", parts.joinToString(" | "))
+                if (key == "net/listeners/socks") socksReply = parts
             }
         } catch (e: Exception) {
             Logger.debug(TAG, "Listener diagnostics failed: ${e.message}")
         }
+        return socksReply
     }
 
     /**
@@ -682,7 +752,7 @@ object TorService {
      * the captured logs for exactly that reason: the real check was never
      * allowed to run. It asks now.
      */
-    private suspend fun waitForBootstrap(timeoutSeconds: Int = 120): Boolean =
+    private suspend fun waitForBootstrap(timeoutSeconds: Int = 120): BootstrapOutcome =
         withContext(Dispatchers.IO) {
             var lastLogged: String? = null
             for (attempt in 1..timeoutSeconds) {
@@ -703,8 +773,17 @@ object TorService {
                                 }
                                 if (line.contains("PROGRESS=100")) {
                                     Logger.info(TAG, "Tor bootstrap reached 100%: $line")
-                                    logProxyListeners(ch)
-                                    return@withContext true
+                                    val socksReply = logProxyListeners(ch)
+                                    // NOSLOP_TOR_OWN_PORTS_V1
+                                    when (TorPortOwnership.socksListenerOwnership(socksReply, SOCKS_PORT)) {
+                                        TorPortOwnership.Ownership.OURS ->
+                                            Logger.info(TAG, "Tor SOCKS listener $PROXY_HOST:$SOCKS_PORT is NoSlop's own daemon")
+                                        TorPortOwnership.Ownership.NOT_OURS ->
+                                            return@withContext BootstrapOutcome.FOREIGN_SOCKS
+                                        TorPortOwnership.Ownership.UNKNOWN ->
+                                            Logger.warn(TAG, "Could not read NoSlop's daemon's SOCKS listeners; ownership of port $SOCKS_PORT not confirmed")
+                                    }
+                                    return@withContext BootstrapOutcome.COMPLETE
                                 }
                             }
                         }
@@ -730,7 +809,7 @@ object TorService {
                         "Control interface never answered in ${attempt}s — abandoning bootstrap polling",
                         "falling back to an end-to-end routing check"
                     )
-                    return@withContext false
+                    return@withContext BootstrapOutcome.INCOMPLETE
                 }
 
                 delay(1000)
@@ -740,7 +819,7 @@ object TorService {
                 "Tor did not reach 100% bootstrap within ${timeoutSeconds}s. " +
                     "Last phase: ${lastBootstrapPhase ?: "control interface never answered"}"
             )
-            false
+            BootstrapOutcome.INCOMPLETE
         }
 
     /**

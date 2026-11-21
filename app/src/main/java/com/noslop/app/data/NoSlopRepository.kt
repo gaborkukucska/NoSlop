@@ -2365,7 +2365,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         useBurnableIdentity: Boolean = false,
         intro: String = ContactIntro.NETWORK,
         shareMainIdentity: Boolean = false
-    ): Boolean {
+    ): Boolean = sendConnectionRequestResult(
+        handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity
+    ).ok
+
+    /** NOSLOP_DM_PATH_NO_SILENT_EXIT_V1: [sendConnectionRequest], saying what happened ([ConnectionRequestResult]). */
+    suspend fun sendConnectionRequestResult(
+        handle: String,
+        publicKeyB64: String,
+        onionAddress: String,
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false,
+        intro: String = ContactIntro.NETWORK,
+        shareMainIdentity: Boolean = false
+    ): ConnectionRequestResult {
         if (useBurnableIdentity && getBurnableIdentity() == null) {
             val newBurnable = generateBurnableIdentity()
             val mainIdentity = getLocalIdentity()
@@ -2378,7 +2391,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 waitCount++
             }
         }
-        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity)
+        return meshSocialRepository.sendConnectionRequestResult(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity, intro, shareMainIdentity)
     }
 
     /**

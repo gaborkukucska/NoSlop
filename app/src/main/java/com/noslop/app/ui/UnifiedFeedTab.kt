@@ -106,11 +106,14 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
  * transient condition such as changing circuit, where playback continues.
  */
 @Composable
-private fun TorStatusOverlay(message: String, onRetry: () -> Unit) {
+private fun TorStatusOverlay(message: String, torFailed: Boolean, onRetry: () -> Unit) {
     // A message is blocking only while nothing can proceed. Circuit changes and
     // per-video failures are informational — the feed is still usable.
-    val isBlocking = message.startsWith("Waiting for Tor") ||
-        message.startsWith("Tor could not connect")
+    // NOSLOP_TOR_OWN_PORTS_V1: a FAILED Tor blocks whatever the message says. The checks below compare
+    // English text, and the messages arrive translated, so on other languages a failed Tor showed
+    // only a spinner banner with no Retry.
+    val canRetry = torFailed || message.startsWith("Tor could not connect")
+    val isBlocking = canRetry || message.startsWith("Waiting for Tor")
 
     if (isBlocking) {
         AlertDialog(
@@ -140,14 +143,14 @@ private fun TorStatusOverlay(message: String, onRetry: () -> Unit) {
                 }
             },
             confirmButton = {
-                if (message.startsWith("Tor could not connect")) {
+                if (canRetry) {
                     TextButton(onClick = onRetry) {
                         Text("Retry".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
                     }
                 }
             },
             dismissButton = {
-                if (message.startsWith("Tor could not connect")) {
+                if (canRetry) {
                     TextButton(onClick = {
                         com.noslop.app.net.HttpClientProvider.useTorForClearnet = false
                         com.noslop.app.util.AppScopes.io.launch {
@@ -624,6 +627,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         if (daemonState == com.noslop.app.tor.TorState.FAILED && activeTorMessage == null) {
             TorStatusOverlay(
                 message = "Tor could not connect. Please retry connecting.".tr,
+                torFailed = true,
                 onRetry = {
                     com.noslop.app.tor.TorService.setTorStatusMessage(null)
                     viewModel.startTor(forceRestart = true)
@@ -633,6 +637,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             activeTorMessage?.let { msg ->
                 TorStatusOverlay(
                     message = msg,
+                    torFailed = daemonState == com.noslop.app.tor.TorState.FAILED,
                     onRetry = {
                         com.noslop.app.tor.TorService.setTorStatusMessage(null)
                         viewModel.startTor(forceRestart = true)
