@@ -725,13 +725,9 @@ object TorService {
         try {
             for (key in listOf("net/listeners/socks", "net/listeners/httptunnel")) {
                 ch.send("GETINFO $key")
-                val parts = mutableListOf<String>()
-                // Reply is "250-key=value" then "250 OK"; bound the read.
-                while (parts.size < 4) {
-                    val l = ch.readLine() ?: break
-                    parts.add(l)
-                    if (l == "250 OK" || l.startsWith("5")) break
-                }
+                // Reply is "250-key=value" then "250 OK"; bounded, and skips the unread tail of the
+                // bootstrap-phase reply that used to shift every answer by one (TorPortOwnership.readGetInfoReply).
+                val parts = TorPortOwnership.readGetInfoReply(key) { ch.readLine() }
                 Logger.info(TAG, "Tor listeners", parts.joinToString(" | "))
                 if (key == "net/listeners/socks") socksReply = parts
             }

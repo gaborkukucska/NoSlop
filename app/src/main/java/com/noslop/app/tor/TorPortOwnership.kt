@@ -43,6 +43,35 @@ object TorPortOwnership {
         }
     }
 
+    /**
+     * Reads the reply to one `GETINFO <key>` from [nextLine]: `250-<key>=<value>` then `250 OK`, or an
+     * error line (`5xx`). Lines left over from an earlier reply that its reader did not finish are
+     * skipped until the key's own line or an error arrives: a bare `250 OK`, or a `250-`/`250 ` line for
+     * another key. waitForBootstrap reads only the first line of `status/bootstrap-phase`, so before this
+     * every listener reply was read one step late (device log of 2026-11-21: the socks query got
+     * `250 OK`, the httptunnel query got the socks listener). At most [maxLines] lines are read.
+     */
+    fun readGetInfoReply(key: String, maxLines: Int = 8, nextLine: () -> String?): List<String> {
+        val out = mutableListOf<String>()
+        var started = false
+        var read = 0
+        while (read < maxLines) {
+            val l = nextLine() ?: break
+            read++
+            val ours = l.startsWith("250-$key=") || l.startsWith("250 $key=") || l.startsWith("250+$key=")
+            if (!started) {
+                if (ours || l.startsWith("5")) {
+                    started = true
+                } else {
+                    continue // tail of an earlier reply
+                }
+            }
+            out.add(l)
+            if (l == "250 OK" || l.startsWith("5")) break
+        }
+        return out
+    }
+
     /** `"127.0.0.1:29601" "[::1]:29601"` → [(127.0.0.1, 29601), ([::1], 29601)]. Unreadable entries are skipped. */
     internal fun parseListeners(value: String): List<Pair<String, Int>> =
         value.split(' ')

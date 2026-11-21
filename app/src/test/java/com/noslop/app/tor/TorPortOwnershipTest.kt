@@ -56,6 +56,53 @@ class TorPortOwnershipTest {
         assertEquals(Ownership.OURS, own("250-net/listeners/socks=\"nonsense\" \"127.0.0.1:29601\"", "250 OK"))
     }
 
+    // ---------------------------------------------------------------- reading one GETINFO reply
+
+    private fun reader(vararg lines: String): () -> String? {
+        val it = lines.iterator()
+        return { if (it.hasNext()) it.next() else null }
+    }
+
+    @Test fun getInfoReply_skipsTheUnreadTailOfTheBootstrapReply() {
+        // The exact order on the wire in the device log of 2026-11-21.
+        val next = reader(
+            "250 OK", // tail of GETINFO status/bootstrap-phase
+            "250-net/listeners/socks=\"127.0.0.1:29613\"", "250 OK",
+            "250-net/listeners/httptunnel=", "250 OK"
+        )
+        val socks = TorPortOwnership.readGetInfoReply("net/listeners/socks", nextLine = next)
+        assertEquals(listOf("250-net/listeners/socks=\"127.0.0.1:29613\"", "250 OK"), socks)
+        assertEquals(Ownership.OURS, TorPortOwnership.socksListenerOwnership(socks, 29613))
+        val tunnel = TorPortOwnership.readGetInfoReply("net/listeners/httptunnel", nextLine = next)
+        assertEquals(listOf("250-net/listeners/httptunnel=", "250 OK"), tunnel)
+    }
+
+    @Test fun getInfoReply_skipsAnotherKeysLeftoverLines() {
+        val next = reader(
+            "250-status/bootstrap-phase=NOTICE BOOTSTRAP PROGRESS=100 TAG=done", "250 OK",
+            "250-net/listeners/socks=\"127.0.0.1:29613\"", "250 OK"
+        )
+        assertEquals(
+            listOf("250-net/listeners/socks=\"127.0.0.1:29613\"", "250 OK"),
+            TorPortOwnership.readGetInfoReply("net/listeners/socks", nextLine = next)
+        )
+    }
+
+    @Test fun getInfoReply_anErrorEndsIt() {
+        val next = reader("250 OK", "552 Unrecognized key \"net/listeners/socks\"", "250 OK")
+        val reply = TorPortOwnership.readGetInfoReply("net/listeners/socks", nextLine = next)
+        assertEquals(listOf("552 Unrecognized key \"net/listeners/socks\""), reply)
+        assertEquals(Ownership.UNKNOWN, TorPortOwnership.socksListenerOwnership(reply, 29613))
+    }
+
+    @Test fun getInfoReply_isBounded_andStopsAtTheEndOfInput() {
+        var calls = 0
+        val endless: () -> String? = { calls++; "250 OK" }
+        assertTrue(TorPortOwnership.readGetInfoReply("net/listeners/socks", maxLines = 5, nextLine = endless).isEmpty())
+        assertEquals(5, calls)
+        assertTrue(TorPortOwnership.readGetInfoReply("net/listeners/socks", nextLine = reader()).isEmpty())
+    }
+
     @Test fun ownDaemon_needsEvidenceSinceThisStart() {
         assertFalse("never started", TorPortOwnership.ownDaemonConfirmed(0L, 100L, 100L))
         assertFalse("evidence only from an earlier daemon", TorPortOwnership.ownDaemonConfirmed(1_000L, 900L, 950L))
