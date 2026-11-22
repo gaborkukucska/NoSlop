@@ -125,8 +125,10 @@ of its contacts, and the firewall, rate limits and cooldown reset trusted it.
   (replay guard). Applies to the listener and to replies read on a
   handshake connection (§3.1). A packet the app cannot sign as one of its own
   identities, and that carries no envelope, is never sent.
-- **Not checked:** packets built inside the app that never cross the socket
-  (Hub pulls, Hub web-UI DMs) — a known gap (PROJECT_STATUS.md, 2026-10-13).
+- **Not checked here:** packets built inside the app that never cross the socket
+  (Hub pulls, Hub web-UI DMs). Since 2026-11-22 the Hub checks every envelope (signature, ±1 h, replay)
+  before it stores a packet for the phone (TECHNICAL_REFERENCE §16.58), so only the Hub's own Admin AI
+  messages (sender `admin_<key>`, not a key) and web-UI DMs arrive without one.
 - Tested (unit: `EnvelopeAuthTest`, `HandshakeReplyPathTest`, `WireProtocolTest`).
 
 ---

@@ -329,6 +329,25 @@ EOF_SHIM
                     sudo "${'$'}@"
                 }
 
+                # NOSLOP_HUB_CREATOR_HOSTING_V1: hainet-core publishes the creator identity's onion through
+                # Tor's control interface (ADD_ONION, held only while the Hub runs). The service user gets
+                # Tor's group (control socket and cookie), via a systemd drop-in so no re-login is needed,
+                # and a cookie-authenticated loopback ControlPort where Tor's defaults have no control socket.
+                ensure_tor_control_access() {
+                    TOR_GROUP=${'$'}(getent group debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
+                    if getent group "${'$'}TOR_GROUP" >/dev/null 2>&1; then
+                        run_sudo usermod -aG "${'$'}TOR_GROUP" "${'$'}(id -un)" || true
+                        printf '[Service]\nSupplementaryGroups=%s\n' "${'$'}TOR_GROUP" > noslop-tor.conf
+                        run_sudo mkdir -p /etc/systemd/system/hainet-core.service.d
+                        run_sudo mv noslop-tor.conf /etc/systemd/system/hainet-core.service.d/noslop-tor.conf
+                        run_sudo systemctl daemon-reload || true
+                    fi
+                    run_sudo grep -q '^ControlPort' /etc/tor/torrc || run_sudo bash -c "echo 'ControlPort 127.0.0.1:9051' >> /etc/tor/torrc"
+                    run_sudo grep -q '^CookieAuthentication' /etc/tor/torrc || run_sudo bash -c "echo 'CookieAuthentication 1' >> /etc/tor/torrc"
+                    run_sudo grep -q '^CookieAuthFileGroupReadable' /etc/tor/torrc || run_sudo bash -c "echo 'CookieAuthFileGroupReadable 1' >> /etc/tor/torrc"
+                    echo "  Tor control access for the Hub: group ${'$'}TOR_GROUP"
+                }
+
                 setup_tor_hidden_service() {
                     cat << 'PYEOF' > gen_tor.py
 import base64, sys, os
@@ -424,6 +443,7 @@ EOF
                         run_sudo sed -i '/HiddenServicePort 8080/a HiddenServicePort 9999 127.0.0.1:9999' /etc/tor/torrc
                     fi
                     
+                    ensure_tor_control_access
                     run_sudo systemctl restart tor || true
                     run_sudo systemctl restart hainet-core.service || true
                     
@@ -469,6 +489,8 @@ EOF
                         exit ${'$'}CARGO_EXIT
                     fi
                     
+                    ensure_tor_control_access
+                    run_sudo systemctl restart tor || true
                     run_sudo systemctl restart hainet-core.service
                     
                     # Ensure full HiddenService block exists in torrc for existing deployments
@@ -707,8 +729,10 @@ EOF
                 run_sudo rm -f /var/lib/tor/state
                 run_sudo rm -f /var/lib/tor/sr-state
                 run_sudo rm -rf /var/lib/tor/diff-cache
+                ensure_tor_control_access
                 run_sudo systemctl start tor@default || true
                 run_sudo systemctl start tor || true
+                run_sudo systemctl restart hainet-core.service || true
                 
                 echo '  Tor Hidden Service configured!'
                 # --- END TOR SETUP ---

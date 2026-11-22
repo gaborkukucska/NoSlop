@@ -786,6 +786,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val hubStatus = repository.getAppSetting("hub_deployment_status")
             _hubDeploymentStatus.value = hubStatus
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+            com.noslop.app.tor.TorService.skipCreatorHiddenServiceRegistration = repository.hubHostsCreator()
 
             if (!hubStatus.isNullOrBlank()) {
                 com.noslop.app.tor.TorService.unregisterHiddenServices()
@@ -3483,6 +3484,9 @@ fun toggleAggregator() {
             
             val hasHub = status.isNotBlank()
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = hasHub
+            // NOSLOP_HUB_CREATOR_HOSTING_V1: unlinking brings the creator onion back to this phone; a new
+            // link leaves it here until the Hub reports that it holds it (ensureCreatorHostedOnHub).
+            if (!hasHub) repository.onHubUnlinked()
             
             if (hasHub) {
                 // Instantly tear down the local Tor hidden service to prevent
@@ -3845,6 +3849,8 @@ fun toggleAggregator() {
             // has opened the database, so the answer is known here.
             if (com.noslop.app.data.DbEncryption.isLocked()) return@launch
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+            // NOSLOP_HUB_CREATOR_HOSTING_V1: the creator onion stays here unless the Hub holds it.
+            com.noslop.app.tor.TorService.skipCreatorHiddenServiceRegistration = repository.hubHostsCreator()
             
             // Re-read settings directly to avoid race condition with init
             val fgEnabled = repository.getAppSetting("foreground_service_enabled") == "true"

@@ -54,76 +54,16 @@ class SyncPacketHandler(
         }
     }
 
-    private suspend fun MeshComment.toCommentSyncData(): CommentSyncData = CommentSyncData(
-        id = id,
-        postId = postId,
-        authorId = authorPublicKeyB64,
-        authorName = authorHandle,
-        authorAvatarB64 = authorAvatarB64,
-        content = content,
-        timestamp = timestamp,
-        signature = signature,
-        parentCommentId = parentCommentId,
-        mediaId = mediaId,
-        mediaType = mediaType,
-        // R2: carry the media descriptor and its signed digest so a comment with a GIF/image verifies
-        // (C17 v2 signature) and its media can be fetched after a sync.
-        mediaMetadata = mediaId?.let { mid ->
-            MediaMetadata(
-                id = mid,
-                type = mediaType ?: "image",
-                mimeType = "application/octet-stream",
-                size = 0,
-                chunkCount = 0,
-                ownerId = authorPublicKeyB64,
-                sha256 = repo.mediaDigestFor(mid)
-            )
-        }
-    )
+    // NOSLOP_HUB_CREATOR_HOSTING_V1: the mappings live in SyncPayloads.kt, shared with the Hub upload.
+    private suspend fun MeshComment.toCommentSyncData(): CommentSyncData = this.toSyncCommentData(repo)
 
     /** D10b fix 2: what a sync reply carries, for the logs. */
     private fun SyncResponsePayload.describe(): String =
         "${posts.size} posts, ${comments?.size ?: 0} comments, ${reactions?.size ?: 0} reactions"
 
-    private fun MeshReaction.toReactionSyncData(): ReactionSyncData = ReactionSyncData(
-        id = id,
-        postId = postId,
-        authorId = authorPublicKeyB64,
-        reactionType = reactionType,
-        timestamp = timestamp,
-        signature = signature
-    )
+    private fun MeshReaction.toReactionSyncData(): ReactionSyncData = this.toSyncReactionData()
 
-    private suspend fun MeshPost.toPostPayload(): PostPayload {
-        val rawMediaId = mediaUrl?.substringAfterLast("/")
-        return PostPayload(
-            id = id,
-            authorId = authorPublicKeyB64,
-            authorName = authorHandle,
-            authorPublicKey = authorPublicKeyB64,
-            authorAvatarB64 = authorAvatarB64,
-            originNode = null,
-            content = content,
-            timestamp = timestamp,
-            privacy = privacy,
-            signature = signature,
-            mediaId = rawMediaId,
-            mediaMetadata = if (rawMediaId != null) MediaMetadata(
-                id = rawMediaId,
-                type = mediaType ?: "image",
-                mimeType = "application/octet-stream",
-                size = mediaSize,
-                chunkCount = 0,
-                thumbnailB64 = thumbnailB64,
-                // R2: the signed media digest; without it a C17 v2 signature cannot be checked.
-                sha256 = repo.mediaDigestFor(rawMediaId)
-            ) else null,
-            clearnetUrl = clearnetUrl,
-            clearnetTitle = clearnetTitle,
-            clearnetThumbnailUrl = clearnetThumbnailUrl,
-            clearnetMediaType = clearnetMediaType
-        )
-    }
+    private suspend fun MeshPost.toPostPayload(): PostPayload = this.toSyncPostPayload(repo)
 
     companion object {
         /** D10b fix 2: waits before re-sending an undelivered sync reply. */

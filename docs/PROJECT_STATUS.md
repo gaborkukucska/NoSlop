@@ -101,12 +101,14 @@ This is the full list of open work on the legacy app as of 2026-11-03, with ever
 * **Audit the `runBlocking` calls.** They are in `IdentityRepository` (line ~110) and `BackupManager` (lines ~136, 290, 793, 1024). Not yet checked which thread each runs on; any that can run on the main thread should become suspend calls.
 * **Test depth where review will look first.** By file count there are 4 test files under `crypto/` against 31 under `mesh/` and 25 under `data/`, and only 2 instrumented tests. Some crypto behaviour is covered from `mesh/` and `data/`, so count assertions before adding any. Candidates: known-answer vectors for the DM AEAD and the envelope signature, negative cases for tampered or replayed packets, and backup-format round trips.
 
-**Hub** (not started: no Hub is deployed or linked, and the app comes first). Since 2026-11-11 the HUB is built in only with `NOSLOP_ENABLE_HUB=true` (§16.40 of the technical reference); everything below needs such a build.
+**Hub** (creator hosting built 2026-11-22, see the entry below; not yet tested on a device). Since 2026-11-11 the HUB is built in only with `NOSLOP_ENABLE_HUB=true` (§16.40 of the technical reference); everything below needs such a build.
 
-* **Packets pulled from a Hub skip the envelope check,** and **the Hub's onion address is not checked against its key.** See Known Gaps in the Review Round 2 summary below.
-* **Hub relaying (D04).** A linked Hub relays by its own rules.
-* **Creator discovery, community mirroring and Home HUB enhancements.** Proposed, not implemented: `docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md`.
-* **Hub sync.** Merging DMs and posts after a failover, syncing Saved and Liked, offloading media downloads to the Hub, background Hub sync through WorkManager, and a daily encrypted backup push.
+* ~~**Packets pulled from a Hub skip the envelope check,** and **the Hub's onion address is not checked against its key.**~~ Done 2026-11-22 (§16.58): the Hub checks every envelope before storing; the phone checks the Hub's onion against its key.
+* ~~**Hub relaying (D04).** A linked Hub relays by its own rules.~~ Done 2026-11-22 (§16.58): the phone chooses every destination (`hub_send`).
+* **Creator discovery, community mirroring and Home HUB enhancements.** The Hub part for creators is built (§16.59); discovery cache and community mirroring are not: `docs/NoSlop-Discovery-Mirroring-Home-HUB-Enhancement-Plan.md`.
+* **Hub sync.** Merging DMs and posts after a failover, syncing Saved and Liked, offloading media downloads to the Hub. (The daily encrypted backup push works since 2026-11-22.)
+* **Hub page status line** for creator hosting (the state is in the `HUB_SYNC` log only).
+* **iOS (`mvp/`) owner client** for the Hub (iOS followers are served by a Hub like anyone else).
 * **LAN fast path** with a self-signed Hub certificate and fingerprint pinning. Hub calls go over the `.onion` address for now.
 
 **Search**
@@ -142,6 +144,17 @@ KMP and iOS work is tracked by the `mvp/` team in `docs/migration/`.
 Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNFOLLOW`, group bans, the `Dns.SYSTEM` fallback, the SSH host-key dialog and pin reset, Room schema export and `MigrationTest`, authenticated backups, HMAC request signing, the Tor leak rules, and circuit cycling (now per-stream, §18).
 
 ---
+
+## Completed Changes (2026-11-22) — The Home HUB Hosts the Creator Identity, Owner-Signed Hub API (Hub build only)
+
+* **The request** (`isues.txt`): catch HAI-Net up with NoSlop so it is the Home HUB for the legacy Android app, first for users with creator mode and discoverability on: back up and hold their identities and serve their content. iOS where possible. Work in both repositories; HAI-Net side: new crate `hainet-noslop`, `docs/NOSLOP_HUB.md`.
+* **Owner decisions (2026-11-22).** The Hub takes over the same creator onion; it auto-accepts followers as the phone does; it serves only the creator's own public content.
+* **What was wrong.** The Hub could not talk to NoSlop ≥ 0.7 (no envelope signatures; it relayed the phone's packets unsigned to every trusted contact; nothing answered sync, media or handshakes). Linking a Hub took the creator onion off the network. The Hub's API let `sync_*`, `get_dms`, `get_mesh_peers` through without login, on the onion every contact knows. The daily backup went to a route the Hub never had. The Admin AI only read DM v1.
+* **Owner-signed Hub API** (`NOSLOP_HUB_OWNER_API_V1`, `docs/TECHNICAL_REFERENCE.md` §16.58): every request signed by the personal key; packets handed over with their destination (`hub_send`), so broadcasts and relays follow this phone's rules with a Hub linked; a durable inbox the Hub fills only with envelope-checked packets; contacts with the identity each knows; a Web UI feed mirror that sends nothing; the daily backup as a signed raw upload; the Hub's onion checked against our key. Tested (unit: `HubClientSignatureTest`, `OnionAddressUpdateTest`).
+* **The creator identity on the Hub** (`NOSLOP_HUB_CREATOR_HOSTING_V1`, §16.59): in creator mode the phone hands over the creator keys, profile, switches, public posts, their comments, reactions and media; the Hub publishes the creator onion (held by its process) and the phone withdraws its own only then, and takes it back if the Hub loses it or can't be reached for 3 rounds. The Hub accepts followers, answers their sync and media requests and announces the creator (and its discoverable card) every 60 s while the phone is away.
+* **HAI-Net side, verified there:** 27 Rust tests, 7 of them against vectors from the app's own Gson 2.10 and Bouncy Castle 1.78.1; 28/28 end-to-end checks against the real `hainet-core` binary with an independent client (owner auth and replay, creator hand-over, a follower's handshake answered on its connection, dropped unsigned and forged frames, Admin AI round trip, streamed backups, portal sessions).
+* **Not yet verified.** The Android build and its unit test run (Gradle and Maven were out of reach where this was written; nothing in the app was compiled). Anything on a device or with a live Tor daemon: the Hub publishing the creator onion through the control port, the hand-over, a follower on another phone syncing and playing media with the creator's phone off. The Play build.
+* No packet, Room schema or archive format change. The Hub API changed incompatibly (signatures required): phone and Hub must both be updated (Update Hub Software).
 
 ## Completed Changes (2026-11-21) — NoSlop Refuses a Tor That Isn't Its Own, No Silent Exits on the DM Path, One Tor Start (v0.8.2-alpha)
 

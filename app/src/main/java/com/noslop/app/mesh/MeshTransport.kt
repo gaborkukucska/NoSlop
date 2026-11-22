@@ -161,7 +161,8 @@ class MeshTransport(
         var pushedToHub = false
         val hubStatus = repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
-            pushedToHub = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(signedForHub) ?: false
+            // NOSLOP_HUB_OWNER_API_V1: the Hub delivers it to this exact onion (hub_send).
+            pushedToHub = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(onionAddress.ifBlank { null }, signedForHub) ?: false
             if (pushedToHub) {
                 com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked and reachable. Delegated packet ${packet.id} to Hub.")
                 // We no longer return early here, so we can also attempt direct Tor routing.

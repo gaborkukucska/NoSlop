@@ -3024,6 +3024,84 @@ network callback and the service start stay outside the lock. A forced restart s
 
 Tests: `TorSingleStartArchitectureTest`.
 
+### 16.58 The owner-signed Home HUB API (`NOSLOP_HUB_OWNER_API_V1`)
+
+Built 2026-11-22 (Hub build only, `NOSLOP_ENABLE_HUB=true`), together with HAI-Net's new
+`hainet-noslop` crate. Reference for the Hub side: HAI-Net `docs/NOSLOP_HUB.md`.
+
+* **Every request is signed** (`data/HubClient.kt`). Headers `X-NoSlop-Hub-Key` (personal public key),
+  `X-NoSlop-Hub-Ts`, `X-NoSlop-Hub-Nonce` (24 random bytes, Base64url) and `X-NoSlop-Hub-Sig` =
+  Ed25519 over `encodeForSigning("noslop-hub-api-v1", METHOD, PATH, ts, nonce, sha256hex(body))`. The Hub
+  refuses unsigned, stale (±5 min), replayed or foreign-key requests (401). Before, `/api/invoke` let every
+  `sync_*`, `get_dms` and `get_mesh_peers` command through without login, on the same onion as the mesh
+  port, so any contact could read the DM mirror, replace the contact list or drain the inbox.
+* **Routes** as before: the LAN address the Hub was linked at (cleartext only where the network security
+  config allows it), else the personal onion on port 8080 over Tor. Bodies are built with Gson, so a
+  relayed packet keeps its member order (org.json reorders members; the envelope digest covers Gson's
+  rendering).
+* **`hub_send`** replaces the destination-less push. `MeshTransport.sendPacket(onion, packet)` hands the
+  signed packet and the onion it is for to the Hub; the Hub signs it again at each send attempt when it
+  is from one of our identities, and passes anyone else's packet on unchanged. Consequences:
+  `GossipService.broadcast` and `forwardPacket` no longer return early with a Hub linked (the per-peer
+  rules — friends-only, groups, which identity each peer knows, hop decrement, sender re-stamp — apply as
+  without a Hub, and each copy goes through the Hub); `processIncoming` no longer pushes received packets
+  back to the Hub; `MeshSocialRepository.dispatchPacket` pushes once (through `sendPacket`). Before, the
+  Hub sent every pushed packet, unsigned, to every trusted contact, and NoSlop ≥ 0.7 dropped all of it.
+* **Inbox** (`pullHubInbox`): `hub_inbox_pull` / `hub_inbox_ack`. Every item passed the Hub's envelope
+  check (signature, ±1 h, replay), which closes the "Hub pulls skip the envelope check" gap (WIRE_PROTOCOL
+  §1.1). Items are removed only after they were processed here.
+* **Contacts** (`syncPeersWithHub`): `hub_contacts_push`, with which identity each contact knows
+  (`IdentityRouter.knowsUsAsCreator`), the relationship, and a declined request nonce.
+* **Web UI feed** (`syncPostsWithHub`): `hub_feed_push` stores the 50 most recent posts for the Hub's Web UI
+  and sends them to nobody (they used to be re-sent to every trusted contact each minute).
+* **Backup** (`HubSyncWorker`): the encrypted archive is the raw body of `POST /api/backup/push`, streamed,
+  signed over its SHA-256. The Hub keeps 5 and serves the newest at `GET /api/backup/pull`. The multipart
+  route the worker used never existed on the Hub.
+* **The Hub's onion is checked** against our key before `updateOnionAddress` (the other gap noted in §1.1's
+  status entry).
+* Admin AI DMs: the Hub opens the owner's v2 message, returns a `DM_ACK` v3 at once and the reply as v2.
+
+Tests: `HubClientSignatureTest` (the signature is pinned to the Hub's own test vector, HAI-Net
+`hainet-noslop/tests/vectors.rs`), `OnionAddressUpdateTest` (hook signature).
+
+### 16.59 The creator identity on the Home HUB (`NOSLOP_HUB_CREATOR_HOSTING_V1`)
+
+Built 2026-11-22 (Hub build only). Owner decisions: the Hub takes over the **same** creator onion; it
+auto-accepts followers as the phone does; it serves **only** the creator's own public content.
+
+* **Before:** with a Hub linked, `TorService.skipHiddenServiceRegistration` stopped the phone publishing
+  both onions, but the Hub only ever received the personal identity, so the creator onion went off the
+  network. Now the creator onion has its own switch, `skipCreatorHiddenServiceRegistration`.
+* **Hand-over** (`NoSlopRepository.ensureCreatorHostedOnHub`, each Hub sync round and after the daily
+  backup): in creator mode with a creator identity, the Hub gets the creator keys (`creator_identity_set`),
+  the resolved creator profile, fund link and the creator / discoverable switches (`creator_profile_set`),
+  the creator's public, not-deleted posts with their comments and reactions exactly as `SYNC_RESPONSE`
+  carries them (`mesh/SyncPayloads.kt`, shared with `SyncPacketHandler`; batches of 50, the last naming
+  every id so the Hub drops deleted posts), and their media (plaintext read through `MediaCrypto`, 512 KB
+  chunks, resumable, at most 64 MB per round, checked against the signed SHA-256 on the Hub). Then
+  `creator_hosting_set {enabled: true}`.
+* **One owner at a time.** The Hub publishes the creator onion with `ADD_ONION` held by its process (no
+  `Detach`). The phone withdraws its own (`TorService.setCreatorHostedByHub(true, …)`) only once `hub_status`
+  says `onion_published`, and publishes it again when creator mode is off, when the Hub reports it no longer
+  has it, after 3 rounds without reaching the Hub, or when the Hub is unlinked. State:
+  `app_settings["hub_creator_hosted"]`, read at start-up for the Tor switch.
+* **On the Hub, while hosting** (phone on or off): follower `CONNECTION_REQUEST`s are checked and
+  auto-accepted like `handleConnectionRequest` (v2, nonce, freshness, blocked, declined nonce, recently
+  deleted, 5 per sender per hour), answered with the creator's `USER_HANDSHAKE` on the requester's
+  connection; `SYNC_REQUEST` / `INVENTORY_SYNC_REQUEST` from creator contacts get the creator's posts and
+  their engagement in batches of 25; `MEDIA_REQUEST` / `MEDIA_RELAY_REQUEST` for the creator's public post
+  media are served from the Hub (16 MB per requester per 60 s; strangers only with a valid signed request);
+  comments and reactions on creator posts are kept for sync. Everything else waits in the inbox.
+* **Here:** a `creator_follower_accepted` inbox item records the follower as `acceptConnectionRequest`
+  would (ACCEPTED, temporary, bound to the creator identity), without answering again. While the Hub
+  hosts the creator, `announceCreatorPresence` sends neither the creator's `ANNOUNCE_PEER` nor
+  `ANNOUNCE_DISCOVERABLE` (the Hub does, every 60 s); the creator's name update still goes from here.
+* **Deploy:** the SSH deployer (full deploy, Update Hub Software, Reset identity) gives the Hub's service
+  user Tor's group through a systemd drop-in and adds a cookie-authenticated `ControlPort` when missing,
+  so `hainet-core` can publish the creator onion.
+* **Not covered:** discoverable without creator mode is not handed over; non-creator community mirroring
+  and the discovery cache (Enhancement Plan) are not started; no Hub page status line yet (logs: `HUB_SYNC`).
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

@@ -22,8 +22,8 @@ import org.robolectric.annotation.Config
 /**
  * NoSlopRepository.updateOnionAddress runs on every app start. It used to broadcast an untargeted
  * USER_HANDSHAKE across the mesh each time, which every receiver rejects. Real repository and Room
- * database; outgoing broadcasts are read from the Hub push hook, which GossipService.broadcast calls
- * first when a Hub is linked.
+ * database; anything sent is read from the Hub push hook (with a Hub linked, MeshTransport.sendPacket
+ * hands every packet to the Hub with its destination, NOSLOP_HUB_OWNER_API_V1).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -45,7 +45,7 @@ class OnionAddressUpdateTest {
         // This test drives the Hub push path, which only a build with the HUB has (NOSLOP_HUB_BUILD_SWITCH_V1).
         com.noslop.app.HubFeature.enabled = true
         repo.putAppSetting("hub_deployment_status", "deployed")
-        GossipService.pushPacketToHub = { packet -> pushed.add(packet); true }
+        GossipService.pushPacketToHub = { _, packet -> pushed.add(packet); true }
     }
 
     @After

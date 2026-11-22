@@ -7,6 +7,9 @@ import android.content.Context
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import com.noslop.app.mesh.MeshPacketHandler
+import com.noslop.app.mesh.toSyncCommentData
+import com.noslop.app.mesh.toSyncPostPayload
+import com.noslop.app.mesh.toSyncReactionData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -17,9 +20,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -129,7 +129,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val breakReminderIntervalMinutes: kotlinx.coroutines.flow.StateFlow<Int> = settingsRepository.breakReminderIntervalMinutes
 
     init {
-        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { onion, packet -> pushPacketToHub(onion, packet) }
         // R5: re-fetch a peer's onion descriptor when sends to it keep failing (see GossipService).
         com.noslop.app.mesh.GossipService.onionDescriptorRefresher = { onion ->
             com.noslop.app.tor.TorService.refreshOnionDescriptor(onion)
@@ -174,143 +174,89 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         meshSocialRepository.dispatchPacket(onionAddress, packet)
     }
 
-        // --- Hub API Client ---
+        // --- Hub API Client (NOSLOP_HUB_OWNER_API_V1: every call is signed, see HubClient) ---
 
-    suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    /**
+     * Hands one packet to the Home HUB for delivery to [onion] (`hub_send`), which is the destination
+     * this phone chose. The Hub signs it again at send time when it is from one of our identities. A
+     * null [onion] uses the Hub's older routing (`sync_push_packets`: the target's onion, else every
+     * trusted personal contact).
+     */
+    suspend fun pushPacketToHub(onion: String?, packet: com.noslop.app.mesh.NetworkPacket): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            val jsonStr = packet.toJson()
-            val jsonObj = org.json.JSONObject(jsonStr)
-            val arr = org.json.JSONArray().put(jsonObj)
-            val args = org.json.JSONObject().put("packets", arr)
-            val res = invokeHubApi("sync_push_packets", args)
-            if (res != null) {
-                com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
-                return@withContext true
+            val ok = if (!onion.isNullOrBlank()) {
+                HubClient.send(this@NoSlopRepository, listOf(onion to packet))
             } else {
-                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to push packet ${packet.id} to Hub (API returned null).")
-                return@withContext false
+                val args = com.google.gson.JsonObject().apply {
+                    add("packets", com.google.gson.JsonArray().apply { add(com.noslop.app.util.Json.gson.toJsonTree(packet)) })
+                }
+                HubClient.invoke(this@NoSlopRepository, "sync_push_packets", args) != null
             }
+            if (ok) {
+                com.noslop.app.debug.Logger.info("HUB_SYNC", "Handed ${packet.type} ${packet.id} to the Hub${if (onion.isNullOrBlank()) "" else " for ${onion.take(12)}"}.")
+            } else {
+                com.noslop.app.debug.Logger.warn("HUB_SYNC", "Could not hand ${packet.type} ${packet.id} to the Hub.")
+            }
+            ok
         } catch (e: Exception) {
             com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to push packet to Hub: ${e.message}")
-            return@withContext false
+            false
         }
     }
 
+    /** One signed Hub command with org.json arguments (see [HubClient.invokeRaw]). */
     suspend fun invokeHubApi(cmd: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
-        val hubStatus = getAppSetting("hub_deployment_status") ?: return@withContext null
-        val isLegacy = hubStatus == "Active (Legacy Connection)"
-        val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
-        val isPrivateLan = isPrivateLanAddress(lanIp)
-        val canCleartextLan = isPrivateLan && lanIp != null && try {
-            android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(lanIp)
-        } catch (_: Throwable) { false }
-        
-        if (canCleartextLan && lanIp != null) {
-            try {
-                val url = "http://$lanIp:8080/api/invoke"
-                val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
-                val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
-                val client = com.noslop.app.net.HttpClientProvider.rawClearnetClient.newBuilder()
-                    .connectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
-                    .build()
-                client.newCall(request).execute().use { response ->
-                    val respBody = response.body?.string() ?: "{}"
-                    if (response.isSuccessful) {
-                        return@withContext JSONObject(respBody)
-                    } else {
-                        com.noslop.app.debug.Logger.warn("HUB_API", "LAN request failed with code ${response.code} for cmd $cmd: $respBody")
-                    }
-                }
-            } catch (e: Exception) {
-                Logger.warn("HUB_API", "LAN request failed: ${e.message}. Falling back to Tor...")
-            }
-        }
-        
-        val identity = getLocalIdentity() ?: return@withContext null
-        val onionAddress = identity.onionAddress
+        if (getAppSetting("hub_deployment_status").isNullOrBlank()) return@withContext null
+        val text = HubClient.invokeRaw(this@NoSlopRepository, cmd, args.toString()) ?: return@withContext null
         try {
-            val url = "http://$onionAddress:8080/api/invoke"
-            val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
-            val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
-            com.noslop.app.net.HttpClientProvider.torClient.newCall(request).execute().use { response ->
-                val respBody = response.body?.string() ?: "{}"
-                if (response.isSuccessful) {
-                    return@withContext JSONObject(respBody)
-                } else {
-                    com.noslop.app.debug.Logger.warn("HUB_API", "Tor request failed with code ${response.code} for cmd $cmd: $respBody")
-                }
-            }
+            JSONObject(text)
         } catch (e: Exception) {
-            Logger.error("HUB_API", "Tor fallback request failed: ${e.message}")
+            Logger.warn("HUB_API", "Unreadable reply to $cmd: ${e.message}")
+            null
         }
-        return@withContext null
     }
 
-    
+    /**
+     * The phone's recent posts for the Hub's Web UI feed (`hub_feed_push`: stored on the Hub, sent to
+     * nobody). They used to go through `sync_push_packets`, which also re-sent them to every trusted
+     * contact each minute. Then the creator identity's hosting is brought up to date.
+     */
     suspend fun syncPostsWithHub() = withContext(Dispatchers.IO) {
         val posts = postDao.getPostsSince(0).take(50)
-        val packetArray = JSONArray()
-        val gson = com.noslop.app.util.Json.gson
-        posts.forEach { post ->
-            val meta = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
-                id = post.mediaUrl,
-                type = post.mediaType ?: "file",
-                mimeType = "application/octet-stream", 
-                size = 0,
-                chunkCount = 999,
-                thumbnailB64 = post.thumbnailB64
-            ) else null
-
-            val payload = com.noslop.app.mesh.PostPayload(
-                id = post.id,
-                authorId = post.authorPublicKeyB64,
-                authorName = post.authorHandle,
-                authorPublicKey = post.authorPublicKeyB64,
-                authorAvatarB64 = post.authorAvatarB64,
-                originNode = "",
-                content = post.content,
-                timestamp = post.timestamp,
-                signature = post.signature,
-                privacy = post.privacy,
-                mediaId = post.mediaUrl,
-                mediaMetadata = meta,
-                clearnetUrl = post.clearnetUrl,
-                clearnetTitle = post.clearnetTitle,
-                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
-                clearnetMediaType = post.clearnetMediaType
-            )
-            val packet = com.noslop.app.mesh.NetworkPacket(
-                id = java.util.UUID.randomUUID().toString(),
-                hops = 3,
-                senderId = post.authorPublicKeyB64,
-                type = "POST",
-                payload = gson.toJsonTree(payload),
-                signature = post.signature
-            )
-            packetArray.put(JSONObject(packet.toJson()))
+        val arr = com.google.gson.JsonArray()
+        for (post in posts) arr.add(com.noslop.app.util.Json.gson.toJsonTree(post.toSyncPostPayload(this@NoSlopRepository)))
+        if (arr.size() > 0) {
+            val res = HubClient.invoke(this@NoSlopRepository, "hub_feed_push", com.google.gson.JsonObject().apply { add("posts", arr) })
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Mirrored ${arr.size()} recent posts to the Hub's Web UI feed.")
         }
-        if (packetArray.length() > 0) {
-            val args = JSONObject().put("packets", packetArray)
-            val res = invokeHubApi("sync_push_packets", args)
-            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${packetArray.length()} local posts to Hub.")
-        }
+        ensureCreatorHostedOnHub()
     }
 
+    /**
+     * The contacts the Hub needs (`hub_contacts_push`, full list): which of our identities each knows
+     * (IdentityRouter.knowsUsAsCreator), the relationship, and a nonce the user declined, so the Hub
+     * answers a creator follower's probe the way this phone would.
+     */
     suspend fun syncPeersWithHub() = withContext(Dispatchers.IO) {
         val peers = peerDao.getAllPeersList()
-        val peerArray = JSONArray()
-        peers.forEach { peer ->
-            val obj = JSONObject()
-            obj.put("public_key", peer.publicKeyB64)
-            obj.put("is_trusted", peer.isTrusted)
-            obj.put("handle", peer.handle)
-            obj.put("onion_address", peer.onionAddress)
-            obj.put("enc_public_key", peer.encPublicKeyB64)
-            peerArray.put(obj)
+        val arr = com.google.gson.JsonArray()
+        for (peer in peers) {
+            if (peer.publicKeyB64.startsWith("admin_")) continue
+            arr.add(com.google.gson.JsonObject().apply {
+                addProperty("public_key", peer.publicKeyB64)
+                addProperty("identity", if (identityRouter.knowsUsAsCreator(peer.publicKeyB64, peer)) "creator" else "personal")
+                addProperty("relationship", peer.relationship)
+                addProperty("is_trusted", peer.isTrusted)
+                addProperty("is_temporary", peer.isTemporary)
+                addProperty("handle", peer.handle)
+                addProperty("onion_address", peer.onionAddress)
+                addProperty("enc_public_key", peer.encPublicKeyB64)
+                appSettingDao.getSetting("declined_request_${peer.publicKeyB64}")?.let { addProperty("declined_nonce", it) }
+            })
         }
-        val args = JSONObject().put("peers", peerArray)
-        val res = invokeHubApi("sync_push_peers", args)
-        if (res != null) Logger.info("HUB_SYNC", "Pushed ${peers.size} contacts to Hub Firewall.")
+        val args = com.google.gson.JsonObject().apply { add("contacts", arr); addProperty("full", true) }
+        val res = HubClient.invoke(this@NoSlopRepository, "hub_contacts_push", args)
+        if (res != null) Logger.info("HUB_SYNC", "Pushed ${arr.size()} contacts to the Hub.")
     }
 
         suspend fun syncDmsWithHub() = withContext(Dispatchers.IO) {
@@ -514,6 +460,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val myKeys = getLocalIdentity()
                 if (pubKey.isNotBlank() && pubKey != myKeys?.publicKeyB64 && peerDao.getPeerByPublicKey(pubKey) == null) {
                     val encPubKey = peerObj.optString("enc_public_key").takeIf { it.isNotBlank() } ?: ""
+                    // NOSLOP_HUB_OWNER_API_V1: the Hub now reports the relationship and which of our
+                    // identities the contact knows; older Hubs only the "trusted" flag.
+                    val reported = peerObj.optString("relationship")
+                    val knownStates = setOf(PeerRelationship.NONE, PeerRelationship.OUTGOING_PENDING, PeerRelationship.INCOMING_PENDING, PeerRelationship.ACCEPTED, PeerRelationship.BLOCKED)
+                    val knowsCreator = peerObj.optString("identity") == "creator"
                     peerDao.insertPeer(com.noslop.app.data.Peer(
                         publicKeyB64 = pubKey,
                         handle = peerObj.optString("handle"),
@@ -522,9 +473,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         encPublicKeyB64 = encPubKey,
                         // D01 (explicit decision): the Hub is the user's own mirror of this device's
                         // contact list, so its "trusted" flag restores an ACCEPTED relationship.
-                        relationship = if (peerObj.optBoolean("is_trusted", false)) PeerRelationship.ACCEPTED else PeerRelationship.NONE,
+                        relationship = if (reported in knownStates) reported else if (peerObj.optBoolean("is_trusted", false)) PeerRelationship.ACCEPTED else PeerRelationship.NONE,
+                        isTemporary = peerObj.optBoolean("is_temporary", false) || knowsCreator,
                         lastSeenAt = System.currentTimeMillis()
                     ))
+                    if (knowsCreator) appSettingDao.insertSetting(AppSetting("contact_identity_$pubKey", "burnable"))
                 }
             }
         }
@@ -636,7 +589,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                                 type = "MESSAGE",
                                 payload = payloadJson
                             )
-                            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+                            // NOSLOP_HUB_OWNER_API_V1: sent through the Hub to the peer's onion.
+                            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(peer?.onionAddress?.takeIf { it.isNotBlank() } ?: com.noslop.app.crypto.CryptoService.onionOf(peerPub), packet)
                         } else {
                             // If we received this DM from a peer, we must process it locally to update the UI
                             val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
@@ -671,7 +625,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val hubOnion = resInfo.getString("onion_address")
                 if (hubOnion.isNotBlank() && hubOnion.endsWith(".onion")) {
                     val myKeys = getLocalIdentity()
-                    if (myKeys != null && myKeys.onionAddress != hubOnion) {
+                    // NOSLOP_HUB_OWNER_API_V1: only the onion our own key gives (the Hub holds the same identity).
+                    if (myKeys != null && !CryptoService.isOnionOf(myKeys.publicKeyB64, hubOnion)) {
+                        com.noslop.app.debug.Logger.warn("HUB_SYNC", "The Hub reported an onion address that is not our key's; ignored")
+                    } else if (myKeys != null && myKeys.onionAddress != hubOnion) {
                         com.noslop.app.debug.Logger.info("HUB_SYNC", "Healing asymmetric routing: Updating local onion from ${myKeys.onionAddress} to Hub's true onion $hubOnion")
                         updateOnionAddress(hubOnion)
                     }
@@ -684,23 +641,248 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         syncPullHistoricalDataFromHub()
         syncPullIncrementalDMsFromHub()
         
-        val res = invokeHubApi("sync_pull_packets", JSONObject())
-        if (res != null && res.has("packets")) {
-            val packetsArray = res.optJSONArray("packets")
-            if (packetsArray != null && packetsArray.length() > 0) {
-                Logger.info("HUB_SYNC", "Pulled ${packetsArray.length()} valid mesh packets from Hub")
-                val gson = com.noslop.app.util.Json.gson
-                for (i in 0 until packetsArray.length()) {
-                    try {
-                        val packetJson = packetsArray.getJSONObject(i).toString()
-                        val packet = gson.fromJson(packetJson, com.noslop.app.mesh.NetworkPacket::class.java)
-                        handleIncomingPacket(packet)
-                    } catch (e: Exception) {
-                        Logger.error("HUB_SYNC", "Failed to parse synced packet: ${e.message}")
+        pullHubInbox()
+    }
+
+    /**
+     * NOSLOP_HUB_OWNER_API_V1: the Hub's durable inbox. Every packet in it passed the Hub's envelope
+     * check (signature, freshness, replay). Items are removed (`hub_inbox_ack`) only after this phone
+     * processed them, so a lost reply or a crash loses nothing; a repeat is dropped by the usual
+     * duplicate checks. Up to 10 pages of 200 per round.
+     */
+    private suspend fun pullHubInbox() = withContext(Dispatchers.IO) {
+        val gson = com.noslop.app.util.Json.gson
+        for (page in 0 until 10) {
+            val args = com.google.gson.JsonObject().apply { addProperty("after", 0); addProperty("limit", 200) }
+            val res = HubClient.invoke(this@NoSlopRepository, "hub_inbox_pull", args) ?: return@withContext
+            val items = res.get("items")?.takeIf { it.isJsonArray }?.asJsonArray ?: return@withContext
+            if (items.size() == 0) return@withContext
+            var last = 0L
+            for (el in items) {
+                val item = el.asJsonObject
+                last = maxOf(last, item.get("seq")?.asLong ?: 0L)
+                try {
+                    val packet = gson.fromJson(item.get("packet").asString, com.noslop.app.mesh.NetworkPacket::class.java)
+                    when (item.get("kind")?.asString) {
+                        "creator_follower_accepted" -> recordHubAcceptedFollower(packet)
+                        else -> handleIncomingPacket(packet)
                     }
+                } catch (e: Exception) {
+                    Logger.error("HUB_SYNC", "Failed to process a Hub inbox item: ${e.message}")
                 }
             }
+            Logger.info("HUB_SYNC", "Processed ${items.size()} item(s) from the Hub inbox")
+            val acked = HubClient.invoke(this@NoSlopRepository, "hub_inbox_ack", com.google.gson.JsonObject().apply { addProperty("up_to", last) })
+            if (acked == null || res.get("more")?.asBoolean != true) return@withContext
         }
+    }
+
+    /**
+     * NOSLOP_HUB_CREATOR_HOSTING_V1: the Hub accepted a follower of our creator identity while it
+     * hosted it (the same auto-accept HandshakePacketHandler applies, and the Hub already answered with
+     * the creator's USER_HANDSHAKE). Record the follower exactly as acceptConnectionRequest would,
+     * without answering again.
+     */
+    private suspend fun recordHubAcceptedFollower(packet: com.noslop.app.mesh.NetworkPacket) {
+        val req = packet.getConnectionRequestPayload() ?: return
+        val burnable = getBurnableIdentity() ?: return
+        if ((req.targetUserId ?: packet.targetUserId) != burnable.publicKeyB64) return
+        val existing = peerDao.getPeerByPublicKey(req.fromUserId)
+        if (existing?.relationship == PeerRelationship.BLOCKED) return
+        val pubBytes = try { android.util.Base64.decode(req.fromUserId, android.util.Base64.DEFAULT) } catch (_: Exception) { return }
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
+        val handle = CryptoService.stripIdentityTag(req.fromUsername.ifBlank { existing?.handle ?: "Unknown" }, pubBytes)
+        val base = existing ?: Peer(publicKeyB64 = req.fromUserId, handle = handle, tripcode = tripcode, onionAddress = req.fromHomeNode)
+        peerDao.insertPeer(base.copy(
+            handle = handle,
+            tripcode = tripcode,
+            onionAddress = req.fromHomeNode.ifBlank { base.onionAddress },
+            encPublicKeyB64 = req.fromEncryptionPublicKey?.takeIf { it.isNotBlank() } ?: base.encPublicKeyB64,
+            relationship = PeerRelationship.ACCEPTED,
+            isTemporary = true,
+            pendingNonce = null,
+            authorAvatarB64 = req.authorAvatarB64 ?: base.authorAvatarB64,
+            bio = req.bio ?: base.bio,
+            lastSeenAt = System.currentTimeMillis()
+        ))
+        appSettingDao.insertSetting(AppSetting("contact_identity_${req.fromUserId}", "burnable"))
+        appSettingDao.removeSetting("requested_identity_${req.fromUserId}")
+        appSettingDao.removeSetting("declined_request_${req.fromUserId}")
+        com.noslop.app.mesh.DmPacketHandler.markDmV2Seen(db, req.fromUserId)
+        Logger.info("HUB_SYNC", "The Hub accepted follower ${handle} for the creator identity; recorded here")
+    }
+
+    @Volatile private var lastCreatorContentSync = 0L
+    @Volatile private var hubUnreachableRounds = 0
+
+    /**
+     * NOSLOP_HUB_CREATOR_HOSTING_V1 — the creator identity on the Home HUB (Hub build only).
+     *
+     * In creator mode, with a creator identity: the Hub gets the creator keys (owner-signed API, never
+     * anywhere else), the creator profile and switches, the creator's public posts with their comments
+     * and reactions, and their media; then it takes over the creator onion. The phone withdraws its own
+     * creator onion only once the Hub reports it published (one owner at a time), and publishes it again
+     * when creator mode is off, when the Hub has lost it, or after 3 rounds without reaching the Hub.
+     */
+    suspend fun ensureCreatorHostedOnHub() = withContext(Dispatchers.IO) {
+        if (!HubFeature.enabled || getAppSetting(HubFeature.STATUS_KEY).isNullOrBlank()) return@withContext
+        val burnable = getBurnableIdentity()
+        val creatorMode = appSettingDao.getSetting("is_creator_enabled") == "true"
+        val hostedByHub = appSettingDao.getSetting(HUB_CREATOR_HOSTED_KEY) == "true"
+        val status = HubClient.invoke(this@NoSlopRepository, "hub_status")
+        if (status == null) {
+            if (hostedByHub && ++hubUnreachableRounds >= 3) {
+                Logger.warn("HUB_SYNC", "Hub unreachable for 3 rounds: publishing the creator onion from this phone again")
+                setHubCreatorHosted(false, burnable)
+            }
+            return@withContext
+        }
+        hubUnreachableRounds = 0
+        val hubCreator = status.get("creator")?.takeIf { it.isJsonObject }?.asJsonObject
+        if (burnable == null || !creatorMode) {
+            if (status.get("creator_hosting")?.asBoolean == true) {
+                HubClient.invoke(this@NoSlopRepository, "creator_hosting_set", com.google.gson.JsonObject().apply { addProperty("enabled", false) })
+            }
+            if (hostedByHub) setHubCreatorHosted(false, burnable)
+            return@withContext
+        }
+        if (hubCreator?.get("public_key")?.asString != burnable.publicKeyB64) {
+            val keys = com.google.gson.JsonObject().apply {
+                addProperty("public_key", burnable.publicKeyB64)
+                addProperty("private_key", burnable.privateKeyB64)
+                addProperty("enc_public_key", burnable.encPublicKeyB64)
+                addProperty("enc_private_key", burnable.encPrivateKeyB64)
+                addProperty("display_name", burnable.displayName)
+                addProperty("replace", true)
+            }
+            if (HubClient.invoke(this@NoSlopRepository, "creator_identity_set", keys) == null) {
+                Logger.warn("HUB_SYNC", "The Hub did not take the creator identity; the creator onion stays on this phone")
+                return@withContext
+            }
+            lastCreatorContentSync = 0L
+            Logger.info("HUB_SYNC", "Creator identity handed to the Hub")
+        }
+        val routed = identityRouter.creator() ?: return@withContext
+        val profile = com.google.gson.JsonObject().apply {
+            addProperty("display_name", burnable.displayName)
+            addProperty("handle", routed.handle)
+            routed.bio?.let { addProperty("bio", it) }
+            routed.avatarB64?.let { addProperty("avatar_b64", it) }
+            appSettingDao.getSetting("creator_fundme_link")?.takeIf { it.isNotBlank() }?.let { addProperty("fund_me_link", it) }
+            addProperty("is_creator", true)
+            addProperty("is_discoverable", appSettingDao.getSetting("is_discoverable_enabled") == "true")
+        }
+        HubClient.invoke(this@NoSlopRepository, "creator_profile_set", profile) ?: return@withContext
+        val now = System.currentTimeMillis()
+        if (now - lastCreatorContentSync > 5 * 60_000L) {
+            if (syncCreatorContentToHub(burnable)) lastCreatorContentSync = now
+        }
+        val current = if (status.get("creator_hosting")?.asBoolean == true) status else
+            HubClient.invoke(this@NoSlopRepository, "creator_hosting_set", com.google.gson.JsonObject().apply { addProperty("enabled", true) }) ?: return@withContext
+        val creatorState = current.get("creator")?.takeIf { it.isJsonObject }?.asJsonObject
+        val published = creatorState?.get("onion_published")?.asBoolean == true
+        if (published && !hostedByHub) setHubCreatorHosted(true, burnable)
+        if (!published) {
+            if (hostedByHub) setHubCreatorHosted(false, burnable)
+            val err = creatorState?.get("onion_error")?.takeIf { !it.isJsonNull }?.asString
+            Logger.info("HUB_SYNC", "The Hub has not published the creator onion yet${err?.let { " ($it)" } ?: ""}; it stays on this phone for now")
+        }
+    }
+
+    /**
+     * NOSLOP_HUB_CREATOR_HOSTING_V1: whether the linked Hub currently publishes the creator onion (read
+     * at start-up for TorService.skipCreatorHiddenServiceRegistration). Always false without a Hub.
+     */
+    suspend fun hubHostsCreator(): Boolean =
+        HubFeature.enabled && !getAppSetting(HubFeature.STATUS_KEY).isNullOrBlank() &&
+            appSettingDao.getSetting(HUB_CREATOR_HOSTED_KEY) == "true"
+
+    /** The Hub link was removed: the creator onion comes back to this phone. */
+    suspend fun onHubUnlinked() {
+        if (appSettingDao.getSetting(HUB_CREATOR_HOSTED_KEY) == "true") setHubCreatorHosted(false, getBurnableIdentity())
+    }
+
+    private suspend fun setHubCreatorHosted(hosted: Boolean, burnable: CryptoService.IdentityKeys?) {
+        appSettingDao.insertSetting(AppSetting(HUB_CREATOR_HOSTED_KEY, hosted.toString()))
+        com.noslop.app.tor.TorService.setCreatorHostedByHub(hosted, burnable?.privateKeyB64)
+        Logger.info("HUB_SYNC", if (hosted) "The Home HUB now hosts the creator identity" else "The creator identity is hosted on this phone")
+    }
+
+    /**
+     * The creator's public posts (not deleted), and the comments and reactions on them, exactly as a
+     * SYNC_RESPONSE from this phone carries them (SyncPayloads.kt), in batches; the last call names
+     * every post id, so the Hub drops posts deleted here. Then the media the Hub still needs.
+     */
+    private suspend fun syncCreatorContentToHub(burnable: CryptoService.IdentityKeys): Boolean {
+        val gson = com.noslop.app.util.Json.gson
+        val posts = postDao.getPostsSince(0).filter { it.authorPublicKeyB64 == burnable.publicKeyB64 && it.privacy == "public" && !it.isOrphaned }
+        val ids = posts.map { it.id }.toSet()
+        val comments = commentDao.getCommentsSince(0).filter { it.postId in ids }
+        val reactions = reactionDao.getReactionsSince(0).filter { it.postId in ids }
+        var mediaNeeded: com.google.gson.JsonArray? = null
+        val postBatches = posts.chunked(50).ifEmpty { listOf(emptyList()) }
+        for ((i, batch) in postBatches.withIndex()) {
+            val last = i == postBatches.size - 1
+            val args = com.google.gson.JsonObject().apply {
+                add("posts", com.google.gson.JsonArray().apply { batch.forEach { add(gson.toJsonTree(it.toSyncPostPayload(this@NoSlopRepository))) } })
+                if (last) {
+                    add("comments", com.google.gson.JsonArray().apply { comments.forEach { add(gson.toJsonTree(it.toSyncCommentData(this@NoSlopRepository))) } })
+                    add("reactions", com.google.gson.JsonArray().apply { reactions.forEach { add(gson.toJsonTree(it.toSyncReactionData())) } })
+                    add("keep_ids", com.google.gson.JsonArray().apply { ids.forEach { add(it) } })
+                    addProperty("full", true)
+                }
+            }
+            val res = HubClient.invoke(this@NoSlopRepository, "creator_content_sync", args, longTransfer = true) ?: return false
+            res.get("rejected")?.takeIf { it.isJsonArray }?.asJsonArray?.takeIf { it.size() > 0 }?.let { Logger.warn("HUB_SYNC", "The Hub refused ${it.size()} creator item(s): $it") }
+            if (last) mediaNeeded = res.get("media_needed")?.takeIf { it.isJsonArray }?.asJsonArray
+        }
+        Logger.info("HUB_SYNC", "Creator content on the Hub: ${posts.size} posts, ${comments.size} comments, ${reactions.size} reactions")
+        var budget = 64L * 1024 * 1024 // per round, so a large upload doesn't hold up the sync loop
+        for (el in mediaNeeded ?: com.google.gson.JsonArray()) {
+            if (budget <= 0) break
+            val item = el.asJsonObject
+            val mediaId = item.get("media_id")?.asString ?: continue
+            val post = posts.firstOrNull { it.mediaUrl?.substringAfterLast("/") == mediaId }
+            budget -= uploadCreatorMedia(mediaId, item.get("sha256")?.takeIf { !it.isJsonNull }?.asString, item.get("received")?.asLong ?: 0L, post?.mediaType, budget)
+        }
+        return true
+    }
+
+    /** Uploads one creator media file (plaintext, from MediaCrypto) from [startAt]; returns bytes sent. */
+    private suspend fun uploadCreatorMedia(mediaId: String, sha256: String?, startAt: Long, mediaType: String?, budget: Long): Long {
+        val file = com.noslop.app.mesh.MediaManager.getLocalFile(mediaId) ?: run {
+            Logger.warn("HUB_SYNC", "Creator media $mediaId is not on this phone; the Hub can't serve it")
+            return 0L
+        }
+        val digest = sha256 ?: mediaDigestFor(mediaId) ?: return 0L
+        val size = com.noslop.app.mesh.MediaCrypto.contentLength(file)
+        val key = com.noslop.app.mesh.MediaVault.key()
+        var offset = startAt
+        var sent = 0L
+        while (offset < size && sent < budget) {
+            val len = minOf(512L * 1024, size - offset).toInt()
+            val buf = ByteArray(len)
+            val read = com.noslop.app.mesh.MediaCrypto.readAt(file, key, offset, buf)
+            if (read != len) { Logger.warn("HUB_SYNC", "Could not read creator media $mediaId at $offset"); return sent }
+            val args = com.google.gson.JsonObject().apply {
+                addProperty("media_id", mediaId)
+                addProperty("type", mediaType ?: "file")
+                addProperty("mime_type", "application/octet-stream")
+                addProperty("size", size)
+                addProperty("sha256", digest)
+                addProperty("offset", offset)
+                addProperty("data", android.util.Base64.encodeToString(buf, android.util.Base64.NO_WRAP))
+            }
+            val res = HubClient.invoke(this@NoSlopRepository, "creator_media_put", args, longTransfer = true) ?: return sent
+            val received = res.get("received")?.asLong ?: return sent
+            if (res.get("status")?.asString == "ok") sent += len
+            offset = received
+            if (res.get("complete")?.asBoolean == true) {
+                Logger.info("HUB_SYNC", "Creator media $mediaId is on the Hub ($size bytes)")
+                break
+            }
+        }
+        return sent
     }
 
     suspend fun isLocalUser(pubKey: String): Boolean {
@@ -1752,7 +1934,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) },
             checkIsLocalUser = { pub -> isLocalUser(pub) }
         )
-        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { onion, packet -> pushPacketToHub(onion, packet) }
         com.noslop.app.mesh.MediaManager.initialize(this)
         startPresenceHeartbeat()
         
@@ -2012,6 +2194,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     companion object {
+        /**
+         * NOSLOP_HUB_CREATOR_HOSTING_V1: "true" while the linked Home HUB publishes the creator onion and
+         * does the creator identity's duties (set by ensureCreatorHostedOnHub).
+         */
+        const val HUB_CREATOR_HOSTED_KEY = "hub_creator_hosted"
+
         /**
          * R3: the identity this device is known by in a group, for anything it signs as a (non-admin)
          * member: the burnable identity when that is the member key, else the main one. Before the

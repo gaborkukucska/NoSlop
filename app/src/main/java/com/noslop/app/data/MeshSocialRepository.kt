@@ -533,15 +533,12 @@ class MeshSocialRepository(
 
     fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
         repositoryScope.launch {
-            val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
-            val hasHub = !hubStatus.isNullOrBlank()
-
-            if (hasHub) {
-                com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
-            }
-
+            // NOSLOP_HUB_OWNER_API_V1: with a Home HUB linked, MeshTransport.sendPacket hands the packet to
+            // the Hub for this onion (and still tries directly). It used to be pushed to the Hub here as well,
+            // without a destination, so the Hub sent it to every trusted contact.
+            // The rest is what a phone without a Hub has always done.
             val isDirected = !packet.targetUserId.isNullOrBlank()
-            if (isDirected || !hasHub) {
+            run {
                 if (onionAddress.isNotBlank()) {
                     val msgId = packet.getMessagePayload()?.id ?: packet.id ?: ""
                     packetLastAttemptTime[msgId] = System.currentTimeMillis()
@@ -592,8 +589,6 @@ class MeshSocialRepository(
                     )
                     com.noslop.app.mesh.GossipService.broadcast(gossipDm)
                 }
-            } else {
-                Logger.info(TAG, "Hub is linked. Delegating broadcast packet ${packet.id} to Hub.")
             }
         }
     }
@@ -628,9 +623,15 @@ class MeshSocialRepository(
         val creator = identityRouter.creator() ?: return
         val keys = creator.keys
         val timestamp = System.currentTimeMillis()
+        // NOSLOP_HUB_CREATOR_HOSTING_V1: while the Home HUB hosts the creator identity it sends the
+        // creator's ANNOUNCE_PEER and ANNOUNCE_DISCOVERABLE itself (every 60 s, phone on or off), so the
+        // phone sends neither. The name update below still goes from here (the Hub doesn't send it).
+        val hubHostsCreator = com.noslop.app.HubFeature.enabled &&
+            db.appSettingDao().getSetting(NoSlopRepository.HUB_CREATOR_HOSTED_KEY) == "true" &&
+            !meshTransport.repository.getAppSetting(com.noslop.app.HubFeature.STATUS_KEY).isNullOrBlank()
         // S2 (E2): the v2 announce signature covers the onion address.
         val announceSig = CryptoService.sign(CryptoService.canonicalAnnouncePeerV2(keys.publicKeyB64, keys.onionAddress, timestamp), keys.privateKeyB64)
-        com.noslop.app.mesh.GossipService.broadcast(
+        if (!hubHostsCreator) com.noslop.app.mesh.GossipService.broadcast(
             com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 3,
@@ -661,6 +662,7 @@ class MeshSocialRepository(
             }
         }
 
+        if (hubHostsCreator) return
         if (db.appSettingDao().getSetting("is_discoverable_enabled") != "true") return
         val creatorAddress = keys.onionAddress.takeIf { it.isNotBlank() } ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress ?: return
         val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"

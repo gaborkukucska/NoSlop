@@ -500,6 +500,40 @@ object TorService {
 
     var skipHiddenServiceRegistration: Boolean = false
 
+    /**
+     * NOSLOP_HUB_CREATOR_HOSTING_V1 — the creator (burnable) onion is published by the linked Home HUB.
+     * Separate from [skipHiddenServiceRegistration] (the personal onion, which a linked Hub always
+     * publishes): the phone keeps publishing the creator onion until the Hub reports that it holds it,
+     * and takes it back when the Hub gives it up ([setCreatorHostedByHub]). Before this switch, linking
+     * a Hub took the creator onion off the network, because the Hub never received the creator identity.
+     */
+    @Volatile
+    var skipCreatorHiddenServiceRegistration: Boolean = false
+
+    /**
+     * NOSLOP_HUB_CREATOR_HOSTING_V1 — hands the creator onion to the Hub ([hosted] = true: withdrawn
+     * here) or takes it back ([hosted] = false: published here again with [burnablePrivateKeyB64]).
+     */
+    fun setCreatorHostedByHub(hosted: Boolean, burnablePrivateKeyB64: String?) {
+        skipCreatorHiddenServiceRegistration = hosted
+        scope.launch {
+            if (hosted) {
+                val serviceId = activeBurnableServiceId
+                if (serviceId != null) {
+                    Logger.info(TAG, "Creator onion is now published by the Home HUB; withdrawing it here.")
+                    unregisterHiddenService(serviceId)
+                    activeBurnableServiceId = null
+                }
+            } else if (burnablePrivateKeyB64 != null) {
+                currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
+                if (_torState.value == TorState.READY) {
+                    Logger.info(TAG, "Creator onion is published here again (the Home HUB no longer holds it).")
+                    triggerRegistration()
+                }
+            }
+        }
+    }
+
     private fun triggerRegistration() {
         scope.launch {
             if (skipHiddenServiceRegistration) {
@@ -532,7 +566,9 @@ object TorService {
                 }
             }
             
-            if (currentBurnablePrivateKeyB64 != null) {
+            if (skipCreatorHiddenServiceRegistration) {
+                Logger.info(TAG, "Skipping creator hidden service registration: the Home HUB publishes the creator onion.")
+            } else if (currentBurnablePrivateKeyB64 != null) {
                 val pubBytes = com.noslop.app.crypto.CryptoService.getPublicKeyFromPrivateKey(currentBurnablePrivateKeyB64!!)
                 val expectedBurnableId = com.noslop.app.crypto.CryptoService.deriveOnionAddress(pubBytes).removeSuffix(".onion")
                 if (activeBurnableServiceId != expectedBurnableId) {
@@ -596,7 +632,8 @@ object TorService {
                 unregisterHiddenService(activeMainServiceId!!)
                 activeMainServiceId = null
             }
-            if (activeBurnableServiceId != null) {
+            // NOSLOP_HUB_CREATOR_HOSTING_V1: the creator onion stays until the Hub holds it.
+            if (skipCreatorHiddenServiceRegistration && activeBurnableServiceId != null) {
                 unregisterHiddenService(activeBurnableServiceId!!)
                 activeBurnableServiceId = null
             }

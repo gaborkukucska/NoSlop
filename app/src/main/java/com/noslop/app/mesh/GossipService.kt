@@ -340,7 +340,12 @@ object GossipService {
     @Volatile private var localPublicKeyB64: String = ""
     @Volatile private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
     @Volatile private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
-    @Volatile var pushPacketToHub: (suspend (NetworkPacket) -> Boolean)? = null
+    /**
+     * NOSLOP_HUB_OWNER_API_V1: hands one packet to the linked Home HUB for delivery to the given onion
+     * (`hub_send`). The destination is the one this phone chose with its own routing rules; a null
+     * destination falls back to the Hub's older routing (`sync_push_packets`).
+     */
+    @Volatile var pushPacketToHub: (suspend (String?, NetworkPacket) -> Boolean)? = null
     private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
         Logger.error(TAG, "Uncaught coroutine exception in GossipService: ${throwable.message}", throwable.stackTraceToString())
     }
@@ -380,7 +385,6 @@ object GossipService {
         }
     }
 
-    /** Only push to Hub if the user actually has one configured */
     /**
      * --- NOSLOP_GROUP_SYNC_DIRECT_V1 ---
      * These packets hold a group's record in plain text: member keys, handles and onion addresses. Only
@@ -392,13 +396,6 @@ object GossipService {
     internal fun isDirectOnly(type: String): Boolean =
         type == "GROUP_SYNC" || type == "GROUP_INVITE" || type == "GROUP_UPDATE"
 
-    private suspend fun pushToHubIfLinked(packet: NetworkPacket) {
-        if (isDirectOnly(packet.type)) return
-        val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
-        if (!hubStatus.isNullOrBlank()) {
-            pushPacketToHub?.invoke(packet)
-        }
-    }
 
 
     private fun cleanupRateLimitsAndFirewall() {
@@ -848,18 +845,15 @@ object GossipService {
             if (!isForUs && !isGroupPacketForUs) {
                 // Directed at someone else, just forward it if hops > 1
                 Logger.info(TAG, "Directed ${packet.type} packet ${packetId} is not for us (target=${packet.targetUserId?.take(20)}...) — forwarding")
-                pushToHubIfLinked(packet)
                 forwardPacket(packet, postContext.isFriendsOnly)
                 return false
             } else if (!isForUs && isGroupPacketForUs) {
                 // Group reaction or delete targeting a local group: forward and also process locally!
                 Logger.info(TAG, "Group ${packet.type} packet $packetId for local group — forwarding and processing locally")
-                pushToHubIfLinked(packet)
                 forwardPacket(packet, postContext.isFriendsOnly)
             }
         } else {
             // Public message/post, process locally AND forward to other peers
-            pushToHubIfLinked(packet)
             
             var shouldForward = true
             if (postContext.isFriendsOnly) {
@@ -925,12 +919,11 @@ object GossipService {
         val tx = transport ?: return
         val dao = peerDao ?: return
         
-        // Hub handles gossip relaying for all packets when active.
-        // We used to handle directed DMs locally, but the Hub is now the dedicated
-        // outbound Tor proxy for the node.
-        val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
-        if (!hubStatus.isNullOrBlank()) return
-        
+        // NOSLOP_HUB_OWNER_API_V1: with a Home HUB linked, relaying follows the same rules as without one;
+        // each copy goes through MeshTransport.sendPacket, which hands it to the Hub with its destination.
+        // (The Hub used to be given the packet unchanged and re-broadcast it to every trusted contact,
+        // without the hop decrement and sender re-stamp below.)
+
         if (isFriendsOnly) {
             return
         }
@@ -1065,16 +1058,11 @@ object GossipService {
         }
         val tx = transport ?: return
         
-        val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
-        if (!hubStatus.isNullOrBlank()) {
-            val pushed = pushPacketToHub?.invoke(packet) ?: false
-            if (pushed) {
-                Logger.info(TAG, "Hub is linked and reachable. Delegated broadcast of packet ${packet.id} to Hub.")
-                return
-            }
-            Logger.warn(TAG, "Hub is linked but push failed/unreachable. Falling back to direct Tor broadcast for packet ${packet.id}")
-        }
-        
+        // NOSLOP_HUB_OWNER_API_V1: with a Home HUB linked, the broadcast is still worked out here, peer by
+        // peer (friends-only, groups, which identity each peer knows); MeshTransport.sendPacket hands every
+        // copy to the Hub with its destination. The Hub used to receive one copy and send it, unchanged,
+        // to every trusted contact, which ignored those rules.
+
         val dao = peerDao ?: return
         val isGroupPacket = packet.type.startsWith("GROUP_") || packet.type == "CHAT_REACTION" || packet.type == "DELETE_MESSAGE" || (packet.type == "MESSAGE" && packet.getMessagePayload()?.groupId != null)
         val groupMemberPubs = if (isGroupPacket) {

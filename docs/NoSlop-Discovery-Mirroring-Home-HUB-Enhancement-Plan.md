@@ -1,6 +1,11 @@
 # NoSlop: creator discovery, community mirroring, and Home HUB enhancement plan
 
-Status: development handoff / proposed design, not implemented
+Status: development handoff / proposed design. **Partly implemented 2026-11-22:** Phase 0H (authenticated
+control API, verified bounded ingress, durable acknowledged inbox, Android/Rust protocol parity with shared
+vectors, real backup route) and the creator part of Phase 5 (owner Home HUB hosting the creator identity on
+the same onion, single owner via a process-held `ADD_ONION`). See `TECHNICAL_REFERENCE.md` §16.58–§16.59 and
+HAI-Net `docs/NOSLOP_HUB.md`. Phases 1–4 (discovery cache, metadata-only discovery, community mirroring) are
+not started
 Revision: 2 — grounded in both the Android and HAI-Net source archives
 Date: 7 October 2026 (Australia/Perth)
 Owner: Gabor Kukucska (Mr Megadream), creator of NoSlop and filmmaker behind INSPIREFLIX

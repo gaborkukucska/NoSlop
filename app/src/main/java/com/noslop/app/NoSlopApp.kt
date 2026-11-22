@@ -151,6 +151,8 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
                 val burnableIdentity = repository.getBurnableIdentity()
                 val hubStatus = repository.getAppSetting("hub_deployment_status")
                 com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+                // NOSLOP_HUB_CREATOR_HOSTING_V1: the creator onion stays here unless the Hub holds it.
+                com.noslop.app.tor.TorService.skipCreatorHiddenServiceRegistration = repository.hubHostsCreator()
                 val fgEnabled = repository.getAppSetting("foreground_service_enabled") == "true"
                 if (fgEnabled && hubStatus.isNullOrBlank()) {
                     com.noslop.app.mesh.NoSlopForegroundService.start(this@NoSlopApp)
