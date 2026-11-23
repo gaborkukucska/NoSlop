@@ -533,29 +533,70 @@ EOF
 
                 # Step 0: Ensure essential build tools are present
                 echo '[STEP 0/5] Checking build prerequisites...'
-                NEED_INSTALL=""
-                command -v cc &> /dev/null || NEED_INSTALL="yes"
-                command -v git &> /dev/null || NEED_INSTALL="yes"
-                command -v curl &> /dev/null || NEED_INSTALL="yes"
-                command -v cmake &> /dev/null || NEED_INSTALL="yes"
-                command -v npm &> /dev/null || NEED_INSTALL="yes"
+                # Only what is missing gets installed. Reinstalling a tool the server already has from another
+                # source (e.g. Node.js from NodeSource, whose nodejs conflicts with the distribution's npm) can fail.
+                MISSING=""
+                command -v cc &> /dev/null || MISSING="${'$'}MISSING cc"
+                command -v git &> /dev/null || MISSING="${'$'}MISSING git"
+                command -v curl &> /dev/null || MISSING="${'$'}MISSING curl"
+                command -v cmake &> /dev/null || MISSING="${'$'}MISSING cmake"
+                command -v npm &> /dev/null || MISSING="${'$'}MISSING node"
                 # hainet-persona's build script needs protoc; openssl-sys needs pkg-config and the OpenSSL headers.
-                command -v protoc &> /dev/null || NEED_INSTALL="yes"
-                command -v pkg-config &> /dev/null || NEED_INSTALL="yes"
-                pkg-config --exists openssl 2> /dev/null || NEED_INSTALL="yes"
-                
-                if [ -n "${'$'}NEED_INSTALL" ]; then
-                    echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, cmake, nodejs, npm, python3-venv...'
-                    
+                command -v protoc &> /dev/null || MISSING="${'$'}MISSING protoc"
+                command -v pkg-config &> /dev/null || MISSING="${'$'}MISSING pkgconfig"
+                pkg-config --exists openssl 2> /dev/null || MISSING="${'$'}MISSING openssl"
+                python3 -c 'import ensurepip' &> /dev/null || MISSING="${'$'}MISSING venv"
+
+                # Package names for each missing tool, per package manager (apt, dnf or pacman).
+                packages_for() {
+                    for TOOL in ${'$'}MISSING; do
+                        case "${'$'}1:${'$'}TOOL" in
+                            apt:cc) echo build-essential ;;
+                            dnf:cc) echo gcc gcc-c++ make ;;
+                            pacman:cc) echo base-devel ;;
+                            *:git) echo git ;;
+                            *:curl) echo curl ;;
+                            *:cmake) echo cmake ;;
+                            *:node) echo nodejs npm ;;
+                            pacman:protoc) echo protobuf ;;
+                            *:protoc) echo protobuf-compiler ;;
+                            apt:pkgconfig) echo pkg-config ;;
+                            dnf:pkgconfig) echo pkgconfig ;;
+                            pacman:pkgconfig) echo pkgconf ;;
+                            apt:openssl) echo libssl-dev ;;
+                            dnf:openssl) echo openssl-devel ;;
+                            pacman:openssl) echo openssl ;;
+                            apt:venv) echo python3-venv ;;
+                            dnf:venv) echo python3 ;;
+                            pacman:venv) echo python ;;
+                        esac
+                    done
+                }
+
+                if [ -n "${'$'}MISSING" ]; then
                     if command -v apt-get &> /dev/null; then
-                        run_sudo apt-get update -qq
-                        run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake nodejs npm python3-venv
+                        PKGS=${'$'}(packages_for apt | tr '\n' ' ')
+                        echo "  Installing: ${'$'}PKGS"
+                        # One broken third-party source (e.g. an expired signing key) must not stop the install:
+                        # the distribution's own package lists are usually still fine.
+                        if ! run_sudo apt-get update -qq; then
+                            echo '  [WARN] apt-get update reported errors (see above); installing from the package lists this server already has.'
+                        fi
+                        if ! run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${'$'}PKGS; then
+                            echo "[ERROR] Could not install: ${'$'}PKGS"
+                            echo '        Fix the package sources reported above (or install these by hand), then deploy again.'
+                            exit 1
+                        fi
                     elif command -v dnf &> /dev/null; then
-                        run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake nodejs npm python3
+                        PKGS=${'$'}(packages_for dnf | tr '\n' ' ')
+                        echo "  Installing: ${'$'}PKGS"
+                        run_sudo dnf install -y ${'$'}PKGS
                     elif command -v pacman &> /dev/null; then
-                        run_sudo pacman -Sy --noconfirm base-devel git curl openssl pkgconf protobuf cmake nodejs npm python
+                        PKGS=${'$'}(packages_for pacman | tr '\n' ' ')
+                        echo "  Installing: ${'$'}PKGS"
+                        run_sudo pacman -Sy --noconfirm ${'$'}PKGS
                     else
-                        echo '[ERROR] Unsupported package manager. Please install dependencies manually.'
+                        echo "[ERROR] Unsupported package manager. Please install these by hand:${'$'}MISSING"
                         exit 1
                     fi
                     echo '  Build tools installed.'
