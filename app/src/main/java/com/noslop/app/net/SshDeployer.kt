@@ -539,6 +539,10 @@ EOF
                 command -v curl &> /dev/null || NEED_INSTALL="yes"
                 command -v cmake &> /dev/null || NEED_INSTALL="yes"
                 command -v npm &> /dev/null || NEED_INSTALL="yes"
+                # hainet-persona's build script needs protoc; openssl-sys needs pkg-config and the OpenSSL headers.
+                command -v protoc &> /dev/null || NEED_INSTALL="yes"
+                command -v pkg-config &> /dev/null || NEED_INSTALL="yes"
+                pkg-config --exists openssl 2> /dev/null || NEED_INSTALL="yes"
                 
                 if [ -n "${'$'}NEED_INSTALL" ]; then
                     echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, cmake, nodejs, npm, python3-venv...'
