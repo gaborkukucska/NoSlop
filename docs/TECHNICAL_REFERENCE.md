@@ -3103,6 +3103,29 @@ auto-accepts followers as the phone does; it serves **only** the creator's own p
 * **Not covered:** discoverable without creator mode is not handed over; non-creator community mirroring
   and the discovery cache (Enhancement Plan) are not started; no Hub page status line yet (logs: `HUB_SYNC`).
 
+### 16.60 The Tor service is bound, not only started (`NOSLOP_TOR_BOUND_SERVICE_V1`)
+
+Built 2026-11-24, after two crashes in a Hub-mode device test.
+
+* **The crash.** NoSlop started tor-android's `TorService` with `startService` only. With a Hub linked NoSlop
+  runs no foreground service (the Hub is the always-on part), so about a minute after the app left the screen
+  Android stopped the service for app idleness ("Stopping service due to app idle: …
+  org.torproject.jni.TorService", 14:17:27.903) and 13 ms later libtor aborted the whole app ("FORTIFY:
+  pthread_mutex_lock called on a destroyed mutex", in `tor_cond_wait`). `TorService.onDestroy` asks Tor to shut
+  down; when Tor's thread finishes it frees its configuration (`mainConfigurationFree`) while worker threads may
+  still be waiting on its locks. At 13:22 the same stop had left Tor off without crashing: it is a race.
+* **First attempt, withdrawn the same day.** Halting Tor cleanly ourselves 30 s after the app went to the
+  background (`SIGNAL HALT`, then `stopTor`) crashed the same way at 14:38:49, 3 s after the halt: any shutdown of
+  Tor inside the app's process can abort it.
+* **Now.** `startTor` also binds to the Tor service with `BIND_AUTO_CREATE` once it is started, as tor-android's
+  Javadoc asks. A service with such a binding is not destroyed by Android's idle stop, so Tor is never torn down
+  when the app goes to the background: the cached app is frozen (Android 14+: no CPU, so no battery cost) or, when
+  memory is needed, killed outright, which shows no crash dialog. When the app is opened it thaws and Tor carries
+  on (or, after a kill, starts as on any launch). `stopTor` (explicit Tor restart in Settings, a backup restore)
+  unbinds before stopping the service; those deliberate stops still shut Tor down in-process, as before. A start after Tor's thread ended by itself (FAILED) first releases the old binding, because tor-android's `stopSelf()` cannot destroy a bound service and Tor only starts in the service's `onCreate`.
+* Owner decision 2026-11-24 for Hub mode: no foreground service and no notification for this; the Hub keeps the
+  creator identity and collects packets for the phone meanwhile.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

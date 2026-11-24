@@ -115,6 +115,49 @@ object TorService {
     @Volatile var startBlockedInBackground: Boolean = false
         private set
 
+    // --- NOSLOP_TOR_BOUND_SERVICE_V1 --- (docs/TECHNICAL_REFERENCE.md §16.60)
+    // tor-android's TorService is meant to be bound (its Javadoc: "first bind to this using bindService"). Only
+    // started, it was stopped by Android about a minute after the app left the screen ("Stopping service due to
+    // app idle"), and its teardown aborted the whole app (2026-11-24 14:17:27: libtor.so "pthread_mutex_lock called
+    // on a destroyed mutex" in tor_cond_wait; Tor frees its configuration while worker threads still wait). Halting
+    // Tor ourselves crashed the same way (14:38:49). With a BIND_AUTO_CREATE binding held, Android's idle stop
+    // leaves the service running; the cached app is frozen (no CPU) or killed outright, neither of which crashes.
+    // Only stopTor (an explicit restart, a restore) unbinds.
+    private var torServiceConnection: android.content.ServiceConnection? = null
+
+    private fun bindTorService(context: Context) {
+        synchronized(startLock) {
+            if (torServiceConnection != null) return
+            val conn = object : android.content.ServiceConnection {
+                override fun onServiceConnected(name: android.content.ComponentName?, service: android.os.IBinder?) {
+                    Logger.debug(TAG, "Bound to the Tor service: Android's idle stop will not destroy it")
+                }
+                override fun onServiceDisconnected(name: android.content.ComponentName?) {
+                    Logger.warn(TAG, "The Tor service's process connection was lost")
+                }
+            }
+            try {
+                val intent = android.content.Intent(context, org.torproject.jni.TorService::class.java)
+                if (context.applicationContext.bindService(intent, conn, Context.BIND_AUTO_CREATE)) {
+                    torServiceConnection = conn
+                } else {
+                    Logger.warn(TAG, "bindService to the Tor service returned false; it stays only started")
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Binding to the Tor service failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun unbindTorService(context: Context) {
+        val conn = synchronized(startLock) { torServiceConnection.also { torServiceConnection = null } } ?: return
+        try {
+            context.applicationContext.unbindService(conn)
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Unbinding the Tor service: ${e.message}")
+        }
+    }
+
     // --- NOSLOP_TOR_OWN_PORTS_V1 --- (TorPortOwnership, docs/TECHNICAL_REFERENCE.md §16.55)
     // Something answering on SOCKS_PORT is not proof that it is our Tor: on 2026-11-17 the Play build
     // sent everything through the GitHub build's Tor. Our daemon proves itself by answering on our
@@ -226,6 +269,8 @@ object TorService {
             Logger.debug(TAG, "SIGNAL HALT on stopTor was ignored or closed: ${e.message}")
         }
 
+        // NOSLOP_TOR_BOUND_SERVICE_V1: a bound service is not destroyed by stopService alone.
+        unbindTorService(context)
         try {
             val stopIntent = android.content.Intent(context, org.torproject.jni.TorService::class.java).apply {
                 action = "org.torproject.android.intent.action.STOP"
@@ -402,6 +447,10 @@ object TorService {
             // org.torproject.jni.TorService calls startForeground() itself, so
             // startForegroundService() is the supported way to launch it from
             // the background.
+            // NOSLOP_TOR_BOUND_SERVICE_V1: when Tor's thread ended by itself (FAILED), its stopSelf() could not destroy
+            // the service while we held a binding, and Tor only starts in the service's onCreate: release the binding
+            // so a stopped service is re-created. (A forced restart has already unbound in stopTor.)
+            if (previousState == TorState.FAILED || previousState == TorState.IDLE) unbindTorService(context)
             var serviceStarted = false
             try {
                 context.startService(intent)
@@ -426,6 +475,7 @@ object TorService {
                 return
             }
             startBlockedInBackground = false
+            bindTorService(context) // NOSLOP_TOR_BOUND_SERVICE_V1
 
             // Unified self-healing bootstrap loop: wait for proxy port, then wait for circuit bootstrap
             bootstrapJob = scope.launch {
