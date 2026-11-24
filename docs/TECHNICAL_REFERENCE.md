@@ -3103,6 +3103,29 @@ auto-accepts followers as the phone does; it serves **only** the creator's own p
 * **Not covered:** discoverable without creator mode is not handed over; non-creator community mirroring
   and the discovery cache (Enhancement Plan) are not started; no Hub page status line yet (logs: `HUB_SYNC`).
 
+### 16.60 Tor in the background in Hub mode (`NOSLOP_HUB_BACKGROUND_TOR_V1`)
+
+Built 2026-11-24 (Hub build only). Owner decision, 2026-11-24: in Hub mode the phone stops its Tor cleanly when
+the app goes to the background, instead of keeping it running.
+
+* **The crash.** With a Hub linked, NoSlop does not start its foreground service (the Hub is the always-on part),
+  so nothing keeps the process in the foreground. About a minute after the app leaves the screen Android stops
+  tor-android's service ("Stopping service due to app idle: … org.torproject.jni.TorService"). On 2026-11-24 at
+  14:17:27 that teardown ran while the daemon's threads were still working, and libtor aborted the whole app
+  ("FORTIFY: pthread_mutex_lock called on a destroyed mutex", in `tor_cond_wait`). At 13:22 the same stop had left
+  Tor off without a crash.
+* **Now.** `MainActivity.onStop` (not for a configuration change) schedules, 30 s later, in Hub mode and when
+  `NoSlopForegroundService` is not running, `TorService.haltForBackground`: `SIGNAL HALT` on the control channel,
+  then up to 5 s for the daemon to close its SOCKS port, then the usual `stopTor`. While
+  `TorService.pausedInBackground` is set, `startTor` refuses automatic restarts (the network callback, the
+  ViewModel's retries; an explicit `forceRestart` still works) and `awaitReady` answers false at once.
+  `MainActivity.onStart` cancels a pending halt and clears the pause (`onAppVisible`); `onResume` then starts Tor
+  as before. If the app comes back while Tor is halting, the scheduled job starts Tor itself.
+* **Meanwhile** the Hub holds the creator identity and collects packets for the phone in its inbox; the phone
+  catches up when opened (in the test, 66 items in one pull). If the Hub does not yet host the creator onion, the
+  phone's copy goes off with Tor, as it already did when Android stopped Tor.
+* With NoSlop's foreground service on (Settings), Tor keeps running in the background as before.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
