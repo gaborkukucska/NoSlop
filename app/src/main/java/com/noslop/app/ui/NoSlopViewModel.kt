@@ -3935,21 +3935,6 @@ fun clearLogFile() { Logger.clearLog() }
                 }
 
                 val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
-                
-                val isOnion = targetIp.endsWith(".onion")
-                val proxy = if (isOnion) {
-                    java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress(com.noslop.app.tor.TorService.PROXY_HOST, com.noslop.app.tor.TorService.SOCKS_PORT))
-                } else {
-                    java.net.Proxy.NO_PROXY
-                }
-                
-                val url = java.net.URL("http://$targetIp:8080/api/auth/qr/verify")
-                val connection = url.openConnection(proxy) as java.net.HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
-                connection.doOutput = true
 
                 val payload = org.json.JSONObject().apply {
                     put("session_id", sessionId)
@@ -3957,19 +3942,22 @@ fun clearLogFile() { Logger.clearLog() }
                     put("signature", signature)
                 }.toString()
 
-                connection.outputStream.use { os ->
-                    val input = payload.toByteArray(Charsets.UTF_8)
-                    os.write(input, 0, input.size)
-                }
+                // NOSLOP_HUB_QR_LOGIN_ROUTE_V1: the same routes as every other Hub call. Plain HTTP to a LAN
+                // address is refused by the network security config unless that host is listed there, so the
+                // login also goes to the Hub's onion over Tor (the Hub keeps the browser's session in memory,
+                // whichever address it was reached on).
+                val reply = com.noslop.app.data.HubClient.postUnsigned(
+                    repository, "/api/auth/qr/verify", payload.toByteArray(Charsets.UTF_8), scannedHost = targetIp
+                ) ?: throw java.io.IOException("the Hub could not be reached on its LAN address or its onion")
 
-                val responseCode = connection.responseCode
+                val responseCode = reply.code
                 Logger.info("QR_LOGIN", "Hub responded with HTTP $responseCode")
                 withContext(Dispatchers.Main) {
                     if (responseCode == 200) {
                         Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $targetIp")
                         android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Successfully authenticated with Hub!"), android.widget.Toast.LENGTH_LONG).show()
                     } else {
-                        val errorBody = try { connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
+                        val errorBody = reply.body.take(300)
                         Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode, Body: $errorBody")
                         if (responseCode == 401) {
                             android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate: Identity mismatch."), android.widget.Toast.LENGTH_LONG).show()

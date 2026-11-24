@@ -3060,6 +3060,7 @@ Built 2026-11-22 (Hub build only, `NOSLOP_ENABLE_HUB=true`), together with HAI-N
 * **The Hub's onion is checked** against our key before `updateOnionAddress` (the other gap noted in §1.1's
   status entry).
 * Admin AI DMs: the Hub opens the owner's v2 message, returns a `DM_ACK` v3 at once and the reply as v2.
+* **Web UI login by QR** (`NOSLOP_HUB_QR_LOGIN_ROUTE_V1`, 2026-11-24): `handleQrLogin` posts the signed session id through `HubClient.postUnsigned`, so it takes the same routes as every other Hub call: the LAN address where the network security config allows cleartext (it does not by default, `NOSLOP_TLS_TRUST_V1`), the address in the QR code when it is an onion or an allowed LAN host, then the Hub's onion over Tor. Before, it only tried plain HTTP to the LAN address, which Android refuses ("Cleartext HTTP traffic to … not permitted"), so QR login never worked against a LAN Hub. The Hub checks the signature against its owner key and keeps the browser's login session in memory, whichever address it was reached on.
 
 Tests: `HubClientSignatureTest` (the signature is pinned to the Hub's own test vector, HAI-Net
 `hainet-noslop/tests/vectors.rs`), `OnionAddressUpdateTest` (hook signature).

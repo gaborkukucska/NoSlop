@@ -139,6 +139,46 @@ object HubClient {
         null
     }
 
+    /** A reply from the Hub: the HTTP status and the body text. */
+    data class Reply(val code: Int, val body: String)
+
+    /**
+     * NOSLOP_HUB_QR_LOGIN_ROUTE_V1 — an unsigned POST to one of the Hub's login routes (`/api/auth/...`),
+     * which check their own signature inside the body. Same routes as [request]: the LAN address where
+     * the network security config allows cleartext, else the Hub's onion over Tor. [scannedHost], the
+     * address a QR code named, is tried after the LAN address when it is an onion or an allowed LAN host.
+     * The first route that answers at all gives the reply; null when none did.
+     */
+    suspend fun postUnsigned(repo: NoSlopRepository, path: String, body: ByteArray, scannedHost: String? = null): Reply? = withContext(Dispatchers.IO) {
+        val base = routes(repo, longTransfer = false)
+        val scanned = scannedHost?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { scannedRoute(it) }
+            ?.takeIf { s -> base.none { it.baseUrl == s.baseUrl } }
+        val ordered = base.filterNot { it.baseUrl.endsWith(".onion:8080") } + listOfNotNull(scanned) +
+            base.filter { it.baseUrl.endsWith(".onion:8080") }
+        for (route in ordered) {
+            try {
+                val req = Request.Builder().url(route.baseUrl + path).post(body.toRequestBody(JSON)).build()
+                route.client.newCall(req).execute().use { r ->
+                    val text = r.body?.string().orEmpty()
+                    if (r.isSuccessful) lastReachedAt = System.currentTimeMillis()
+                    return@withContext Reply(r.code, text)
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "POST $path via ${route.baseUrl.take(24)} failed: ${e.message}")
+            }
+        }
+        null
+    }
+
+    private fun scannedRoute(host: String): Route? = when {
+        host.endsWith(".onion") -> Route("http://$host:8080", HttpClientProvider.torClient)
+        NoSlopRepository.isPrivateLanAddress(host) && try {
+            android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(host)
+        } catch (_: Throwable) { false } -> Route("http://$host:8080", HttpClientProvider.rawClearnetClient.newBuilder()
+            .connectTimeout(3, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).build())
+        else -> null
+    }
+
     /** `/api/invoke` with a Gson body; the reply as a Gson object. */
     suspend fun invoke(repo: NoSlopRepository, cmd: String, args: JsonObject = JsonObject(), longTransfer: Boolean = false): JsonObject? {
         val body = JsonObject().apply { addProperty("cmd", cmd); add("args", args) }
