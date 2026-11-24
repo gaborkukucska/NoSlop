@@ -731,6 +731,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val hostedByHub = appSettingDao.getSetting(HUB_CREATOR_HOSTED_KEY) == "true"
         val status = HubClient.invoke(this@NoSlopRepository, "hub_status")
         if (status == null) {
+            // NOSLOP_HUB_QR_LOGIN_ROUTE_V1 (2026-11-24): a round only counts against the Hub when this phone's own
+            // Tor was up. With it down (Android stops it while the app is in the background and refuses to restart
+            // it) the Hub is not what is unreachable, and taking the creator onion back would leave two publishers.
+            if (com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
+                Logger.info("HUB_SYNC", "Hub not reached while this phone's Tor is not ready; not counted against the Hub")
+                return@withContext
+            }
             if (hostedByHub && ++hubUnreachableRounds >= 3) {
                 Logger.warn("HUB_SYNC", "Hub unreachable for 3 rounds: publishing the creator onion from this phone again")
                 setHubCreatorHosted(false, burnable)

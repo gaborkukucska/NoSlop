@@ -3946,9 +3946,23 @@ fun clearLogFile() { Logger.clearLog() }
                 // address is refused by the network security config unless that host is listed there, so the
                 // login also goes to the Hub's onion over Tor (the Hub keeps the browser's session in memory,
                 // whichever address it was reached on).
-                val reply = com.noslop.app.data.HubClient.postUnsigned(
-                    repository, "/api/auth/qr/verify", payload.toByteArray(Charsets.UTF_8), scannedHost = targetIp
-                ) ?: throw java.io.IOException("the Hub could not be reached on its LAN address or its onion")
+                // Opening the app to scan often (re)starts its Tor: wait for it instead of failing at once, and try
+                // once more if the first, cold connection to the Hub's onion gets no answer.
+                if (com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
+                    Logger.info("QR_LOGIN", "Waiting for Tor before reaching the Hub")
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Connecting to Tor network..."), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    if (!com.noslop.app.tor.TorService.awaitReady(90_000L)) Logger.warn("QR_LOGIN", "Tor is not ready; only a LAN route can work")
+                }
+                val body = payload.toByteArray(Charsets.UTF_8)
+                var reply = com.noslop.app.data.HubClient.postUnsigned(repository, "/api/auth/qr/verify", body, scannedHost = targetIp)
+                if (reply == null && com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.READY) {
+                    Logger.info("QR_LOGIN", "No answer from the Hub yet; trying once more")
+                    kotlinx.coroutines.delay(3_000)
+                    reply = com.noslop.app.data.HubClient.postUnsigned(repository, "/api/auth/qr/verify", body, scannedHost = targetIp)
+                }
+                if (reply == null) throw java.io.IOException("the Hub could not be reached on its LAN address or its onion")
 
                 val responseCode = reply.code
                 Logger.info("QR_LOGIN", "Hub responded with HTTP $responseCode")

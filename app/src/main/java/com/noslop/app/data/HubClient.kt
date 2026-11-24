@@ -153,8 +153,12 @@ object HubClient {
         val base = routes(repo, longTransfer = false)
         val scanned = scannedHost?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { scannedRoute(it) }
             ?.takeIf { s -> base.none { it.baseUrl == s.baseUrl } }
-        val ordered = base.filterNot { it.baseUrl.endsWith(".onion:8080") } + listOfNotNull(scanned) +
-            base.filter { it.baseUrl.endsWith(".onion:8080") }
+        // The first connection to an onion after Tor (re)starts can take well over the usual 20 s, and someone is
+        // waiting at the browser: onion routes get 60 s to connect here.
+        val ordered = (base.filterNot { it.baseUrl.endsWith(".onion:8080") } + listOfNotNull(scanned) +
+            base.filter { it.baseUrl.endsWith(".onion:8080") }).map { r ->
+            if (r.baseUrl.endsWith(".onion:8080")) r.copy(client = r.client.newBuilder().connectTimeout(60, TimeUnit.SECONDS).build()) else r
+        }
         for (route in ordered) {
             try {
                 val req = Request.Builder().url(route.baseUrl + path).post(body.toRequestBody(JSON)).build()
