@@ -263,6 +263,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         if (!shouldSyncDms) return@withContext
         shouldSyncDms = false
         val identity = getLocalIdentity() ?: return@withContext
+        // NOSLOP_HUB_DM_MIRROR_KEYS_V1: DMs with a creator contact are encrypted to the creator identity; decrypt
+        // them as ChatThreadScreen does (personal keys, then the creator keys) instead of mirroring "..." to the Hub.
+        val burnable = getBurnableIdentity()
+        var undecryptable = 0
         val peers = peerDao.getAllPeersList()
         val dmArray = JSONArray()
         
@@ -273,19 +277,36 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val messages = kotlinx.coroutines.withTimeoutOrNull(2000L) {
                     messageDao.getMessagesWithPeer(peer.publicKeyB64).first()
                 }?.takeLast(30) ?: emptyList()
+                val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
                 messages.forEach { msg ->
                     val plaintext = com.noslop.app.crypto.CryptoService.decryptDMForDisplay(
                         ciphertextB64 = msg.ciphertext,
                         nonceB64 = msg.nonce,
-                        theirEncPubB64 = peer.encPublicKeyB64,
+                        theirEncPubB64 = opponentEncPub,
                         myEncPrivB64 = identity.encPrivateKeyB64,
                         myEdPub = identity.publicKeyB64,
                         senderEdPub = msg.senderPub,
                         peerEdPub = peer.publicKeyB64,
                         msgId = msg.id,
                         timestamp = msg.timestamp
-                    )
-                    var contentStr = plaintext ?: "..."
+                    ) ?: burnable?.let { b ->
+                        com.noslop.app.crypto.CryptoService.decryptDMForDisplay(
+                            ciphertextB64 = msg.ciphertext,
+                            nonceB64 = msg.nonce,
+                            theirEncPubB64 = opponentEncPub,
+                            myEncPrivB64 = b.encPrivateKeyB64,
+                            myEdPub = b.publicKeyB64,
+                            senderEdPub = msg.senderPub,
+                            peerEdPub = peer.publicKeyB64,
+                            msgId = msg.id,
+                            timestamp = msg.timestamp
+                        )
+                    }
+                    if (plaintext == null) {
+                        undecryptable++ // never mirror a placeholder: the Hub would show it as the message
+                        return@forEach
+                    }
+                    var contentStr: String = plaintext
                     val obj = JSONObject()
                     var hasMedia = false
                     try {
@@ -319,6 +340,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to sync DMs for ${peer.handle}: ${e.message}")
             }
         }
+        if (undecryptable > 0) com.noslop.app.debug.Logger.warn("HUB_SYNC", "$undecryptable DM(s) could not be decrypted here and were not mirrored to the Hub")
         if (dmArray.length() > 0) {
             val args = JSONObject().put("dms", dmArray)
             val res = invokeHubApi("sync_push_dms", args)

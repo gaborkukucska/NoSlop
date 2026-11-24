@@ -3126,6 +3126,16 @@ Built 2026-11-24, after two crashes in a Hub-mode device test.
 * Owner decision 2026-11-24 for Hub mode: no foreground service and no notification for this; the Hub keeps the
   creator identity and collects packets for the phone meanwhile.
 
+### 16.61 DMs mirrored to the Hub's Web UI decrypt with the creator keys too (`NOSLOP_HUB_DM_MIRROR_KEYS_V1`)
+
+Found 2026-11-24 (device test: DMs between two phones worked both ways, but the Hub's Web UI showed `...` for every
+message). `syncDmsWithHub` decrypts the last 30 messages per contact to mirror them to the Hub (`sync_push_dms`), but
+tried only the personal keys and sent `"..."` as the text when that failed. DMs with a contact who knows us as a
+creator are encrypted to the creator identity, so all of those arrived as `...`. It now decrypts as
+`ChatThreadScreen` does (personal keys, then the creator keys; the contact's Ed25519 key when it has no X25519 key)
+and never mirrors a message it cannot decrypt (logged as a count). The Hub replaces the stored `...` rows when the
+same message ids are pushed again (`INSERT OR REPLACE`).
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
