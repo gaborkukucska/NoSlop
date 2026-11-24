@@ -3136,6 +3136,24 @@ creator are encrypted to the creator identity, so all of those arrived as `...`.
 and never mirrors a message it cannot decrypt (logged as a count). The Hub replaces the stored `...` rows when the
 same message ids are pushed again (`INSERT OR REPLACE`).
 
+### 16.62 DMs typed in the Hub's Web UI (`NOSLOP_HUB_WEBUI_SEND_V1`)
+
+Found 2026-11-24 (device test): a DM typed in the Hub's Web UI to a contact who follows us as a creator never
+arrived ("Dropping DM from MCowBQYDK2Vw: no X25519 key on record") and showed on this phone with an attachment that
+never downloaded ("MEDIA_REQUEST for null").
+
+* The Web UI only stored the text; `syncPullIncrementalDMsFromHub` later sent it from the **personal** identity,
+  which a creator follower does not know. The Hub now sends it itself (HAI-Net `hub::dms::send_from_web_ui`), DM v2
+  from the identity the contact knows (`hub_contacts_push`'s `identity`), and lists it with `sent_by_hub: true`.
+  This phone keeps a copy (sealed with the keys of the identity that wrote it, the creator keys for a creator
+  message) and does not send it again; a message from an older Hub (no flag) is sent from here as before, from the
+  identity named as its sender.
+* The Hub returned `"mediaId": null` for a text message and `optString` turned it into `"null"`: a phantom
+  attachment. Both pulls now ignore `"null"` (and the Hub sends `""`).
+* Only our own messages are taken from `sync_pull_dms` now. Since the Hub opens DMs for its Web UI
+  (`NOSLOP_HUB_DM_VIEW_V1`) that list also holds contacts' DMs, which reach this phone through the Hub inbox,
+  signature-checked. The one-time restore (`syncPullHistoricalDataFromHub`) still takes everything.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

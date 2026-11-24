@@ -376,6 +376,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         ensureAdminPeerExists()
 
         val myKeys = getLocalIdentity() ?: return@withContext
+        val burnable = getBurnableIdentity()
 
         // 1. Pull DMs
         val resDms = invokeHubApi("get_dms", JSONObject())
@@ -393,8 +394,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
                     
                     val map = mutableMapOf<String, Any>("content" to contentStr)
-                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
-                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    // NOSLOP_HUB_WEBUI_SEND_V1: older Hubs sent "mediaId": null, which optString turns into "null".
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() && it != "null" }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() && it != "null" }
                     if (mediaId != null) {
                         val metadata = com.noslop.app.mesh.MediaMetadata(
                             id = mediaId,
@@ -408,7 +410,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     }
                     val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
                     val dmTimestamp = dm.optLong("timestamp", System.currentTimeMillis())
-                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, myKeys, dmTimestamp)
+                    // Our own messages written as the creator are sealed with the creator keys, so they open here.
+                    val sealKeys = burnable?.takeIf { it.publicKeyB64 == sender } ?: myKeys
+                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, sealKeys, dmTimestamp)
                     
                     if (ciphertext != null && nonce != null) {
                         val localMsg = com.noslop.app.data.ChatMessage(
@@ -538,6 +542,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     private suspend fun syncPullIncrementalDMsFromHub() = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext
+        val burnable = getBurnableIdentity()
         val args = JSONObject().put("since", lastDmSyncTimestamp)
         val resDms = invokeHubApi("sync_pull_dms", args)
         
@@ -557,13 +562,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     val contentStr = dm.optString("content")
                     val sender = dm.optString("sender")
                     val peerPub = dm.optString("peer")
+                    // NOSLOP_HUB_WEBUI_SEND_V1: only our own messages (typed in the Hub's Web UI) are taken from
+                    // here. A contact's DM reaches this phone through the Hub inbox, signature-checked; since the
+                    // Hub opens DMs for its Web UI (NOSLOP_HUB_DM_VIEW_V1) this list also holds those.
+                    val ownKeys = when (sender) {
+                        myKeys.publicKeyB64 -> myKeys
+                        burnable?.publicKeyB64 -> burnable
+                        else -> null
+                    } ?: continue
                     
                     val peer = peerDao.getPeerByPublicKey(peerPub)
                     val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
                     
                     val map = mutableMapOf<String, Any>("content" to contentStr)
-                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
-                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    // Older Hubs sent "mediaId": null, which optString turns into the text "null".
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() && it != "null" }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() && it != "null" }
                     if (mediaId != null) {
                         map["media"] = com.noslop.app.mesh.MediaMetadata(
                             id = mediaId,
@@ -575,7 +589,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         )
                     }
                     val contentToSend = com.noslop.app.util.Json.gson.toJson(map)
-                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, myKeys, timestamp)
+                    val (ciphertext, nonce) = sealHubDm(contentToSend, id, sender, peerPub, peerEncPub, ownKeys, timestamp)
                     
                     if (ciphertext != null && nonce != null) {
                         val localMsg = com.noslop.app.data.ChatMessage(
@@ -591,8 +605,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         )
                         messageDao.insertMessage(localMsg)
                         
-                        // If WE sent this DM (via Hub Web UI), we must push it back to the Hub so it routes over Tor!
-                        if (sender == myKeys.publicKeyB64) {
+                        // A newer Hub sends Web UI messages itself, from the identity the contact knows
+                        // (sent_by_hub). An older one only stored them: send those from here, as before.
+                        if (dm.optBoolean("sent_by_hub", false)) {
+                            com.noslop.app.debug.Logger.info("HUB_SYNC", "Web UI message $id was sent by the Hub; kept here")
+                        } else {
                             // D05: sealed as v2 by sealHubDm; it used to go out as v1, which a v2 peer refuses.
                             val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
                                 com.noslop.app.mesh.EncryptedPayload(
@@ -606,31 +623,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             val packet = com.noslop.app.mesh.NetworkPacket(
                                 id = java.util.UUID.randomUUID().toString(),
                                 hops = 3,
-                                senderId = myKeys.publicKeyB64,
+                                senderId = ownKeys.publicKeyB64,
                                 targetUserId = peerPub,
                                 type = "MESSAGE",
                                 payload = payloadJson
                             )
                             // NOSLOP_HUB_OWNER_API_V1: sent through the Hub to the peer's onion.
                             com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(peer?.onionAddress?.takeIf { it.isNotBlank() } ?: com.noslop.app.crypto.CryptoService.onionOf(peerPub), packet)
-                        } else {
-                            // If we received this DM from a peer, we must process it locally to update the UI
-                            val payloadJson = com.noslop.app.util.Json.gson.toJsonTree(
-                                com.noslop.app.mesh.EncryptedPayload(
-                                    id = id,
-                                    nonce = nonce,
-                                    ciphertext = ciphertext,
-                                    timestamp = timestamp
-                                )
-                            )
-                            val packet = com.noslop.app.mesh.NetworkPacket(
-                                id = id,
-                                senderId = sender,
-                                targetUserId = myKeys.publicKeyB64,
-                                type = "MESSAGE",
-                                payload = payloadJson
-                            )
-                            handleIncomingPacket(packet)
                         }
                     }
                 }
