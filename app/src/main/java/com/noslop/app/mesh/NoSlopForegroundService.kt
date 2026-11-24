@@ -27,9 +27,6 @@ class NoSlopForegroundService : Service() {
         private const val CHANNEL_ID = "noslop_mesh_sync_channel"
         private const val NOTIFICATION_ID = 1001
 
-        /** NOSLOP_HUB_BACKGROUND_TOR_V1: while this service runs, the process stays in the foreground and Tor keeps running. */
-        @Volatile var isRunning: Boolean = false
-
         fun start(context: Context) {
             val intent = Intent(context, NoSlopForegroundService::class.java)
             try {
@@ -51,7 +48,6 @@ class NoSlopForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        isRunning = true
         Logger.info(TAG, "NoSlopForegroundService created")
         createNotificationChannel()
         
@@ -96,7 +92,6 @@ class NoSlopForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        isRunning = false
         try {
             wakeLock?.let {
                 if (it.isHeld) it.release()

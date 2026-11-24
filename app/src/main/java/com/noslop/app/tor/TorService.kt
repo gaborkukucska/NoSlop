@@ -78,7 +78,6 @@ object TorService {
         // R4: Android refused to start Tor while the app was in the background; nothing will make it
         // READY until the app is foregrounded, so callers fail fast (their work goes to the outbox).
         if (startBlockedInBackground && _torState.value == TorState.IDLE) return false
-        if (pausedInBackground && _torState.value == TorState.IDLE) return false // NOSLOP_HUB_BACKGROUND_TOR_V1
         val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
             _torState.first { it == TorState.READY || it == TorState.FAILED }
         }
@@ -115,60 +114,6 @@ object TorService {
     /** True after Android refused to start the Tor service from the background (cleared on the next start). */
     @Volatile var startBlockedInBackground: Boolean = false
         private set
-
-    // --- NOSLOP_HUB_BACKGROUND_TOR_V1 --- (docs/TECHNICAL_REFERENCE.md §16.60)
-    // With a Home HUB linked and no NoSlop foreground service, nothing keeps the process in the foreground, and
-    // about a minute after the app leaves the screen Android stops tor-android's service ("Stopping service due
-    // to app idle"). Its teardown while the daemon's threads still ran aborted the whole app (2026-11-24 14:17:27,
-    // libtor.so: "pthread_mutex_lock called on a destroyed mutex"). So the app halts Tor itself first
-    // ([haltForBackground]); while paused, only the app coming back ([onAppVisible]) or an explicit restart starts it.
-
-    /** True while Tor is deliberately off because the app is in the background in Hub mode. */
-    @Volatile var pausedInBackground: Boolean = false
-        private set
-    @Volatile private var appVisible: Boolean = true
-
-    /** MainActivity.onStart: the app is on screen; a background pause ends. */
-    fun onAppVisible() {
-        appVisible = true
-        if (pausedInBackground) {
-            pausedInBackground = false
-            Logger.info(TAG, "App in the foreground again: Tor may start")
-        }
-    }
-
-    /** MainActivity.onStop (not for a configuration change). */
-    fun onAppHidden() { appVisible = false }
-
-    /**
-     * Halts Tor cleanly (SIGNAL HALT, then waits for the daemon to close its SOCKS port, then stops the service)
-     * because the app is in the background in Hub mode. Returns false, doing nothing, if the app is visible.
-     */
-    fun haltForBackground(context: Context): Boolean {
-        if (appVisible) return false
-        pausedInBackground = true
-        if (_torState.value == TorState.IDLE) return true
-        Logger.info(TAG, "Hub mode, app in the background: halting Tor cleanly before Android stops its service")
-        bootstrapJob?.cancel()
-        try {
-            TorControlChannel.open(connectTimeoutMs = 800, readTimeoutMs = 800)?.use { ch -> ch.send("SIGNAL HALT") }
-        } catch (e: Exception) {
-            Logger.debug(TAG, "SIGNAL HALT for the background pause was ignored or closed: ${e.message}")
-        }
-        // Let the daemon leave its main loop before its service is destroyed (up to 5 s).
-        var waitCount = 0
-        while (waitCount < 25) {
-            val stillOpen = try {
-                Socket().use { s -> s.connect(InetSocketAddress(PROXY_HOST, SOCKS_PORT), 150); true }
-            } catch (_: Exception) { false }
-            if (!stillOpen) break
-            try { Thread.sleep(200) } catch (_: Exception) {}
-            waitCount++
-        }
-        stopTor(context)
-        if (appVisible) pausedInBackground = false // came back while halting: MainActivity restarts Tor
-        return true
-    }
 
     // --- NOSLOP_TOR_OWN_PORTS_V1 --- (TorPortOwnership, docs/TECHNICAL_REFERENCE.md §16.55)
     // Something answering on SOCKS_PORT is not proof that it is our Tor: on 2026-11-17 the Play build
@@ -324,11 +269,6 @@ object TorService {
         burnablePrivateKeyB64: String? = null,
         forceRestart: Boolean = false
     ) {
-        // NOSLOP_HUB_BACKGROUND_TOR_V1: no automatic restart (network callback, retries) while paused in the background.
-        if (pausedInBackground && !forceRestart) {
-            Logger.info(TAG, "Tor is paused while the app is in the background (Hub mode); not starting it now")
-            return
-        }
         if (forceRestart) {
             Logger.info(TAG, "Force restart requested. Terminating Tor daemon and purging stale cache...")
             stopTor(context)

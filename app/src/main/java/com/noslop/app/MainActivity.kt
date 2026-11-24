@@ -257,40 +257,11 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         com.noslop.app.debug.MainThreadStallMonitor.start()
-        // NOSLOP_HUB_BACKGROUND_TOR_V1: back on screen; onResume starts Tor if it was paused.
-        backgroundTorJob?.cancel()
-        backgroundTorJob = null
-        com.noslop.app.tor.TorService.onAppVisible()
     }
 
     override fun onStop() {
         com.noslop.app.debug.MainThreadStallMonitor.stop()
-        if (!isChangingConfigurations) scheduleBackgroundTorHalt()
         super.onStop()
-    }
-
-    private var backgroundTorJob: kotlinx.coroutines.Job? = null
-
-    /**
-     * NOSLOP_HUB_BACKGROUND_TOR_V1 (§16.60): 30 s after the app leaves the screen, in Hub mode without NoSlop's
-     * foreground service, Tor is halted cleanly, before Android's own idle stop (about 60 s) can tear its service
-     * down under running threads. The Hub keeps everything meanwhile; the phone catches up from its inbox.
-     */
-    private fun scheduleBackgroundTorHalt() {
-        com.noslop.app.tor.TorService.onAppHidden()
-        backgroundTorJob?.cancel()
-        val appContext = applicationContext
-        backgroundTorJob = com.noslop.app.util.AppScopes.io.launch {
-            kotlinx.coroutines.delay(30_000L)
-            if (!com.noslop.app.HubFeature.enabled) return@launch
-            if (com.noslop.app.mesh.NoSlopForegroundService.isRunning) return@launch
-            if (com.noslop.app.NoSlopApp.repository.getAppSetting(com.noslop.app.HubFeature.STATUS_KEY).isNullOrBlank()) return@launch
-            val halted = com.noslop.app.tor.TorService.haltForBackground(appContext)
-            // Came back while Tor was halting: onResume has already run, so start it here.
-            if (halted && !com.noslop.app.tor.TorService.pausedInBackground && this@MainActivity::viewModel.isInitialized) {
-                viewModel.startTor(forceRestart = false)
-            }
-        }
     }
 
     override fun onResume() {
