@@ -47,7 +47,7 @@ The aggregator's sources are the easiest code to contribute, and the list is mea
 **An API source** needs a client:
 
 1. Write `feeds/api/<Name>Client.kt`. Return a `List<FeedItem>`, or a `SourcePage` if it pages (`SourcePage.failed()` when a request fails, so a search can tell an error from the end).
-2. Make every request through `HttpClientProvider.activeClearnetClient`, so it follows the Tor setting. Send an honest User-Agent, `NoSlop/<version> (+https://github.com/gaborkukucska/NoSlop)`, unless the API asks for its own format. Log search terms only through `Logger.redact(...)`.
+2. Make every request through `HttpClientProvider.activeClearnetClient`, so it follows the Tor setting. Send an honest User-Agent, `NoSlop/<version> (+https://github.com/DeveLooped-INC/NoSlop)`, unless the API asks for its own format. Log search terms only through `Logger.redact(...)`.
 3. Register it in `SourceLibrary.sources` with `feedType = "api"` and `url = "<service>:<kind>"`, and call it from `PublicApiService` with `fetchAsync("<id>") { … }` in the categories it fits. If it supports search paging, add it with `pagedAsync` and a `SearchCursor` constant.
 4. If it needs a key, the user brings their own: never ship one in the APK. Add the service to `ApiKeyRepository.SERVICES` with its sign-up URL and at least three steps, and a test request to `ApiKeyTester`. `GuidedKeysTest` checks both.
 5. Add a unit test that parses a saved sample response, like `InternetArchiveClientTest`.

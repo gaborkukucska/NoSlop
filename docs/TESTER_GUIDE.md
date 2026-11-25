@@ -24,7 +24,7 @@ NoSlop comes in two builds. They are two separate apps, so pick one.
 | | GitHub APK | Play build |
 |---|---|---|
 | App ID | `com.noslop.app` | `com.noslop.me.app` |
-| Where from | The [releases page](https://github.com/gaborkukucska/NoSlop/releases) | Google Play, by invitation while it is in testing |
+| Where from | The [releases page](https://github.com/DeveLooped-INC/NoSlop/releases) | Google Play, by invitation while it is in testing |
 | Updates | NoSlop checks GitHub over Tor and saves the update for you to install | Google Play |
 | Install | Sideload (steps below) | Normal Play install |
 
@@ -42,7 +42,7 @@ the GitHub APK.
 
 ### Install the GitHub APK
 
-1. Open the [releases page](https://github.com/gaborkukucska/NoSlop/releases) and download the `.apk`
+1. Open the [releases page](https://github.com/DeveLooped-INC/NoSlop/releases) and download the `.apk`
    and the `.sha256` file that belongs to it (`NoSlop-<version>.apk` and `NoSlop-<version>.apk.sha256`).
 2. On a computer, put both files in one folder and check the checksum. It must match, or don't install
    the file.
@@ -61,7 +61,7 @@ the GitHub APK.
    Play Protect has blocked earlier NoSlop builds as harmful; the history is in
    [PROJECT_STATUS.md](PROJECT_STATUS.md). Since v0.7.4-alpha the GitHub build no longer asks for the
    install-packages permission or installs updates itself, which Play Protect had flagged. If you
-   still see a block, please [open an issue](https://github.com/gaborkukucska/NoSlop/issues) with your
+   still see a block, please [open an issue](https://github.com/DeveLooped-INC/NoSlop/issues) with your
    phone model, Android version and the NoSlop version. Don't switch Play Protect off just to get past
    a warning you don't understand.
 

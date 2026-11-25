@@ -31,7 +31,7 @@ const MAX_BODY_BYTES = 16 * 1024; // an InnerTube search or player body is about
 
 const REDDIT_HOSTS = ['https://old.reddit.com', 'https://www.reddit.com'];
 const REDDIT_DEFAULT_UA = 'android:com.noslop.app:v0.7 (by /u/NoSlopApp)';
-const DEFAULT_UA = 'NoSlop-Android/1.0 (+https://github.com/gaborkukucska/NoSlop)';
+const DEFAULT_UA = 'NoSlop-Android/1.0 (+https://github.com/DeveLooped-INC/NoSlop)';
 
 /**
  * The only calls forwarded. `path` is matched against the path after the route prefix.

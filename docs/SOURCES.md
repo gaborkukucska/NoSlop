@@ -42,7 +42,7 @@ About 45 publisher feeds in `SourceLibrary`, from Ars Technica to NME, plus Flic
 
 Done on 2026-11-12 (`NOSLOP_HONEST_USER_AGENT_V1`, `NOSLOP_SOURCE_CREDIT_V1`):
 
-1. **Honest User-Agents.** `net/NoSlopUserAgent.value`, `NoSlop-Android/<version> (+https://github.com/gaborkukucska/NoSlop; noslop.me@proton.me)`, for every client except YouTube, Invidious and Reddit, and for Wikimedia and Art Institute images (other media downloads, images and streams, keep a browser User-Agent, since many hosts refuse other clients). `FeedParser` and `InternetArchiveClient` retry once as a browser only when refused.
+1. **Honest User-Agents.** `net/NoSlopUserAgent.value`, `NoSlop-Android/<version> (+https://github.com/DeveLooped-INC/NoSlop; noslop.me@proton.me)`, for every client except YouTube, Invidious and Reddit, and for Wikimedia and Art Institute images (other media downloads, images and streams, keep a browser User-Agent, since many hosts refuse other clients). `FeedParser` and `InternetArchiveClient` retry once as a browser only when refused.
 2. **AIC contact.** `AIC-User-Agent` names the contact address.
 3. **Notices.** Settings › About NoSlop lists the sources with Openverse's required line, Pexels and Jamendo credits, and a link here.
 4. **Per-slide credit.** Media slides name the creator and source; the source badge opens the item's own page; Openverse and Wikimedia slides show the licence.

@@ -166,6 +166,7 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 * **Device test 2026-11-25 (late), owner:** images and GIFs a contact sent show in the Hub's Web UI chat (fetched by the Hub from the contact) and in the app; an image this phone held was uploaded to the Hub; the creator onion was published again by the Hub on hand-back; DMs, deletes and Clear Chat reach the Hub; Admin AI answers arrive (an empty-answer bug with "thinking" models was fixed on the HAI-Net side).
 * **Still to verify:** a follower on another phone syncing and playing the creator's media with the creator's phone off; the chat's refresh button and Tor status line after a long background; the Play builds.
 * No packet, Room schema or archive format change. The Hub API changed incompatibly (signatures required): phone and Hub must both be updated (Update Hub Software).
+* **New public repository (2026-11-25):** [DeveLooped-INC/NoSlop](https://github.com/DeveLooped-INC/NoSlop) is now the main repository. The in-app updater (`UpdateChecker`), the User-Agent (`NoSlopUserAgent.REPOSITORY`, also in `proxy/worker.js`), the Report Issue fallback link, the Settings links, the issue templates and the docs point there. Installed 0.8.2-alpha and older still look for updates on `gaborkukucska/NoSlop`.
 * **Version 0.8.3-alpha** (`versionCode` 83). The one new string ("Refresh chat") is in all 21 languages.
 
 ## Completed Changes (2026-11-21) — NoSlop Refuses a Tor That Isn't Its Own, No Silent Exits on the DM Path, One Tor Start (v0.8.2-alpha)

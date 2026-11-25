@@ -301,7 +301,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                                 try {
                                     val encodedTitle = android.net.Uri.encode(issueTitle)
                                     val encodedBody = android.net.Uri.encode(bodyBuilder.toString())
-                                    val fallbackUrl = "https://github.com/gaborkukucska/NoSlop/issues/new?title=$encodedTitle&body=$encodedBody"
+                                    val fallbackUrl = "https://github.com/DeveLooped-INC/NoSlop/issues/new?title=$encodedTitle&body=$encodedBody"
                                     context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(fallbackUrl)))
                                     submitError = "Relay server is unreachable. We've opened GitHub in your browser instead so you don't lose your report."
                                 } catch (fallbackEx: Exception) {

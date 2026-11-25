@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Security problem?** Don't post it here. See [SECURITY.md](https://github.com/gaborkukucska/NoSlop/blob/main/SECURITY.md) and report it privately.
+        **Security problem?** Don't post it here. See [SECURITY.md](https://github.com/DeveLooped-INC/NoSlop/blob/main/SECURITY.md) and report it privately.
 
         **Logs can contain onion addresses and peer keys.** Read them before you paste them, and remove anything you don't want public.
   - type: input

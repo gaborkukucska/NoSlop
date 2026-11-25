@@ -19,7 +19,7 @@ class NoSlopUserAgentTest {
     fun namesTheAppItsVersionAndAContact() {
         val ua = NoSlopUserAgent.value
         assertTrue(ua.startsWith("NoSlop-Android/${BuildConfig.VERSION_NAME} "))
-        assertTrue(ua.contains("https://github.com/gaborkukucska/NoSlop"))
+        assertTrue(ua.contains("https://github.com/DeveLooped-INC/NoSlop"))
         assertTrue(ua.contains("noslop.me@proton.me"))
         assertFalse("not a browser", ua.contains("Mozilla"))
     }

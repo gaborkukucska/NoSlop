@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object NoSlopUserAgent {
     const val CONTACT = "noslop.me@proton.me"
-    const val REPOSITORY = "https://github.com/gaborkukucska/NoSlop"
+    const val REPOSITORY = "https://github.com/DeveLooped-INC/NoSlop"
 
     val value: String = "NoSlop-Android/${BuildConfig.VERSION_NAME} (+$REPOSITORY; $CONTACT)"
 

@@ -43,7 +43,7 @@ only the *upload key*, and a separate keystore for it is recommended (§8.5).
 
 1.  **Clone the Repository**:
     ```bash
-    git clone https://github.com/gaborkukucska/NoSlop.git
+    git clone https://github.com/DeveLooped-INC/NoSlop.git
     cd NoSlop
     ```
 
@@ -363,6 +363,8 @@ passed, and any failures and their stack traces.
 
 ### 8.3 Publish on GitHub
 
+Releases are published on the public repository, [DeveLooped-INC/NoSlop](https://github.com/DeveLooped-INC/NoSlop) (since 0.8.3-alpha; earlier releases were on `gaborkukucska/NoSlop`). The in-app updater reads that repository's latest release.
+
 Sign with the same keystore as every earlier release. Android refuses an update signed with another key, and so does the app's own certificate check.
 
 ```bash
@@ -370,10 +372,10 @@ VERSION=0.8.3-alpha   # the versionName from app/build.gradle.kts
 ./gradlew clean :app:assembleGithubRelease
 cp app/build/outputs/apk/github/release/NoSlop-github-release.apk NoSlop-$VERSION.apk
 sha256sum NoSlop-$VERSION.apk > NoSlop-$VERSION.apk.sha256
-gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --title "NoSlop $VERSION" --notes-file release-notes.md
+gh release create v$VERSION NoSlop-$VERSION.apk NoSlop-$VERSION.apk.sha256 --repo DeveLooped-INC/NoSlop --title "NoSlop $VERSION" --notes-file release-notes.md
 ```
 
-* **Keep the version in the tag.** The app reads it from the tag (for example `v0.8.2-alpha`).
+* **Keep the version in the tag.** The app reads it from the tag (for example `v0.8.3-alpha`); the tag must match `versionName`.
 * **Don't mark it as a pre-release or a draft.** The app asks GitHub for `/releases/latest`, which skips both.
 * **Upload one `.apk`.** The app takes the first one it finds.
 * **Upload the `.sha256`.** Any name ending in `.sha256` works, and a file named after the APK wins. The app can also read a digest from the release notes. Without a checksum, it refuses the download.

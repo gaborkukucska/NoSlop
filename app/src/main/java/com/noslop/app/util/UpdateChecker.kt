@@ -77,7 +77,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
         const val NOTIFY_INTERVAL_MS = 3L * 24 * 60 * 60 * 1000 // 3 days
 
         private const val LATEST_RELEASE_URL =
-            "https://api.github.com/repos/gaborkukucska/NoSlop/releases/latest"
+            "https://api.github.com/repos/DeveLooped-INC/NoSlop/releases/latest"
     }
 
     private val _updateInfo = MutableStateFlow<UpdateInfo?>(null)

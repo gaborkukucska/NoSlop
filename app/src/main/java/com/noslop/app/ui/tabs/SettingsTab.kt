@@ -2086,12 +2086,12 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     Text(
                         "GitHub Repository".tr, 
                         color = AccentGreen, 
-                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop"))) }.padding(vertical = 4.dp)
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/DeveLooped-INC/NoSlop"))) }.padding(vertical = 4.dp)
                     )
                     Text(
                         "Privacy Policy".tr, 
                         color = AccentGreen, 
-                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop/blob/main/docs/PRIVACY_POLICY.md"))) }.padding(vertical = 4.dp)
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/DeveLooped-INC/NoSlop/blob/main/docs/PRIVACY_POLICY.md"))) }.padding(vertical = 4.dp)
                     )
 
                     // NOSLOP_SOURCE_CREDIT_V1 — the credits the sources' terms ask for.
@@ -2122,7 +2122,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     Text(
                         "Source terms".tr,
                         color = AccentGreen,
-                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop/blob/main/docs/SOURCES.md"))) }.padding(vertical = 4.dp)
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/DeveLooped-INC/NoSlop/blob/main/docs/SOURCES.md"))) }.padding(vertical = 4.dp)
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
