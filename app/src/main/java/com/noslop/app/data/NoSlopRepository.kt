@@ -260,6 +260,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
         suspend fun syncDmsWithHub() = withContext(Dispatchers.IO) {
+        uploadPendingDmMediaToHub()
         if (!shouldSyncDms) return@withContext
         shouldSyncDms = false
         val identity = getLocalIdentity() ?: return@withContext
@@ -320,6 +321,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             obj.put("mediaType", mediaJson.optString("type"))
                             obj.put("media", mediaJson)
                             hasMedia = true
+                            noteDmMediaForHub(mediaJson, msg.id, msg.timestamp, peer.publicKeyB64, msg.senderPub, identity.publicKeyB64, burnable?.publicKeyB64)
                         }
                     } catch (e: Exception) {}
                     
@@ -346,6 +348,103 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val res = invokeHubApi("sync_push_dms", args)
             if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${dmArray.length()} DMs to Hub.")
         }
+    }
+
+    /**
+     * NOSLOP_HUB_DM_MEDIA_V1 — the Hub's Web UI chat shows DM attachments. It fetches a contact's attachments
+     * itself; the ones this phone holds (its own, and those it downloaded) it gets from here: every DM with an
+     * attachment that is mirrored is noted, and [uploadPendingDmMediaToHub] uploads what the Hub does not have
+     * yet (`hub_dm_media_info`, then `dm_media_put` in resumable chunks), at most once a minute and 32 MB a round.
+     */
+    private data class DmMediaForHub(
+        val mediaId: String, val dmId: String, val dmTs: Long, val peer: String, val asKey: String,
+        val type: String, val mime: String, val sha256: String?, val incoming: Boolean, val notedAt: Long
+    )
+    private val dmMediaForHub = java.util.concurrent.ConcurrentHashMap<String, DmMediaForHub>()
+    @Volatile private var lastDmMediaUpload = 0L
+
+    private suspend fun noteDmMediaForHub(media: JSONObject, dmId: String, dmTs: Long, peer: String, sender: String, personal: String, creator: String?) {
+        val id = media.optString("id")
+        if (id.isBlank() || id.startsWith("noslop-gif://") || !com.noslop.app.mesh.MediaManager.isValidMediaId(id)) return
+        if (dmMediaForHub.containsKey(id) || dmMediaForHub.size >= 500) return
+        val outgoing = sender == personal || (creator != null && sender == creator)
+        val asKey = if (outgoing) sender else if (creator != null && appSettingDao.getSetting("contact_identity_$peer") == "burnable") creator else personal
+        dmMediaForHub[id] = DmMediaForHub(
+            mediaId = id, dmId = dmId, dmTs = dmTs, peer = peer, asKey = asKey,
+            type = media.optString("type").ifBlank { "file" }, mime = media.optString("mime_type").ifBlank { "application/octet-stream" },
+            sha256 = media.optString("sha256").takeIf { it.length == 64 }, incoming = !outgoing, notedAt = System.currentTimeMillis()
+        )
+    }
+
+    private suspend fun uploadPendingDmMediaToHub() {
+        if (dmMediaForHub.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (now - lastDmMediaUpload < 60_000L) return
+        lastDmMediaUpload = now
+        // An attachment this phone never downloaded is the Hub's to fetch; it is not asked about forever.
+        dmMediaForHub.values.filter { now - it.notedAt > 3L * 24 * 60 * 60_000 }.forEach { dmMediaForHub.remove(it.mediaId) }
+        val batch = dmMediaForHub.values.sortedBy { it.dmTs }.takeLast(50)
+        if (batch.isEmpty()) return
+        val ids = com.google.gson.JsonArray().apply { batch.forEach { add(it.mediaId) } }
+        val res = HubClient.invoke(this@NoSlopRepository, "hub_dm_media_info", com.google.gson.JsonObject().apply { add("media_ids", ids) }) ?: return
+        val states = HashMap<String, String>()
+        res.get("items")?.takeIf { it.isJsonArray }?.asJsonArray?.forEach { el ->
+            val o = el.asJsonObject
+            val id = o.get("media_id")?.asString ?: return@forEach
+            states[id] = o.get("state")?.asString ?: ""
+        }
+        var budget = 32L * 1024 * 1024
+        for (item in batch) {
+            if (budget <= 0) break
+            when (states[item.mediaId]) {
+                "complete", "too_large" -> { dmMediaForHub.remove(item.mediaId); continue }
+            }
+            val file = com.noslop.app.mesh.MediaManager.getLocalFile(item.mediaId) ?: continue // not on this phone (yet)
+            val (sent, complete) = uploadDmMediaToHub(item, file, budget)
+            budget -= sent
+            if (complete) dmMediaForHub.remove(item.mediaId)
+        }
+    }
+
+    /** Uploads one DM attachment (plaintext, from MediaCrypto); returns bytes sent and whether the Hub has it all. */
+    private suspend fun uploadDmMediaToHub(item: DmMediaForHub, file: java.io.File, budget: Long): Pair<Long, Boolean> {
+        val digest = item.sha256 ?: mediaDigestFor(item.mediaId) ?: return 0L to false
+        val size = com.noslop.app.mesh.MediaCrypto.contentLength(file)
+        if (size <= 0) return 0L to false
+        val key = com.noslop.app.mesh.MediaVault.key()
+        var offset = 0L
+        var sent = 0L
+        while (offset < size && sent < budget) {
+            val len = minOf(512L * 1024, size - offset).toInt()
+            val buf = ByteArray(len)
+            val read = com.noslop.app.mesh.MediaCrypto.readAt(file, key, offset, buf)
+            if (read != len) { Logger.warn("HUB_SYNC", "Could not read DM attachment ${item.mediaId} at $offset"); return sent to false }
+            val args = com.google.gson.JsonObject().apply {
+                addProperty("media_id", item.mediaId)
+                addProperty("sha256", digest)
+                addProperty("size", size)
+                addProperty("offset", offset)
+                addProperty("data", android.util.Base64.encodeToString(buf, android.util.Base64.NO_WRAP))
+                addProperty("peer", item.peer)
+                addProperty("dm_id", item.dmId)
+                addProperty("dm_ts", item.dmTs)
+                addProperty("as_key", item.asKey)
+                addProperty("incoming", item.incoming)
+                addProperty("type", item.type)
+                addProperty("mime_type", item.mime)
+            }
+            val res = HubClient.invoke(this@NoSlopRepository, "dm_media_put", args, longTransfer = true) ?: return sent to false
+            val status = res.get("status")?.asString
+            if (res.get("complete")?.asBoolean == true) {
+                Logger.info("HUB_SYNC", "DM attachment ${item.mediaId} is on the Hub ($size bytes)")
+                return (sent + if (status == "ok") len.toLong() else 0L) to true
+            }
+            if (status == "busy") return sent to false // the Hub is fetching it from the contact right now
+            val received = res.get("received")?.asLong ?: return sent to false
+            if (status == "ok") sent += len
+            offset = received
+        }
+        return sent to false
     }
 
     suspend fun ensureAdminPeerExists() = withContext(Dispatchers.IO) {
@@ -735,6 +834,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     @Volatile private var lastCreatorContentSync = 0L
     @Volatile private var hubUnreachableRounds = 0
+    /** NOSLOP_HUB_LINK_RESILIENCE_V1: how long the Hub must have been silent before the creator onion comes back here. */
+    private val HUB_TAKEBACK_AFTER_MS = 10 * 60_000L
 
     /**
      * NOSLOP_HUB_CREATOR_HOSTING_V1 — the creator identity on the Home HUB (Hub build only).
@@ -759,8 +860,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 Logger.info("HUB_SYNC", "Hub not reached while this phone's Tor is not ready; not counted against the Hub")
                 return@withContext
             }
-            if (hostedByHub && ++hubUnreachableRounds >= 3) {
-                Logger.warn("HUB_SYNC", "Hub unreachable for 3 rounds: publishing the creator onion from this phone again")
+            // NOSLOP_HUB_LINK_RESILIENCE_V1 (2026-11-25): and only after the Hub has not answered for
+            // HUB_TAKEBACK_AFTER_MS. Three short rounds were enough before: a phone whose own circuits to the Hub
+            // were slow took the creator onion back while the Hub was up and serving it, and then two hosts
+            // published the same onion (contacts reached neither reliably).
+            val silentFor = System.currentTimeMillis() - maxOf(HubClient.lastReachedAt, HubClient.startedAt)
+            if (hostedByHub && ++hubUnreachableRounds >= 3 && silentFor >= HUB_TAKEBACK_AFTER_MS) {
+                Logger.warn("HUB_SYNC", "Hub unreachable for ${silentFor / 60_000} min: publishing the creator onion from this phone again")
                 setHubCreatorHosted(false, burnable)
             }
             return@withContext
@@ -809,7 +915,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             HubClient.invoke(this@NoSlopRepository, "creator_hosting_set", com.google.gson.JsonObject().apply { addProperty("enabled", true) }) ?: return@withContext
         val creatorState = current.get("creator")?.takeIf { it.isJsonObject }?.asJsonObject
         val published = creatorState?.get("onion_published")?.asBoolean == true
-        if (published && !hostedByHub) setHubCreatorHosted(true, burnable)
+        if (published && !hostedByHub) {
+            setHubCreatorHosted(true, burnable)
+            // NOSLOP_HUB_LINK_RESILIENCE_V1: this phone may have published the creator onion meanwhile; its descriptor
+            // is then the newest on the directories and points at this phone. The Hub publishes again so contacts
+            // find the Hub (an older Hub does not know the command; nothing changes there).
+            val again = HubClient.invoke(this@NoSlopRepository, "creator_onion_republish")
+            if (again?.get("republished")?.asBoolean == true) Logger.info("HUB_SYNC", "The Hub published the creator onion again (fresh descriptor)")
+        }
         if (!published) {
             if (hostedByHub) setHubCreatorHosted(false, burnable)
             val err = creatorState?.get("onion_error")?.takeIf { !it.isJsonNull }?.asString

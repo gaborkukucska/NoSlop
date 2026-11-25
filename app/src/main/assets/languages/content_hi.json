@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "{handle} को अनुरोध नहीं भेजा गया: आपकी निर्माता पहचान अब इस डिवाइस पर नहीं है। इसे स्टूडियो में \"निर्माता पहचान बहाल करें\" से बहाल करें, फिर पुनः प्रयास करें।",
   "Request not sent: this device has no identity yet.": "अनुरोध नहीं भेजा गया: इस डिवाइस पर अभी कोई पहचान नहीं है।",
   "Request not sent: {handle} is blocked on this device.": "अनुरोध नहीं भेजा गया: {handle} इस डिवाइस पर ब्लॉक है।",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor कनेक्ट नहीं हो सका: कोई दूसरा ऐप NoSlop का Tor पोर्ट ({port}) इस्तेमाल कर रहा है। उस ऐप को बंद करें या अपना फ़ोन रीस्टार्ट करें, फिर \"पुनः प्रयास करें\" पर टैप करें।"
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor कनेक्ट नहीं हो सका: कोई दूसरा ऐप NoSlop का Tor पोर्ट ({port}) इस्तेमाल कर रहा है। उस ऐप को बंद करें या अपना फ़ोन रीस्टार्ट करें, फिर \"पुनः प्रयास करें\" पर टैप करें।",
+  "Refresh chat": "चैट रीफ़्रेश करें"
 }

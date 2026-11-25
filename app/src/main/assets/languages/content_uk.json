@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "Запит для {handle} не надіслано: вашої особи автора більше немає на цьому пристрої. Відновіть її в розділі «Студія» кнопкою «Відновити особу автора» і спробуйте знову.",
   "Request not sent: this device has no identity yet.": "Запит не надіслано: на цьому пристрої ще немає особи.",
   "Request not sent: {handle} is blocked on this device.": "Запит не надіслано: {handle} заблоковано на цьому пристрої.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor не зміг підключитися: інший застосунок використовує порт Tor застосунку NoSlop ({port}). Закрийте цей застосунок або перезапустіть телефон, а потім натисніть «Повторити»."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor не зміг підключитися: інший застосунок використовує порт Tor застосунку NoSlop ({port}). Закрийте цей застосунок або перезапустіть телефон, а потім натисніть «Повторити».",
+  "Refresh chat": "Оновити чат"
 }

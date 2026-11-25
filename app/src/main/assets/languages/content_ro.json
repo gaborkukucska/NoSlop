@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "Cererea către {handle} nu a fost trimisă: identitatea ta de creator nu mai este pe acest dispozitiv. Restaureaz-o în Studio cu „Restaurează identitatea de creator”, apoi încearcă din nou.",
   "Request not sent: this device has no identity yet.": "Cererea nu a fost trimisă: acest dispozitiv nu are încă o identitate.",
   "Request not sent: {handle} is blocked on this device.": "Cererea nu a fost trimisă: {handle} este blocat pe acest dispozitiv.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor nu s-a putut conecta: o altă aplicație folosește portul Tor al NoSlop ({port}). Închide aplicația respectivă sau repornește telefonul, apoi atinge „Reîncearcă”."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor nu s-a putut conecta: o altă aplicație folosește portul Tor al NoSlop ({port}). Închide aplicația respectivă sau repornește telefonul, apoi atinge „Reîncearcă”.",
+  "Refresh chat": "Reîmprospătează conversația"
 }

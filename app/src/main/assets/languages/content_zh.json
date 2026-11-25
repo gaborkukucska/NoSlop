@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "未向 {handle} 发送请求：你的创作者身份已不在此设备上。请在“创作室”中通过“恢复创作者身份”恢复后再试。",
   "Request not sent: this device has no identity yet.": "未发送请求：此设备还没有身份。",
   "Request not sent: {handle} is blocked on this device.": "未发送请求：{handle} 已在此设备上被屏蔽。",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor 无法建立连接：另一个应用正在使用 NoSlop 的 Tor 端口（{port}）。请关闭该应用或重启手机，然后点按“重试”。"
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor 无法建立连接：另一个应用正在使用 NoSlop 的 Tor 端口（{port}）。请关闭该应用或重启手机，然后点按“重试”。",
+  "Refresh chat": "刷新聊天"
 }

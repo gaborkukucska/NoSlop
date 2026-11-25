@@ -3146,6 +3146,42 @@ fun toggleAggregator() {
 
 
 
+    /**
+     * NOSLOP_CHAT_REFRESH_V1 (2026-11-25): the chat's refresh button. Starts Tor again when it stopped (the app
+     * was in the background for long), pulls what the Home HUB holds for this phone (its inbox and the Web UI's
+     * messages) right away instead of at the next background round, then sends what is waiting for this contact
+     * and asks them for anything missed (DM_SYNC_REQUEST). At most two minutes; the button shows it is working.
+     */
+    private val _chatRefreshing = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val chatRefreshing: kotlinx.coroutines.flow.StateFlow<Boolean> = _chatRefreshing
+
+    fun refreshChat(peer: Peer) {
+        if (_chatRefreshing.value) return
+        _chatRefreshing.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                when (TorService.torState.value) {
+                    TorState.FAILED -> startTor(forceRestart = true)
+                    TorState.IDLE -> startTor(forceRestart = false)
+                    else -> {}
+                }
+                kotlinx.coroutines.withTimeoutOrNull(120_000L) {
+                    if (!repository.getAppSetting("hub_deployment_status").isNullOrBlank()) {
+                        com.noslop.app.data.HubClient.clearOnionBackoff()
+                        repository.pullMeshPacketsFromHub()
+                        repository.syncDmsWithHub()
+                    }
+                    repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress, force = true)
+                    repository.requestDmSync(peer)
+                }
+            } catch (e: Exception) {
+                Logger.warn("VM", "Chat refresh did not finish: ${e.message}")
+            } finally {
+                _chatRefreshing.value = false
+            }
+        }
+    }
+
     fun syncDmsWithPeer(peer: Peer) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress, force = true)

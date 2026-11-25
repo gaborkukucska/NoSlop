@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "Nem sikerült elküldeni a kérést {handle} számára: az alkotói azonosítód már nincs ezen az eszközön. Állítsd vissza a Stúdióban az „Alkotói azonosító visszaállítása” gombbal, majd próbáld újra.",
   "Request not sent: this device has no identity yet.": "A kérés nem ment el: ezen az eszközön még nincs azonosító.",
   "Request not sent: {handle} is blocked on this device.": "A kérés nem ment el: {handle} le van tiltva ezen az eszközön.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "A Tor nem tudott csatlakozni: egy másik alkalmazás használja a NoSlop Tor-portját ({port}). Zárd be azt az alkalmazást, vagy indítsd újra a telefont, majd koppints az „Újrapróbálás” gombra."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "A Tor nem tudott csatlakozni: egy másik alkalmazás használja a NoSlop Tor-portját ({port}). Zárd be azt az alkalmazást, vagy indítsd újra a telefont, majd koppints az „Újrapróbálás” gombra.",
+  "Refresh chat": "Csevegés frissítése"
 }

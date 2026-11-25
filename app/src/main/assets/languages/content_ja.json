@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "{handle} にリクエストを送信できませんでした: クリエイターIDがこの端末にありません。スタジオの「クリエイターIDを復元」で復元してから、もう一度お試しください。",
   "Request not sent: this device has no identity yet.": "リクエストを送信できませんでした: この端末にはまだIDがありません。",
   "Request not sent: {handle} is blocked on this device.": "リクエストを送信できませんでした: {handle} はこの端末でブロックされています。",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Torに接続できませんでした: 別のアプリがNoSlopのTorポート ({port}) を使用しています。そのアプリを閉じるか端末を再起動してから、「再試行」をタップしてください。"
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Torに接続できませんでした: 別のアプリがNoSlopのTorポート ({port}) を使用しています。そのアプリを閉じるか端末を再起動してから、「再試行」をタップしてください。",
+  "Refresh chat": "チャットを更新"
 }

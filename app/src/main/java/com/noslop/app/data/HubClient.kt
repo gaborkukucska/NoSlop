@@ -46,6 +46,41 @@ object HubClient {
     /** Whether the last request reached the Hub (for the Hub page). */
     @Volatile var lastReachedAt: Long = 0L
 
+    // NOSLOP_HUB_LINK_RESILIENCE_V1 (2026-11-25): the background sync loop runs every 5 s and makes several Hub
+    // calls in a row. While the Hub's onion cannot be reached each of them waited out its own connect timeout, so
+    // one round took minutes and a reachable Hub was tried again only after all of them. Now, after a failed onion
+    // connection, the next calls skip the onion for [ONION_RETRY_GAP_MS] (the next round tries again), the
+    // connection gets [ONION_CONNECT_TIMEOUT_S] (a rendezvous with a cold circuit often takes 20-40 s on a phone),
+    // and Tor is asked for the Hub's current descriptor (at most every [DESCRIPTOR_REFRESH_GAP_MS]), so a Hub whose
+    // Tor restarted is found at its new introduction points. A refresh the user asks for clears the gap.
+    @Volatile private var onionFailedAt: Long = 0L
+    @Volatile private var descriptorRefreshedAt: Long = 0L
+    private const val ONION_RETRY_GAP_MS = 15_000L
+    private const val ONION_CONNECT_TIMEOUT_S = 45L
+    private const val DESCRIPTOR_REFRESH_GAP_MS = 120_000L
+
+    /** When this process started (the Hub counts as silent only from then on). */
+    val startedAt: Long = System.currentTimeMillis()
+
+    /** The user asked for a refresh: try the Hub's onion at once. */
+    fun clearOnionBackoff() { onionFailedAt = 0L }
+
+    private fun onionInBackoff(now: Long = System.currentTimeMillis()): Boolean =
+        onionFailedAt > lastReachedAt && now - onionFailedAt < ONION_RETRY_GAP_MS
+
+    private fun noteOnionFailure(baseUrl: String) {
+        val now = System.currentTimeMillis()
+        onionFailedAt = now
+        if (now - descriptorRefreshedAt < DESCRIPTOR_REFRESH_GAP_MS) return
+        descriptorRefreshedAt = now
+        val host = baseUrl.removePrefix("http://").substringBefore(':')
+        try {
+            com.noslop.app.tor.TorService.refreshOnionDescriptor(host)
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Descriptor refresh for the Hub not started: ${e.message}")
+        }
+    }
+
     private fun sha256Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
@@ -85,8 +120,9 @@ object HubClient {
         }
         val onion = repo.getLocalIdentity()?.onionAddress
         if (!onion.isNullOrBlank()) {
-            val tor = if (longTransfer) HttpClientProvider.torClient.newBuilder()
-                .readTimeout(600, TimeUnit.SECONDS).writeTimeout(600, TimeUnit.SECONDS).build() else HttpClientProvider.torClient
+            val tor = if (longTransfer) HttpClientProvider.torClient.newBuilder().connectTimeout(ONION_CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
+                .readTimeout(600, TimeUnit.SECONDS).writeTimeout(600, TimeUnit.SECONDS).build()
+            else HttpClientProvider.torClient.newBuilder().connectTimeout(ONION_CONNECT_TIMEOUT_S, TimeUnit.SECONDS).build()
             out.add(Route("http://$onion:8080", tor))
         }
         return out
@@ -118,6 +154,11 @@ object HubClient {
     ): T? = withContext(Dispatchers.IO) {
         val keys = repo.getLocalIdentity() ?: return@withContext null
         for (route in routes(repo, longTransfer)) {
+            val isOnion = route.baseUrl.endsWith(".onion:8080")
+            if (isOnion && onionInBackoff()) {
+                Logger.debug(TAG, "$method $path: the Hub's onion failed moments ago; skipped this time")
+                continue
+            }
             try {
                 val builder = Request.Builder().url(route.baseUrl + path)
                 // A fresh signature per attempt: the nonce must never be reused.
@@ -134,6 +175,7 @@ object HubClient {
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "$method $path via ${route.baseUrl.take(24)} failed: ${e.message}")
+                if (isOnion && e is java.io.IOException) noteOnionFailure(route.baseUrl)
             }
         }
         null

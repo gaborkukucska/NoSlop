@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "Chưa gửi yêu cầu tới {handle}: danh tính người sáng tạo của bạn không còn trên thiết bị này. Hãy khôi phục trong Studio bằng \"Khôi phục danh tính người sáng tạo\", rồi thử lại.",
   "Request not sent: this device has no identity yet.": "Chưa gửi yêu cầu: thiết bị này chưa có danh tính.",
   "Request not sent: {handle} is blocked on this device.": "Chưa gửi yêu cầu: {handle} đang bị chặn trên thiết bị này.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor không thể kết nối: một ứng dụng khác đang dùng cổng Tor của NoSlop ({port}). Hãy đóng ứng dụng đó hoặc khởi động lại điện thoại, rồi nhấn \"Thử lại\"."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor không thể kết nối: một ứng dụng khác đang dùng cổng Tor của NoSlop ({port}). Hãy đóng ứng dụng đó hoặc khởi động lại điện thoại, rồi nhấn \"Thử lại\".",
+  "Refresh chat": "Làm mới cuộc trò chuyện"
 }

@@ -3209,6 +3209,36 @@ back a minute later, everywhere (phone and the Hub's Web UI).
   also applies `DELETE_MESSAGE`s to the Web UI's chat).
 * Not changed: group chats (`clearGroupChat`) and what the contact keeps of their own messages.
 
+### 16.66 The Hub link after a long background, DM attachments on the Hub, chat refresh and Tor status (`NOSLOP_HUB_LINK_RESILIENCE_V1`, `NOSLOP_HUB_DM_MEDIA_V1`, `NOSLOP_CHAT_REFRESH_V1`, `NOSLOP_CHAT_TOR_STATUS_V1`)
+
+Found 2026-11-25 (device test, logs of both phones and the Hub): after the app had been in the background, nothing
+reached the phone from the Hub for half an hour, and attachments showed in the Hub's Web UI chat only as "open this
+conversation on your phone".
+
+* **Split creator onion.** The phone's signed Hub calls gave up on the Hub's onion after 20 s, so with slow circuits
+  three background rounds failed within minutes and the phone published the creator onion itself, while the Hub,
+  which was up, kept publishing it too. When the phone handed it back, its descriptor was still the newest on the
+  directories, so contacts kept reaching the (frozen) phone: Gabby's "SOCKS: Host unreachable" to the creator onion
+  until the Hub restarted. Now the onion connection gets 45 s; the creator onion comes back to the phone only after
+  three failed rounds *and* 10 minutes without any answer from the Hub (counted from the app's start at the
+  earliest); and on hand-back the phone asks the Hub to publish again (`creator_onion_republish`, a fresh
+  descriptor). An older Hub does not know the command; nothing else changes there.
+* **One failure, not one per call.** After a failed connection to the Hub's onion, the other calls of the same
+  background round skip it for 15 s instead of each waiting out its own timeout, and Tor is asked for the Hub's
+  current descriptor (`HSFETCH`, at most every 2 minutes). A refresh by the user clears the gap.
+* **DM attachments on the Hub.** Every mirrored DM with an attachment (not a picker GIF) is noted; at most once a
+  minute the phone asks the Hub which it lacks (`hub_dm_media_info`) and uploads the ones it holds (its own, and
+  those it downloaded), as resumable 512 KB chunks (`dm_media_put`, owner-signed), 32 MB per round. The Hub fetches
+  a contact's attachments itself from the contact (HAI-Net `NOSLOP_HUB_DM_MEDIA_V1`); the Web UI shows images and
+  GIFs, plays audio, voice recordings and video, and offers other files for download.
+* **Refresh button in the chat** (`NoSlopViewModel.refreshChat`): starts Tor again when it stopped or failed, pulls
+  the Hub's inbox and Web UI messages right away, sends this contact's outbox and asks them for missed DMs; a
+  spinner shows while it works (two minutes at most).
+* **Tor status in the chat:** while Tor is not ready (after 3 s) a line above the messages says "Connecting to Tor
+  network..."; when Tor stopped or failed, it says so with Retry. Existing translated strings, plus "Refresh chat"
+  in all 21 languages.
+* Not changed: packets, Room schema, the Hub's own `MEDIA_REQUEST` handling for the creator's public media.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

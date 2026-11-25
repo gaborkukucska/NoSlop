@@ -305,6 +305,15 @@ fun ChatThreadScreen(
                     }
                 }
 
+                // NOSLOP_CHAT_REFRESH_V1: fetch what is waiting for this chat now (see NoSlopViewModel.refreshChat).
+                val chatRefreshing by viewModel.chatRefreshing.collectAsState()
+                if (chatRefreshing) {
+                    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
+                    }
+                } else {
+                    IconButton(onClick = { viewModel.refreshChat(peer) }) { Icon(Icons.Default.Refresh, contentDescription = "Refresh chat".tr, tint = TextMuted) }
+                }
                 var showMenu by remember { mutableStateOf(false) }
                 var showClearConfirm by remember { mutableStateOf(false) }
                 Box {
@@ -368,6 +377,10 @@ fun ChatThreadScreen(
         // D10b (C02): a changed encryption key is applied automatically (it is signed by the
         // contact's identity key); this one-line notice stays until dismissed.
         KeyChangeNotice(peer = peer, viewModel = viewModel)
+
+        // NOSLOP_CHAT_TOR_STATUS_V1: after a long time in the background Android may have stopped Tor; say so here
+        // instead of letting messages wait silently.
+        ChatTorStatusBanner(viewModel = viewModel)
 
         if (peer.isTemporary) {
             Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
@@ -989,6 +1002,47 @@ private fun KeyChangeNotice(peer: Peer, viewModel: NoSlopViewModel) {
             changedAt = null
         }) {
             Text("Dismiss".tr, color = TemporaryAmber, fontSize = 12.sp)
+        }
+    }
+}
+
+/**
+ * NOSLOP_CHAT_TOR_STATUS_V1 (2026-11-25): a one-line notice above the messages while Tor is not ready (shown
+ * after 3 s, so a short reconnect does not flash it). Messages wait in the outbox until Tor is back; when Tor has
+ * stopped or failed, Retry starts it again.
+ */
+@Composable
+private fun ChatTorStatusBanner(viewModel: NoSlopViewModel) {
+    val state by com.noslop.app.tor.TorService.torState.collectAsState()
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        if (state == com.noslop.app.tor.TorState.READY) {
+            visible = false
+        } else {
+            kotlinx.coroutines.delay(3_000L)
+            visible = true
+        }
+    }
+    if (!visible || state == com.noslop.app.tor.TorState.READY) return
+    val stopped = state == com.noslop.app.tor.TorState.FAILED || state == com.noslop.app.tor.TorState.IDLE
+    Row(
+        modifier = Modifier.fillMaxWidth().background(TemporaryAmber.copy(alpha = 0.15f)).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!stopped) {
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = TemporaryAmber, strokeWidth = 2.dp)
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+        Text(
+            text = if (stopped) "Tor could not connect. Please retry connecting.".tr else "Connecting to Tor network...".tr,
+            color = TemporaryAmber,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f)
+        )
+        if (stopped) {
+            TextButton(onClick = { viewModel.startTor(forceRestart = state == com.noslop.app.tor.TorState.FAILED) }) {
+                Text("Retry".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

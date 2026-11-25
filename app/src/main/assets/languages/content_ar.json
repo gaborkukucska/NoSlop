@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "لم يُرسَل الطلب إلى {handle}: هوية المنشئ الخاصة بك لم تعد على هذا الجهاز. استعدها في الاستوديو عبر «استعادة هوية المنشئ»، ثم حاول مرة أخرى.",
   "Request not sent: this device has no identity yet.": "لم يُرسَل الطلب: لا توجد هوية على هذا الجهاز بعد.",
   "Request not sent: {handle} is blocked on this device.": "لم يُرسَل الطلب: {handle} محظور على هذا الجهاز.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "تعذر على Tor الاتصال: تطبيق آخر يستخدم منفذ Tor الخاص بـ NoSlop ({port}). أغلق ذلك التطبيق أو أعد تشغيل هاتفك، ثم اضغط «إعادة المحاولة»."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "تعذر على Tor الاتصال: تطبيق آخر يستخدم منفذ Tor الخاص بـ NoSlop ({port}). أغلق ذلك التطبيق أو أعد تشغيل هاتفك، ثم اضغط «إعادة المحاولة».",
+  "Refresh chat": "تحديث المحادثة"
 }

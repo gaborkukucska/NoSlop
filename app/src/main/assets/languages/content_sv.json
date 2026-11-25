@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "Förfrågan till {handle} skickades inte: din skaparidentitet finns inte längre på den här enheten. Återställ den i Studio med ”Återställ skaparidentitet” och försök sedan igen.",
   "Request not sent: this device has no identity yet.": "Förfrågan skickades inte: den här enheten har ingen identitet än.",
   "Request not sent: {handle} is blocked on this device.": "Förfrågan skickades inte: {handle} är blockerad på den här enheten.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor kunde inte ansluta: en annan app använder NoSlops Tor-port ({port}). Stäng den appen eller starta om telefonen och tryck sedan på ”Försök igen”."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor kunde inte ansluta: en annan app använder NoSlops Tor-port ({port}). Stäng den appen eller starta om telefonen och tryck sedan på ”Försök igen”.",
+  "Refresh chat": "Uppdatera chatten"
 }

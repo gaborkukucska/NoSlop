@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "{handle} kişisine istek gönderilmedi: üretici kimliğiniz artık bu cihazda değil. Stüdyo'da \"Üretici kimliğini geri yükle\" ile geri yükleyin, ardından tekrar deneyin.",
   "Request not sent: this device has no identity yet.": "İstek gönderilmedi: bu cihazda henüz bir kimlik yok.",
   "Request not sent: {handle} is blocked on this device.": "İstek gönderilmedi: {handle} bu cihazda engellendi.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor bağlanamadı: başka bir uygulama NoSlop'un Tor portunu ({port}) kullanıyor. O uygulamayı kapatın veya telefonunuzu yeniden başlatın, ardından \"Yeniden Dene\"ye dokunun."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor bağlanamadı: başka bir uygulama NoSlop'un Tor portunu ({port}) kullanıyor. O uygulamayı kapatın veya telefonunuzu yeniden başlatın, ardından \"Yeniden Dene\"ye dokunun.",
+  "Refresh chat": "Sohbeti yenile"
 }

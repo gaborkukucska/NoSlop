@@ -1085,5 +1085,6 @@
   "Request not sent to {handle}: your creator identity is no longer on this device. Restore it in Studio with Restore Creator Identity, then try again.": "{handle}님에게 요청을 보내지 못했습니다: 크리에이터 신원이 더 이상 이 기기에 없습니다. 스튜디오에서 '크리에이터 신원 복원'으로 복원한 뒤 다시 시도하세요.",
   "Request not sent: this device has no identity yet.": "요청을 보내지 못했습니다: 이 기기에 아직 신원이 없습니다.",
   "Request not sent: {handle} is blocked on this device.": "요청을 보내지 못했습니다: {handle}님은 이 기기에서 차단되어 있습니다.",
-  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor에 연결할 수 없습니다: 다른 앱이 NoSlop의 Tor 포트({port})를 사용하고 있습니다. 그 앱을 닫거나 휴대폰을 다시 시작한 다음 '다시 시도'를 누르세요."
+  "Tor could not connect: another app is using NoSlop's Tor port {port}. Close that app or restart your phone, then tap Retry.": "Tor에 연결할 수 없습니다: 다른 앱이 NoSlop의 Tor 포트({port})를 사용하고 있습니다. 그 앱을 닫거나 휴대폰을 다시 시작한 다음 '다시 시도'를 누르세요.",
+  "Refresh chat": "채팅 새로고침"
 }
