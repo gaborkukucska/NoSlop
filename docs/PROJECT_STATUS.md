@@ -145,7 +145,7 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 
 ---
 
-## Completed Changes (2026-11-22) — The Home HUB Hosts the Creator Identity, Owner-Signed Hub API (Hub build only)
+## Completed Changes (2026-11-22 – 2026-11-25) — The Home HUB Hosts the Creator Identity, Owner-Signed Hub API (v0.8.3-alpha)
 
 * **The request** (`isues.txt`): catch HAI-Net up with NoSlop so it is the Home HUB for the legacy Android app, first for users with creator mode and discoverability on: back up and hold their identities and serve their content. iOS where possible. Work in both repositories; HAI-Net side: new crate `hainet-noslop`, `docs/NOSLOP_HUB.md`.
 * **Owner decisions (2026-11-22).** The Hub takes over the same creator onion; it auto-accepts followers as the phone does; it serves only the creator's own public content.
@@ -163,7 +163,10 @@ Closed on 2026-11-03 from the old backlog after checking the code: `FOLLOW`/`UNF
 * **Hub updates failed when the SSH connection dropped, and a second attempt then failed on `sudo` (fixed 2026-11-25, §16.64, `NOSLOP_HUB_DEPLOY_DETACHED_V1`):** the deployment now runs detached on the Hub under a lock, the app follows its log and reconnects after a drop, and each run keeps its own sudo helpers.
 * **Deleted DMs were never removed on the other phone, and "Clear Chat" came back (fixed 2026-11-25, §16.65):** the receiver checked a delete's signature against an older text than the one senders sign, so every DM delete was refused; and a cleared chat asked the contact for its whole history again at the next DM sync. Deletes are now applied, a cleared chat remembers when it was cleared, and the Hub's Web UI is cleared with it.
 * **After a long background nothing synced from the Hub, and DM attachments did not show in the Hub's Web UI (fixed 2026-11-25, §16.66):** slow circuits to the Hub made the phone take the creator onion back while the Hub was still publishing it, so contacts reached neither reliably; the phone now waits 45 s for the Hub's onion, takes the creator onion back only after 10 minutes of silence, and asks the Hub to publish it again on hand-back. The phone uploads the DM attachments it holds to the Hub (the Hub fetches a contact's attachments itself), so the Web UI shows and plays them. New in the chat: a refresh button and a line saying when Tor is not ready, with Retry. Not yet verified on a device.
+* **Device test 2026-11-25 (late), owner:** images and GIFs a contact sent show in the Hub's Web UI chat (fetched by the Hub from the contact) and in the app; an image this phone held was uploaded to the Hub; the creator onion was published again by the Hub on hand-back; DMs, deletes and Clear Chat reach the Hub; Admin AI answers arrive (an empty-answer bug with "thinking" models was fixed on the HAI-Net side).
+* **Still to verify:** a follower on another phone syncing and playing the creator's media with the creator's phone off; the chat's refresh button and Tor status line after a long background; the Play builds.
 * No packet, Room schema or archive format change. The Hub API changed incompatibly (signatures required): phone and Hub must both be updated (Update Hub Software).
+* **Version 0.8.3-alpha** (`versionCode` 83). The one new string ("Refresh chat") is in all 21 languages.
 
 ## Completed Changes (2026-11-21) — NoSlop Refuses a Tor That Isn't Its Own, No Silent Exits on the DM Path, One Tor Start (v0.8.2-alpha)
 

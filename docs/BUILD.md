@@ -235,7 +235,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ### 8.1 Bump the version
 
-In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.8.2-alpha`; both flavours share these two values, and Play refuses a `versionCode` it has already seen, so never reuse one). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
+In `app/build.gradle.kts`, raise `versionCode` by one and set `versionName` (the current form is `0.8.3-alpha`; both flavours share these two values, and Play refuses a `versionCode` it has already seen, so never reuse one). Update the badge in `README.md` and the version in `docs/TECHNICAL_REFERENCE.md` (the header and §12).
 
 Then run the unit tests:
 
@@ -366,7 +366,7 @@ passed, and any failures and their stack traces.
 Sign with the same keystore as every earlier release. Android refuses an update signed with another key, and so does the app's own certificate check.
 
 ```bash
-VERSION=0.8.2-alpha   # the versionName from app/build.gradle.kts
+VERSION=0.8.3-alpha   # the versionName from app/build.gradle.kts
 ./gradlew clean :app:assembleGithubRelease
 cp app/build/outputs/apk/github/release/NoSlop-github-release.apk NoSlop-$VERSION.apk
 sha256sum NoSlop-$VERSION.apk > NoSlop-$VERSION.apk.sha256

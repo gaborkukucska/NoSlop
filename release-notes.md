@@ -1,13 +1,16 @@
+Home HUB (run your own Hub on a computer at home):
+- Your Hub can now hold your creator identity: it keeps your creator profile online, accepts followers and serves your public posts and media while your phone is off
+- Deploying and updating the Hub is more reliable: it installs only what is missing, keeps going if you switch apps or the connection drops, and logs in to the Hub's Web UI by QR code over Tor
+- Your Hub's Web UI shows your direct messages, with images, GIFs, voice notes and videos, and you can reply from it; deleted messages and cleared chats are removed there too
+- Desktop notifications in the Hub's Web UI for new messages
+
 Messages:
-- When a contact request can't be sent, NoSlop now tells you why instead of doing nothing: for example, when the contact knows your creator identity and it is no longer on this phone, or when the contact is blocked
-- The "Connection request sent" notice now appears once the request has actually gone out
+- Deleted messages are now removed on the other person's phone, and a cleared chat stays cleared
+- New refresh button in a chat: fetches new messages straight away
+- A chat now tells you when Tor is still connecting, with Retry if it stopped
 
-Tor and privacy:
-- NoSlop now checks that the Tor it uses is its own. If another app is using NoSlop's Tor port, NoSlop stops, sends nothing through it and tells you how to fix it
-- Fixed Tor sometimes being started several times at once when the app opened
-- When Tor can't connect, the message now offers Retry in every language, not only in English
-
-Languages:
-- The welcome screens, the backup reminder after an update and the encryption messages are now translated into all 20 languages
+Stability:
+- Fixed a crash when the app was in the background with a Hub linked
+- The app stays in touch with the Hub better after a long time in the background
 
 Once downloaded, open the file from your Files app to install the update.
