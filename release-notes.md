@@ -1,3 +1,7 @@
+NoSlop has a new home: https://github.com/DeveLooped-INC/NoSlop
+- This version is published at both the old and the new address. From this version on, NoSlop looks for updates at the new address
+- If you are on 0.8.2-alpha or older, please install this update (in the app or by hand from the new releases page). After 0.8.4-alpha the old address gets no more releases, so older versions will have to be updated by hand
+
 Home HUB (run your own Hub on a computer at home):
 - Your Hub can now hold your creator identity: it keeps your creator profile online, accepts followers and serves your public posts and media while your phone is off
 - Deploying and updating the Hub is more reliable: it installs only what is missing, keeps going if you switch apps or the connection drops, and logs in to the Hub's Web UI by QR code over Tor

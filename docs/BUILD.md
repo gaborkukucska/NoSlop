@@ -363,7 +363,7 @@ passed, and any failures and their stack traces.
 
 ### 8.3 Publish on GitHub
 
-Releases are published on the public repository, [DeveLooped-INC/NoSlop](https://github.com/DeveLooped-INC/NoSlop) (since 0.8.3-alpha; earlier releases were on `gaborkukucska/NoSlop`). The in-app updater reads that repository's latest release.
+Releases are published on the public repository, [DeveLooped-INC/NoSlop](https://github.com/DeveLooped-INC/NoSlop) (since 0.8.3-alpha; earlier releases were on `gaborkukucska/NoSlop`). The in-app updater reads that repository's latest release. Until v0.8.4-alpha, publish each release on `gaborkukucska/NoSlop` too: versions before 0.8.3-alpha check only there.
 
 Sign with the same keystore as every earlier release. Android refuses an update signed with another key, and so does the app's own certificate check.
 

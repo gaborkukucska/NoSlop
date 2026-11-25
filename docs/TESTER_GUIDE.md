@@ -144,6 +144,14 @@ and your installed signing certificate, and saves it to your Download folder. It
 itself: tap **Open Downloads**, then tap the NoSlop APK. Details are in
 [SUPPORT.md](SUPPORT.md#installing-an-update).
 
+**Moving to the new repository (from v0.8.3-alpha).** NoSlop's home is now
+[DeveLooped-INC/NoSlop](https://github.com/DeveLooped-INC/NoSlop). Versions before v0.8.3-alpha look for
+updates at the old address, `gaborkukucska/NoSlop`, which carries v0.8.3-alpha too but stops receiving
+releases after v0.8.4-alpha. If you are on v0.8.2-alpha or older, update to v0.8.3-alpha or later once
+(in the app, or by hand from the [releases page](https://github.com/DeveLooped-INC/NoSlop/releases)); from then on the app finds
+updates at the new address. Anyone still on an older version after that has to download the new version
+from the releases page and install it by hand.
+
 ## 5. Reporting a problem
 
 Please include:

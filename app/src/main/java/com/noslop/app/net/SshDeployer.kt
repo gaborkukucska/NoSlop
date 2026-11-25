@@ -800,7 +800,7 @@ EOF
                     git pull || { echo '[ERROR] Failed to update repository (merge conflicts?)'; exit 1; }
                     cd ..
                 else
-                    git clone https://github.com/gaborkukucska/hai.git || { echo '[ERROR] Failed to clone repository'; exit 1; }
+                    git clone https://github.com/DeveLooped-INC/hai.git || { echo '[ERROR] Failed to clone repository'; exit 1; }
                 fi
                 
 
