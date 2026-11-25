@@ -72,6 +72,13 @@ class DmPacketHandler(
 
         suspend fun isAckV3Peer(db: NoSlopDatabase, peerPub: String): Boolean =
             db.appSettingDao().getSetting(DM_ACK_V3_PREFIX + peerPub) != null
+
+        // NOSLOP_DM_CLEAR_STICKS_V1 (§16.65): "Clear Chat" records when; older copies (the contact's DM sync
+        // answer, re-sends, the Hub) are acknowledged but not stored again.
+        const val DM_CLEARED_BEFORE_PREFIX = "dm_cleared_before_"
+
+        suspend fun dmClearedBefore(db: NoSlopDatabase, peerPub: String): Long =
+            db.appSettingDao().getSetting(DM_CLEARED_BEFORE_PREFIX + peerPub)?.toLongOrNull() ?: 0L
     }
 
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
@@ -99,6 +106,18 @@ class DmPacketHandler(
                 com.noslop.app.util.AppScopes.io.launch { sendDmAck(msgPay.id, packet.senderId, myKeys) }
             }
             return true
+        }
+
+        // NOSLOP_DM_CLEAR_STICKS_V1: a DM from before this chat was cleared (the contact's DM sync answer
+        // since=0, or a re-send of an unacknowledged one) is acknowledged, so the sender stops, but not stored.
+        if (msgPay.groupId.isNullOrBlank()) {
+            val clearedBefore = dmClearedBefore(db, packet.senderId)
+            val sentAt = msgPay.timestamp ?: 0L
+            if (clearedBefore > 0L && sentAt in 1..clearedBefore) {
+                Logger.info(TAG, "DM ${msgPay.id} from ${packet.senderId.take(12)} predates the cleared chat; acknowledged, not stored")
+                com.noslop.app.util.AppScopes.io.launch { sendDmAck(msgPay.id, packet.senderId, myKeys) }
+                return true
+            }
         }
 
         val peer = peerDao.getPeerByPublicKey(packet.senderId)
@@ -380,9 +399,17 @@ class DmPacketHandler(
         val deletePay = packet.getDeleteMessagePayload() ?: return false
         val signature = packet.signature ?: return false
 
-        // Verify signature
-        val payloadToVerify = "${deletePay.messageId}|${deletePay.authorId}|${deletePay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, signature, deletePay.authorId)) return false
+        // NOSLOP_DM_DELETE_SIGNATURE_V1 (§16.65): every sender signs encodeForSigning(id, author, ts), which
+        // MeshPacketVerifier checks; this used to re-check the older "id|author|ts" text only, so no DM delete
+        // was ever applied here. Both forms are accepted.
+        val signedNow = CryptoService.encodeForSigning(deletePay.messageId, deletePay.authorId, deletePay.timestamp.toString())
+        val signedLegacy = "${deletePay.messageId}|${deletePay.authorId}|${deletePay.timestamp}"
+        if (!CryptoService.verify(signedNow, signature, deletePay.authorId) &&
+            !CryptoService.verify(signedLegacy, signature, deletePay.authorId)
+        ) {
+            Logger.warn(TAG, "Rejected DELETE_MESSAGE ${deletePay.messageId}: signature does not verify")
+            return false
+        }
 
         val groupId = deletePay.groupId
         if (groupId != null) {

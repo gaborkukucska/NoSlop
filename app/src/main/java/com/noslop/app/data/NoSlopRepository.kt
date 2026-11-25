@@ -2942,6 +2942,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun clearChat(peerPubB64: String) {
         meshSocialRepository.clearChat(peerPubB64)
+        // NOSLOP_DM_CLEAR_STICKS_V1: the Hub's Web UI shows the same conversation; clear it there too (no-op
+        // without a linked Hub; an older Hub answers "unknown command" and keeps it).
+        val before = com.noslop.app.mesh.DmPacketHandler.dmClearedBefore(db, peerPubB64)
+        val res = invokeHubApi("hub_dms_clear", JSONObject().put("peer", peerPubB64).put("before", before))
+        if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Cleared the chat on the Hub too (${res.optInt("deleted")} messages)")
     }
 
     suspend fun clearGroupChat(groupId: String) {

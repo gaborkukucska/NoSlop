@@ -1616,7 +1616,12 @@ class MeshSocialRepository(
             return@withContext
         }
 
-        val since = messageDao.getLatestReceivedTimestamp(peer.publicKeyB64) ?: 0L
+        // NOSLOP_DM_CLEAR_STICKS_V1: after "Clear Chat" the conversation is empty, and since=0 used to ask the
+        // contact for its whole history back.
+        val since = maxOf(
+            messageDao.getLatestReceivedTimestamp(peer.publicKeyB64) ?: 0L,
+            com.noslop.app.mesh.DmPacketHandler.dmClearedBefore(db, peer.publicKeyB64)
+        )
         val payload = com.noslop.app.mesh.DmSyncRequestPayload(since = since)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
@@ -2744,6 +2749,10 @@ class MeshSocialRepository(
         // the chat is still cleared locally.
         val myKeys = getIdentityForPeer(peerPubB64)
         val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext
+        // NOSLOP_DM_CLEAR_STICKS_V1: remember when, so the next DM sync or a re-send does not bring it all back.
+        db.appSettingDao().insertSetting(
+            AppSetting(com.noslop.app.mesh.DmPacketHandler.DM_CLEARED_BEFORE_PREFIX + peerPubB64, System.currentTimeMillis().toString())
+        )
         
         val messages = messageDao.getMessagesWithPeerList(peerPubB64)
         for (msg in messages) {

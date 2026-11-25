@@ -3190,6 +3190,25 @@ at the same fixed paths (`~/.hainet_askpass`, `~/.hainet_deploy_tmp/sudo`).
 
 Tests: `SshDeployerDetachedTest` (the UTF-8 split of a streamed log, and that no command line carries a secret).
 
+### 16.65 DM deletes are applied, and a cleared chat stays cleared (`NOSLOP_DM_DELETE_SIGNATURE_V1`, `NOSLOP_DM_CLEAR_STICKS_V1`)
+
+Found 2026-11-25 (device test): a message Gabby deleted stayed on this phone, and "Clear Chat" on this phone came
+back a minute later, everywhere (phone and the Hub's Web UI).
+
+* **No DM delete was ever applied by the receiver.** Senders (`deleteDirectMessage`, `clearChat`) sign
+  `encodeForSigning(messageId, authorId, timestamp)`, which `MeshPacketVerifier` checks; `handleDeleteMessage` then
+  re-checked the older `messageId|authorId|timestamp` text, which never verified, and returned false. It now accepts
+  either form (WIRE_PROTOCOL_REFERENCE lists the pipe form; both are signed by the author's key).
+* **A cleared chat refilled itself.** After a clear the conversation is empty, so the next `requestDmSync` asked the
+  contact for everything `since=0`, and the contact (who never applied the deletes, above) sent it all back.
+  `clearChat` now stores `dm_cleared_before_<peer>`; `requestDmSync` asks from that time at the earliest, and
+  `handleDirectMessage` acknowledges but does not store a one-to-one DM written before it (so a sender re-sending an
+  unacknowledged DM stops).
+* **The Hub's copy.** `clearChat` also calls `hub_dms_clear {peer, before}`: the Hub removes that conversation from
+  its Web UI and its notifications, and ignores older copies afterwards (HAI-Net `NOSLOP_HUB_DM_DELETE_V1`, which
+  also applies `DELETE_MESSAGE`s to the Web UI's chat).
+* Not changed: group chats (`clearGroupChat`) and what the contact keeps of their own messages.
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
