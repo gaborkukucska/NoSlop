@@ -3154,6 +3154,19 @@ never downloaded ("MEDIA_REQUEST for null").
   (`NOSLOP_HUB_DM_VIEW_V1`) that list also holds contacts' DMs, which reach this phone through the Hub inbox,
   signature-checked. The one-time restore (`syncPullHistoricalDataFromHub`) still takes everything.
 
+### 16.63 A Hub deployment keeps the app in the foreground (`NOSLOP_HUB_DEPLOY_KEEPALIVE_V1`)
+
+Found 2026-11-25: "Update Hub Software" failed ("Deployment failed (exit code -1)" while compiling `hainet-core`)
+when the user switched to another app during the update, and succeeded with the app kept on screen. The
+deployment runs over this app's SSH session and the build on the Hub runs inside it; once the app left the screen
+nothing kept the process in the foreground (with a Hub linked the foreground service is off), Android froze it, the
+session dropped and the Hub stopped the build. `SshDeployer.deployHaiNetHub` now starts `NoSlopForegroundService`
+for the whole deployment (`startKeepAlive`; its notification and partial wake lock) and stops it afterwards
+(`stopKeepAlive`). It leaves the service alone when the user already runs it, and a service that only kept a
+deployment alive does not broadcast `USER_EXIT` when it stops; a normal `start` (the user's setting) during a
+deployment turns it back into the user's service. Not covered: a deployment interrupted by the network itself
+(the build still runs inside the SSH session).
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the

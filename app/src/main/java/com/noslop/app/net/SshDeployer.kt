@@ -55,7 +55,33 @@ object SshDeployer {
         }
     }
 
+    /**
+     * NOSLOP_HUB_DEPLOY_KEEPALIVE_V1 (§16.63): the deployment runs over this app's SSH session, and the build on
+     * the Hub runs inside that session. When the user switched away, Android froze the app, the session dropped
+     * and the build stopped ("Deployment failed (exit code -1)" during "Compiling hainet-core", 2026-11-25). The
+     * foreground service now keeps the app running (and the CPU awake) for the whole deployment.
+     */
     suspend fun deployHaiNetHub(
+        ip: String,
+        user: String,
+        pass: String,
+        sharedFolder: String,
+        identity: CryptoService.IdentityKeys?,
+        strategy: OverwriteStrategy = OverwriteStrategy.PROMPT,
+        onLog: (String) -> Unit = {},
+        onHostKeyPrompt: (suspend (host: String, fingerprint: String) -> Boolean)? = null
+    ): Result<String> {
+        val appContext = try { com.noslop.app.NoSlopApp.repository.context.applicationContext } catch (_: Throwable) { null }
+        val keptAlive = appContext != null && com.noslop.app.mesh.NoSlopForegroundService.startKeepAlive(appContext)
+        if (keptAlive) Logger.info(TAG, "Keeping NoSlop in the foreground while the Hub is deployed")
+        try {
+            return deployHaiNetHubInSession(ip, user, pass, sharedFolder, identity, strategy, onLog, onHostKeyPrompt)
+        } finally {
+            if (keptAlive && appContext != null) com.noslop.app.mesh.NoSlopForegroundService.stopKeepAlive(appContext)
+        }
+    }
+
+    private suspend fun deployHaiNetHubInSession(
         ip: String,
         user: String,
         pass: String,

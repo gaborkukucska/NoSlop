@@ -27,7 +27,39 @@ class NoSlopForegroundService : Service() {
         private const val CHANNEL_ID = "noslop_mesh_sync_channel"
         private const val NOTIFICATION_ID = 1001
 
+        // --- NOSLOP_HUB_DEPLOY_KEEPALIVE_V1 --- (docs/TECHNICAL_REFERENCE.md §16.63)
+        /** True between onCreate and onDestroy. */
+        @Volatile var isRunning: Boolean = false
+            private set
+        /** True while the service runs only to keep a Hub deployment alive (no USER_EXIT when it stops). */
+        @Volatile private var keepAliveOnly: Boolean = false
+
+        /**
+         * Keeps the process in the foreground for a Hub deployment, so Android does not freeze the app (and drop
+         * its SSH session, which stops the build on the Hub) when the user switches away. Returns true when it
+         * started the service; false when it was already running (the user's own setting) or could not start.
+         */
+        fun startKeepAlive(context: Context): Boolean {
+            if (isRunning) return false
+            keepAliveOnly = true
+            val intent = Intent(context, NoSlopForegroundService::class.java)
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent) else context.startService(intent)
+                true
+            } catch (e: Exception) {
+                keepAliveOnly = false
+                Logger.warn(TAG, "Could not keep NoSlop in the foreground for the Hub deployment: ${e.message}")
+                false
+            }
+        }
+
+        /** Ends a keep-alive started by [startKeepAlive], unless the user has since started the service. */
+        fun stopKeepAlive(context: Context) {
+            if (keepAliveOnly) stop(context)
+        }
+
         fun start(context: Context) {
+            keepAliveOnly = false // the user's own service: it stays after a deployment ends
             val intent = Intent(context, NoSlopForegroundService::class.java)
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -48,6 +80,7 @@ class NoSlopForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         Logger.info(TAG, "NoSlopForegroundService created")
         createNotificationChannel()
         
@@ -92,6 +125,9 @@ class NoSlopForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning = false
+        val wasKeepAliveOnly = keepAliveOnly
+        keepAliveOnly = false
         try {
             wakeLock?.let {
                 if (it.isHeld) it.release()
@@ -107,7 +143,8 @@ class NoSlopForegroundService : Service() {
         // Fire-and-forget with an internal timeout — onDestroy() must not block,
         // peers that aren't reached in time fall back to the ANNOUNCE_PEER
         // staleness timeout.
-        NoSlopApp.repository.broadcastUserExitAsync()
+        // NOSLOP_HUB_DEPLOY_KEEPALIVE_V1: a service that only kept a Hub deployment alive is not the user leaving.
+        if (!wasKeepAliveOnly) NoSlopApp.repository.broadcastUserExitAsync()
     }
 
     private fun createNotificationChannel() {
