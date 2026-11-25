@@ -55,6 +55,148 @@ object SshDeployer {
         }
     }
 
+    // --- NOSLOP_HUB_DEPLOY_DETACHED_V1 helpers ---------------------------------------------------------------
+
+    private fun runDir(runId: String) = "\"${'$'}HOME/.hainet_deploy_runs/$runId\""
+
+    /** Stores the script (from stdin) in an owner-only run folder. No secret is on any command line. */
+    internal fun uploadCommand(runId: String): String =
+        "umask 077; mkdir -p \"${'$'}HOME/.hainet_deploy_runs\" && chmod 700 \"${'$'}HOME/.hainet_deploy_runs\" && " +
+            "mkdir -p ${runDir(runId)} && cat > ${runDir(runId)}/deploy.sh"
+
+    /**
+     * Starts the uploaded script detached (setsid, nohup, its own log), one deployment at a time (flock on
+     * ~/.hainet_deploy.lock). Prints NOSLOP_DEPLOY_STARTED <pid>, or NOSLOP_DEPLOY_BUSY <run id> when an earlier
+     * deployment still holds the lock. Also clears run folders older than two days and any uploaded script
+     * older than ten minutes that never started.
+     */
+    internal fun launchCommand(runId: String): String = """
+        RUNS="${'$'}HOME/.hainet_deploy_runs"; D=${runDir(runId)}; LOCK="${'$'}HOME/.hainet_deploy.lock"
+        find "${'$'}RUNS" -mindepth 2 -maxdepth 2 -name deploy.sh -mmin +10 -delete 2>/dev/null
+        find "${'$'}RUNS" -mindepth 1 -maxdepth 1 -type d ! -name '$runId' -mtime +2 -exec rm -rf {} + 2>/dev/null
+        if command -v flock >/dev/null 2>&1; then
+          exec 9>"${'$'}LOCK"
+          if ! flock -n 9; then echo "NOSLOP_DEPLOY_BUSY ${'$'}(cat "${'$'}RUNS/current" 2>/dev/null)"; exit 0; fi
+          exec 9>&-
+        fi
+        cd "${'$'}HOME"
+        setsid nohup bash -c 'exec 9>"${'$'}2"; command -v flock >/dev/null 2>&1 && flock -w 7200 9; export NOSLOP_RUN_DIR="${'$'}1"; bash "${'$'}1/deploy.sh" 9>&-; echo ${'$'}? > "${'$'}1/exit"' _ "${'$'}D" "${'$'}LOCK" > "${'$'}D/log" 2>&1 < /dev/null &
+        P=${'$'}!
+        echo "${'$'}P" > "${'$'}D/pid"; echo '$runId' > "${'$'}RUNS/current"
+        echo "NOSLOP_DEPLOY_STARTED ${'$'}P"
+    """.trimIndent()
+
+    /** Prints the run's log from byte [offset] on, until the run's process ends. */
+    internal fun followCommand(runId: String, offset: Long): String =
+        "D=${runDir(runId)}; P=${'$'}(cat \"${'$'}D/pid\" 2>/dev/null); " +
+            "if [ -n \"${'$'}P\" ] && kill -0 \"${'$'}P\" 2>/dev/null; then tail -c +${offset + 1} --pid=\"${'$'}P\" -f \"${'$'}D/log\"; " +
+            "else tail -c +${offset + 1} \"${'$'}D/log\"; fi"
+
+    internal fun exitCommand(runId: String): String = "cat ${runDir(runId)}/exit 2>/dev/null"
+
+    internal fun cleanupCommand(runId: String): String =
+        "rm -rf ${runDir(runId)}; [ \"${'$'}(cat \"${'$'}HOME/.hainet_deploy_runs/current\" 2>/dev/null)\" = '$runId' ] && " +
+            "rm -f \"${'$'}HOME/.hainet_deploy_runs/current\"; true"
+
+    private fun disconnectQuietly(s: com.jcraft.jsch.Session) {
+        try { s.disconnect() } catch (e: Exception) { Logger.debug(TAG, "SSH disconnect: ${e.message}") }
+    }
+
+    /** Runs [command] and returns its exit status and output (stdout; commands redirect stderr themselves). */
+    private suspend fun execCollect(session: com.jcraft.jsch.Session, command: String, stdin: ByteArray? = null): Pair<Int, String> =
+        withContext(Dispatchers.IO) {
+            val ch = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
+            ch.setCommand(command)
+            ch.setErrStream(null)
+            val input = ch.inputStream
+            val out = ch.outputStream
+            ch.connect(10000)
+            if (stdin != null) { out.write(stdin); out.flush() }
+            out.close()
+            val text = input.readBytes().toString(Charsets.UTF_8)
+            while (!ch.isClosed) kotlinx.coroutines.delay(50)
+            val code = ch.exitStatus
+            ch.disconnect()
+            code to text
+        }
+
+    /**
+     * Follows a detached run's log to its end, re-establishing the SSH session when it drops (up to 20 failed
+     * attempts in a row; any progress resets the count). Returns the run's exit code (-2 when it ended without
+     * one) or null when the Hub could not be reached any more, and the session last used.
+     */
+    private suspend fun followRun(
+        first: com.jcraft.jsch.Session,
+        reconnect: suspend () -> com.jcraft.jsch.Session,
+        runId: String,
+        onLog: (String) -> Unit,
+        output: StringBuilder?
+    ): Pair<Int?, com.jcraft.jsch.Session> = withContext(Dispatchers.IO) {
+        var s = first
+        var offset = 0L
+        var failures = 0
+        var carry = ByteArray(0)
+        while (true) {
+            try {
+                if (!s.isConnected) {
+                    s = reconnect()
+                    Logger.info(TAG, "Reconnected to the Hub to follow deployment $runId at byte $offset")
+                    withContext(Dispatchers.Main) { onLog("\n[Reconnected to the Hub; the deployment kept running there.]\n") }
+                }
+                val ch = s.openChannel("exec") as com.jcraft.jsch.ChannelExec
+                ch.setCommand(followCommand(runId, offset))
+                ch.setErrStream(null)
+                val input = ch.inputStream
+                ch.connect(10000)
+                val buf = ByteArray(4096)
+                while (true) {
+                    val len = input.read(buf)
+                    if (len < 0) break
+                    offset += len
+                    failures = 0
+                    val (text, rest) = decodeUtf8Prefix(carry + buf.copyOf(len))
+                    carry = rest
+                    if (text.isNotEmpty()) {
+                        output?.append(text)
+                        Logger.info(TAG, text.trimEnd())
+                        withContext(Dispatchers.Main) { onLog(text) }
+                    }
+                }
+                while (!ch.isClosed) kotlinx.coroutines.delay(100)
+                val tailStatus = ch.exitStatus
+                ch.disconnect()
+                if (tailStatus != 0) throw java.io.IOException("following the log ended with status $tailStatus")
+                val exit = execCollect(s, exitCommand(runId)).second.trim().toIntOrNull() ?: -2
+                return@withContext exit to s
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                failures++
+                Logger.warn(TAG, "Following deployment $runId: ${e.message} (attempt $failures)")
+                if (failures > 20) return@withContext null to s
+                disconnectQuietly(s)
+                kotlinx.coroutines.delay(minOf(30_000L, 3_000L * failures))
+            }
+        }
+        null to s
+    }
+
+    /** Splits [bytes] into the text of its complete UTF-8 characters and the bytes of an incomplete last one. */
+    internal fun decodeUtf8Prefix(bytes: ByteArray): Pair<String, ByteArray> {
+        var cut = bytes.size
+        var i = bytes.size - 1
+        var seen = 0
+        while (i >= 0 && seen < 4) {
+            val b = bytes[i].toInt() and 0xFF
+            if (b and 0xC0 != 0x80) { // a lead byte (or ASCII)
+                val need = when { b < 0x80 -> 1; b >= 0xF0 -> 4; b >= 0xE0 -> 3; b >= 0xC0 -> 2; else -> 1 }
+                if (bytes.size - i < need) cut = i
+                break
+            }
+            i--; seen++
+        }
+        return String(bytes, 0, cut, Charsets.UTF_8) to bytes.copyOfRange(cut, bytes.size)
+    }
+
     /**
      * NOSLOP_HUB_DEPLOY_KEEPALIVE_V1 (§16.63): the deployment runs over this app's SSH session, and the build on
      * the Hub runs inside that session. When the user switched away, Android froze the app, the session dropped
@@ -304,6 +446,13 @@ object SshDeployer {
                 #!/bin/bash
                 set -e
                 exec 2>&1
+                # NOSLOP_HUB_DEPLOY_DETACHED_V1 (§16.64): this script runs detached from a file the app uploaded
+                # (owner-only, it holds the sudo password): remove the file now (bash keeps reading it), and keep
+                # this run's sudo helpers in its own folder so a second deployment cannot delete them.
+                case "${'$'}0" in */.hainet_deploy_runs/*/deploy.sh) rm -f -- "${'$'}0" 2>/dev/null || true ;; esac
+                RUN_TMP="${'$'}{NOSLOP_RUN_DIR:-${'$'}(mktemp -d)}"
+                # Helpers left behind by an older app version's run that was killed.
+                find "${'$'}HOME" -maxdepth 1 -name .hainet_askpass -mmin +60 -delete 2>/dev/null || true
                 export GIT_TERMINAL_PROMPT=0
                 export GIT_MERGE_AUTOEDIT=no
                 export DEBIAN_FRONTEND=noninteractive
@@ -321,16 +470,16 @@ object SshDeployer {
                 # F19: Restrictive default umask for secret creation
                 umask 077
 
-                cat << 'EOF_ASKPASS' > "${'$'}HOME/.hainet_askpass"
+                cat << 'EOF_ASKPASS' > "${'$'}RUN_TMP/askpass"
 #!/bin/bash
 echo "${'$'}SUDO_PASS"
 EOF_ASKPASS
-                chmod 700 "${'$'}HOME/.hainet_askpass"
-                export SUDO_ASKPASS="${'$'}HOME/.hainet_askpass"
+                chmod 700 "${'$'}RUN_TMP/askpass"
+                export SUDO_ASKPASS="${'$'}RUN_TMP/askpass"
                 
                 # Setup transient sudo shim for Rust binaries
-                mkdir -p "${'$'}HOME/.hainet_deploy_tmp"
-                cat << 'EOF_SHIM' > "${'$'}HOME/.hainet_deploy_tmp/sudo"
+                mkdir -p "${'$'}RUN_TMP/bin"
+                cat << 'EOF_SHIM' > "${'$'}RUN_TMP/bin/sudo"
 #!/bin/bash
 if [ "${'$'}(id -u)" -eq 0 ]; then
     /usr/bin/sudo "${'$'}@"
@@ -338,13 +487,14 @@ else
     /usr/bin/sudo -A "${'$'}@"
 fi
 EOF_SHIM
-                chmod 700 "${'$'}HOME/.hainet_deploy_tmp/sudo"
-                export PATH="${'$'}HOME/.hainet_deploy_tmp:${'$'}PATH"
+                chmod 700 "${'$'}RUN_TMP/bin/sudo"
+                export PATH="${'$'}RUN_TMP/bin:${'$'}PATH"
                 
                 DEPLOY_DIR="${'$'}PWD"
                 cleanup() {
-                    rm -f "${'$'}HOME/.hainet_askpass"
-                    rm -rf "${'$'}HOME/.hainet_deploy_tmp"
+                    rm -f "${'$'}RUN_TMP/askpass"
+                    rm -rf "${'$'}RUN_TMP/bin"
+                    [ -z "${'$'}{NOSLOP_RUN_DIR:-}" ] && rm -rf "${'$'}RUN_TMP"
                     rm -f "${'$'}DEPLOY_DIR/gen_tor.py" "${'$'}DEPLOY_DIR/reset_ident.py" "${'$'}DEPLOY_DIR/hai/hub_config.json" "${'$'}DEPLOY_DIR/hs_ed25519_secret_key"
                     unset SUDO_PASS
                     unset SUDO_ASKPASS
@@ -812,37 +962,71 @@ EOF
                 echo '=== Deployment Complete ==='
             """.trimIndent()
 
-            val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
-            // Pipe the script via stdin to avoid all quoting issues
-            channel.setCommand("bash -s")
-            channel.setErrStream(null)
+            // --- NOSLOP_HUB_DEPLOY_DETACHED_V1 --- (docs/TECHNICAL_REFERENCE.md §16.64)
+            // The deployment used to run inside this SSH channel: when the connection dropped (the app frozen in
+            // the background, Wi-Fi, a sleeping screen) the app reported "exit code -1" although the Hub carried on,
+            // and a second attempt then ran alongside the first, which deleted its sudo helper ("sudo: A terminal is
+            // required to authenticate", 2026-11-25). Now the script is uploaded (stdin, owner-only file), started
+            // detached under a lock, and followed through its log; a dropped connection is re-established and the
+            // log picked up where it stopped. The result is the script's own exit code.
+            session.serverAliveInterval = 15000 // a dead link is noticed within ~2 min and then reconnected
+            session.serverAliveCountMax = 8
+            val runId = java.util.UUID.randomUUID().toString().replace("-", "").take(20)
+            val reconnect: suspend () -> com.jcraft.jsch.Session = {
+                // The host key is pinned by now: a fresh session checks it and refuses a changed one.
+                val s = newSession(SshHostKeyPolicy.ProbeUserInfo(pass, logSshMessage))
+                s.connect(15000)
+                s.serverAliveInterval = 15000
+                s.serverAliveCountMax = 8
+                s
+            }
 
-            val outputStream = channel.outputStream
-            val inputStream = channel.inputStream
-            channel.connect(10000)
-
-            // Write the script to stdin and close it
-            outputStream.write(script.toByteArray())
-            outputStream.flush()
-            outputStream.close()
+            val upload = execCollect(session, uploadCommand(runId), script.toByteArray())
+            if (upload.first != 0) {
+                val errorMsg = "Could not upload the deployment script (exit ${upload.first}): ${upload.second.trim().take(300)}"
+                withContext(Dispatchers.Main) { onLog("\n[ERROR] $errorMsg\n") }
+                disconnectQuietly(session)
+                return@withContext Result.failure(Exception(errorMsg))
+            }
 
             val output = StringBuilder()
-            val buf = ByteArray(4096)
-            while (true) {
-                val len = inputStream.read(buf)
-                if (len < 0) break // EOF
-                val chunk = String(buf, 0, len)
-                output.append(chunk)
-                Logger.info(TAG, chunk.trimEnd())
-                withContext(Dispatchers.Main) { onLog(chunk) }
+            var current = session
+            var started = false
+            for (attempt in 1..3) {
+                val launch = execCollect(current, launchCommand(runId))
+                val line = launch.second.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("NOSLOP_DEPLOY_") } ?: ""
+                if (line.startsWith("NOSLOP_DEPLOY_STARTED")) { started = true; break }
+                val other = line.removePrefix("NOSLOP_DEPLOY_BUSY").trim()
+                if (!line.startsWith("NOSLOP_DEPLOY_BUSY") || other.isEmpty() || other == runId) break
+                Logger.info(TAG, "An earlier deployment ($other) is still running on the Hub; following it first")
+                withContext(Dispatchers.Main) {
+                    onLog("\nAn earlier Hub deployment is still running on this machine. Following it until it finishes...\n")
+                }
+                val (otherExit, s) = followRun(current, reconnect, other, onLog, null)
+                current = s
+                withContext(Dispatchers.Main) {
+                    onLog("\nThe earlier deployment finished (exit ${otherExit ?: "unknown"}). Starting this one...\n\n")
+                }
             }
-
-            while (!channel.isClosed) {
-                kotlinx.coroutines.delay(100)
+            if (!started) {
+                execCollect(current, cleanupCommand(runId))
+                val errorMsg = "Could not start the deployment on the Hub"
+                withContext(Dispatchers.Main) { onLog("\n[ERROR] $errorMsg\n") }
+                disconnectQuietly(current)
+                return@withContext Result.failure(Exception(errorMsg))
             }
-            val exitStatus = channel.exitStatus
-            channel.disconnect()
-            session.disconnect()
+            val (followedExit, last) = followRun(current, reconnect, runId, onLog, output)
+            current = last
+            // -1: the app could not reach the Hub any more; -2: the run ended without recording a result.
+            val exitStatus = followedExit ?: -1
+            if (followedExit != null) {
+                try { execCollect(current, cleanupCommand(runId)) } catch (e: Exception) { Logger.warn(TAG, "Could not remove the run folder $runId on the Hub: ${e.message}") }
+            } else {
+                withContext(Dispatchers.Main) {
+                    onLog("\n[ERROR] Lost the connection to the Hub. The deployment keeps running there; deploy again to follow it.\n")
+                }
+            }
+            disconnectQuietly(current)
 
             Logger.info(TAG, "Deployment finished with exit code: $exitStatus")
 

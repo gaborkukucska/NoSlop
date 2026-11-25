@@ -3167,6 +3167,29 @@ deployment alive does not broadcast `USER_EXIT` when it stops; a normal `start` 
 deployment turns it back into the user's service. Not covered: a deployment interrupted by the network itself
 (the build still runs inside the SSH session).
 
+### 16.64 Hub deployments run detached and survive a dropped connection (`NOSLOP_HUB_DEPLOY_DETACHED_V1`)
+
+Found 2026-11-25, two "Update Hub Software" attempts in a row: the first failed with "exit code -1" a few seconds
+into compiling `hainet-core` (the SSH channel closed without an exit status), although the build carried on on the
+Hub; the second waited for the first build ("Blocking waiting for file lock"), built, then failed with "sudo: A
+terminal is required to authenticate": when the first run ended, its cleanup deleted the sudo helpers both runs kept
+at the same fixed paths (`~/.hainet_askpass`, `~/.hainet_deploy_tmp/sudo`).
+
+* `SshDeployer` uploads the script over the channel's stdin into an owner-only run folder
+  (`~/.hainet_deploy_runs/<id>/deploy.sh`, mode 0600 in 0700; no secret on any command line), starts it detached
+  (`setsid nohup`, log in the run folder) and follows the log (`tail --pid -f`). The script deletes its own file
+  as it starts. If the connection drops, the app reconnects (the pinned host key is checked again; up to 20
+  failed attempts in a row, any progress resets the count) and continues from the last byte it received. The
+  result is the script's exit code, written by the runner; exit 99 (existing deployment) works as before. If the
+  Hub cannot be reached again, the app says the deployment keeps running there.
+* One deployment at a time: the runner holds `flock` on `~/.hainet_deploy.lock`. A new deployment that finds an
+  earlier one still running follows that one to its end first, then starts.
+* Each run keeps its sudo helpers in its own folder (`$NOSLOP_RUN_DIR`), removed by its exit trap; run folders
+  older than two days and uploaded scripts that never started within ten minutes are removed.
+* §16.63 (the foreground service during a deployment) still applies: it keeps the app's side running.
+
+Tests: `SshDeployerDetachedTest` (the UTF-8 split of a streamed log, and that no command line carries a secret).
+
 ## 17. Audit and Hardening Pass (2026-09-02)
 
 Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
