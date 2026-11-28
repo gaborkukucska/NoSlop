@@ -171,30 +171,12 @@ This is the new Kotlin Multiplatform application currently under development in 
 
 ---
 
-## 6.1. GitHub Issue Submission (Optional)
+## 6.1. GitHub Issue Submission
 
-The app includes a built-in **File a Report** screen (accessible from Settings) that submits bug reports, feature requests, and questions directly to the GitHub repository via the REST API. This requires two optional keys in `local.properties`:
+The **File a Report** screen (Settings) needs no build-time keys. It posts the report (title and body: description, optional name, device information and recent error logs) to the NoSlop relay at `https://noslop.me/api/relay/github-issue`, which files the issue in `DeveLooped-INC/NoSlop`. If the relay can't be reached, the app opens GitHub's "New issue" page in the browser with the title and body filled in, so the report isn't lost.
 
-```properties
-# local.properties (never commit this file!)
-GITHUB_PAT=ghp_your_personal_access_token_here
-GITHUB_ASSIGNEE=gaborkukucska
-```
-
-| Property | Required | Description |
-|---|---|---|
-| `GITHUB_PAT` | **Yes** (for in-app submission) | A GitHub [Personal Access Token](https://github.com/settings/tokens) with **`repo`** scope. Without this, the Submit button is disabled and users see an "unavailable" message. |
-| `GITHUB_ASSIGNEE` | No | The GitHub username to auto-assign as the issue owner. If blank, issues are created without an assignee. |
-
-The app maps the user's "Issue Type" dropdown to standard GitHub labels:
-- **Bug** → `bug`
-- **Feature Request** → `enhancement`
-- **Question** → `question`
-
-> [!IMPORTANT]
-> These labels must already exist in your GitHub repository. If they don't, create them at:
-> `https://github.com/<owner>/<repo>/labels`
-> GitHub repositories created after 2020 include `bug` and `enhancement` by default, but `question` may need to be added manually.
+> [!NOTE]
+> Older versions of this guide asked for `GITHUB_PAT` and `GITHUB_ASSIGNEE` in `local.properties`. The app no longer reads them; remove them from your `local.properties` (a personal access token should never be built into an APK).
 
 ---
 

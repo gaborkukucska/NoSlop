@@ -1369,8 +1369,6 @@ Database migrations (`MIGRATION_1_2` through `MIGRATION_18_19`) safely preserve 
 | Compose | enabled, via Compose BOM |
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
 | ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true` (R8 full mode). Rules in `app/proguard-rules.pro`: `tor-android`; Bouncy Castle **provider packages only** (`org.bouncycastle.jce.provider.**`, `org.bouncycastle.jcajce.provider.**`, `org.bouncycastle.pqc.jcajce.provider.**`, plus `-dontwarn org.bouncycastle.**`; round E5 — the app calls the lightweight API directly, so R8 keeps what it uses, and nothing asks the provider for an algorithm by name); Gson's `TypeToken` rules (E2b; app code uses no `TypeToken`); Room, mesh packets and settings models. Unit tests run the unshrunk debug build, so check a release build with [BUILD.md §8](BUILD.md#8-releasing-an-update) after any rule or dependency change. `ReleaseBuildRulesE5Test` fails if the Bouncy Castle keep-all rule returns. |
-| `GITHUB_PAT` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_PAT`. When non-blank, enables in-app GitHub issue submission via REST API (`POST /repos/DeveLooped-INC/NoSlop/issues`). When blank, the Submit button in `ReportIssueScreen` is disabled. |
-| `GITHUB_ASSIGNEE` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_ASSIGNEE`. When non-blank, auto-assigns the specified GitHub user to all submitted issues. |
 
 ### Key Dependencies
 
@@ -3238,6 +3236,10 @@ conversation on your phone".
   network..."; when Tor stopped or failed, it says so with Retry. Existing translated strings, plus "Refresh chat"
   in all 21 languages.
 * Not changed: packets, Room schema, the Hub's own `MEDIA_REQUEST` handling for the creator's public media.
+
+### 16.67 Build docs: no GitHub keys for issue reports (2026-11-28)
+
+The **File a Report** screen has posted to the relay (`https://noslop.me/api/relay/github-issue`, with GitHub's "New issue" page in the browser as the fallback) since the token was taken out of the APK (`docs/archived/MustFixBeforeRelease.md`), but `docs/BUILD.md` §6.1 and the build table above still asked for `GITHUB_PAT` and `GITHUB_ASSIGNEE` in `local.properties` (with a real user name as the example). Neither is read by the build or the app; both are gone from the docs, and §6.1 now describes the relay and says to remove the old keys from `local.properties`. No code change.
 
 ## 17. Audit and Hardening Pass (2026-09-02)
 
